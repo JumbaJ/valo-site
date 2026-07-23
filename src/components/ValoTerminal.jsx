@@ -787,6 +787,13 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   };
   const onMove = (e) => {
     const { cx, cy } = ptOf(e);
+    const ld = lineDragRef.current;
+    if (ld) {
+      const g = geom.current;
+      const yy = Math.min(Math.max(cy, g.padT), g.padT + g.chartH);
+      botSetRef.current.lineDrag && botSetRef.current.lineDrag(ld.id, priceAtY(yy), false);
+      return;
+    }
     const d0 = dragRef.current;
     if (d0 && d0.botset) {
       d0.moved = true;
@@ -829,6 +836,15 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     }
   };
   const onUp = (e) => {
+    const ld = lineDragRef.current;
+    if (ld) {
+      const { cy } = ptOf(e);
+      const g = geom.current;
+      const yy = Math.min(Math.max(cy, g.padT), g.padT + g.chartH);
+      botSetRef.current.lineDrag && botSetRef.current.lineDrag(ld.id, priceAtY(yy), true);
+      lineDragRef.current = null;
+      return;
+    }
     const dBS = dragRef.current;
     if (dBS && dBS.botset) {
       const { cy } = ptOf(e);
@@ -980,10 +996,12 @@ function Meter({ label, value, color }) {
 function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editBot, onRelaunch, setAmount, botLock, dragSetOn, onToggleDragSet, compactArm = false }) {
   const [stopLoss, setStopLoss] = useState(25);
   const [armFlash, setArmFlash] = useState(0); // lights the arm button when a bot goes live
+  const [showLine, setShowLine] = useState(false); // 📍 buy-in line painted on the chart
   // buy-in price: follows live until touched
   const [buyTouched, setBuyTouched] = useState(false);
   const [buyInPrice, setBuyInPrice] = useState(token.price);
   useEffect(() => { if (!buyTouched) setBuyInPrice(token.price); }, [token.price, buyTouched]);
+  useEffect(() => { if (showLine) onDraftLevel && onDraftLevel(buyInPrice, token.id, "buy"); }, [buyInPrice, showLine]);
   const [legs, setLegs] = useState([{ mult: 2, trail: 10, alloc: 50 }, { mult: 4, trail: 15, alloc: 50 }]);
   // editing an existing bot: preload every metric it launched with
   useEffect(() => {
@@ -1059,6 +1077,11 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
 
       {/* buy-in price slider — tracks live price, drag to set a higher/lower entry */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 7 }}>
+        {onDraftLevel && (
+          <button onClick={() => { const on = !showLine; setShowLine(on); onDraftLevel(on ? buyInPrice : null, token.id, "buy"); }}
+            title={showLine ? "Hide the buy-in line on the chart" : "Show the buy-in line on the chart"}
+            style={{ ...chip(showLine), flex: "0 0 auto", padding: "4px 9px", fontSize: 11, fontWeight: 900, color: showLine ? T.green : T.dim, borderColor: showLine ? `${T.green}88` : T.border, boxShadow: showLine ? `0 0 8px ${T.green}55` : "none" }}>📍</button>
+        )}
         {onToggleDragSet && (
           <button onClick={() => { const on = !dragSetOn; onToggleDragSet(); if (on) onDraftLevel && onDraftLevel(buyInPrice, token.id, "buy"); }}
             title={dragSetOn ? "Drag-set ON — drag on the chart (double-click arms instantly)" : "Drag-set: click, then drag on the chart to set the buy-in with the mouse"}
@@ -2327,6 +2350,8 @@ function AutoTraderPanel({ token, tokens = [], amount, setAmount, pay, setPay, o
   const sold = botRuns.filter((r) => r.status === "sold" && inScope(r.tokenId));
   const barBase = (hue) => ({ display: "flex", alignItems: "center", gap: 8, padding: "8px 9px", borderRadius: 9, marginBottom: 5, border: `1px solid ${accent(hue)}44`, background: "rgba(255,255,255,0.02)", cursor: "pointer", fontFamily: T.mono });
   const [subTab, setSubTab] = useState("trader"); // trader | visual
+  // editing a visual pair jumps straight to the visual tab with prices loaded
+  useEffect(() => { if (editBot && editBot.vt) setSubTab("visual"); }, [editBot && editBot.id]);
   return (
     <div>
       <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
@@ -2337,7 +2362,8 @@ function AutoTraderPanel({ token, tokens = [], amount, setAmount, pay, setPay, o
         <VisualTrading token={token} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
           botLock={botLock} onStageSide={onStageSide} onArmPair={onArmPair}
           dragSetOn={dragSetOn} onToggleDragSet={onToggleDragSet} onDraftLevel={onDraftLevel}
-          onSetDragSet={onSetDragSet} onLinesChange={onLinesChange} />
+          onSetDragSet={onSetDragSet} onLinesChange={onLinesChange}
+          editBot={editBot && editBot.vt ? editBot : null} />
       ) : (
       <TradePanel key={editingBotId || "new"} token={token} amount={amount} setAmount={setAmount} pay={pay}
         onExecute={onExecute} onDraftLevel={onDraftLevel} editBot={editBot} onRelaunch={onRelaunch} botLock={botLock}
@@ -2403,11 +2429,19 @@ function AutoTraderPanel({ token, tokens = [], amount, setAmount, pay, setPay, o
 // every bot in one place — overall PnL bar on top, then live & finished bots
 // VISUAL TRADING — set a buy-in line, then a sell-all point; the pair trades
 // itself with zero interference between bots
-function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStageSide, onArmPair, dragSetOn, onToggleDragSet, onDraftLevel, onSetDragSet, onLinesChange }) {
+function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStageSide, onArmPair, dragSetOn, onToggleDragSet, onDraftLevel, onSetDragSet, onLinesChange, editBot = null, compactArm = false }) {
   const [buyLvl, setBuyLvl] = useState(null);
   const [sellLvl, setSellLvl] = useState(null);
   const [trail, setTrail] = useState(0);
   const [flash, setFlash] = useState(0);
+  // EDIT: clicking a visual pair loads its prices right back into the boxes
+  useEffect(() => {
+    if (!editBot || !editBot.vt) return;
+    setBuyLvl(editBot.level);
+    setSellLvl(editBot.vtSell || null);
+    setTrail(editBot.vtTrail || 0);
+    setAmount && setAmount(String(editBot.amt));
+  }, [editBot && editBot.id]);
   const stage = buyLvl == null ? "buy" : sellLvl == null ? "sell" : "done";
   useEffect(() => { onStageSide && onStageSide(stage === "sell" ? "sell" : "buy"); }, [stage]);
   // the set lines stay painted on the chart — green buy in, red exit point
@@ -2423,6 +2457,13 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
   }, [botLock && botLock.n]);
   const amt = parseFloat(amount) || 0;
   const roi = buyLvl && sellLvl ? ((sellLvl / buyLvl - 1) * 100) : null;
+  const canArm = buyLvl > 0 && sellLvl > 0 && amt > 0;
+  const armPair = () => {
+    if (!canArm) return;
+    onArmPair({ buy: buyLvl, sell: sellLvl, amt, trail, editId: editBot && editBot.vt ? editBot.id : null });
+    setFlash(Date.now()); setTimeout(() => setFlash(0), 900);
+    setBuyLvl(null); setSellLvl(null); // boxes go back to blank "tap to set"
+  };
   // click a box to activate it — it highlights and the chart is ready to drag
   const step = (n, label, val, col, active, onActivate, onClear) => (
     <div onClick={onActivate} title={`Click to set your ${label.toLowerCase()} on the chart`}
@@ -2436,8 +2477,21 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
   );
   return (
     <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14 }}>
-      <div style={{ fontFamily: T.mono, fontSize: 11, letterSpacing: 2, color: T.dim, marginBottom: 8 }}>
-        👁 VISUAL TRADING · <b style={{ color: accent(token.hue) }}>{token.sym}</b>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <div style={{ fontFamily: T.mono, fontSize: 11, letterSpacing: 2, color: T.dim, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          👁 VISUAL TRADING · <b style={{ color: accent(token.hue) }}>{token.sym}</b>{editBot && editBot.vt ? <span style={{ color: T.amber }}> · EDITING</span> : null}
+        </div>
+        {compactArm && (
+          <button disabled={!canArm} onClick={armPair}
+            style={{ flex: "0 0 auto", border: "none", borderRadius: 8, padding: "7px 13px", fontFamily: T.mono, fontSize: 10.5, letterSpacing: 1, fontWeight: 900,
+              background: !canArm ? "#1a2030" : flash ? T.green : editBot && editBot.vt ? T.amber : T.blue,
+              color: !canArm ? T.faint : flash ? "#07130d" : editBot && editBot.vt ? "#1d1503" : "#07101d",
+              cursor: canArm ? "pointer" : "not-allowed",
+              transform: flash ? "scale(1.08)" : "scale(1)", transition: "transform .18s, box-shadow .18s, background .18s",
+              boxShadow: !canArm ? "none" : flash ? `0 0 22px ${T.green}` : `0 0 10px rgba(46,112,204,0.45)` }}>
+            {flash ? "✓ ARMED" : editBot && editBot.vt ? "🔁 RE-ARM" : "👁 ARM PAIR"}
+          </button>
+        )}
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
         <label style={{ ...lbl, marginBottom: 0 }}>Buy-in amount</label>
@@ -2475,15 +2529,16 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
       <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, margin: "2px 0 10px" }}>
         {trail > 0 ? `after your sell point hits, it rides the peak and sells all when price drops ${trail}% from it` : "0% = sell the instant your sell point is hit"}
       </div>
-      <button disabled={!(buyLvl > 0 && sellLvl > 0 && amt > 0)}
-        onClick={() => { onArmPair({ buy: buyLvl, sell: sellLvl, amt, trail }); setFlash(Date.now()); setTimeout(() => setFlash(0), 900); setBuyLvl(null); setSellLvl(null); }}
-        style={{ width: "100%", border: "none", borderRadius: 9, padding: "12px", fontFamily: T.mono, fontSize: 12, letterSpacing: 1.5, fontWeight: 900,
-          background: !(buyLvl > 0 && sellLvl > 0 && amt > 0) ? "#1a2030" : flash ? T.green : T.blue,
-          color: !(buyLvl > 0 && sellLvl > 0 && amt > 0) ? T.faint : "#07101d", cursor: buyLvl > 0 && sellLvl > 0 ? "pointer" : "not-allowed",
-          transform: flash ? "scale(1.02)" : "scale(1)", transition: "transform .18s, background .18s",
-          boxShadow: flash ? `0 0 22px ${T.green}` : "none" }}>
-        {flash ? "✓ PAIR ARMED" : "👁 ARM VISUAL PAIR"}
-      </button>
+      {!compactArm && (
+        <button disabled={!canArm} onClick={armPair}
+          style={{ width: "100%", border: "none", borderRadius: 9, padding: "12px", fontFamily: T.mono, fontSize: 12, letterSpacing: 1.5, fontWeight: 900,
+            background: !canArm ? "#1a2030" : flash ? T.green : editBot && editBot.vt ? T.amber : T.blue,
+            color: !canArm ? T.faint : flash ? "#07130d" : editBot && editBot.vt ? "#1d1503" : "#07101d", cursor: canArm ? "pointer" : "not-allowed",
+            transform: flash ? "scale(1.02)" : "scale(1)", transition: "transform .18s, background .18s",
+            boxShadow: flash ? `0 0 22px ${T.green}` : "none" }}>
+          {flash ? "✓ PAIR ARMED" : editBot && editBot.vt ? "🔁 RE-ARM VISUAL PAIR" : "👁 ARM VISUAL PAIR"}
+        </button>
+      )}
     </div>
   );
 }
@@ -3597,11 +3652,21 @@ const WP_SECTIONS = [
     { t: "b", x: "The buyback is a real market purchase, adding buy pressure before burning." },
   ]},
   { id: "airdrop", icon: "🎁", n: "5", title: "Hourly Airdrop Epochs", accent: "#7D5CF0", body: [
-    { t: "p", x: "Every hour on the hour, the epoch wallet's entire balance is distributed. The system snapshots balances and volume, computes each wallet's share, builds a Merkle tree, and publishes the root on-chain. Only sub-dust rolls forward." },
+    { t: "p", x: "An epoch is one hour of platform life, and it is the heartbeat of VALO's economics. All hour long, the airdrop vault fills: half of every single trading fee on the site flows in, trade by trade, in real time — you can watch it grow in the claim panel. Then, on the hour, the entire vault is distributed to the community and the clock starts again. Nothing is held back for later, nothing is discretionary: the payout fires every hour, forever, funded purely by real trading activity." },
+    { t: "h", x: "The hourly cycle, step by step" },
+    { t: "b", x: "1 · ACCRUE — for 60 minutes, every buy and sell on the site deposits 50% of its fee into the epoch vault. Bigger trading hours mean bigger vaults." },
+    { t: "b", x: "2 · SNAPSHOT — at the top of the hour, the indexer freezes two numbers per wallet: your time-weighted $VALO balance across the hour (so a last-second buy can't game a full hour's weight) and your traded volume within the epoch." },
+    { t: "b", x: "3 · COMPUTE — every wallet's share of the vault is calculated from those snapshots (formula below), scaled by its loyalty multiplier." },
+    { t: "b", x: "4 · PUBLISH — the full payout list is compressed into a Merkle tree and its root is published on-chain. From that moment your allocation is provable by anyone and changeable by no one, including us." },
+    { t: "b", x: "5 · RESET — the vault empties into pending claims, volume counters zero out, and the next epoch begins accruing immediately. Only sub-dust amounts too small to distribute roll forward into the next vault." },
     { t: "h", x: "Share formula" },
-    { t: "p", x: "A wallet's share blends holder weight (time-weighted balance) and volume weight (share of epoch volume) 50/50, then scales by the loyalty multiplier." },
-    { t: "h", x: "Claiming" },
-    { t: "p", x: "Claiming fetches your Merkle proof and submits a claim tx — you pay your own gas, tokens land in your wallet. Unclaimed epochs stack and can be claimed together." },
+    { t: "p", x: "Your slice = ( holder weight × 50% + volume weight × 50% ) × loyalty multiplier. Holder weight is your time-weighted balance divided by all held supply; volume weight is your epoch volume divided by everyone's epoch volume. The 50/50 blend is deliberate: pure holder-weighting would pay wallets that never trade, pure volume-weighting would pay wash-traders — splitting it rewards people who both hold $VALO and actually use the terminal." },
+    { t: "p", x: "Worked example: the vault holds 1,000 $VALO this epoch. You hold 0.5% of held supply and did 2% of the hour's volume. Your base weight is (0.5% × 0.5) + (2% × 0.5) = 1.25%. At a ×2.0 loyalty multiplier, you receive 1,000 × 1.25% × 2.0 = 25 $VALO — from this one epoch alone, with the next one an hour away." },
+    { t: "h", x: "Missed hours cost you nothing" },
+    { t: "p", x: "You do not need to be online when an epoch fires. Every unclaimed epoch stacks in your pending list — each with its own amount and published root — and can sit there indefinitely. When you claim, all stacked epochs collect in a single action. Sleeping through twelve epochs simply means twelve payouts waiting when you wake up." },
+    { t: "h", x: "Claiming & the loyalty trade-off" },
+    { t: "p", x: "Claiming fetches your Merkle proof and submits the claim transaction — you pay your own SOL gas, and tokens land directly in your wallet; the distributor never touches your keys. But claiming is a strategic choice: withdrawing resets your loyalty multiplier to ×1, while letting rewards ride grows it +0.1× per day toward ×2.5 — meaning a patient wallet earns up to 2.5× more from every future epoch. Auto-withdraw can run this strategy for you: collect every epoch, or hold to a target multiplier (×1.5 / ×2 / ×2.5), auto-collect, and repeat." },
+    { t: "note", x: "Why hourly? Daily or weekly rewards ask you to trust a payout you can't see coming. An hourly epoch is short enough to watch fill, verify, and receive within one trading session — trust is replaced by observation." },
   ]},
   { id: "loyalty", icon: "⭐", n: "6", title: "Loyalty Stack", accent: "#F0B90B", body: [
     { t: "p", x: "Holding rewards without withdrawing grows a multiplier: +0.1× per day, up to ×2.5. Withdrawing at any moment resets it to ×1, then it builds again." },
@@ -3615,14 +3680,37 @@ const WP_SECTIONS = [
     { t: "b", x: "Live candlesticks with zoom, pan, timeframes, clickable trade markers." },
     { t: "b", x: "Risk score (SAFE / CAUTION / RISKY) from momentum, pressure, liquidity, age." },
     { t: "b", x: "Buy-vs-sell counts per timeframe show who's in control." },
-    { t: "h", x: "Automated trading" },
-    { t: "p", x: "A non-custodial builder: live-tracking buy-in price, stop-loss, and trailing take-profit legs summing to 100%. Simulated here; production routes through your wallet via a keeper." },
+    { t: "b", x: "Track any trader: pick a colour or image and their markers paint the chart in it, so you can follow their entries and exits at a glance." },
+    { t: "h", x: "Auto Trader bots" },
+    { t: "p", x: "Arm a bot instead of clicking buy: set a buy-in amount (SOL or $VALO), a buy-in price via the meter or by dragging straight on the chart (✋ drag-set, double-click to plant as many bots as you like), a stop loss, and trailing take-profit legs that must sum to 100%. Bots wait on the chart as yellow lines, fill automatically when price arrives, then run their exits on their own book — separate from your manual trades." },
+    { t: "h", x: "Visual Trading" },
+    { t: "p", x: "The two-tap strategy: tap BUY IN and drag the chart to plant a green line, the flow auto-advances to EXIT POINT for a red line, arm the pair and walk away. Buy-in hits → buys automatically. Exit point hits → sells 100% of that bot. Optional trailing loss rides the peak past your exit before selling. Pairs never interfere with each other, lines stay painted until hit, and every armed line can be grabbed and dragged to a new price at any time — fills freeze while you're holding it." },
+    { t: "h", x: "Positions & PnL" },
+    { t: "b", x: "MY POSITIONS hub: trading bots, order tickets, or both — with per-row and one-tap SELL ALL, coloured by live profit or loss." },
+    { t: "b", x: "Overall bot PnL: total buy-in, realized 24h, and unrealized — bots keep their own book, manual trades keep theirs." },
+    { t: "b", x: "Every buy pulls from your wallet live; every sell credits principal plus P/L back the instant it fills." },
     { t: "h", x: "Portfolio & wallet" },
     { t: "b", x: "Equity, all-time PnL, SOL / $VALO breakdown, privacy mask." },
     { t: "b", x: "Deposit / withdraw with percentage presets and confirm-to-execute." },
     { t: "b", x: "Tax-free SOL ⇄ $VALO swap, traceable PnL chart, held-positions close-all." },
   ]},
-  { id: "arch", icon: "🧩", n: "8", title: "Architecture", accent: "#16C784", body: [
+  { id: "community", icon: "🫂", n: "8", title: "Community", accent: "#16C784", body: [
+    { t: "p", x: "VALO is not a terminal with a community bolted on — the community IS the product. Nearly every feature in this build exists because someone asked for it, and that is the permanent development model: the people trading here decide what gets built next." },
+    { t: "h", x: "What we (the team) are doing for the community" },
+    { t: "b", x: "Building in public: features ship from community requests, and the changelog is the conversation. If enough of you want it, it gets built." },
+    { t: "b", x: "Funding the community from real revenue: the airdrop vault — half of every site fee — goes back to holders every hour, forever. The community is paid before the team is." },
+    { t: "b", x: "Running community trading competitions with vault-funded prize pools: best PnL, best callout, best new-token spot." },
+    { t: "b", x: "Spotlighting the community's best: top callers ride the callout banner site-wide, and the tier ladder (from JEET all the way to DIAMOND APEX) gives every trader a rank worth grinding for." },
+    { t: "b", x: "Staying reachable: the team trades on the same terminal, in the same chat rooms, with the same wallet rules as everyone else." },
+    { t: "h", x: "What the community does here" },
+    { t: "b", x: "Call your plays: post callouts on coins you believe in — your entry MC is stamped publicly, and when it moons, everyone sees your multiplier. Reputation here is earned on-chain, not claimed." },
+    { t: "b", x: "Talk your book: every coin has its own room, plus the global social feed. Coin names are clickable everywhere, so a conversation is always one tap from a chart." },
+    { t: "b", x: "Build your circle: add friends, accept or deny requests from their profile, DM privately, send tokens to friends, and follow the traders worth following." },
+    { t: "b", x: "Track the best: paint any trader's markers in your own colour or image and learn from how they actually trade — not how they say they trade." },
+    { t: "h", x: "Where it goes" },
+    { t: "p", x: "As the platform grows, community direction hardens into structure: feature voting for holders, community moderators rewarded from the vault, and a public roadmap the community ranks. The goal is simple — the people who show up every day should shape the place, share in what it earns, and be recognised for what they contribute." },
+  ]},
+  { id: "arch", icon: "🧩", n: "9", title: "Architecture", accent: "#16C784", body: [
     { t: "b", x: "Fee router (Anchor) — takes the fee, splits burn/vault, emits an event." },
     { t: "b", x: "Indexer (Helius → Postgres) — records trades and fees." },
     { t: "b", x: "Snapshot job (hourly) — time-weighted balances." },
@@ -3630,19 +3718,19 @@ const WP_SECTIONS = [
     { t: "b", x: "Creator-fee handler (hourly) — 25/25/50 split incl. buyback-burn." },
     { t: "b", x: "Distributor (on-chain) — verifies proofs, releases tokens." },
   ]},
-  { id: "security", icon: "🛡️", n: "9", title: "Security Model", accent: "#EA3943", body: [
+  { id: "security", icon: "🛡️", n: "10", title: "Security Model", accent: "#EA3943", body: [
     { t: "b", x: "Privileged wallets held in multisig; no single hot key moves material funds." },
     { t: "b", x: "Automated jobs default to a dry-run guard; live execution is deliberate." },
     { t: "b", x: "On-chain programs audited before mainnet; Merkle logic reproducible off-chain." },
     { t: "b", x: "Claims are proof-gated; the distributor never custodies user wallets." },
   ]},
-  { id: "roadmap", icon: "🗺️", n: "10", title: "Roadmap", accent: "#7D5CF0", body: [
+  { id: "roadmap", icon: "🗺️", n: "11", title: "Roadmap", accent: "#7D5CF0", body: [
     { t: "b", x: "Phase 1 — Terminal + simulated economics (current)." },
     { t: "b", x: "Phase 2 — Live wiring: price feeds, devnet router, indexer, hourly jobs." },
     { t: "b", x: "Phase 3 — Audit + mainnet: multisig custody, distributor live, real burns/epochs." },
     { t: "b", x: "Phase 4 — Expansion: more venues, keeper strategies, deeper analytics." },
   ]},
-  { id: "disclaimer", icon: "⚠️", n: "11", title: "Disclaimers", accent: "#EA3943", body: [
+  { id: "disclaimer", icon: "⚠️", n: "12", title: "Disclaimers", accent: "#EA3943", body: [
     { t: "p", x: "This is a simulated build. Figures are illustrative and are not guaranteed returns. $VALO and meme coins are highly volatile and may lose all value. Nothing here is investment, legal, or tax advice, nor a solicitation." },
     { t: "p", x: "Smart contracts carry risk. Before mainnet, programs must be audited, keys secured in multisig, and automated jobs guarded. Users are responsible for their own decisions, custody, and compliance." },
   ]},
@@ -3705,9 +3793,14 @@ function WhitepaperModal({ onClose, isMobile }) {
 
   return (
     <div onClick={onClose}
-      style={{ position: "fixed", inset: 0, zIndex: 61, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
+      style={{ position: "fixed", inset: 0, zIndex: 61, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex",
+        alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+        padding: isMobile ? "max(12px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()}
-        style={{ width: "min(96vw, 900px)", height: isMobile ? "92vh" : "86vh", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 16, boxShadow: "0 30px 90px rgba(0,0,0,0.7)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        style={{ width: "min(96vw, 900px)",
+          height: isMobile ? "calc(100dvh - max(12px, env(safe-area-inset-top)) - 20px)" : "86vh",
+          maxHeight: isMobile ? "calc(100dvh - 24px)" : "86vh",
+          background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 16, boxShadow: "0 30px 90px rgba(0,0,0,0.7)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {/* header with gradient + progress bar */}
         <div style={{ position: "relative", padding: "14px 16px", background: `linear-gradient(120deg, ${activeSec.accent}22, transparent 70%)`, borderBottom: `1px solid ${T.border}`, transition: "background .4s" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -4244,6 +4337,7 @@ export default function App() {
   const [exitAmt, setExitAmt] = useState("1.0");                   // sell-out trader amount
   const [botSide, setBotSide] = useState("buy");                   // which side the drag-set / draft belongs to
   const [vtLines, setVtLines] = useState(null);                    // { tokenId, buy, sell } — visual-trading lines that stay painted
+  const lineEditRef = useRef(false);                               // a bot line is being dragged — ALL fills freeze
   const [botDragSet, setBotDragSet] = useState(false);             // toggle: chart drag sets buy-in vs normal pan
   const [mobPageTab, setMobPageTab] = useState("trader");          // mobile bot page: trader | bots
   // manual SELL on a running bot — dumps its whole remaining position at market
@@ -4257,14 +4351,30 @@ export default function App() {
     setPendingOrders((P) => P.filter((o) => o.runId !== runId)); // its exit bots die with it
     sayPrivate({ type: "note", text: `🤖 bot sold out of ${r.sym} @ $${fmtP(t.price)} · PnL ${pnlUsd >= 0 ? "+" : "−"}$${Math.abs(pnlUsd).toFixed(2)}` });
   };
+  // grab-and-drag any armed bot line on the chart: live re-price, frozen fills,
+  // 1.5s re-arm grace on release so it can't trigger the instant you let go
+  const dragBotLine = (id, price, done) => {
+    lineEditRef.current = !done;
+    if (!(price > 0)) return;
+    setPendingOrders((P) => P.map((o) => {
+      if (o.id !== id) return o;
+      const t = tokens.find((x) => String(x.id) === String(o.tokenId));
+      const live = t ? t.price : price;
+      const upd = { ...o, level: price, dir: price <= live ? -1 : 1, trailArmed: false, peak: undefined };
+      if (done) upd.ts = Date.now(); // fresh arm grace — "won't trigger until set again"
+      // dragging a visual pair's BUY line keeps its exit point untouched
+      return upd;
+    }));
+  };
   const sellAllRuns = () => botRuns.filter((r) => r.status === "live").forEach((r) => sellRun(r.id));
   const sellPos = (t) => { const p0 = positions[t.id]; if (p0 && p0.amt > 0) execute(t, { side: "sell", pay: p0.pay || pay, amt: p0.amt, mode: "instant", tax: taxFor(p0.pay || pay), burn: splitFee(p0.amt, p0.pay || pay).total, legs: [] }, {}); };
   const closeAllTickets = () => Object.keys(positions).forEach((id) => { const t = tokens.find((x) => String(x.id) === String(id)); if (t) sellPos(t); });
   // VISUAL TRADING pair — buy line + sell-all point, armed as one bot
-  const armVisualPair = ({ buy, sell, amt: a, trail }) => {
+  const armVisualPair = ({ buy, sell, amt: a, trail, editId = null }) => {
     if (!selected || !(buy > 0) || !(sell > 0) || !(a > 0)) return;
     const dir = buy <= selected.price ? -1 : 1;
-    setPendingOrders((P) => [...P, { id: Date.now() + Math.random(), tokenId: selected.id, side: "buy", level: buy, dir, amt: a, pay, tax: taxFor(pay), stopLoss: null, tpMult: null, legs: [], vt: true, vtSell: sell, vtTrail: trail > 0 ? trail : null, ts: Date.now() }]);
+    setPendingOrders((P) => [...P.filter((o) => o.id !== editId), { id: Date.now() + Math.random(), tokenId: selected.id, side: "buy", level: buy, dir, amt: a, pay, tax: taxFor(pay), stopLoss: null, tpMult: null, legs: [], vt: true, vtSell: sell, vtTrail: trail > 0 ? trail : null, ts: Date.now() }]);
+    if (editId) setEditingBotId(null);
     setBotDraftLevel(null); setBotDragSet(false); setVtLines(null);
     sayPrivate({ type: "note", text: `👁 visual pair armed — BUY ${a} ${pay} @ $${fmtP(buy)} → SELL ALL @ $${fmtP(sell)}${trail > 0 ? ` (trail ${trail}%)` : ""}` });
   };
@@ -4971,6 +5081,7 @@ export default function App() {
   // fill watcher — every price tick, fill pending orders whose level was hit
   useEffect(() => {
     if (!pendingOrders.length) return;
+    if (lineEditRef.current) return; // a line is being dragged — nothing fires
     const now = Date.now();
     // trailing sells: reaching the target ARMS them; they ride the peak and
     // only fire once price gives back trail% from that peak
@@ -5321,6 +5432,7 @@ export default function App() {
                     onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
                     onBotSet={(lvl) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); }}
                     onBotArm={(lvl) => armAtLevel(lvl)}
+                    onBotLineDrag={dragBotLine}
                     isMobile={isMobile} height={isMobile ? mobChartH : 480 + extraH} />
 
                   {/* MOBILE bottom handle — pull up for a skinnier chart, down for taller;
@@ -6267,7 +6379,7 @@ export default function App() {
               ...(botDraftLevel && String(botDraftLevel.tokenId) === String(selected.id) ? [{ level: botDraftLevel.level, side: botDraftLevel.side || "buy", draft: true, vt: !!vtLines }] : []),
             ]}
             botRuns={botRuns.filter((r) => r.status === "live" && String(r.tokenId) === String(selected.id))}
-            botSetMode={botDragSet}
+            botSetMode={botDragSet} onBotLineDrag={dragBotLine}
             onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
             onBotSet={(lvl) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); }} />
           {/* drag-set toggle + page tabs — chart above stays in view for both */}
@@ -6280,10 +6392,13 @@ export default function App() {
           <div style={{ flex: 1, overflowY: "auto", padding: 10 }}>
             {mobPageTab === "bots" ? (
               <AllBotsPanel tokens={tokens} pendingOrders={pendingOrders} botRuns={botRuns}
-                onEdit={(id, tid) => { setSel(tid); setClickMode(null); setEditingBotId(id); setMobPageTab("trader"); }}
+                onEdit={(id, tid) => { setSel(tid); setClickMode(null); setEditingBotId(id);
+                  const ord = pendingOrders.find((o) => o.id === id);
+                  setMobPageTab(ord && ord.vt ? "visual" : "trader"); }}
                 onCancel={cancelBot} onSellRun={sellRun} onSellAll={sellAllRuns} onOpenBotRun={(id) => setBotRunOpen(id)} />
             ) : mobPageTab === "visual" ? (
-              <VisualTrading token={selected} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
+              <VisualTrading token={selected} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} compactArm
+                editBot={pendingOrders.find((o) => o.id === editingBotId && o.vt) || null}
                 botLock={botLock} onStageSide={(m) => setBotSide(m)} onArmPair={armVisualPair}
                 dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
                 onSetDragSet={(v) => setBotDragSet(!!v)} onLinesChange={(l) => setVtLines(l)}
