@@ -337,7 +337,7 @@ const ratingColor = (s) => (s >= 66 ? T.green : s >= 40 ? T.amber : T.red);
 // ================================================================
 // CHART
 // ================================================================
-function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm }) {
+function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect }) {
   const wrapRef = useRef(null);
   const cvsRef = useRef(null);
   const [cross, setCross] = useState(null);
@@ -445,25 +445,48 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     // yellow dotted line = a bot waiting to trigger at that price. On mobile
     // candle charts these draw BENEATH the candles so the chart stays first.
     const drawBotLines = () => {
+      lineHitsRef.current = [];
+      // pair key: a visual pair's buy + exit share one key; a run's exits share
+      // the runId — grabbing any member lights the whole family, rest go faint
+      const keyOf = (o) => (typeof o.id === "string" && o.id.endsWith("::vtSell")) ? o.id.slice(0, -8)
+        : o.runId != null ? "run:" + o.runId
+        : o.vt && o.vtSell > 0 ? String(o.id)
+        : o.id != null ? String(o.id) : null;
+      const activeId = (lineDragRef.current && lineDragRef.current.id) != null
+        ? lineDragRef.current.id
+        : (stickyRef.current && stickyRef.current.id) != null ? stickyRef.current.id : selectedLineId;
+      let activeKey = null;
+      if (activeId != null) {
+        const src0 = (pendingLevels || []).find((o) => o.id === activeId);
+        if (src0) activeKey = keyOf(src0);
+      }
       (pendingLevels || []).forEach((o) => {
         if (o.level < lo || o.level > hi) return;
         const byY = y(o.level);
+        if (o.id != null && !o.draft) lineHitsRef.current.push({ id: o.id, y: byY });
+        const grabbed = activeId != null && activeId === o.id;
+        const paired = !grabbed && activeKey != null && keyOf(o) === activeKey;
+        const dimmed = activeKey != null && !grabbed && !paired && !o.draft;
         const sell = o.side === "sell";
         // visual-trading buy in = GREEN and stays until hit; exits & sells = RED
         const col = sell ? T.red : o.vt ? T.green : T.amber;
-        ctx.setLineDash(o.draft ? [6, 3] : [2, 4]); ctx.strokeStyle = col;
-        ctx.globalAlpha = o.draft ? 1 : 0.9; ctx.lineWidth = o.draft ? 1.8 : 1.4;
+        ctx.setLineDash(o.draft ? [6, 3] : grabbed || paired ? [8, 3] : [2, 4]); ctx.strokeStyle = col;
+        ctx.globalAlpha = o.draft || grabbed ? 1 : paired ? 0.95 : dimmed ? 0.28 : 0.62;
+        ctx.lineWidth = grabbed ? 2.4 : paired ? 2 : o.draft ? 1.8 : 1.4;
         ctx.beginPath(); ctx.moveTo(0, byY); ctx.lineTo(plotW, byY); ctx.stroke();
-        ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.lineWidth = 1;
+        ctx.setLineDash([]); ctx.lineWidth = 1;
         ctx.fillStyle = col; ctx.font = `bold 9px ${T.mono}`;
-        const amtTxt = o.amt != null ? ` · ${o.amt} ${o.pay || ""}` : "";
+        // exact amount at 0.1 precision on every bot line
+        const amtN = o.amt != null ? (Math.round(o.amt * 10) / 10).toFixed(1) : null;
+        const amtTxt = amtN != null ? ` · ${amtN} ${o.pay || ""}` : "";
         const label = o.draft
           ? (isMobile ? `${sell ? "SELL" : "BUY"} ${fmtP(o.level)}` : `${sell ? "🔻 SELL" : o.vt ? "🟢 BUY IN" : "🤖 BUY-IN"} MOVING @ ${fmtP(o.level)}`)
-          : isMobile ? (sell ? `${fmtP(o.level)}${amtTxt}` : fmtP(o.level))
+          : isMobile ? `${fmtP(o.level)}${amtTxt}`
           : sell ? `${o.vt ? "🔴 EXIT POINT" : "🔻 SELL"} @ ${fmtP(o.level)}${amtTxt}`
-          : o.vt ? `🟢 BUY IN @ ${fmtP(o.level)}`
-          : `🤖 BUY BOT TRIGGERS @ ${fmtP(o.level)}`;
+          : o.vt ? `🟢 BUY IN @ ${fmtP(o.level)}${amtTxt}`
+          : `🤖 BUY BOT TRIGGERS @ ${fmtP(o.level)}${amtTxt}`;
         ctx.fillText(label, 6, byY - 5);
+        ctx.globalAlpha = 1;
         ctx.font = `10px ${T.mono}`;
       });
     };
@@ -697,26 +720,91 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   const clickModeRef = useRef(clickMode); clickModeRef.current = clickMode;
   const onChartTradeRef = useRef(onChartTrade); onChartTradeRef.current = onChartTrade;
   // bot-set mode: dragging the chart paints the buy-in line instead of panning
-  const botSetRef = useRef({}); botSetRef.current = { on: botSetMode, draft: onBotDraft, set: onBotSet, arm: onBotArm };
+  const botSetRef = useRef({}); botSetRef.current = { on: botSetMode, draft: onBotDraft, set: onBotSet, arm: onBotArm, lineDrag: onBotLineDrag };
+  const lineHitsRef = useRef([]);      // grabbable bot lines: {id, y}
+  const lineDragRef = useRef(null);    // active line drag: {id}
+  const touchIntentRef = useRef(null); // first-move decision: chart gesture vs page scroll
+  const pendGrabRef = useRef(null);    // touch press-and-hold before a line grab engages
+  const stickyRef = useRef(null);      // instant-edit: the line rides the cursor until you click/release
+  useEffect(() => {
+    if (!editLineReq || editLineReq.id == null) return;
+    stickyRef.current = { id: editLineReq.id };
+    lineDragRef.current = { id: editLineReq.id };
+    onLineSelect && onLineSelect(editLineReq.id);
+  }, [editLineReq && editLineReq.n]);
   const priceAtY = (cy) => { const g = geom.current; return g.hi - ((cy - g.padT) / g.chartH) * (g.hi - g.lo); };
   useEffect(() => {
     const cvs = cvsRef.current; if (!cvs) return;
-    const block = (e) => {
-      e.preventDefault();
+    // SCROLL-FRIENDLY TOUCH: the first ~7px of movement decides the gesture.
+    // Mostly-vertical swipe (no special mode active) → the page scrolls
+    // normally. Horizontal movement, drag-set, line-grabs, or axis drags →
+    // the chart takes the gesture and the page holds still.
+    const chartForced = () => {
       const d = dragRef.current, bs = botSetRef.current;
-      if (d && d.botset && e.touches && e.touches[0] && bs.draft) {
+      return (bs && bs.on) || lineDragRef.current || axisRef.current || (d && d.botset);
+    };
+    const onTS = (e) => {
+      const p0 = e.touches && e.touches[0]; if (!p0) return;
+      touchIntentRef.current = { x: p0.clientX, y: p0.clientY, decided: false, scroll: false };
+      if (chartForced()) { touchIntentRef.current.decided = true; e.preventDefault(); }
+    };
+    const onTM = (e) => {
+      const it = touchIntentRef.current; const p0 = e.touches && e.touches[0];
+      if (pendGrabRef.current && p0) {
+        const r0 = cvs.getBoundingClientRect();
+        const mx = Math.abs(p0.clientX - r0.left - pendGrabRef.current.x), my = Math.abs(p0.clientY - r0.top - pendGrabRef.current.y);
+        if (Math.max(mx, my) > 7) { clearTimeout(pendGrabRef.current.timer); pendGrabRef.current = null; } // moved → it's a pan
+      }
+      if (it && !it.decided && p0) {
+        if (chartForced()) { it.decided = true; }
+        else {
+          const dx = Math.abs(p0.clientX - it.x), dy = Math.abs(p0.clientY - it.y);
+          if (Math.max(dx, dy) > 7) {
+            it.decided = true;
+            it.scroll = dy > dx * 1.25; // clearly vertical → let the page move
+            if (it.scroll) { dragRef.current = null; setCross(null); }
+          }
+        }
+      }
+      if (it && it.decided && it.scroll) return; // browser scrolls the page
+      e.preventDefault();
+      const ldm = stickyRef.current || lineDragRef.current;
+      if (ldm && p0 && botSetRef.current.lineDrag) {
+        const r = cvs.getBoundingClientRect();
+        const g = geom.current;
+        const cy = Math.min(Math.max(p0.clientY - r.top, g.padT), g.padT + g.chartH);
+        botSetRef.current.lineDrag(ldm.id, priceAtY(cy), false);
+        return;
+      }
+      const d = dragRef.current, bs = botSetRef.current;
+      if (d && d.botset && p0 && bs.draft) {
         d.moved = true;
         const r = cvs.getBoundingClientRect();
         const g = geom.current;
-        const cy = Math.min(Math.max(e.touches[0].clientY - r.top, g.padT), g.padT + g.chartH);
+        const cy = Math.min(Math.max(p0.clientY - r.top, g.padT), g.padT + g.chartH);
         bs.draft(g.hi - ((cy - g.padT) / g.chartH) * (g.hi - g.lo));
       }
     };
-    cvs.addEventListener("touchstart", block, { passive: false });
-    cvs.addEventListener("touchmove", block, { passive: false });
+    cvs.addEventListener("touchstart", onTS, { passive: false });
+    cvs.addEventListener("touchmove", onTM, { passive: false });
     // Native touchend for $ markers AND armed trades. React's synthetic
     // touchend is unreliable on mobile, so BOTH paths must live here.
     const onTouchEndNative = (e) => {
+      if (pendGrabRef.current) { clearTimeout(pendGrabRef.current.timer); pendGrabRef.current = null; }
+      const it = touchIntentRef.current; touchIntentRef.current = null;
+      if (it && it.decided && it.scroll) { lineDragRef.current = null; return; }
+      const ld0 = stickyRef.current || lineDragRef.current;
+      if (ld0) {
+        const r = cvs.getBoundingClientRect();
+        const p0 = e.changedTouches && e.changedTouches[0];
+        if (p0 && botSetRef.current.lineDrag) {
+          const g = geom.current;
+          const cy = Math.min(Math.max(p0.clientY - r.top, g.padT), g.padT + g.chartH);
+          botSetRef.current.lineDrag(ld0.id, priceAtY(cy), true);
+        }
+        stickyRef.current = null; lineDragRef.current = null;
+        return;
+      }
       const d = dragRef.current;
       const bs = botSetRef.current;
       if (d && d.botset) {
@@ -751,8 +839,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     };
     cvs.addEventListener("touchend", onTouchEndNative, { passive: false });
     return () => {
-      cvs.removeEventListener("touchstart", block);
-      cvs.removeEventListener("touchmove", block);
+      cvs.removeEventListener("touchstart", onTS);
+      cvs.removeEventListener("touchmove", onTM);
       cvs.removeEventListener("touchend", onTouchEndNative);
     };
   }, [onMarkerClick]);
@@ -782,11 +870,57 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       setCross(null);
       return;
     }
+    // instant-edit in progress? this press LOCKS the line at this exact price
+    if (stickyRef.current) {
+      const gS = geom.current;
+      const yS = Math.min(Math.max(cy, gS.padT), gS.padT + gS.chartH);
+      botSetRef.current.lineDrag && botSetRef.current.lineDrag(stickyRef.current.id, priceAtY(yS), true);
+      stickyRef.current = null; lineDragRef.current = null;
+      return;
+    }
+    // grab an armed bot line? Mouse grabs instantly. Touch uses PRESS-AND-HOLD
+    // (~180ms still) so panning around the chart never snags a line by accident
+    const slopL = e.touches ? 11 : 8;
+    const gL = geom.current;
+    if (gL.plotW != null && cx < gL.plotW - 4 && botSetRef.current.lineDrag) {
+      const grab = lineHitsRef.current.find((l) => Math.abs(l.y - cy) <= slopL);
+      if (grab) {
+        if (!e.touches) {
+          lineDragRef.current = { id: grab.id };
+          onLineSelect && onLineSelect(grab.id);
+          botSetRef.current.lineDrag(grab.id, priceAtY(cy), false);
+          dragRef.current = null; setCross(null);
+          return;
+        }
+        // touch: arm a hold-timer; if the finger stays put it becomes a grab,
+        // if it moves first it's a normal pan/scroll
+        if (pendGrabRef.current) clearTimeout(pendGrabRef.current.timer);
+        pendGrabRef.current = {
+          id: grab.id, x: cx, y: cy,
+          timer: setTimeout(() => {
+            const pg = pendGrabRef.current; if (!pg) return;
+            pendGrabRef.current = null;
+            lineDragRef.current = { id: pg.id };
+            dragRef.current = null; setCross(null);
+            if (navigator.vibrate) navigator.vibrate(12); // felt feedback: line picked up
+            botSetRef.current.lineDrag && botSetRef.current.lineDrag(pg.id, priceAtY(pg.y), false);
+          }, 180),
+        };
+        // fall through — panning starts normally and wins if the finger moves
+      }
+    }
     dragRef.current = { sx: cx, sy: cy, startOffset: offset, startPriceOff: view.priceOff || 0, moved: false, t0: Date.now(), touch: !!e.touches };
     setCross({ cx, cy });
   };
   const onMove = (e) => {
     const { cx, cy } = ptOf(e);
+    const st = stickyRef.current;
+    if (st && !e.touches) {
+      const g = geom.current;
+      const yy = Math.min(Math.max(cy, g.padT), g.padT + g.chartH);
+      botSetRef.current.lineDrag && botSetRef.current.lineDrag(st.id, priceAtY(yy), false);
+      return;
+    }
     const ld = lineDragRef.current;
     if (ld) {
       const g = geom.current;
@@ -882,7 +1016,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   return (
     <div ref={wrapRef}
       onTouchStart={(e) => e.stopPropagation()} onTouchMove={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()}
-      style={{ position: "relative", background: "#0c0f16", border: `1px solid ${clickMode ? (clickMode === "buy" ? T.green : T.red) : T.border}`, borderRadius: 10, overflow: "hidden", transition: "border-color .2s", touchAction: "none", overscrollBehavior: "contain" }}>
+      data-chart="1"
+      style={{ position: "relative", background: "#0c0f16", border: `1px solid ${clickMode ? (clickMode === "buy" ? T.green : T.red) : T.border}`, borderRadius: 10, overflow: "hidden", transition: "border-color .2s", touchAction: "pan-y", overscrollBehavior: "contain" }}>
       {/* mobile: OHLC readout + LIVE/fit share a flow header row ABOVE the chart */}
       {isMobile ? (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, padding: "7px 10px 4px", background: "#0c0f16", flexWrap: "nowrap" }}>
@@ -931,7 +1066,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       </div>
       <canvas
         ref={cvsRef}
-        style={{ width: "100%", height, display: "block", cursor: clickMode ? "pointer" : "crosshair", touchAction: "none", overscrollBehavior: "none", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
+        style={{ width: "100%", height, display: "block", cursor: clickMode ? "pointer" : "crosshair", touchAction: "pan-y", overscrollBehavior: "contain", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
         onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
         onDoubleClick={(e) => {
           const bs = botSetRef.current; if (!bs.on || !bs.arm) return;
@@ -952,9 +1087,12 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
         // hug the LATEST candle: sit just right of it, clamped inside the plot,
         // so the box shifts and bounces with the bar itself — not the price axis
         const lp = lastPxRef.current;
-        const left = Math.max(8, Math.min((lp.x != null ? lp.x : lp.plotW) + 10, lp.plotW - 118));
+        // rigid to the bar with breathing room (+18px) — and when the bar rides
+        // the right edge, the box slides OVER the price axis (half-visible past
+        // the edge) instead of being blocked by that right-side wall
+        const left = Math.max(6, Math.min((lp.x != null ? lp.x : lp.plotW) + 18, lp.plotW + 46));
         return (
-          <div style={{ position: "absolute", left, top, zIndex: 4, pointerEvents: "none", transition: "left .15s linear, top .15s linear",
+          <div style={{ position: "absolute", left, top, zIndex: 4, pointerEvents: "none",
             background: "rgba(10,13,19,0.94)", border: `1px solid ${col}`, borderRadius: 8, padding: "5px 8px",
             fontFamily: T.mono, textAlign: "right", boxShadow: `0 0 12px ${col}44` }}>
             <div style={{ fontSize: 8, letterSpacing: 1, color: T.faint }}>POSITION PnL</div>
@@ -997,6 +1135,15 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
   const [stopLoss, setStopLoss] = useState(25);
   const [armFlash, setArmFlash] = useState(0); // lights the arm button when a bot goes live
   const [showLine, setShowLine] = useState(false); // 📍 buy-in line painted on the chart
+  useEffect(() => {
+    if (!showLine) return;
+    const cancel = (e) => {
+      if (e.target && e.target.closest && e.target.closest('[data-chart], [data-botui]')) return;
+      setShowLine(false); onDraftLevel && onDraftLevel(null);
+    };
+    window.addEventListener("pointerdown", cancel, true);
+    return () => window.removeEventListener("pointerdown", cancel, true);
+  }, [showLine]);
   // buy-in price: follows live until touched
   const [buyTouched, setBuyTouched] = useState(false);
   const [buyInPrice, setBuyInPrice] = useState(token.price);
@@ -1034,7 +1181,7 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
   const flashOn = !!armFlash;
 
   return (
-    <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14 }}>
+    <div data-botui="1" style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <div style={{ fontFamily: T.mono, fontSize: 11, letterSpacing: 2, color: T.dim, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           🤖 AUTO TRADER · <b style={{ color: accent(token.hue) }}>{token.sym}</b>
@@ -1060,9 +1207,13 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
           </span>
         )}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 7, margin: "5px 0 4px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "5px 0 4px" }}>
+        <button onClick={() => setAmount && setAmount(Math.max(0, (parseFloat(amount) || 0) - 0.1).toFixed(1))}
+          style={{ ...chip(false), flex: "0 0 auto", padding: "9px 12px", fontSize: 13, fontWeight: 900 }}>−</button>
         <input value={amount} onChange={(e) => setAmount && setAmount(e.target.value)} inputMode="decimal"
-          style={{ ...inp, flex: 1, fontSize: 15, fontWeight: 800, padding: "10px 12px" }} />
+          style={{ ...inp, flex: 1, minWidth: 0, fontSize: 15, fontWeight: 800, padding: "10px 12px", textAlign: "center" }} />
+        <button onClick={() => setAmount && setAmount(((parseFloat(amount) || 0) + 0.1).toFixed(1))}
+          style={{ ...chip(false), flex: "0 0 auto", padding: "9px 12px", fontSize: 13, fontWeight: 900 }}>+</button>
         <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 800, color: pay === "SOL" ? T.blue : VALO_PURPLE, flex: "0 0 auto" }}>{pay}</span>
       </div>
       <div style={{ display: "flex", gap: 5, marginBottom: 10 }}>
@@ -1675,6 +1826,42 @@ function genLeaderboard(period) {
   }
   return out.sort((a, b) => b.mult - a.mult);
 }
+// full tier ladder — JEET at the bottom, DIAMOND APEX at the top
+function TierListModal({ onClose, isMobile, myBest = 0 }) {
+  const ladder = [...CALLOUT_TIERS].slice().reverse(); // highest first
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 76, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+      padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "86vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14 }}>
+        <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 14px", borderBottom: `1px solid ${T.border}` }}>
+          <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, letterSpacing: 1.5 }}>🏆 CALLOUT TIER LIST</span>
+          <button onClick={onClose} style={{ ...chip(false), padding: "5px 9px", fontSize: 12 }}>✕</button>
+        </div>
+        <div style={{ padding: "10px 12px 14px" }}>
+          <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, marginBottom: 10 }}>
+            Your best peak decides your rank — from JEET all the way to DIAMOND APEX. Every tier upgrades your ring.
+          </div>
+          {ladder.map((tr) => {
+            const mine = myBest >= tr.min && (ladder.find((x) => x.min > tr.min && myBest >= x.min) == null);
+            return (
+              <div key={tr.label} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 9px", borderRadius: 10, marginBottom: 4,
+                border: mine ? `1.5px solid ${tr.color}` : `1px solid ${tr.color}33`, background: mine ? `${tr.color}14` : `${tr.color}07`,
+                boxShadow: mine ? `0 0 12px ${tr.color}44` : "none" }}>
+                <CalloutRing mult={Math.max(tr.min, 1.01)} size={34} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: tr.color }}>{tr.label}{mine ? "  · YOU" : ""}</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>peak ×{tr.min}{tr.apex ? " and beyond — the summit" : "+"}</div>
+                </div>
+                <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, color: tr.color }}>×{tr.min}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [] }) {
   const [tab, setTab] = useState("tiers");   // tiers | board
   const [period, setPeriod] = useState("1D");
@@ -1754,7 +1941,7 @@ function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [] }) {
                     <span style={{ fontFamily: T.mono, fontSize: i < 3 ? 12 : 9.5, fontWeight: 900, color: rankCol(i), width: 30, flex: "0 0 auto" }}>
                       {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `#${i + 1}`}
                     </span>
-                    {i < 3 && <CalloutRing mult={r.mult} size={30} />}
+                    {i < 10 && <CalloutRing mult={r.mult} size={i < 3 ? 30 : 24} />}
                     <span style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: r.you ? 900 : 700, color: r.you ? VALO_PURPLE : T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {r.you ? "YOU" : "@" + r.user}
                     </span>
@@ -1877,7 +2064,8 @@ function FollowListModal({ kind, list, onClose, isMobile, onOpenUser }) {
     </div>
   );
 }
-function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, onToggleFollow, friendStatus, onFriendAction, onOpenToken, onSendFunds, dmLog = [], onSendDm, solBalance = 0, valoWallet = 0 , incomingReq = false, onAcceptReq, onDeclineReq}) {
+function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, onToggleFollow, friendStatus, onFriendAction, onOpenToken, onSendFunds, dmLog = [], onSendDm, solBalance = 0, valoWallet = 0 , incomingReq = false, onAcceptReq, onDeclineReq, onOpenTierList, onOpenLeaderboard }) {
+  const [badgeTab, setBadgeTab] = useState(false); // insignia tapped → tier/leaderboard tab
   // API: replace with a real user-profile endpoint — all stats below are seeded fakes
   const rand = seededRand(hashStr("user-" + name));
   const peak = +(1 + rand() * (rand() < 0.12 ? 120 : 24)).toFixed(2);
@@ -1920,8 +2108,9 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     return x.ts >= a && x.ts <= b;                            // inclusive range, e.g. 7/3–7/9
   });
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 63, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, maxHeight: "88vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14 }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 74, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+      padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "88vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14 }}>
         {/* profile head */}
         <div style={{ padding: "14px 14px 12px", borderBottom: `1px solid ${T.border}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1930,7 +2119,8 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
               <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 800 }}>@{name}</div>
               <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{fols} followers · {folg} following</div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div onClick={() => setBadgeTab((v) => !v)} title="Tap: tier list & leaderboards"
+              style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
               <CalloutRing mult={peak} size={38} />
               <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 800, color: tier.color }}>{tier.label}</span>
             </div>
@@ -1987,7 +2177,15 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
         )}
         {/* current holdings — mini token cards; each opens that chart */}
         <div style={{ padding: "11px 14px", borderBottom: `1px solid ${T.border}` }}>
-          <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1.5, marginBottom: 6 }}>💼 CURRENT HOLDINGS · {holds.length}</div>
+          {badgeTab && (
+          <div style={{ margin: "10px 14px 0", border: `1px solid ${tier.color}44`, background: `${tier.color}0d`, borderRadius: 11, padding: 10, display: "flex", gap: 7 }}>
+            <button onClick={() => onOpenTierList && onOpenTierList()}
+              style={{ flex: 1, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)", color: T.text, borderRadius: 9, padding: "9px", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, cursor: "pointer" }}>🏆 TIER LIST</button>
+            <button onClick={() => onOpenLeaderboard && onOpenLeaderboard()}
+              style={{ flex: 1, border: `1px solid ${VALO_PURPLE}55`, background: "rgba(125,92,240,0.1)", color: VALO_PURPLE, borderRadius: 9, padding: "9px", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, cursor: "pointer" }}>📊 LEADERBOARD</button>
+          </div>
+        )}
+        <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1.5, marginBottom: 6 }}>💼 CURRENT HOLDINGS · {holds.length}</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
             {holds.map((h, i) => {
               const pnl = (h.t.price - h.entry) * h.qty;
@@ -2476,7 +2674,7 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
     </div>
   );
   return (
-    <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14 }}>
+    <div data-botui="1" style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <div style={{ fontFamily: T.mono, fontSize: 11, letterSpacing: 2, color: T.dim, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           👁 VISUAL TRADING · <b style={{ color: accent(token.hue) }}>{token.sym}</b>{editBot && editBot.vt ? <span style={{ color: T.amber }}> · EDITING</span> : null}
@@ -2502,18 +2700,28 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
           </span>
         )}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+        <button onClick={() => setAmount && setAmount(Math.max(0, (parseFloat(amount) || 0) - 0.1).toFixed(1))}
+          style={{ ...chip(false), flex: "0 0 auto", padding: "8px 11px", fontSize: 13, fontWeight: 900 }}>−</button>
         <input value={amount} onChange={(e) => setAmount && setAmount(e.target.value)} inputMode="decimal"
-          style={{ ...inp, flex: 1, fontSize: 14, fontWeight: 800, padding: "9px 11px" }} />
+          style={{ ...inp, flex: 1, minWidth: 0, fontSize: 14, fontWeight: 800, padding: "9px 11px", textAlign: "center" }} />
+        <button onClick={() => setAmount && setAmount(((parseFloat(amount) || 0) + 0.1).toFixed(1))}
+          style={{ ...chip(false), flex: "0 0 auto", padding: "8px 11px", fontSize: 13, fontWeight: 900 }}>+</button>
         <span style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 800, color: pay === "SOL" ? T.blue : VALO_PURPLE }}>{pay}</span>
         <span style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>≈ ${(amt * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
       </div>
       <div style={{ display: "flex", gap: 7, marginBottom: 9 }}>
         {step("1", "BUY IN", buyLvl, T.green, stage === "buy" && dragSetOn,
-          () => { setBuyLvl(null); setSellLvl(null); onSetDragSet && onSetDragSet(true); },
+          () => {
+            if (stage === "buy" && dragSetOn) { onSetDragSet && onSetDragSet(false); onDraftLevel && onDraftLevel(null); return; } // re-tap = cancel
+            setBuyLvl(null); setSellLvl(null); onSetDragSet && onSetDragSet(true);
+          },
           () => { setBuyLvl(null); setSellLvl(null); })}
         {step("2", "EXIT POINT", sellLvl, T.red, stage === "sell" && dragSetOn,
-          () => { if (buyLvl != null) { setSellLvl(null); onSetDragSet && onSetDragSet(true); } },
+          () => {
+            if (stage === "sell" && dragSetOn) { onSetDragSet && onSetDragSet(false); onDraftLevel && onDraftLevel(null); return; } // re-tap = cancel
+            if (buyLvl != null) { setSellLvl(null); onSetDragSet && onSetDragSet(true); }
+          },
           () => setSellLvl(null))}
       </div>
       <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginBottom: 9 }}>
@@ -2628,7 +2836,7 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
   );
 }
 
-function AllBotsPanel({ tokens = [], pendingOrders = [], botRuns = [], onEdit, onCancel, onSellRun, onSellAll, onOpenBotRun }) {
+function AllBotsPanel({ tokens = [], pendingOrders = [], botRuns = [], onEdit, onCancel, onSellRun, onSellAll, onOpenBotRun, onHighlight, onEditLine }) {
   const tkOf = (tid) => tokens.find((x) => String(x.id) === String(tid));
   const runsLive = botRuns.filter((r) => r.status === "live");
   const runsSold = botRuns.filter((r) => r.status === "sold");
@@ -2682,14 +2890,28 @@ function AllBotsPanel({ tokens = [], pendingOrders = [], botRuns = [], onEdit, o
             <button onClick={() => onSellRun(r.id)} style={{ border: "none", borderRadius: 7, padding: "4px 10px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, background: T.red, color: "#170808", cursor: "pointer" }}>SELL ALL</button>
           </div>
         ); })}
-      {pend.map((o) => { const t = tkOf(o.tokenId); if (!t) return null; return (
-        <div key={o.id} style={bar(t.hue)}>
+      {pend.map((o) => { const t = tkOf(o.tokenId); if (!t) return null;
+        const isSellBot = o.side === "sell";
+        return (
+        <div key={o.id} onClick={() => onHighlight && onHighlight(o.id, o.tokenId)} title="Tap: highlight this bot's lines on the chart"
+          style={{ ...bar(t.hue), flexWrap: "wrap" }}>
           <span style={{ fontSize: 10 }}>⏳</span>
           <span style={{ fontSize: 10.5, fontWeight: 800, color: accent(t.hue) }}>${t.sym}</span>
-          <span style={{ fontSize: 9, color: T.text }}>{o.amt} {o.pay} @ ${fmtP(o.level)}</span>
+          <span style={{ fontSize: 9, color: T.text }}>{(Math.round(o.amt * 10) / 10).toFixed(1)} {o.pay} @ ${fmtP(o.level)}</span>
           <span style={{ fontSize: 8, color: T.amber, marginLeft: "auto" }}>{(Math.abs(t.price - o.level) / t.price * 100).toFixed(1)}% away</span>
-          <button onClick={() => onEdit(o.id, o.tokenId)} style={{ ...chip(false), padding: "4px 8px", fontSize: 9, fontWeight: 800 }}>Edit</button>
-          <button onClick={() => onCancel(o.id)} style={{ ...chip(false), padding: "4px 8px", fontSize: 9, fontWeight: 800, color: T.red, borderColor: `${T.red}44` }}>✕</button>
+          {/* instant line edit — the line jumps onto your cursor/finger, click or release locks it */}
+          <button onClick={(e) => { e.stopPropagation(); onEditLine && onEditLine(o.id, o.tokenId); }}
+            title="Instantly re-price this line — it follows your cursor until you click"
+            style={{ ...chip(false), padding: "4px 8px", fontSize: 9, fontWeight: 900, color: isSellBot ? T.red : o.vt ? T.green : T.amber, borderColor: `${isSellBot ? T.red : o.vt ? T.green : T.amber}55` }}>
+            ✎ {isSellBot ? "SELL LINE" : "BUY LINE"}
+          </button>
+          {o.vt && o.vtSell > 0 && (
+            <button onClick={(e) => { e.stopPropagation(); onEditLine && onEditLine(o.id + "::vtSell", o.tokenId); }}
+              title="Instantly re-price the exit point"
+              style={{ ...chip(false), padding: "4px 8px", fontSize: 9, fontWeight: 900, color: T.red, borderColor: `${T.red}55` }}>✎ EXIT</button>
+          )}
+          <button onClick={(e) => { e.stopPropagation(); onEdit(o.id, o.tokenId); }} style={{ ...chip(false), padding: "4px 8px", fontSize: 9, fontWeight: 800 }}>Edit</button>
+          <button onClick={(e) => { e.stopPropagation(); onCancel(o.id); }} style={{ ...chip(false), padding: "4px 8px", fontSize: 9, fontWeight: 800, color: T.red, borderColor: `${T.red}44` }}>✕</button>
         </div>
       ); })}
       {runsSold.map((r) => { const pnl = r.exits.reduce((s, e) => s + e.pnlUsd, 0); const g = pnl >= 0; return (
@@ -3771,10 +3993,23 @@ function WhitepaperModal({ onClose, isMobile }) {
   }, []);
 
   const go = (id) => {
+    setActive(id);
+    if (isMobile) {
+      // the mobile TOC hides the article pane (display:none), so scrolling now
+      // would target a hidden container whose sections all sit at offset 0.
+      // Close the TOC first, then scroll on the next frames once it's visible.
+      setTocOpen(false);
+      let tries = 0;
+      const attempt = () => {
+        const el = secRefs.current[id], sc = scrollRef.current;
+        if (el && sc && el.offsetTop > 0) sc.scrollTo({ top: el.offsetTop - 12, behavior: "smooth" });
+        else if (++tries < 8) requestAnimationFrame(attempt); // wait out the re-render
+      };
+      requestAnimationFrame(attempt);
+      return;
+    }
     const el = secRefs.current[id], sc = scrollRef.current;
     if (el && sc) sc.scrollTo({ top: el.offsetTop - 12, behavior: "smooth" });
-    setActive(id);
-    if (isMobile) setTocOpen(false);
   };
 
   const onScroll = () => {
@@ -4338,7 +4573,20 @@ export default function App() {
   const [botSide, setBotSide] = useState("buy");                   // which side the drag-set / draft belongs to
   const [vtLines, setVtLines] = useState(null);                    // { tokenId, buy, sell } — visual-trading lines that stay painted
   const lineEditRef = useRef(false);                               // a bot line is being dragged — ALL fills freeze
+  const [selLineId, setSelLineId] = useState(null);                // clicked line — its whole pair stays highlighted
+  const [editLineReq, setEditLineReq] = useState(null);            // {id, n} — line snaps to the cursor for instant re-pricing
   const [botDragSet, setBotDragSet] = useState(false);             // toggle: chart drag sets buy-in vs normal pan
+  // OFF-CHART CLICK CANCELS THE LINE SETTER — tapping anything that isn't the
+  // chart or the bot panels switches drag-set off and clears the moving line
+  useEffect(() => {
+    if (!botDragSet) return;
+    const cancel = (e) => {
+      if (e.target && e.target.closest && e.target.closest('[data-chart], [data-botui]')) return;
+      setBotDragSet(false); setBotDraftLevel(null);
+    };
+    window.addEventListener("pointerdown", cancel, true);
+    return () => window.removeEventListener("pointerdown", cancel, true);
+  }, [botDragSet]);
   const [mobPageTab, setMobPageTab] = useState("trader");          // mobile bot page: trader | bots
   // manual SELL on a running bot — dumps its whole remaining position at market
   const sellRun = (runId) => {
@@ -4355,7 +4603,14 @@ export default function App() {
   // 1.5s re-arm grace on release so it can't trigger the instant you let go
   const dragBotLine = (id, price, done) => {
     lineEditRef.current = !done;
+    setSelLineId(id); // touching a line keeps its pair highlighted
     if (!(price > 0)) return;
+    // grabbing a pending visual pair's EXIT line re-prices its sell-all point
+    if (typeof id === "string" && id.endsWith("::vtSell")) {
+      const baseId = +id.slice(0, -8) || id.slice(0, -8);
+      setPendingOrders((P) => P.map((o) => (String(o.id) === String(baseId) ? { ...o, vtSell: price, ...(done ? { ts: Date.now() } : {}) } : o)));
+      return;
+    }
     setPendingOrders((P) => P.map((o) => {
       if (o.id !== id) return o;
       const t = tokens.find((x) => String(x.id) === String(o.tokenId));
@@ -4422,8 +4677,10 @@ export default function App() {
   // ---- MY MC CALLOUTS — "📣 CALLOUT" on the chart stamps the current market
   // cap; the ring then tracks your best multiplier since. Peak only ratchets UP.
   const [myMcCallouts, setMyMcCallouts] = useState({}); // { [tokenId]: { mcAt, peak } }
+  const [lastCalloutTs, setLastCalloutTs] = useState(0);   // one callout every 3h — no spamming every token
   const [calloutHubOpen, setCalloutHubOpen] = useState(false); // tier list + leaderboards popup
   const [myCalloutsOpen, setMyCalloutsOpen] = useState(false); // your callout history popup
+  const [tierListOpen, setTierListOpen] = useState(false);     // full tier-ladder popup
   const [nameChangedAt, setNameChangedAt] = useState(0);      // weekly username-change lock
   // ---- social graph + notifications (API: wire real social service) ----
   const [followersList, setFollowersList] = useState(() => { const r = seededRand(4242); return Array.from({ length: 7 }, () => randomHandle(r)); });
@@ -4968,9 +5225,14 @@ export default function App() {
       return;
     }
     setPctSel(null); // balance changes on trade — the applied % no longer holds
-    // buys pull straight out of the wallet, live
+    // buys pull straight out of the wallet, live — and can NEVER take it below 0
     if (o.side === "buy" && o.amt > 0) {
-      if (o.pay === "SOL") setSolBalance((b) => b - o.amt); else setValoWallet((v) => v - o.amt);
+      const bal = o.pay === "SOL" ? solBalance : valoWallet;
+      if (bal < o.amt - 1e-9) {
+        sayPrivate({ type: "note", text: `⛔ insufficient ${o.pay} — tried to buy ${o.amt}, wallet holds ${bal.toFixed(3)}` });
+        return;
+      }
+      if (o.pay === "SOL") setSolBalance((b) => Math.max(0, b - o.amt)); else setValoWallet((v) => Math.max(0, v - o.amt));
     }
     const fee = splitFee(o.amt, o.pay);
     setBurned((b) => b + fee.burn);        // burn pool only
@@ -5110,8 +5372,13 @@ export default function App() {
       if (!t) return;
       if (o.side === "buy") {
         // fill → a RUNNING BOT with its own book, kept out of the Live P/L box
+        const balNow = o.pay === "SOL" ? solBalance : valoWallet;
+        if (balNow < o.amt - 1e-9) {
+          sayPrivate({ type: "note", text: `⛔ bot cancelled — needed ${o.amt} ${o.pay} to buy ${t.sym}, wallet holds ${balNow.toFixed(3)}` });
+          return;
+        }
         const runId = "run" + Date.now() + Math.random();
-        if (o.pay === "SOL") setSolBalance((b) => b - o.amt); else setValoWallet((v) => v - o.amt);
+        if (o.pay === "SOL") setSolBalance((b) => Math.max(0, b - o.amt)); else setValoWallet((v) => Math.max(0, v - o.amt));
         setBotRuns((R) => [...R, { id: runId, tokenId: o.tokenId, sym: t.sym, hue: t.hue, entry: t.price, level: o.level, amt: o.amt, remaining: o.amt, pay: o.pay, legs: o.legs || [], stopLossPrice: o.stopLoss || null, filledTs: Date.now(), exits: [], status: "live" }]);
         sayPrivate({ type: "note", text: `🎯 bot filled — BOUGHT ${o.amt} ${o.pay} of ${t.sym} @ $${fmtP(t.price)} (armed @ $${fmtP(o.level)})` });
         const follow = [];
@@ -5257,13 +5524,25 @@ export default function App() {
   const calloutWidget = (noBox, ringSize = 34, horizontal = false) => {
     if (!selected) return null;
     const co = myMcCallouts[selected.id];
-    if (!co) return (
-      <button onClick={() => setMyMcCallouts((M) => ({ ...M, [selected.id]: { mcAt: mcOf(selected), peak: 1, ts: Date.now() } }))}
-        title="Call this coin out at the current market cap — the ring then tracks your best multiplier"
+    if (!co) {
+      const cdLeft = 3 * 3600e3 - (Date.now() - lastCalloutTs);
+      if (cdLeft > 0) {
+        const h = Math.floor(cdLeft / 3600e3), m = Math.ceil((cdLeft % 3600e3) / 60000);
+        return (
+          <button disabled title="One callout every 3 hours — make it count"
+            style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap", border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)", color: T.faint, borderRadius: 7, padding: "4px 9px", fontFamily: T.mono, fontSize: 10, fontWeight: 800, cursor: "not-allowed" }}>
+            📣 NEXT CALLOUT {h > 0 ? `${h}h ` : ""}{m}m
+          </button>
+        );
+      }
+      return (
+      <button onClick={() => { setMyMcCallouts((M) => ({ ...M, [selected.id]: { mcAt: mcOf(selected), peak: 1, ts: Date.now() } })); setLastCalloutTs(Date.now()); }}
+        title="Call this coin out at the current market cap — one callout every 3 hours, so make it count"
         style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap", border: `1px solid ${VALO_PURPLE}66`, background: "rgba(125,92,240,0.10)", color: VALO_PURPLE, borderRadius: 7, padding: "4px 9px", fontFamily: T.mono, fontSize: 10, fontWeight: 800, cursor: "pointer" }}>
         📣 CALLOUT · {fmt$(mcOf(selected))}
       </button>
-    );
+      );
+    }
     const { tier } = calloutTier(co.peak);
     if (horizontal) {
       // compact row form — same height as the buttons beside it, so opening
@@ -5345,16 +5624,21 @@ export default function App() {
                 {/* MOBILE chart-tools row — candles/line/trending left, callout tier
                     pinned to the right with no frame around it */}
                 {isMobile && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 8 }}>
-                    <button onClick={() => setChartMode("candles")} style={chip(chartMode === "candles")}>▮ Candles</button>
-                    <button onClick={() => setChartMode("line")} style={chip(chartMode === "line")}>∿ Line</button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 8, flexWrap: "wrap", minWidth: 0 }}>
+                    <button onClick={() => setChartMode("candles")} style={{ ...chip(chartMode === "candles"), padding: "4px 7px", fontSize: 9.5 }}>▮</button>
+                    <button onClick={() => setChartMode("line")} style={{ ...chip(chartMode === "line"), padding: "4px 7px", fontSize: 9.5 }}>∿</button>
                     {trendingBtn}
-                    <div style={{ marginLeft: "auto", flex: "0 0 auto" }}>{calloutWidget(true, 36, true)}</div>
+                    <button onClick={() => setMetricsCrunch((c) => (c > 0.5 ? 0 : 1))}
+                      title={metricsCrunch > 0.5 ? "Expand the metrics" : "Collapse the metrics"}
+                      style={{ ...chip(metricsCrunch > 0.5), padding: "4px 7px", fontSize: 9.5, fontWeight: 900, color: metricsCrunch > 0.5 ? VALO_PURPLE : T.dim, borderColor: metricsCrunch > 0.5 ? `${VALO_PURPLE}66` : T.border }}>
+                      {metricsCrunch > 0.5 ? "▸" : "▾"} STATS
+                    </button>
+                    <div style={{ marginLeft: "auto", flex: "0 0 auto", minWidth: 0, display: "flex", justifyContent: "flex-end" }}>{calloutWidget(true, 34, true)}</div>
                   </div>
                 )}
                 {/* metrics under price — on mobile this whole block crunches away
                     as the chart is pulled up; durations below always stay */}
-                <div style={isMobile ? { maxHeight: Math.round((1 - metricsCrunch) * 130), opacity: 1 - metricsCrunch, overflow: "hidden", pointerEvents: metricsCrunch > 0.85 ? "none" : "auto" } : undefined}>
+                <div style={isMobile ? { maxHeight: Math.round((1 - metricsCrunch) * 130), opacity: 1 - metricsCrunch, overflow: "hidden", pointerEvents: metricsCrunch > 0.85 ? "none" : "auto", transition: "max-height .28s ease, opacity .28s ease" } : undefined}>
                 <div style={{ display: "flex", gap: 12, marginBottom: 10, flexWrap: "wrap", fontFamily: T.mono, fontSize: 10.5 }}>
                   <span style={{ color: T.faint }}>MOM <b style={{ color: accent(selected.hue) }}>{Math.round(selected.momentum)}</b></span>
                   <span style={{ color: T.faint }}>B/S <b style={{ color: selected.buyPressure >= 50 ? T.green : T.red }}>{Math.round(selected.buyPressure)}</b></span>
@@ -5408,8 +5692,9 @@ export default function App() {
                   </div>
                 )}
                 {isMobile && (
-                  <div onTouchStart={chartDragStart("top")} aria-label="Pull up to hide metrics, down to restore"
-                    style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "5px 0 8px", touchAction: "none" }}>
+                  <div onTouchStart={chartDragStart("top")} onClick={() => setMetricsCrunch((c) => (c > 0.5 ? 0 : 1))}
+                    aria-label="Tap to collapse/expand the metrics — or drag"
+                    style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "5px 0 8px", touchAction: "none", cursor: "pointer" }}>
                     <div style={{ width: 68, height: 5, borderRadius: 3, background: metricsCrunch > 0 ? VALO_PURPLE : T.border2, boxShadow: metricsCrunch > 0 ? `0 0 8px ${VALO_PURPLE}` : "none" }} />
                   </div>
                 )}
@@ -5421,6 +5706,10 @@ export default function App() {
                     position={positions[selected.id]} price={selected.price} sym={selected.sym}
                     pendingLevels={[
                       ...pendingOrders.filter((o) => String(o.tokenId) === String(selected.id)),
+              ...pendingOrders.filter((o) => String(o.tokenId) === String(selected.id) && o.vt && o.side === "buy" && o.vtSell > 0)
+                .map((o) => ({ id: o.id + "::vtSell", level: o.vtSell, side: "sell", vt: true, amt: o.amt, pay: o.pay })),
+                      ...pendingOrders.filter((o) => String(o.tokenId) === String(selected.id) && o.vt && o.side === "buy" && o.vtSell > 0)
+                        .map((o) => ({ id: o.id + "::vtSell", level: o.vtSell, side: "sell", vt: true, amt: o.amt, pay: o.pay })),
                       ...(vtLines && String(vtLines.tokenId) === String(selected.id) ? [
                         ...(vtLines.buy > 0 ? [{ level: vtLines.buy, side: "buy", vt: true }] : []),
                         ...(vtLines.sell > 0 ? [{ level: vtLines.sell, side: "sell", vt: true }] : []),
@@ -5432,7 +5721,8 @@ export default function App() {
                     onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
                     onBotSet={(lvl) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); }}
                     onBotArm={(lvl) => armAtLevel(lvl)}
-                    onBotLineDrag={dragBotLine}
+                    onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq}
+                    onLineSelect={(id) => setSelLineId(id)}
                     isMobile={isMobile} height={isMobile ? mobChartH : 480 + extraH} />
 
                   {/* MOBILE bottom handle — pull up for a skinnier chart, down for taller;
@@ -5514,15 +5804,7 @@ export default function App() {
                   onPickTrader={(row) => setMarkerInfo({ trader: row.trader, side: row.isBuy ? "buy" : "sell", sym: selected.sym,
                     t: row.at, amt: +row.sol.toFixed(3), unit: "SOL", price: selected.price, mc: row.mc,
                     pnlPct: row.pnlPct != null ? row.pnlPct : null, pnlMoney: null, tx: row.tx })} />}
-                {/* MOBILE: auto-trader bar under the holders tab — opens the
-                    fullscreen chart + bot-metrics page */}
-                {isMobile && (
-                  <button onClick={() => setMobileBotScreen(true)}
-                    style={{ width: "100%", marginTop: 8, display: "flex", alignItems: "center", justifyContent: "space-between", border: `1px solid ${pendingOrders.length ? `${T.amber}66` : T.border2}`, borderRadius: 10, padding: "10px 12px", background: pendingOrders.length ? "rgba(240,185,11,0.07)" : "rgba(255,255,255,0.02)", cursor: "pointer", fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: T.text }}>
-                    <span>🤖 AUTO-TRADER · {pendingOrders.length}</span>
-                    <span style={{ color: pendingOrders.length ? T.amber : T.faint, fontSize: 9 }}>chart + bots ▸</span>
-                  </button>
-                )}
+                {/* auto-trader entry now lives in the hotbar (🤖 button) */}
               </div>
             )
 
@@ -5590,7 +5872,8 @@ export default function App() {
                       {(coinChats[selected.id] || []).map((m) => (
                         <div key={m.id} style={{ margin: "6px 0", fontFamily: T.mono, fontSize: 11, lineHeight: 1.55 }}>
                           <span style={{ color: T.faint, fontSize: 9.5 }}>{m.ts} </span>
-                          <span style={{ color: m.me ? accent(258, 68) : T.blue }}>@{m.user}</span>
+                          <span onClick={() => !m.me && setProfileUser(m.user)}
+                            style={{ color: m.me ? accent(258, 68) : T.blue, cursor: m.me ? "default" : "pointer", textDecoration: m.me ? "none" : "underline dotted", textUnderlineOffset: 2 }}>@{m.user}</span>
                           <span style={{ color: T.text }}> {m.text}</span>
                         </div>
                       ))}
@@ -5681,6 +5964,12 @@ export default function App() {
           style={{ ...chip(true), padding: "8px 9px", fontSize: 10, minWidth: 54 }}>{pay === "SOL" ? "SOL" : "$VALO"}</button>
         <input value={amount} onChange={(e) => { setAmount(e.target.value); setPctSel(null); }}
           style={{ ...inp, flex: 1, minWidth: 0, padding: "9px 6px", fontSize: 13, textAlign: "center" }} />
+        <button onClick={() => setMobileBotScreen(true)}
+          style={{ flex: "0 0 auto", border: `1px solid ${pendingOrders.length ? `${T.amber}88` : T.border2}`, background: pendingOrders.length ? "rgba(240,185,11,0.12)" : "rgba(255,255,255,0.03)",
+            color: pendingOrders.length ? T.amber : T.dim, borderRadius: 8, padding: "8px 10px", fontFamily: T.mono, fontSize: 10, fontWeight: 900, cursor: "pointer",
+            boxShadow: pendingOrders.length ? `0 0 8px ${T.amber}44` : "none" }}>
+          🤖{pendingOrders.length > 0 ? ` ${pendingOrders.length}` : ""}
+        </button>
       </div>
 
       {/* split hotbar — BUY side (% of wallet) | SELL side (% of holdings) */}
@@ -6161,7 +6450,9 @@ export default function App() {
             {selected && ticketTab === "bots" ? (
               <AllBotsPanel tokens={tokens} pendingOrders={pendingOrders} botRuns={botRuns}
                 onEdit={(id, tid) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(id); }}
-                onCancel={cancelBot} onSellRun={sellRun} onSellAll={sellAllRuns} onOpenBotRun={(id) => setBotRunOpen(id)} />
+                onCancel={cancelBot} onSellRun={sellRun} onSellAll={sellAllRuns} onOpenBotRun={(id) => setBotRunOpen(id)}
+                onHighlight={(id, tid) => { setSel(tid); setSelLineId(id); }}
+                onEditLine={(id, tid) => { setSel(tid); setSelLineId(id); setEditLineReq({ id, n: Date.now() }); }} />
             ) : selected && ticketTab === "auto" ? (
               <AutoTraderPanel token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
                 dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
@@ -6321,7 +6612,7 @@ export default function App() {
       {/* TRADE MARKER RECEIPT */}
       {markerInfo && (
         <MarkerReceipt info={markerInfo} isMobile={isMobile} onClose={() => setMarkerInfo(null)}
-          onOpenUser={(u) => { setMarkerInfo(null); setProfileUser(u); }}
+          onOpenUser={(u) => setProfileUser(u)}
           onHighlight={(tx) => setHighlightTx(tx)}
           traderPrefs={traderPrefs} setTraderPref={setTraderPref} myName={username} />
       )}
@@ -6329,14 +6620,16 @@ export default function App() {
       {/* WHITEPAPER MODAL — interactive reader with expandable TOC sidebar */}
       {wpOpen && <WhitepaperModal onClose={() => setWpOpen(false)} isMobile={isMobile} />}
       {calloutHubOpen && <CalloutHubModal onClose={() => setCalloutHubOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} />}
+      {tierListOpen && <TierListModal onClose={() => setTierListOpen(false)} isMobile={isMobile}
+        myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)} />}
       {myCalloutsOpen && <MyCalloutsModal onClose={() => setMyCalloutsOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username} onOpenToken={navigateToToken} />}
       {notifOpen && <NotificationsModal onClose={() => setNotifOpen(false)} isMobile={isMobile} notifs={notifs} friendReqs={friendReqs}
-        onOpenToken={navigateToToken} onOpenUser={(u) => { setNotifOpen(false); setProfileUser(u); }}
+        onOpenToken={navigateToToken} onOpenUser={(u) => setProfileUser(u)}
         onAccept={(u) => { setFriendReqs((L) => L.filter((x) => x !== u)); setFriendsList((L) => [...L, u]); }}
         onDecline={(u) => setFriendReqs((L) => L.filter((x) => x !== u))}
         notifSetting={notifSetting} setNotifSetting={setNotifSetting} />}
       {followListOpen && <FollowListModal kind={followListOpen} list={followListOpen === "followers" ? followersList : followingList}
-        onClose={() => setFollowListOpen(null)} isMobile={isMobile} onOpenUser={(u) => { setFollowListOpen(null); setProfileUser(u); }} />}
+        onClose={() => setFollowListOpen(null)} isMobile={isMobile} onOpenUser={(u) => setProfileUser(u)} />}
       {profileUser && <UserProfileModal name={profileUser} onClose={() => setProfileUser(null)} isMobile={isMobile} tokens={tokens}
         isFollowing={followingList.includes(profileUser)}
         onToggleFollow={() => setFollowingList((L) => (L.includes(profileUser) ? L.filter((x) => x !== profileUser) : [...L, profileUser]))}
@@ -6345,6 +6638,7 @@ export default function App() {
           if (friendsList.includes(profileUser)) return;
           setSentFriendReqs((L) => (L.includes(profileUser) ? L.filter((x) => x !== profileUser) : [...L, profileUser])); // tap again cancels
         }}
+        onOpenTierList={() => setTierListOpen(true)} onOpenLeaderboard={() => setCalloutHubOpen(true)}
         incomingReq={friendReqs.includes(profileUser)}
         onAcceptReq={() => { setFriendsList((F) => (F.includes(profileUser) ? F : [...F, profileUser])); setFriendReqs((R) => R.filter((x) => x !== profileUser)); }}
         onDeclineReq={() => setFriendReqs((R) => R.filter((x) => x !== profileUser))}
@@ -6379,7 +6673,8 @@ export default function App() {
               ...(botDraftLevel && String(botDraftLevel.tokenId) === String(selected.id) ? [{ level: botDraftLevel.level, side: botDraftLevel.side || "buy", draft: true, vt: !!vtLines }] : []),
             ]}
             botRuns={botRuns.filter((r) => r.status === "live" && String(r.tokenId) === String(selected.id))}
-            botSetMode={botDragSet} onBotLineDrag={dragBotLine}
+            botSetMode={botDragSet} onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq}
+            onLineSelect={(id) => setSelLineId(id)}
             onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
             onBotSet={(lvl) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); }} />
           {/* drag-set toggle + page tabs — chart above stays in view for both */}
@@ -6395,14 +6690,24 @@ export default function App() {
                 onEdit={(id, tid) => { setSel(tid); setClickMode(null); setEditingBotId(id);
                   const ord = pendingOrders.find((o) => o.id === id);
                   setMobPageTab(ord && ord.vt ? "visual" : "trader"); }}
-                onCancel={cancelBot} onSellRun={sellRun} onSellAll={sellAllRuns} onOpenBotRun={(id) => setBotRunOpen(id)} />
+                onCancel={cancelBot} onSellRun={sellRun} onSellAll={sellAllRuns} onOpenBotRun={(id) => setBotRunOpen(id)}
+                onHighlight={(id, tid) => { setSel(tid); setSelLineId(id); }}
+                onEditLine={(id, tid) => { setSel(tid); setSelLineId(id); setEditLineReq({ id, n: Date.now() }); }} />
             ) : mobPageTab === "visual" ? (
+              <>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "8px 11px", marginBottom: 8, fontFamily: T.mono }}>
+                <span style={{ fontSize: 7.5, letterSpacing: 1.5, color: T.faint }}>💼 WALLET</span>
+                <span style={{ fontSize: 10, fontWeight: 800, color: T.blue }}>{solBalance.toFixed(2)} SOL</span>
+                <span style={{ fontSize: 10, fontWeight: 800, color: VALO_PURPLE }}>{fmtQty(valoWallet)} $VALO</span>
+                <span style={{ fontSize: 10.5, fontWeight: 900, color: T.text }}>${(solBalance * SOL_USD + valoWallet * valoUsdPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+              </div>
               <VisualTrading token={selected} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} compactArm
                 editBot={pendingOrders.find((o) => o.id === editingBotId && o.vt) || null}
                 botLock={botLock} onStageSide={(m) => setBotSide(m)} onArmPair={armVisualPair}
                 dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
                 onSetDragSet={(v) => setBotDragSet(!!v)} onLinesChange={(l) => setVtLines(l)}
                 onDraftLevel={(lvl, tid, side) => setBotDraftLevel(lvl ? { tokenId: tid != null ? tid : selected.id, level: lvl, side: side || botSide } : null)} />
+              </>
             ) : (
             <>
             {/* live wallet — state-driven, so it moves the instant any bot or trade does */}
@@ -7015,7 +7320,7 @@ export default function App() {
           .token-card:hover{ border-color: rgba(120,140,180,0.55) !important; box-shadow: 0 0 0 1px rgba(120,140,180,0.25), 0 6px 20px rgba(0,0,0,0.4) !important; transform: translateY(-1px); }
         }
         @keyframes wallSlide{ from{ transform: translateX(-100%); opacity:0; } to{ transform: translateX(0); opacity:1; } }
-        .ticker-track{ display:flex; width:max-content; animation: tickerScroll 58s linear infinite; }
+        .ticker-track{ display:flex; width:max-content; animation: tickerScroll 130s linear infinite; }
         .ticker-half{ display:flex; align-items:center; padding-left: 96px; }
         .ticker.paused .ticker-track{ animation-play-state: paused; }
         @keyframes tickerScroll{ from{ transform:translateX(0); } to{ transform:translateX(-50%); } }
