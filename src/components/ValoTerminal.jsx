@@ -728,10 +728,24 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   const stickyRef = useRef(null);      // instant-edit: the line rides the cursor until you click/release
   useEffect(() => {
     if (!editLineReq || editLineReq.id == null) return;
-    stickyRef.current = { id: editLineReq.id };
+    // remember where the line IS — it stays put and moves relative to your hand,
+    // so recent buy/sell lines hold their spot for slight adjustments
+    stickyRef.current = { id: editLineReq.id, level0: editLineReq.level != null ? editLineReq.level : null, off: null };
     lineDragRef.current = { id: editLineReq.id };
     onLineSelect && onLineSelect(editLineReq.id);
   }, [editLineReq && editLineReq.n]);
+  // sticky price with anchoring: first contact locks the offset between cursor
+  // and line, then every move is a delta from the line's own position
+  const stickyPriceAt = (cy) => {
+    const st = stickyRef.current; const g = geom.current;
+    const clampY = (v) => Math.min(Math.max(v, g.padT), g.padT + g.chartH);
+    let yy = clampY(cy);
+    if (st && st.off == null) {
+      const y0 = st.level0 != null && g.y ? g.y(st.level0) : yy;
+      st.off = y0 - yy;
+    }
+    return priceAtY(clampY(yy + ((st && st.off) || 0)));
+  };
   const priceAtY = (cy) => { const g = geom.current; return g.hi - ((cy - g.padT) / g.chartH) * (g.hi - g.lo); };
   useEffect(() => {
     const cvs = cvsRef.current; if (!cvs) return;
@@ -771,9 +785,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const ldm = stickyRef.current || lineDragRef.current;
       if (ldm && p0 && botSetRef.current.lineDrag) {
         const r = cvs.getBoundingClientRect();
-        const g = geom.current;
-        const cy = Math.min(Math.max(p0.clientY - r.top, g.padT), g.padT + g.chartH);
-        botSetRef.current.lineDrag(ldm.id, priceAtY(cy), false);
+        const cy = p0.clientY - r.top;
+        botSetRef.current.lineDrag(ldm.id, stickyRef.current ? stickyPriceAt(cy) : priceAtY(Math.min(Math.max(cy, geom.current.padT), geom.current.padT + geom.current.chartH)), false);
         return;
       }
       const d = dragRef.current, bs = botSetRef.current;
@@ -798,9 +811,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
         const r = cvs.getBoundingClientRect();
         const p0 = e.changedTouches && e.changedTouches[0];
         if (p0 && botSetRef.current.lineDrag) {
-          const g = geom.current;
-          const cy = Math.min(Math.max(p0.clientY - r.top, g.padT), g.padT + g.chartH);
-          botSetRef.current.lineDrag(ld0.id, priceAtY(cy), true);
+          const cy = p0.clientY - r.top;
+          botSetRef.current.lineDrag(ld0.id, stickyRef.current ? stickyPriceAt(cy) : priceAtY(Math.min(Math.max(cy, geom.current.padT), geom.current.padT + geom.current.chartH)), true);
         }
         stickyRef.current = null; lineDragRef.current = null;
         return;
@@ -872,9 +884,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     }
     // instant-edit in progress? this press LOCKS the line at this exact price
     if (stickyRef.current) {
-      const gS = geom.current;
-      const yS = Math.min(Math.max(cy, gS.padT), gS.padT + gS.chartH);
-      botSetRef.current.lineDrag && botSetRef.current.lineDrag(stickyRef.current.id, priceAtY(yS), true);
+      botSetRef.current.lineDrag && botSetRef.current.lineDrag(stickyRef.current.id, stickyPriceAt(cy), true);
       stickyRef.current = null; lineDragRef.current = null;
       return;
     }
@@ -909,6 +919,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
         // fall through — panning starts normally and wins if the finger moves
       }
     }
+    onLineSelect && onLineSelect(null); // tapped open chart — drop the highlight
     dragRef.current = { sx: cx, sy: cy, startOffset: offset, startPriceOff: view.priceOff || 0, moved: false, t0: Date.now(), touch: !!e.touches };
     setCross({ cx, cy });
   };
@@ -916,9 +927,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     const { cx, cy } = ptOf(e);
     const st = stickyRef.current;
     if (st && !e.touches) {
-      const g = geom.current;
-      const yy = Math.min(Math.max(cy, g.padT), g.padT + g.chartH);
-      botSetRef.current.lineDrag && botSetRef.current.lineDrag(st.id, priceAtY(yy), false);
+      botSetRef.current.lineDrag && botSetRef.current.lineDrag(st.id, stickyPriceAt(cy), false);
       return;
     }
     const ld = lineDragRef.current;
@@ -984,7 +993,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const { cy } = ptOf(e);
       const bs = botSetRef.current;
       const lvl = priceAtY(Math.min(Math.max(cy, geom.current.padT), geom.current.padT + geom.current.chartH));
-      bs.set && bs.set(lvl); // locked in — flows straight into the bot's buy-in
+      bs.set && bs.set(lvl, e && e.clientX != null ? { x: e.clientX, y: e.clientY } : null); // locked in
       dragRef.current = null;
       return;
     }
@@ -1131,7 +1140,7 @@ function Meter({ label, value, color }) {
 }
 
 // ---------------- order ticket (right side) ----------------
-function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editBot, onRelaunch, setAmount, botLock, dragSetOn, onToggleDragSet, compactArm = false }) {
+function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editBot, onRelaunch, setAmount, botLock, dragSetOn, onToggleDragSet, compactArm = false, wide = false, onReadyArm, solBalance = 0, valoWallet = 0 }) {
   const [stopLoss, setStopLoss] = useState(25);
   const [armFlash, setArmFlash] = useState(0); // lights the arm button when a bot goes live
   const [showLine, setShowLine] = useState(false); // 📍 buy-in line painted on the chart
@@ -1178,10 +1187,17 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
   };
   const setLeg = (i, k, v) => setLegs((L) => L.map((l, j) => (j === i ? { ...l, [k]: v } : l)));
   const invalid = allocTotal !== 100;
+  const armRef = useRef(null); armRef.current = armNow;
+  useEffect(() => {
+    onReadyArm && onReadyArm(invalid ? null : () => armRef.current && armRef.current());
+    return () => { onReadyArm && onReadyArm(null); };
+  }, [invalid, !!onReadyArm]);
   const flashOn = !!armFlash;
 
   return (
-    <div data-botui="1" style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14 }}>
+    <div data-botui="1" style={{ background: wide ? "transparent" : T.panel, border: wide ? "none" : `1px solid ${T.border2}`, borderRadius: 12, padding: wide ? 0 : 14,
+      ...(wide ? { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" } : {}) }}>
+      {!wide && (
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <div style={{ fontFamily: T.mono, fontSize: 11, letterSpacing: 2, color: T.dim, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           🤖 AUTO TRADER · <b style={{ color: accent(token.hue) }}>{token.sym}</b>
@@ -1196,7 +1212,9 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
           </button>
         )}
       </div>
+      )}
 
+      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1 1 210px", minWidth: 200 } : undefined}>
       {/* BUY-IN AMOUNT — swap SOL / $VALO freely */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <label style={{ ...lbl, marginBottom: 0 }}>Buy-in amount</label>
@@ -1209,14 +1227,14 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "5px 0 4px" }}>
         <button onClick={() => setAmount && setAmount(Math.max(0, (parseFloat(amount) || 0) - 0.1).toFixed(1))}
-          style={{ ...chip(false), flex: "0 0 auto", padding: "9px 12px", fontSize: 13, fontWeight: 900 }}>−</button>
+          style={{ ...chip(false), flex: "0 0 auto", padding: wide ? "6px 10px" : "9px 12px", fontSize: 13, fontWeight: 900 }}>−</button>
         <input value={amount} onChange={(e) => setAmount && setAmount(e.target.value)} inputMode="decimal"
-          style={{ ...inp, flex: 1, minWidth: 0, fontSize: 15, fontWeight: 800, padding: "10px 12px", textAlign: "center" }} />
+          style={{ ...inp, flex: 1, minWidth: 0, fontSize: wide ? 13 : 15, fontWeight: 800, padding: wide ? "7px 9px" : "10px 12px", textAlign: "center" }} />
         <button onClick={() => setAmount && setAmount(((parseFloat(amount) || 0) + 0.1).toFixed(1))}
-          style={{ ...chip(false), flex: "0 0 auto", padding: "9px 12px", fontSize: 13, fontWeight: 900 }}>+</button>
+          style={{ ...chip(false), flex: "0 0 auto", padding: wide ? "6px 10px" : "9px 12px", fontSize: 13, fontWeight: 900 }}>+</button>
         <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 800, color: pay === "SOL" ? T.blue : VALO_PURPLE, flex: "0 0 auto" }}>{pay}</span>
       </div>
-      <div style={{ display: "flex", gap: 5, marginBottom: 10 }}>
+      <div style={{ display: "flex", gap: 5, marginBottom: wide ? 4 : 10 }}>
         {[0.5, 1, 2, 5].map((v) => (
           <button key={v} onClick={() => setAmount && setAmount(String(v))}
             style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "5px 0", fontSize: 9.5, fontWeight: 800 }}>{v}</button>
@@ -1225,7 +1243,27 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
           ≈ ${(amt * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD
         </span>
       </div>
+      {wide && (() => {
+        const bal = pay === "SOL" ? solBalance : valoWallet;
+        const unit$ = pay === "SOL" ? SOL_USD : 0.0125;
+        return (
+          <>
+            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, margin: "2px 0 4px" }}>
+              💼 WALLET <b style={{ color: pay === "SOL" ? T.blue : VALO_PURPLE }}>{bal.toFixed(2)} {pay}</b>
+              <span style={{ color: T.faint }}> · ≈ ${(bal * unit$).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD</span>
+            </div>
+            <div style={{ display: "flex", gap: 4 }}>
+              {[25, 50, 75, 100].map((pc) => (
+                <button key={pc} onClick={() => setAmount && setAmount(((bal * pc) / 100).toFixed(2))}
+                  style={{ ...chip(false), flex: 1, textAlign: "center", padding: "3px 0", fontSize: 8.5, fontWeight: 800 }}>{pc === 100 ? "MAX" : `${pc}%`}</button>
+              ))}
+            </div>
+          </>
+        );
+      })()}
 
+      </div>
+      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1.1 1 230px", minWidth: 220 } : undefined}>
       {/* buy-in price slider — tracks live price, drag to set a higher/lower entry */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 7 }}>
         {onDraftLevel && (
@@ -1245,7 +1283,7 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
         )}
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, margin: "3px 0 2px" }}>
-        <span style={{ fontFamily: T.mono, fontSize: 15, fontWeight: 800, color: buyTouched ? (buyPct >= 0 ? T.green : T.red) : T.text }}>${fmtP(buyInPrice)}</span>
+        <span style={{ fontFamily: T.mono, fontSize: wide ? 13 : 15, fontWeight: 800, color: buyTouched ? (buyPct >= 0 ? T.green : T.red) : T.text }}>${fmtP(buyInPrice)}</span>
         <span style={{ fontFamily: T.mono, fontSize: 10, color: buyPct >= 0 ? T.green : T.red }}>{buyPct >= 0 ? "+" : ""}{buyPct.toFixed(1)}% vs live</span>
       </div>
       <input type="range" min={buyMin} max={buyMax} step={(buyMax - buyMin) / 400} value={Math.min(buyMax, Math.max(buyMin, buyInPrice))}
@@ -1255,7 +1293,9 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
         <span>−40%</span><span>live ${fmtP(token.price)}</span><span>+40%</span>
       </div>
 
-      <label style={{ ...lbl, marginTop: 12 }}>Stop loss — {stopLoss}% below entry</label>
+      </div>
+      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1.3 1 260px", minWidth: 250 } : undefined}>
+      <label style={{ ...lbl, marginTop: wide ? 0 : 12 }}>Stop loss — {stopLoss}% below entry</label>
       <input type="range" min={1} max={100} value={stopLoss} onChange={(e) => setStopLoss(+e.target.value)} style={{ width: "100%", accentColor: T.red }} />
 
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, marginBottom: 6 }}>
@@ -1263,26 +1303,40 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
         <span style={{ fontFamily: T.mono, fontSize: 10, color: allocTotal === 100 ? T.green : T.red }}>Σ {allocTotal}% {allocTotal === 100 ? "✓" : "must=100"}</span>
       </div>
       {legs.map((l, i) => (
-        <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 28px", gap: 6, marginBottom: 6 }}>
-          <div><span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>at ×</span><input value={l.mult} onChange={(e) => setLeg(i, "mult", e.target.value)} style={inpS} /></div>
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 28px", gap: wide ? 4 : 6, marginBottom: wide ? 3 : 6 }}>
+          <div>
+            <span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>at ×</span><input value={l.mult} onChange={(e) => setLeg(i, "mult", e.target.value)} style={inpS} />
+            {(() => { const m = parseFloat(l.mult) || 0, al = Number(l.alloc || 0); const est = amt * (al / 100) * (m - 1) * (pay === "SOL" ? SOL_USD : 0.0125);
+              return m > 1 && al > 0 ? <span style={{ display: "block", fontFamily: T.mono, fontSize: 7.5, fontWeight: 800, color: T.green, marginTop: 2 }}>≈ +${est.toFixed(0)} · ×{m}</span> : null; })()}
+          </div>
           <div><span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>trail%</span><input value={l.trail} onChange={(e) => setLeg(i, "trail", e.target.value)} style={inpS} /></div>
           <div><span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>sell%</span><input value={l.alloc} onChange={(e) => setLeg(i, "alloc", +e.target.value)} style={inpS} /></div>
           <button onClick={() => setLegs((L) => L.filter((_, j) => j !== i))} style={{ ...chip(false), alignSelf: "end", padding: "5px 0", textAlign: "center" }}>−</button>
         </div>
       ))}
       <button onClick={() => setLegs((L) => [...L, { mult: 3, trail: 12, alloc: 0 }])} style={{ ...chip(false), width: "100%", textAlign: "center" }}>+ add leg</button>
-
-      {!compactArm && (
+      {wide && (
+        <button disabled={invalid} onClick={armNow}
+          style={{ width: "100%", marginTop: 7, border: "none", borderRadius: 8, padding: "8px", fontFamily: T.mono, fontSize: 11, letterSpacing: 1.2, fontWeight: 900,
+            background: invalid ? "#1a2030" : editBot ? T.amber : T.blue, color: invalid ? T.faint : editBot ? "#1d1503" : "#07101d", cursor: invalid ? "not-allowed" : "pointer",
+            transform: flashOn ? "scale(1.02)" : "scale(1)", transition: "transform .18s, box-shadow .18s",
+            boxShadow: flashOn ? `0 0 20px ${editBot ? T.amber : T.blue}` : "none" }}>
+          {flashOn ? "✓ ARMED" : editBot ? "🔁 RELAUNCH" : "🤖 ARM"}
+        </button>
+      )}
+      </div>
+      {!(compactArm || wide) && !onReadyArm && (
         <button disabled={invalid} onClick={armNow}
           style={{
-            width: "100%", marginTop: 10, border: "none", borderRadius: 9, padding: "12px", fontFamily: T.mono, fontSize: 12.5, letterSpacing: 1.5, fontWeight: 800,
+            gridColumn: wide ? "1 / -1" : undefined,
+            width: "100%", marginTop: wide ? 4 : 10, border: "none", borderRadius: 9, padding: wide ? "9px" : "12px", fontFamily: T.mono, fontSize: wide ? 11.5 : 12.5, letterSpacing: 1.5, fontWeight: 800,
             background: invalid ? "#1a2030" : editBot ? T.amber : T.blue, color: invalid ? T.faint : editBot ? "#1d1503" : "#07101d", cursor: invalid ? "not-allowed" : "pointer",
             transform: flashOn ? "scale(1.02)" : "scale(1)", transition: "transform .18s, box-shadow .18s",
             boxShadow: flashOn ? `0 0 22px ${editBot ? T.amber : T.blue}` : "none",
           }}>{flashOn ? "✓ ARMED" : editBot ? "🔁 RELAUNCH BOT" : "🤖 ARM AUTO STRATEGY"}</button>
       )}
 
-      <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, marginTop: 9, lineHeight: 1.6, borderTop: `1px solid ${T.border}`, paddingTop: 8 }}>
+      <div style={{ width: wide ? "100%" : undefined, fontFamily: T.mono, fontSize: wide ? 8 : 9, color: T.faint, marginTop: wide ? 2 : 9, lineHeight: 1.5, borderTop: wide ? "none" : `1px solid ${T.border}`, paddingTop: wide ? 0 : 8 }}>
         <div>🔥 {fee.burn.toFixed(5)} → burn pool · 🎁 {fee.vault.toFixed(5)} → airdrop vault ({pay === "SOL" ? "0.6%" : "0.3%"} fee)</div>
       </div>
     </div>
@@ -1832,9 +1886,9 @@ function TierListModal({ onClose, isMobile, myBest = 0 }) {
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 76, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "86vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14 }}>
-        <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 14px", borderBottom: `1px solid ${T.border}` }}>
-          <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, letterSpacing: 1.5 }}>🏆 CALLOUT TIER LIST</span>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 540, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "80vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
+        <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 13px", borderBottom: `1px solid ${T.border}` }}>
+          <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1.5 }}>🏆 CALLOUT TIER LIST</span>
           <button onClick={onClose} style={{ ...chip(false), padding: "5px 9px", fontSize: 12 }}>✕</button>
         </div>
         <div style={{ padding: "10px 12px 14px" }}>
@@ -1847,15 +1901,137 @@ function TierListModal({ onClose, isMobile, myBest = 0 }) {
               <div key={tr.label} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 9px", borderRadius: 10, marginBottom: 4,
                 border: mine ? `1.5px solid ${tr.color}` : `1px solid ${tr.color}33`, background: mine ? `${tr.color}14` : `${tr.color}07`,
                 boxShadow: mine ? `0 0 12px ${tr.color}44` : "none" }}>
-                <CalloutRing mult={Math.max(tr.min, 1.01)} size={34} />
+                <CalloutRing mult={Math.max(tr.min, 1.01)} size={27} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: tr.color }}>{tr.label}{mine ? "  · YOU" : ""}</div>
-                  <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>peak ×{tr.min}{tr.apex ? " and beyond — the summit" : "+"}</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: tr.color }}>{tr.label}{mine ? " · YOU" : ""}</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>peak ×{tr.min}{tr.apex ? "+ — the summit" : "+"}</div>
                 </div>
-                <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, color: tr.color }}>×{tr.min}</span>
+                <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: tr.color }}>×{tr.min}</span>
               </div>
             );
           })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// compact leaderboard — the tier-list's sibling: same frame, top-10 badges per
+// duration, your rank, and the epoch bonus each placement pays
+function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser }) {
+  const [period, setPeriod] = useState("1D");
+  const lbBonus = (r) => r < 1 ? 0 : r === 1 ? 0.5 : r === 2 ? 0.42 : r === 3 ? 0.36 : r === 4 ? 0.32 : r === 5 ? 0.29 : r === 6 ? 0.26 : r === 7 ? 0.23 : r === 8 ? 0.20 : r === 9 ? 0.17 : r === 10 ? 0.14 : r <= 100 ? 0.10 : 0;
+  const board = useMemo(() => {
+    const mine = Object.entries(myCallouts).map(([id, c]) => {
+      const tk = tokens.find((t) => String(t.id) === String(id));
+      return tk ? { user: "you", you: true, sym: tk.sym, hue: tk.hue, mcAt: c.mcAt, mult: c.peak } : null;
+    }).filter(Boolean);
+    return [...genLeaderboard(period), ...mine].sort((a, b) => b.mult - a.mult);
+  }, [period, myCallouts, tokens]);
+  const myRank = board.findIndex((e) => e.you) + 1;
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 76, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+      padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 620, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "82vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
+        <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, padding: "11px 13px 9px", borderBottom: `1px solid ${T.border}` }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontFamily: T.mono, fontSize: isMobile ? 11 : 13, fontWeight: 900, letterSpacing: 1.5 }}>📊 CALLOUT LEADERBOARD</span>
+            <button onClick={onClose} style={{ ...chip(false), padding: "4px 8px", fontSize: 11 }}>✕</button>
+          </div>
+          <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+            {Object.keys(LB_MAX).map((p) => (
+              <button key={p} onClick={() => setPeriod(p)} style={{ ...chip(period === p), padding: "3px 7px", fontSize: 8, fontWeight: 800 }}>{p}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ padding: "9px 11px 12px" }}>
+          {myRank > 0 && (
+            <div style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, color: myRank <= 100 ? T.green : T.faint, border: `1px solid ${myRank <= 100 ? "rgba(22,199,132,0.4)" : T.border}`, background: myRank <= 100 ? "rgba(22,199,132,0.07)" : "transparent", borderRadius: 9, padding: "6px 9px", marginBottom: 8 }}>
+              YOU · #{myRank} {period}{lbBonus(myRank) > 0 ? ` → +${lbBonus(myRank).toFixed(2)}× every epoch (stacks across boards)` : " · crack the top 100 for an epoch bonus"}
+            </div>
+          )}
+          {/* PC podium — the top three get their moment */}
+          {!isMobile && board.length >= 3 && (
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 10, margin: "4px 0 14px" }}>
+              {[1, 0, 2].map((bi) => {
+                const r = board[bi]; const rk = bi + 1; const tr = calloutTier(r.mult);
+                const hgt = rk === 1 ? 148 : rk === 2 ? 120 : 104;
+                const medal = rk === 1 ? "🥇" : rk === 2 ? "🥈" : "🥉";
+                return (
+                  <div key={bi} className="lb-pod" onClick={() => !r.you && onOpenUser && onOpenUser(r.user)}
+                    style={{ flex: 1, height: hgt, border: `1.5px solid ${tr.color}`, background: `linear-gradient(180deg, ${tr.color}22, ${tr.color}08)`,
+                      borderRadius: 12, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 4, padding: "10px 8px",
+                      cursor: "pointer", boxShadow: rk === 1 ? `0 0 22px ${tr.color}55` : `0 0 10px ${tr.color}22` }}>
+                    <span style={{ fontSize: rk === 1 ? 20 : 15 }}>{medal}</span>
+                    <CalloutRing mult={r.mult} size={rk === 1 ? 44 : 34} />
+                    <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: r.you ? T.green : T.text, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{r.user}</span>
+                    <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, color: tr.color }}>×{r.mult.toFixed(1)}</span>
+                    <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 800, color: VALO_PURPLE }}>+{(rk === 1 ? 0.5 : rk === 2 ? 0.42 : 0.36).toFixed(2)}×/epoch</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {board.slice(isMobile ? 0 : 3, 25).map((r, i) => {
+            const rk = (isMobile ? 0 : 3) + i + 1;
+            const tr = calloutTier(r.mult);
+            return (
+              <div key={i} className="lb-row" onClick={() => !r.you && onOpenUser && onOpenUser(r.user)}
+                title={r.you ? "That's you" : `Open @${r.user}'s portfolio`}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", borderRadius: 9, marginBottom: 3, cursor: r.you ? "default" : "pointer",
+                border: r.you ? `1.5px solid ${T.green}` : `1px solid ${rk <= 3 ? `${tr.color}55` : T.border}`,
+                background: r.you ? "rgba(22,199,132,0.08)" : rk <= 3 ? `${tr.color}0a` : "rgba(255,255,255,0.015)" }}>
+                <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: rk <= 3 ? tr.color : T.faint, width: 26 }}>#{rk}</span>
+                {rk <= 10 && <CalloutRing mult={r.mult} size={rk <= 3 ? 26 : 21} />}
+                <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, color: r.you ? T.green : T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{r.user}</span>
+                <span style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>${r.sym}</span>
+                <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: tr.color }}>×{r.mult.toFixed(1)}</span>
+                {lbBonus(rk) > 0 && <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 800, color: VALO_PURPLE }}>+{lbBonus(rk).toFixed(2)}×</span>}
+              </div>
+            );
+          })}
+          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 7, lineHeight: 1.6 }}>
+            Top 100 of ANY duration earns an epoch bonus: #1 +0.50× · #2 +0.42× · #3 +0.36× … #10 +0.14× · #11–100 +0.10×. Bonuses stack across every board — up to +4.0× total.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 🔥 burn stats — everything the burn buttons track, moving live with trades
+function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0 }) {
+  const TOTAL = 1e9; // genesis supply
+  const circ = Math.max(0, TOTAL - siteBurned);
+  const pct = (siteBurned / TOTAL) * 100;
+  const row = (label, val, sub, col) => (
+    <div style={{ border: `1px solid ${col}44`, background: `${col}0d`, borderRadius: 11, padding: "11px 13px", marginBottom: 8 }}>
+      <div style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.5, color: T.faint, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontFamily: T.mono, fontSize: 20, fontWeight: 900, color: col }}>{val}</div>
+      {sub && <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 76, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+      padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 390, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "80vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
+        <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 13px", borderBottom: `1px solid ${T.border}` }}>
+          <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1.5 }}>🔥 BURN TRACKER · LIVE</span>
+          <button onClick={onClose} style={{ ...chip(false), padding: "4px 8px", fontSize: 11 }}>✕</button>
+        </div>
+        <div style={{ padding: "11px 12px 13px" }}>
+          {row("YOUR TOTAL BURNED", `${myBurned.toFixed(4)} $VALO`, "the burn slice of every fee you've ever paid", "#f97316")}
+          {row("SITE TOTAL BURN", `${fmtQty(siteBurned)} $VALO`, "every trader's burn pool + hourly buyback burns, on-chain forever", T.red)}
+          {row("CIRCULATING SUPPLY", `${fmtQty(circ)} $VALO`, `of ${fmtQty(TOTAL)} genesis — shrinking with every trade`, T.green)}
+          <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, margin: "4px 0 5px", display: "flex", justifyContent: "space-between" }}>
+            <span>SUPPLY BURNED</span><span style={{ color: "#f97316", fontWeight: 800 }}>{pct.toFixed(5)}%</span>
+          </div>
+          <div style={{ height: 8, borderRadius: 4, background: "#1a1f2a", overflow: "hidden" }}>
+            <div style={{ width: `${Math.max(0.4, Math.min(100, pct))}%`, height: "100%", background: "linear-gradient(90deg,#f97316,#ea3943)", transition: "width .4s ease" }} />
+          </div>
+          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 8, lineHeight: 1.6 }}>
+            Numbers move in real time — every buy, sell, and bot fill on the site feeds the burn, and the hourly creator-fee buyback torches its slice on top. Burns are permanent: supply only goes down.
+          </div>
         </div>
       </div>
     </div>
@@ -2108,7 +2284,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     return x.ts >= a && x.ts <= b;                            // inclusive range, e.g. 7/3–7/9
   });
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 74, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 78, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "88vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14 }}>
         {/* profile head */}
@@ -2119,7 +2295,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
               <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 800 }}>@{name}</div>
               <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{fols} followers · {folg} following</div>
             </div>
-            <div onClick={() => setBadgeTab((v) => !v)} title="Tap: tier list & leaderboards"
+            <div onClick={() => onOpenTierList && onOpenTierList()} title="Tap: tier list"
               style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
               <CalloutRing mult={peak} size={38} />
               <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 800, color: tier.color }}>{tier.label}</span>
@@ -2145,6 +2321,14 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
           </div>
           <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 6 }}>
             Followers get this user's callouts as alerts · friends can also DM & send SOL/$VALO
+          </div>
+          {/* quiet links, split from the actions by a hairline — no pill borders */}
+          <div style={{ height: 1, background: T.border, margin: "10px 0 7px" }} />
+          <div style={{ display: "flex", gap: 18 }}>
+            <button onClick={() => onOpenTierList && onOpenTierList()}
+              style={{ border: "none", background: "none", padding: 0, fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, letterSpacing: 0.5, color: T.text, cursor: "pointer" }}>🏆 TIER LIST</button>
+            <button onClick={() => onOpenLeaderboard && onOpenLeaderboard()}
+              style={{ border: "none", background: "none", padding: 0, fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, letterSpacing: 0.5, color: VALO_PURPLE, cursor: "pointer" }}>📊 LEADERBOARD</button>
           </div>
         </div>
         {/* friends-only: DM + send funds */}
@@ -2177,15 +2361,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
         )}
         {/* current holdings — mini token cards; each opens that chart */}
         <div style={{ padding: "11px 14px", borderBottom: `1px solid ${T.border}` }}>
-          {badgeTab && (
-          <div style={{ margin: "10px 14px 0", border: `1px solid ${tier.color}44`, background: `${tier.color}0d`, borderRadius: 11, padding: 10, display: "flex", gap: 7 }}>
-            <button onClick={() => onOpenTierList && onOpenTierList()}
-              style={{ flex: 1, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)", color: T.text, borderRadius: 9, padding: "9px", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, cursor: "pointer" }}>🏆 TIER LIST</button>
-            <button onClick={() => onOpenLeaderboard && onOpenLeaderboard()}
-              style={{ flex: 1, border: `1px solid ${VALO_PURPLE}55`, background: "rgba(125,92,240,0.1)", color: VALO_PURPLE, borderRadius: 9, padding: "9px", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, cursor: "pointer" }}>📊 LEADERBOARD</button>
-          </div>
-        )}
-        <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1.5, marginBottom: 6 }}>💼 CURRENT HOLDINGS · {holds.length}</div>
+<div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1.5, marginBottom: 6 }}>💼 CURRENT HOLDINGS · {holds.length}</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
             {holds.map((h, i) => {
               const pnl = (h.t.price - h.entry) * h.qty;
@@ -2536,7 +2712,7 @@ function BotRunStatsModal({ run, onClose, isMobile }) {
 }
 
 // ---- PC AUTO TRADER TAB — form on top, bot bars below with sub-tabs -------
-function AutoTraderPanel({ token, tokens = [], amount, setAmount, pay, setPay, onExecute, onDraftLevel, botLock, dragSetOn, onToggleDragSet, onSetDragSet, onLinesChange, onStageSide, onArmPair,
+function AutoTraderPanel({ wide = false, solBalance = 0, valoWallet = 0, token, tokens = [], amount, setAmount, pay, setPay, onExecute, onDraftLevel, botLock, dragSetOn, onToggleDragSet, onSetDragSet, onLinesChange, onStageSide, onArmPair, onReadyArm,
   pendingOrders = [], botRuns = [], editingBotId, setEditingBotId, onRelaunch, onCancelBot, onSellRun, onOpenBotRun, onOpenTokenAuto }) {
   const [listTab, setListTab] = useState("live");   // live | inactive
   const [scope, setScope] = useState("token");      // token | site
@@ -2552,34 +2728,31 @@ function AutoTraderPanel({ token, tokens = [], amount, setAmount, pay, setPay, o
   useEffect(() => { if (editBot && editBot.vt) setSubTab("visual"); }, [editBot && editBot.id]);
   return (
     <div>
+    <div>
       <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
         <button onClick={() => setSubTab("trader")} style={{ ...chip(subTab === "trader"), flex: 1, textAlign: "center", padding: "7px", fontSize: 9.5, fontWeight: 800 }}>🤖 AUTO TRADER</button>
         <button onClick={() => setSubTab("visual")} style={{ ...chip(subTab === "visual"), flex: 1, textAlign: "center", padding: "7px", fontSize: 9.5, fontWeight: 800, color: subTab === "visual" ? T.amber : T.dim, borderColor: subTab === "visual" ? `${T.amber}66` : T.border }}>👁 VISUAL TRADING</button>
       </div>
       {subTab === "visual" ? (
-        <VisualTrading token={token} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
+        <VisualTrading token={token} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} wide={wide}
           botLock={botLock} onStageSide={onStageSide} onArmPair={onArmPair}
           dragSetOn={dragSetOn} onToggleDragSet={onToggleDragSet} onDraftLevel={onDraftLevel}
-          onSetDragSet={onSetDragSet} onLinesChange={onLinesChange}
+          onSetDragSet={onSetDragSet} onLinesChange={onLinesChange} onReadyArm={onReadyArm}
+          solBalance={solBalance} valoWallet={valoWallet}
           editBot={editBot && editBot.vt ? editBot : null} />
       ) : (
-      <TradePanel key={editingBotId || "new"} token={token} amount={amount} setAmount={setAmount} pay={pay}
+      <TradePanel key={editingBotId || "new"} token={token} amount={amount} setAmount={setAmount} pay={pay} wide={wide}
         onExecute={onExecute} onDraftLevel={onDraftLevel} editBot={editBot} onRelaunch={onRelaunch} botLock={botLock}
-        dragSetOn={dragSetOn} onToggleDragSet={onToggleDragSet} setPay={setPay} />
+        dragSetOn={dragSetOn} onToggleDragSet={onToggleDragSet} setPay={setPay} onReadyArm={onReadyArm}
+        solBalance={solBalance} valoWallet={valoWallet} />
       )}
-      {/* placed orders — bordered token bars */}
-      <div style={{ marginTop: 12, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 12, padding: 11 }}>
-        <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
-          <button onClick={() => setListTab("live")} style={{ ...chip(listTab === "live"), flex: 1, textAlign: "center", padding: "6px", fontSize: 9, fontWeight: 800 }}>LIVE BOTS · {pend.length + running.length}</button>
-          <button onClick={() => setListTab("inactive")} style={{ ...chip(listTab === "inactive"), flex: 1, textAlign: "center", padding: "6px", fontSize: 9, fontWeight: 800 }}>INACTIVE · {sold.length}</button>
-        </div>
-        <div style={{ display: "flex", gap: 5, marginBottom: 9 }}>
-          <button onClick={() => setScope("token")} style={{ ...chip(scope === "token"), flex: 1, textAlign: "center", padding: "5px", fontSize: 8.5, fontWeight: 800 }}>THIS TOKEN</button>
-          <button onClick={() => setScope("site")} style={{ ...chip(scope === "site"), flex: 1, textAlign: "center", padding: "5px", fontSize: 8.5, fontWeight: 800 }}>ALL BOTS SITE-WIDE</button>
-        </div>
+    </div>
+    <div style={wide ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, alignItems: "start" } : undefined}>
+      {/* placed orders — only appears once something is actually armed or running */}
+      {(pend.length + running.length + sold.length) > 0 && (
+      <div style={{ marginTop: wide ? 8 : 12, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 12, padding: 11 }}>
         {listTab === "live" ? (
           <>
-            {pend.length + running.length === 0 && <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center", padding: 14 }}>No live bots — arm one above.</div>}
             {pend.map((o) => { const t = tkOf(o.tokenId); if (!t) return null; return (
               <div key={o.id} style={barBase(t.hue)}
                 onClick={() => { if (String(o.tokenId) === String(token.id)) setEditingBotId(o.id); else onOpenTokenAuto(o.tokenId, o.id); }}
@@ -2608,7 +2781,6 @@ function AutoTraderPanel({ token, tokens = [], amount, setAmount, pay, setPay, o
           </>
         ) : (
           <>
-            {sold.length === 0 && <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center", padding: 14 }}>No finished bot trades yet.</div>}
             {sold.map((r) => { const pnl = r.exits.reduce((s, e) => s + e.pnlUsd, 0); const up = pnl >= 0; return (
               <div key={r.id} style={{ ...barBase(r.hue), borderLeft: `2px solid ${T.amber}` }} onClick={() => onOpenBotRun(r.id)} title="Full stats">
                 <span style={{ fontSize: 10 }}>🤖</span>
@@ -2620,6 +2792,8 @@ function AutoTraderPanel({ token, tokens = [], amount, setAmount, pay, setPay, o
           </>
         )}
       </div>
+      )}
+    </div>
     </div>
   );
 }
@@ -2627,7 +2801,7 @@ function AutoTraderPanel({ token, tokens = [], amount, setAmount, pay, setPay, o
 // every bot in one place — overall PnL bar on top, then live & finished bots
 // VISUAL TRADING — set a buy-in line, then a sell-all point; the pair trades
 // itself with zero interference between bots
-function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStageSide, onArmPair, dragSetOn, onToggleDragSet, onDraftLevel, onSetDragSet, onLinesChange, editBot = null, compactArm = false }) {
+function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStageSide, onArmPair, dragSetOn, onToggleDragSet, onDraftLevel, onSetDragSet, onLinesChange, editBot = null, compactArm = false, onReadyArm, wide = false, solBalance = 0, valoWallet = 0 }) {
   const [buyLvl, setBuyLvl] = useState(null);
   const [sellLvl, setSellLvl] = useState(null);
   const [trail, setTrail] = useState(0);
@@ -2656,16 +2830,23 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
   const amt = parseFloat(amount) || 0;
   const roi = buyLvl && sellLvl ? ((sellLvl / buyLvl - 1) * 100) : null;
   const canArm = buyLvl > 0 && sellLvl > 0 && amt > 0;
+  const armPairRef = useRef(null);
   const armPair = () => {
     if (!canArm) return;
     onArmPair({ buy: buyLvl, sell: sellLvl, amt, trail, editId: editBot && editBot.vt ? editBot.id : null });
     setFlash(Date.now()); setTimeout(() => setFlash(0), 900);
     setBuyLvl(null); setSellLvl(null); // boxes go back to blank "tap to set"
   };
+  armPairRef.current = armPair;
+  // both prices set → the ⚡ARM bubble rides the mouse for a one-click arm (PC)
+  useEffect(() => {
+    onReadyArm && onReadyArm(canArm ? () => armPairRef.current && armPairRef.current() : null);
+    return () => { onReadyArm && onReadyArm(null); };
+  }, [canArm]);
   // click a box to activate it — it highlights and the chart is ready to drag
   const step = (n, label, val, col, active, onActivate, onClear) => (
     <div onClick={onActivate} title={`Click to set your ${label.toLowerCase()} on the chart`}
-      style={{ flex: 1, border: `1.5px solid ${active ? col : val != null ? `${col}66` : T.border}`, background: active ? `${col}1c` : val != null ? `${col}10` : "rgba(255,255,255,0.02)", borderRadius: 10, padding: "8px 9px", boxShadow: active ? `0 0 12px ${col}55` : "none", cursor: "pointer", transition: "border-color .15s, box-shadow .15s, background .15s" }}>
+      style={{ flex: 1, border: `1.5px solid ${active ? col : val != null ? `${col}66` : T.border}`, background: active ? `${col}1c` : val != null ? `${col}10` : "rgba(255,255,255,0.02)", borderRadius: 10, padding: wide ? "6px 8px" : "8px 9px", boxShadow: active ? `0 0 12px ${col}55` : "none", cursor: "pointer", transition: "border-color .15s, box-shadow .15s, background .15s" }}>
       <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1, color: active || val != null ? col : T.faint, marginBottom: 3 }}>{n} · {label}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
         <span style={{ fontFamily: T.mono, fontSize: 12.5, fontWeight: 900, color: val != null ? T.text : T.faint, flex: 1 }}>{val != null ? `$${fmtP(val)}` : active ? "drag the chart…" : "tap to set"}</span>
@@ -2674,7 +2855,9 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
     </div>
   );
   return (
-    <div data-botui="1" style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14 }}>
+    <div data-botui="1" style={{ background: wide ? "transparent" : T.panel, border: wide ? "none" : `1px solid ${T.border2}`, borderRadius: 12, padding: wide ? 0 : 14,
+      ...(wide ? { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" } : {}) }}>
+      {!wide && (
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <div style={{ fontFamily: T.mono, fontSize: 11, letterSpacing: 2, color: T.dim, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           👁 VISUAL TRADING · <b style={{ color: accent(token.hue) }}>{token.sym}</b>{editBot && editBot.vt ? <span style={{ color: T.amber }}> · EDITING</span> : null}
@@ -2691,6 +2874,8 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
           </button>
         )}
       </div>
+      )}
+      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1 1 220px", minWidth: 210 } : undefined}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
         <label style={{ ...lbl, marginBottom: 0 }}>Buy-in amount</label>
         {setPay && (
@@ -2704,13 +2889,39 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
         <button onClick={() => setAmount && setAmount(Math.max(0, (parseFloat(amount) || 0) - 0.1).toFixed(1))}
           style={{ ...chip(false), flex: "0 0 auto", padding: "8px 11px", fontSize: 13, fontWeight: 900 }}>−</button>
         <input value={amount} onChange={(e) => setAmount && setAmount(e.target.value)} inputMode="decimal"
-          style={{ ...inp, flex: 1, minWidth: 0, fontSize: 14, fontWeight: 800, padding: "9px 11px", textAlign: "center" }} />
+          style={{ ...inp, flex: 1, minWidth: 0, fontSize: wide ? 12.5 : 14, fontWeight: 800, padding: wide ? "6px 9px" : "9px 11px", textAlign: "center" }} />
         <button onClick={() => setAmount && setAmount(((parseFloat(amount) || 0) + 0.1).toFixed(1))}
           style={{ ...chip(false), flex: "0 0 auto", padding: "8px 11px", fontSize: 13, fontWeight: 900 }}>+</button>
         <span style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 800, color: pay === "SOL" ? T.blue : VALO_PURPLE }}>{pay}</span>
         <span style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>≈ ${(amt * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
       </div>
-      <div style={{ display: "flex", gap: 7, marginBottom: 9 }}>
+      {wide && (() => {
+        const bal = pay === "SOL" ? solBalance : valoWallet;
+        const unit$ = pay === "SOL" ? SOL_USD : 0.0125;
+        return (
+          <>
+            <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
+              {[0.5, 1, 2, 5].map((v) => (
+                <button key={v} onClick={() => setAmount && setAmount(String(v))}
+                  style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "4px 0", fontSize: 9, fontWeight: 800 }}>{v}</button>
+              ))}
+            </div>
+            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, margin: "2px 0 4px" }}>
+              💼 WALLET <b style={{ color: pay === "SOL" ? T.blue : VALO_PURPLE }}>{bal.toFixed(2)} {pay}</b>
+              <span style={{ color: T.faint }}> · ≈ ${(bal * unit$).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD</span>
+            </div>
+            <div style={{ display: "flex", gap: 4 }}>
+              {[25, 50, 75, 100].map((pc) => (
+                <button key={pc} onClick={() => setAmount && setAmount(((bal * pc) / 100).toFixed(2))}
+                  style={{ ...chip(false), flex: 1, textAlign: "center", padding: "3px 0", fontSize: 8.5, fontWeight: 800 }}>{pc === 100 ? "MAX" : `${pc}%`}</button>
+              ))}
+            </div>
+          </>
+        );
+      })()}
+      </div>
+      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1.5 1 300px", minWidth: 290 } : undefined}>
+      <div style={{ display: "flex", gap: 7, marginBottom: wide ? 6 : 9 }}>
         {step("1", "BUY IN", buyLvl, T.green, stage === "buy" && dragSetOn,
           () => {
             if (stage === "buy" && dragSetOn) { onSetDragSet && onSetDragSet(false); onDraftLevel && onDraftLevel(null); return; } // re-tap = cancel
@@ -2737,9 +2948,10 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
       <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, margin: "2px 0 10px" }}>
         {trail > 0 ? `after your sell point hits, it rides the peak and sells all when price drops ${trail}% from it` : "0% = sell the instant your sell point is hit"}
       </div>
-      {!compactArm && (
+      </div>
+      {!(compactArm || wide) && !onReadyArm && (
         <button disabled={!canArm} onClick={armPair}
-          style={{ width: "100%", border: "none", borderRadius: 9, padding: "12px", fontFamily: T.mono, fontSize: 12, letterSpacing: 1.5, fontWeight: 900,
+          style={{ gridColumn: wide ? "1 / -1" : undefined, width: "100%", border: "none", borderRadius: 9, padding: wide ? "9px" : "12px", fontFamily: T.mono, fontSize: wide ? 11.5 : 12, letterSpacing: 1.5, fontWeight: 900,
             background: !canArm ? "#1a2030" : flash ? T.green : editBot && editBot.vt ? T.amber : T.blue,
             color: !canArm ? T.faint : flash ? "#07130d" : editBot && editBot.vt ? "#1d1503" : "#07101d", cursor: canArm ? "pointer" : "not-allowed",
             transform: flash ? "scale(1.02)" : "scale(1)", transition: "transform .18s, background .18s",
@@ -2836,13 +3048,102 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
   );
 }
 
-function AllBotsPanel({ tokens = [], pendingOrders = [], botRuns = [], onEdit, onCancel, onSellRun, onSellAll, onOpenBotRun, onHighlight, onEditLine }) {
+// PRO LAYOUT order ticket — one wide bar under the chart, buy & sell side by side
+function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, valoBalance = 0, position, onExecute, onPosTrade, clickMode, setClickMode, realized24 = 0 }) {
+  const amt = parseFloat(amount) || 0;
+  const bal = pay === "SOL" ? solBalance : valoBalance;
+  const unit$ = pay === "SOL" ? SOL_USD : 0.0125;
+  const held = position && position.amt > 0 ? position.amt : 0;
+  const livePct = held ? ((token.price / (position.entry || token.price)) - 1) * 100 : 0;
+  const livePnlUsd = held ? (held * (token.price / (position.entry || token.price)) - held) * (position.pay === "SOL" ? SOL_USD : 0.0125) : 0;
+  const gain = livePnlUsd >= 0;
+  const fire = (side, a) => onExecute({ side, pay: side === "sell" ? (position && position.pay) || pay : pay, amt: a, mode: "instant", tax: taxFor(pay), burn: splitFee(a, pay).total, legs: [] });
+  const seg = { border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 11px", background: "rgba(255,255,255,0.015)" };
+  return (
+    <div data-botui="1" style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 12, display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
+      {/* amount */}
+      <div style={{ ...seg, flex: "1 1 230px", minWidth: 220 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+          <span style={{ ...lbl, marginBottom: 0 }}>Amount</span>
+          <span style={{ display: "flex", gap: 4 }}>
+            <button onClick={() => setPay("SOL")} style={{ ...chip(pay === "SOL"), padding: "2px 8px", fontSize: 8.5, fontWeight: 800, color: pay === "SOL" ? T.blue : T.faint }}>SOL</button>
+            <button onClick={() => setPay("VALO")} style={{ ...chip(pay === "VALO"), padding: "2px 8px", fontSize: 8.5, fontWeight: 800, color: pay === "VALO" ? VALO_PURPLE : T.faint }}>$VALO</button>
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+          <button onClick={() => setAmount(Math.max(0, amt - 0.1).toFixed(1))} style={{ ...chip(false), padding: "7px 10px", fontWeight: 900 }}>−</button>
+          <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal"
+            style={{ ...inp, flex: 1, minWidth: 0, fontSize: 14, fontWeight: 800, padding: "8px", textAlign: "center" }} />
+          <button onClick={() => setAmount((amt + 0.1).toFixed(1))} style={{ ...chip(false), padding: "7px 10px", fontWeight: 900 }}>+</button>
+        </div>
+        <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
+          {[25, 50, 75, 100].map((pc) => (
+            <button key={pc} onClick={() => setAmount(((bal * pc) / 100).toFixed(2))}
+              style={{ ...chip(false), flex: 1, textAlign: "center", padding: "3px 0", fontSize: 8.5, fontWeight: 800 }}>{pc === 100 ? "MAX" : `${pc}%`}</button>
+          ))}
+        </div>
+        <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, marginTop: 5 }}>≈ ${(amt * unit$).toLocaleString(undefined, { maximumFractionDigits: 0 })} · wallet {bal.toFixed(2)} {pay}</div>
+      </div>
+      {/* BUY | SELL side by side */}
+      <div style={{ flex: "2 1 340px", minWidth: 300, display: "flex", gap: 8 }}>
+        <button disabled={!(amt > 0) || bal < amt} onClick={() => fire("buy", amt)}
+          style={{ flex: 1, border: "none", borderRadius: 11, fontFamily: T.mono, fontWeight: 900, fontSize: 14, letterSpacing: 1.2,
+            background: amt > 0 && bal >= amt ? T.green : "#1a2030", color: amt > 0 && bal >= amt ? "#07130d" : T.faint, cursor: amt > 0 && bal >= amt ? "pointer" : "not-allowed",
+            boxShadow: amt > 0 && bal >= amt ? "0 0 16px rgba(22,199,132,0.35)" : "none" }}>
+          🔥 BUY<div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>{amt.toFixed(2)} {pay} · ${Math.round(amt * unit$)}</div>
+        </button>
+        <button disabled={!held} onClick={() => fire("sell", held)}
+          style={{ flex: 1, border: "none", borderRadius: 11, fontFamily: T.mono, fontWeight: 900, fontSize: 14, letterSpacing: 1.2,
+            background: held ? T.red : "#1a2030", color: held ? "#170808" : T.faint, cursor: held ? "pointer" : "not-allowed",
+            boxShadow: held ? "0 0 16px rgba(234,57,67,0.3)" : "none" }}>
+          SELL ALL<div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>{held ? `${held.toFixed(2)} ${((position && position.pay) || pay)}` : "no position"}</div>
+        </button>
+      </div>
+      {/* partial sells + arm */}
+      <div style={{ ...seg, flex: "1 1 190px", minWidth: 180 }}>
+        <div style={{ ...lbl }}>Sell % of held</div>
+        <div style={{ display: "flex", gap: 4 }}>
+          {[10, 25, 50, 75].map((pc) => (
+            <button key={pc} disabled={!held} onClick={() => fire("sell", +(held * pc / 100).toFixed(4))}
+              style={{ ...chip(false), flex: 1, textAlign: "center", padding: "6px 0", fontSize: 9, fontWeight: 800, color: held ? T.red : T.faint, borderColor: held ? `${T.red}44` : T.border, cursor: held ? "pointer" : "not-allowed" }}>{pc}%</button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 4, marginTop: 7 }}>
+          <button onClick={() => setClickMode(clickMode === "buy" ? null : "buy")} style={{ ...chip(clickMode === "buy"), flex: 1, textAlign: "center", padding: "5px 0", fontSize: 8.5, fontWeight: 800, color: T.green }}>▲ ARM BUY</button>
+          <button onClick={() => setClickMode(clickMode === "sell" ? null : "sell")} style={{ ...chip(clickMode === "sell"), flex: 1, textAlign: "center", padding: "5px 0", fontSize: 8.5, fontWeight: 800, color: T.red }}>▼ ARM SELL</button>
+        </div>
+      </div>
+      {/* live position */}
+      <div style={{ ...seg, flex: "1 1 200px", minWidth: 190 }}>
+        <div style={{ ...lbl }}>Live P/L · {token.sym}</div>
+        {held ? (
+          <>
+            <div style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 900, color: gain ? T.green : T.red }}>{gain ? "+" : "−"}${Math.abs(livePnlUsd).toFixed(2)} <span style={{ fontSize: 10 }}>({gain ? "+" : ""}{livePct.toFixed(1)}%)</span></div>
+            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 3 }}>
+              {fmtQty(posTokenQty(token, position))} tokens · avg ${fmtP(position.entry)}
+              <span style={{ color: (realized24 || 0) >= 0 ? T.green : T.red }}> · R24H {(realized24 || 0) >= 0 ? "+" : "−"}${Math.abs(realized24 || 0).toFixed(2)}</span>
+            </div>
+          </>
+        ) : (
+          <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, marginTop: 6 }}>No open position — hit BUY.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AllBotsPanel({ tokens = [], pendingOrders = [], botRuns = [], curTokenId = null, onEdit, onCancel, onSellRun, onSellAll, onOpenBotRun, onHighlight, onEditLine }) {
+  const [view, setView] = useState("live"); // live | inactive | token | site
   const tkOf = (tid) => tokens.find((x) => String(x.id) === String(tid));
-  const runsLive = botRuns.filter((r) => r.status === "live");
-  const runsSold = botRuns.filter((r) => r.status === "sold");
-  const pend = pendingOrders.filter((o) => !o.runId);
-  const livePnl = runsLive.reduce((s, r) => { const t = tkOf(r.tokenId); return t ? s + (r.remaining * (t.price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : 0.0125) : s; }, 0);
-  const realPnl = runsSold.reduce((s, r) => s + r.exits.reduce((a, e) => a + e.pnlUsd, 0), 0);
+  const inView = (tid) => (view === "token" ? String(tid) === String(curTokenId) : true);
+  const runsLiveAll = botRuns.filter((r) => r.status === "live");
+  const runsSoldAll = botRuns.filter((r) => r.status === "sold");
+  const pendAll = pendingOrders.filter((o) => !o.runId);
+  const runsLive = (view === "inactive" ? [] : runsLiveAll.filter((r) => inView(r.tokenId)));
+  const runsSold = (view === "live" ? [] : runsSoldAll.filter((r) => inView(r.tokenId)));
+  const pend = (view === "inactive" ? [] : pendAll.filter((o) => inView(o.tokenId)));
+  const livePnl = runsLiveAll.reduce((s, r) => { const t = tkOf(r.tokenId); return t ? s + (r.remaining * (t.price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : 0.0125) : s; }, 0);
+  const realPnl = runsSoldAll.reduce((s, r) => s + r.exits.reduce((a, e) => a + e.pnlUsd, 0), 0);
   const total = livePnl + realPnl, up = total >= 0;
   const usd = (amt, payU) => amt * (payU === "SOL" ? SOL_USD : 0.0125);
   // bots-only capital: filled buy-ins + armed capital still waiting
@@ -2867,6 +3168,11 @@ function AllBotsPanel({ tokens = [], pendingOrders = [], botRuns = [], onEdit, o
             <span style={{ color: livePnl >= 0 ? T.green : T.red }}>UNREALIZED {livePnl >= 0 ? "+" : "−"}${Math.abs(livePnl).toFixed(2)}</span>
           </span>
         </span>
+      </div>
+      <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+        {[["live", `LIVE · ${pendAll.length + runsLiveAll.length}`], ["inactive", `INACTIVE · ${runsSoldAll.length}`], ["token", "THIS TOKEN"], ["site", "SITE-WIDE"]].map(([k, lab]) => (
+          <button key={k} onClick={() => setView(k)} style={{ ...chip(view === k), flex: 1, textAlign: "center", padding: "6px 2px", fontSize: 8.5, fontWeight: 800 }}>{lab}</button>
+        ))}
       </div>
       {runsLive.length > 0 && (
         <button onClick={() => onSellAll && onSellAll()} title="Sell every running bot's whole position right now"
@@ -2984,6 +3290,19 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   epochLastHour = 0, epochTotalEarned = 0, valoUsdForEpoch = 0.0125, onOpenClaim }) {
   const bestCalloutPeak = Object.values(myCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0);
   const mask = (s) => (hideBalance ? "••••••" : s);
+  // any movement anywhere on the site — manual, bots, exits — flashes the wallet
+  const [balFlash, setBalFlash] = useState(0);
+  const prevBalRef = useRef({ s: solBalance, v: valoWallet });
+  useEffect(() => {
+    const pv = prevBalRef.current;
+    const dir = solBalance > pv.s + 1e-9 || valoWallet > pv.v + 1e-9 ? 1
+      : solBalance < pv.s - 1e-9 || valoWallet < pv.v - 1e-9 ? -1 : 0;
+    prevBalRef.current = { s: solBalance, v: valoWallet };
+    if (!dir) return;
+    setBalFlash(dir);
+    const tm = setTimeout(() => setBalFlash(0), 750);
+    return () => clearTimeout(tm);
+  }, [solBalance, valoWallet]);
   const valoUsd = 0.0125; // API: live $VALO price
   const liveValue = Object.entries(positions).reduce((a, [id, p]) => {
     const t = tokens.find((x) => x.id === +id); if (!t || !p) return a;
@@ -3103,7 +3422,10 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               {hideBalance ? "🙈" : "👁"}
             </button>
             <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1 }}>TOTAL EQUITY</div>
-            <div style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 800, color: T.text }}>{mask(`$${totalEquity.toLocaleString(undefined, { maximumFractionDigits: 0 })}`)}</div>
+            <div style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 800,
+              color: balFlash > 0 ? T.green : balFlash < 0 ? T.red : T.text,
+              textShadow: balFlash ? `0 0 14px ${balFlash > 0 ? "rgba(22,199,132,0.7)" : "rgba(234,57,67,0.7)"}` : "none",
+              transition: "color .25s ease, text-shadow .25s ease" }}>{mask(`$${totalEquity.toLocaleString(undefined, { maximumFractionDigits: 0 })}`)}</div>
             <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 700, color: gain ? T.green : T.red }}>
               {mask(`${gain ? "▲ +" : "▼ −"}$${Math.abs(totalPnl).toFixed(2)} all-time PnL`)}
             </div>
@@ -4487,7 +4809,10 @@ function StickySearch({ top, children }) {
       const r = el.getBoundingClientRect();
       const should = r.top <= top;
       setStuck(should);
-      if (should) setBox({ left: r.left, width: r.width });
+      // an ancestor zoom (PC bigger-text) re-scales fixed children's coords —
+      // divide by the visual/layout ratio so the bar lands exactly on its column
+      const scale = el.offsetWidth ? r.width / el.offsetWidth : 1;
+      if (should) setBox({ left: r.left / scale, width: el.offsetWidth, scale });
     };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -4500,7 +4825,7 @@ function StickySearch({ top, children }) {
       {stuck && <div style={{ height: 50 }} />}
       <div style={stuck
         ? {
-            position: "fixed", top, left: box.left - 8, width: box.width + 16, zIndex: 30,
+            position: "fixed", top: top / (box.scale || 1), left: box.left - 8, width: box.width + 16, zIndex: 30,
             boxSizing: "border-box",
             // solid, not see-through: nothing beneath shows or is clickable here
             background: T.bg,
@@ -4565,6 +4890,31 @@ export default function App() {
   const [botRuns, setBotRuns] = useState([]);                      // filled bot positions — never touch the Live P/L book
   const [botRunOpen, setBotRunOpen] = useState(null);              // run id → full stats popup
   const [ticketTab, setTicketTab] = useState("ticket");            // PC right column: ticket | auto
+  const [layoutPro, setLayoutPro] = useState(false);               // PC layout B: panels under the chart, feeds on the right
+  const [pcCrunch, setPcCrunch] = useState(0);                     // PC: chart pulled up over the stats (0..1)
+  const pcPullRef = useRef(null);
+  const [chartInsetL, setChartInsetL] = useState(0);               // PC: chart pulled in from the left → token strip
+  const [chartInsetR, setChartInsetR] = useState(0);               // PC: chart pulled in from the right → panels widen
+  const edgeRef = useRef(null);
+  useEffect(() => {
+    const mv = (e) => {
+      if (pcPullRef.current) {
+        const dy = pcPullRef.current.y0 - e.clientY;
+        setPcCrunch(Math.max(0, Math.min(1, pcPullRef.current.base + dy / 120)));
+      }
+      const ed = edgeRef.current;
+      if (ed) {
+        if (ed.side === "L") setChartInsetL(Math.max(0, Math.min(250, ed.base + (e.clientX - ed.x0))));
+        else setChartInsetR(Math.max(0, Math.min(240, ed.base - (e.clientX - ed.x0))));
+      }
+    };
+    const up = () => { pcPullRef.current = null; edgeRef.current = null; };
+    window.addEventListener("mousemove", mv); window.addEventListener("mouseup", up);
+    return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
+  }, []);
+  const [quickArmOn, setQuickArmOn] = useState(false);             // an armable strategy is ready
+  const [armPop, setArmPop] = useState(null);                      // {x,y} — ARM popup pinned where the line was set
+  const quickArmRef = useRef(null);
   const [ltMin, setLtMin] = useState(false);                       // PC: live trades panel minimized
   const [chatMin, setChatMin] = useState(false);                   // PC: chat panel minimized
   const [editingBotId, setEditingBotId] = useState(null);          // PC: bot loaded into the auto trader form
@@ -4574,6 +4924,15 @@ export default function App() {
   const [vtLines, setVtLines] = useState(null);                    // { tokenId, buy, sell } — visual-trading lines that stay painted
   const lineEditRef = useRef(false);                               // a bot line is being dragged — ALL fills freeze
   const [selLineId, setSelLineId] = useState(null);                // clicked line — its whole pair stays highlighted
+  useEffect(() => {
+    if (selLineId == null) return;
+    const off = (e) => {
+      if (e.target && e.target.closest && e.target.closest('[data-chart], [data-botui]')) return;
+      setSelLineId(null); // tapped away — de-highlight
+    };
+    window.addEventListener("pointerdown", off, true);
+    return () => window.removeEventListener("pointerdown", off, true);
+  }, [selLineId != null]);
   const [editLineReq, setEditLineReq] = useState(null);            // {id, n} — line snaps to the cursor for instant re-pricing
   const [botDragSet, setBotDragSet] = useState(false);             // toggle: chart drag sets buy-in vs normal pan
   // OFF-CHART CLICK CANCELS THE LINE SETTER — tapping anything that isn't the
@@ -4681,6 +5040,7 @@ export default function App() {
   const [calloutHubOpen, setCalloutHubOpen] = useState(false); // tier list + leaderboards popup
   const [myCalloutsOpen, setMyCalloutsOpen] = useState(false); // your callout history popup
   const [tierListOpen, setTierListOpen] = useState(false);     // full tier-ladder popup
+  const [lbOpen, setLbOpen] = useState(false);                 // compact leaderboard popup
   const [nameChangedAt, setNameChangedAt] = useState(0);      // weekly username-change lock
   // ---- social graph + notifications (API: wire real social service) ----
   const [followersList, setFollowersList] = useState(() => { const r = seededRand(4242); return Array.from({ length: 7 }, () => randomHandle(r)); });
@@ -4749,6 +5109,13 @@ export default function App() {
   const [callouts, setCallouts] = useState([]); // [{id, tokenId, user, mcAt, ts}]
   const [bannerPaused, setBannerPaused] = useState(false);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
+  // the popup clears itself when you tap anywhere that isn't the popup
+  useEffect(() => {
+    if (!armPop) return;
+    const off = (e) => { if (e.target && e.target.closest && e.target.closest("[data-armpop]")) return; setArmPop(null); };
+    window.addEventListener("pointerdown", off, true);
+    return () => window.removeEventListener("pointerdown", off, true);
+  }, [armPop != null]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [portfolioDrawer, setPortfolioDrawer] = useState(false); // mobile portfolio drawer
   // right-edge tab positions — draggable up/down so users park them where comfy
@@ -4967,6 +5334,12 @@ export default function App() {
   const [now, setNow] = useState(Date.now());
   const epochRef = useRef(epochOf(Date.now()));
   const [myBurned, setMyBurned] = useState(0);
+  const [burnOpen, setBurnOpen] = useState(false); // 🔥 burn tracker popup
+  // the SITE burn keeps climbing with everyone else's trades, live
+  useEffect(() => {
+    const iv = setInterval(() => setBurned((b) => b + 40 + Math.random() * 140), 2600);
+    return () => clearInterval(iv);
+  }, []);
   useEffect(() => {
     const on = () => setIsMobile(window.innerWidth < 900);
     window.addEventListener("resize", on);
@@ -5525,11 +5898,11 @@ export default function App() {
     if (!selected) return null;
     const co = myMcCallouts[selected.id];
     if (!co) {
-      const cdLeft = 3 * 3600e3 - (Date.now() - lastCalloutTs);
+      const cdLeft = 4 * 3600e3 - (Date.now() - lastCalloutTs);
       if (cdLeft > 0) {
         const h = Math.floor(cdLeft / 3600e3), m = Math.ceil((cdLeft % 3600e3) / 60000);
         return (
-          <button disabled title="One callout every 3 hours — make it count"
+          <button disabled title="One callout every 4 hours — make it count"
             style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap", border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)", color: T.faint, borderRadius: 7, padding: "4px 9px", fontFamily: T.mono, fontSize: 10, fontWeight: 800, cursor: "not-allowed" }}>
             📣 NEXT CALLOUT {h > 0 ? `${h}h ` : ""}{m}m
           </button>
@@ -5537,7 +5910,7 @@ export default function App() {
       }
       return (
       <button onClick={() => { setMyMcCallouts((M) => ({ ...M, [selected.id]: { mcAt: mcOf(selected), peak: 1, ts: Date.now() } })); setLastCalloutTs(Date.now()); }}
-        title="Call this coin out at the current market cap — one callout every 3 hours, so make it count"
+        title="Call this coin out at the current market cap — one callout every 4 hours, so make it count"
         style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap", border: `1px solid ${VALO_PURPLE}66`, background: "rgba(125,92,240,0.10)", color: VALO_PURPLE, borderRadius: 7, padding: "4px 9px", fontFamily: T.mono, fontSize: 10, fontWeight: 800, cursor: "pointer" }}>
         📣 CALLOUT · {fmt$(mcOf(selected))}
       </button>
@@ -5638,7 +6011,11 @@ export default function App() {
                 )}
                 {/* metrics under price — on mobile this whole block crunches away
                     as the chart is pulled up; durations below always stay */}
-                <div style={isMobile ? { maxHeight: Math.round((1 - metricsCrunch) * 130), opacity: 1 - metricsCrunch, overflow: "hidden", pointerEvents: metricsCrunch > 0.85 ? "none" : "auto", transition: "max-height .28s ease, opacity .28s ease" } : undefined}>
+                <div style={isMobile
+                  ? { maxHeight: Math.round((1 - metricsCrunch) * 130), opacity: 1 - metricsCrunch, overflow: "hidden", pointerEvents: metricsCrunch > 0.85 ? "none" : "auto", transition: "max-height .28s ease, opacity .28s ease" }
+                  : layoutPro
+                  ? { display: "none" } /* pro layout: the skinny strip below replaces this block */
+                  : { maxHeight: Math.round((1 - pcCrunch) * 160), opacity: 1 - pcCrunch, overflow: "hidden", pointerEvents: pcCrunch > 0.85 ? "none" : "auto", transition: pcPullRef.current ? "none" : "max-height .2s ease, opacity .2s ease" }}>
                 <div style={{ display: "flex", gap: 12, marginBottom: 10, flexWrap: "wrap", fontFamily: T.mono, fontSize: 10.5 }}>
                   <span style={{ color: T.faint }}>MOM <b style={{ color: accent(selected.hue) }}>{Math.round(selected.momentum)}</b></span>
                   <span style={{ color: T.faint }}>B/S <b style={{ color: selected.buyPressure >= 50 ? T.green : T.red }}>{Math.round(selected.buyPressure)}</b></span>
@@ -5668,6 +6045,27 @@ export default function App() {
                   );
                 })()}
                 </div>
+                {/* PRO: one skinny metrics strip above the durations — smooth, out of the way */}
+                {!isMobile && layoutPro && (() => {
+                  const { buys, sells } = buysSellsFor(selected, tf, 90);
+                  const net = selected.greenUsd - selected.redUsd;
+                  const tot = buys + sells || 1;
+                  return (
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", fontFamily: T.mono, fontSize: 9,
+                      border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.015)", borderRadius: 8, padding: "4px 10px", marginBottom: 7 }}>
+                      <span style={{ color: T.faint }}>MOM <b style={{ color: accent(selected.hue) }}>{Math.round(selected.momentum)}</b></span>
+                      <span style={{ color: T.faint }}>B/S <b style={{ color: selected.buyPressure >= 50 ? T.green : T.red }}>{Math.round(selected.buyPressure)}</b></span>
+                      <span style={{ color: T.faint }}>▲ <b style={{ color: T.green }}>{fmt$(selected.greenUsd)}</b></span>
+                      <span style={{ color: T.faint }}>▼ <b style={{ color: T.red }}>{fmt$(selected.redUsd)}</b></span>
+                      <span style={{ color: T.faint }}>NET <b style={{ color: net >= 0 ? T.green : T.red }}>{net >= 0 ? "+" : "−"}{fmt$(Math.abs(net))}</b></span>
+                      <span style={{ color: T.faint }}>{buys}▲/{sells}▼</span>
+                      <span style={{ flex: 1, minWidth: 40, height: 4, borderRadius: 2, overflow: "hidden", background: "#1a1f2a", display: "flex" }}>
+                        <span style={{ width: `${(buys / tot) * 100}%`, background: T.green }} />
+                        <span style={{ width: `${100 - (buys / tot) * 100}%`, background: T.red }} />
+                      </span>
+                    </div>
+                  );
+                })()}
                 {/* durations — always visible above the chart */}
                 <div style={{ display: "flex", gap: 4, marginBottom: 10, flexWrap: "wrap" }}>
                   {TIMEFRAMES.map((f) => (
@@ -5698,7 +6096,43 @@ export default function App() {
                     <div style={{ width: 68, height: 5, borderRadius: 3, background: metricsCrunch > 0 ? VALO_PURPLE : T.border2, boxShadow: metricsCrunch > 0 ? `0 0 8px ${VALO_PURPLE}` : "none" }} />
                   </div>
                 )}
-                <div style={{ position: "relative" }}>
+                {!isMobile && (
+                  <div onMouseDown={(e) => { e.preventDefault(); pcPullRef.current = { y0: e.clientY, base: pcCrunch }; }}
+                    title="Drag up — the chart rises and the stats fold away (callout row and CA stay put)"
+                    style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "2px 0 6px", cursor: "ns-resize" }}>
+                    <div style={{ width: 76, height: 5, borderRadius: 3, background: pcCrunch > 0 ? VALO_PURPLE : T.border2, boxShadow: pcCrunch > 0 ? `0 0 8px ${VALO_PURPLE}` : "none" }} />
+                  </div>
+                )}
+                <div style={{ position: "relative", paddingLeft: !isMobile && chartInsetL > 90 ? chartInsetL + 8 : 0 }}>
+                  {/* pull the chart in from the LEFT → a compact token strip fills the space */}
+                  {!isMobile && chartInsetL > 90 && (
+                    <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: chartInsetL, overflowY: "auto",
+                      display: "grid", gridTemplateColumns: chartInsetL > 180 ? "1fr 1fr" : "1fr", gap: 6, alignContent: "start", paddingRight: 2 }}>
+                      {tokens.map((tk) => {
+                        const up = tk.change24 >= 0;
+                        return (
+                          <div key={tk.id} onClick={() => { setSel(tk.id); setClickMode(null); }}
+                            style={{ border: `1px solid ${String(tk.id) === String(selected.id) ? accent(tk.hue) : T.border}`, background: String(tk.id) === String(selected.id) ? `${accent(tk.hue)}14` : T.panel,
+                              borderRadius: 9, padding: "6px 7px", cursor: "pointer", fontFamily: T.mono }}>
+                            <div style={{ fontSize: 9.5, fontWeight: 900, color: accent(tk.hue), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>${tk.sym}</div>
+                            <div style={{ fontSize: 8.5, color: T.text }}>${fmtP(tk.price)}</div>
+                            <div style={{ fontSize: 8, fontWeight: 800, color: up ? T.green : T.red }}>{up ? "+" : ""}{(tk.change24 || 0).toFixed(1)}%</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {/* edge grips: drag the chart in from either side */}
+                  {!isMobile && (
+                    <>
+                      <div onMouseDown={(e) => { e.preventDefault(); edgeRef.current = { side: "L", x0: e.clientX, base: chartInsetL }; }}
+                        title="Drag right — tuck the chart in and reveal the token strip"
+                        style={{ position: "absolute", left: (!isMobile && chartInsetL > 90 ? chartInsetL + 8 : 0) - 4, top: 0, bottom: 0, width: 9, cursor: "col-resize", zIndex: 6 }} />
+                      <div onMouseDown={(e) => { e.preventDefault(); edgeRef.current = { side: "R", x0: e.clientX, base: chartInsetR }; }}
+                        title="Drag left — the panels and wallet widen as the chart tucks in"
+                        style={{ position: "absolute", right: -4, top: 0, bottom: 0, width: 9, cursor: "col-resize", zIndex: 6 }} />
+                    </>
+                  )}
                   <ProChart candles={selected.candles} hue={selected.hue} synthetic={!selected.hasDex}
                     mode={chartMode} tfMin={tf} trades={chartTrades} traderPrefs={traderPrefs} theme={themeIdx}
                     clickMode={clickMode} onChartTrade={chartTrade} onMarkerClick={(tr) => { setMarkerInfo(tr); if (tr && tr.tx) setHighlightTx(tr.tx); }}
@@ -5706,8 +6140,6 @@ export default function App() {
                     position={positions[selected.id]} price={selected.price} sym={selected.sym}
                     pendingLevels={[
                       ...pendingOrders.filter((o) => String(o.tokenId) === String(selected.id)),
-              ...pendingOrders.filter((o) => String(o.tokenId) === String(selected.id) && o.vt && o.side === "buy" && o.vtSell > 0)
-                .map((o) => ({ id: o.id + "::vtSell", level: o.vtSell, side: "sell", vt: true, amt: o.amt, pay: o.pay })),
                       ...pendingOrders.filter((o) => String(o.tokenId) === String(selected.id) && o.vt && o.side === "buy" && o.vtSell > 0)
                         .map((o) => ({ id: o.id + "::vtSell", level: o.vtSell, side: "sell", vt: true, amt: o.amt, pay: o.pay })),
                       ...(vtLines && String(vtLines.tokenId) === String(selected.id) ? [
@@ -5719,11 +6151,11 @@ export default function App() {
                     botRuns={botRuns.filter((r) => r.status === "live" && String(r.tokenId) === String(selected.id))}
                     botSetMode={!isMobile && ticketTab === "auto" && botDragSet}
                     onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
-                    onBotSet={(lvl) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); }}
+                    onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop(at); }}
                     onBotArm={(lvl) => armAtLevel(lvl)}
                     onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq}
                     onLineSelect={(id) => setSelLineId(id)}
-                    isMobile={isMobile} height={isMobile ? mobChartH : 480 + extraH} />
+                    isMobile={isMobile} height={isMobile ? mobChartH : 480 + extraH + Math.round(pcCrunch * 150)} />
 
                   {/* MOBILE bottom handle — pull up for a skinnier chart, down for taller;
                       everything below follows in flow so it stays right under the chart */}
@@ -5782,8 +6214,9 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* metrics — single line, short tags, horizontally scrollable if tight */}
-                <div style={{ display: "flex", gap: 6, marginTop: 10, overflowX: "auto", whiteSpace: "nowrap", paddingBottom: 2 }}>
+                {/* metrics — single line, short tags; folds away in pro layout */}
+                <div style={{ display: "flex", gap: 6, marginTop: 10, overflowX: "auto", whiteSpace: "nowrap", paddingBottom: 2,
+                  ...((!isMobile && layoutPro) ? { maxHeight: 0, marginTop: 0, opacity: 0, overflow: "hidden", paddingBottom: 0, transition: "max-height .2s ease, opacity .2s ease" } : {}) }}>
                   {[
                     ["LIQ", fmt$(selected.liq)],
                     ["V", fmt$(selected.vol24)],
@@ -6038,7 +6471,24 @@ export default function App() {
   const volPctNow = poolVol > 0 ? myEpochVol / poolVol : 0;
   const weightNow = holdPctNow * 0.5 + volPctNow * 0.5;
   const loyaltyMult = Math.min(2.5, 1 + loyaltyDays * 0.1); // +0.1x/day, resets to 1x on withdraw
-  const stackNow = loyaltyMult;
+  // CALLOUT LEADERBOARD BONUS — land top-100 on any duration board and every
+  // epoch snapshot adds it: 11th–100th +0.10 · 10th +0.14 · 9th +0.17 · 8th +0.20
+  // 7th +0.23 · 6th +0.26 · 5th +0.29 · 4th +0.32 · 3rd +0.36 · 2nd +0.42 · 1st +0.50
+  // — and bonuses STACK across every duration you place on (up to +4.0 total)
+  const lbBonusFor = (r) => r < 1 ? 0 : r === 1 ? 0.5 : r === 2 ? 0.42 : r === 3 ? 0.36 : r === 4 ? 0.32 : r === 5 ? 0.29 : r === 6 ? 0.26 : r === 7 ? 0.23 : r === 8 ? 0.20 : r === 9 ? 0.17 : r === 10 ? 0.14 : r <= 100 ? 0.10 : 0;
+  const calloutBonus = useMemo(() => {
+    const mine = Object.entries(myMcCallouts).map(([id, c]) => ({ you: true, mult: c.peak || 1 }));
+    if (!mine.length) return { total: 0, hits: [] };
+    const hits = [];
+    Object.keys(LB_MAX).forEach((p) => {
+      const board = [...genLeaderboard(p), ...mine].sort((a, b) => b.mult - a.mult);
+      const rank = board.findIndex((e) => e.you) + 1;
+      const b = lbBonusFor(rank);
+      if (b > 0) hits.push({ p, rank, b });
+    });
+    return { total: hits.reduce((s, h) => s + h.b, 0), hits };
+  }, [myMcCallouts]);
+  const stackNow = loyaltyMult + calloutBonus.total; // every snapshot pays loyalty + stacked board bonuses
   const accruingNow = vaultTotal * weightNow * stackNow;
   const claimable = pendingEpochs.reduce((a, e) => a + e.amount, 0);
 
@@ -6208,7 +6658,7 @@ export default function App() {
                 ["TVL", <b>{fmt$(gTvl)}</b>],
                 ["NET", <b style={{ color: gNet >= 0 ? T.green : T.red }}>{gNet >= 0 ? "+" : "−"}{fmt$(Math.abs(gNet))}</b>],
                 ["24H PnL", <b style={{ color: platformPnl >= 0 ? T.green : T.red }}>{platformPnl >= 0 ? "+" : "−"}${Math.abs(platformPnl).toFixed(0)}</b>],
-                ["🔥 BURN", <b style={{ color: "#f97316" }}>{(burnMine ? myBurned : burned).toFixed(3)}</b>],
+                ["🔥 BURN", <b onClick={() => setBurnOpen(true)} style={{ color: "#f97316", cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(burned)}</b>],
               ].map(([k, v], i) => (
                 <div key={k} style={{ flex: 1, textAlign: "center", padding: "6px 2px", borderLeft: i ? `1px solid ${T.border}` : "none" }}>
                   <div style={{ color: T.faint, fontSize: 7.5, letterSpacing: 0.8, marginBottom: 2 }}>{k}</div>
@@ -6239,7 +6689,7 @@ export default function App() {
                 <div style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: col }}>{v}</div>
               </div>
             ))}
-            <div onClick={() => setBurnMine((v) => !v)} title="Tap to switch between total and your burn"
+            <div onClick={() => setBurnOpen(true)} title="Burn tracker — your burn, site burn, circulating supply, live"
               style={{ cursor: "pointer", userSelect: "none", background: "rgba(249,115,22,0.05)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 9, padding: "6px 13px" }}>
               <div className="burn-swap" style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>
                 🔥 {burnMine ? "YOUR" : "TOTAL"} $VALO BURNED
@@ -6383,7 +6833,7 @@ export default function App() {
             )}
           </>
         ) : (
-        <div className="pt-grid" ref={gridRef} style={{ display: "grid", gridTemplateColumns: `300px minmax(320px,1fr) 304px ${walletCollapsed ? 40 : 322}px`, gap: 14, alignItems: "start", marginRight: -pullR }}>
+        <div className="pt-grid" ref={gridRef} style={{ display: "grid", gridTemplateColumns: `300px minmax(320px,1fr) ${(layoutPro ? 330 : 304) + Math.round(chartInsetR * 0.5)}px ${walletCollapsed ? 40 : 322 + Math.round(chartInsetR * 0.5)}px`, gap: 14, alignItems: "start", marginRight: -pullR, zoom: 1.06 }}>
           {/* scanner — slides left as the chart is pulled over, stays same width */}
           <div ref={scannerRef} style={{ transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s", display: "grid", gap: 10, maxHeight: "calc(100vh - 185px)", overflowY: "auto", padding: "2px 10px 2px 2px" }}>
             {shown.map((t) => (
@@ -6400,10 +6850,68 @@ export default function App() {
                   <SearchBar tokens={tokens} username={username} full onPickToken={(id) => { setSel(id); setClickMode(null); }} onPickUser={(u) => setProfileUser(u)} />
                 </StickySearch>
               )}
+              <div style={{ display: "flex", justifyContent: "flex-end", margin: "0 0 6px" }}>
+                <button onClick={() => setLayoutPro((v) => !v)}
+                  title={layoutPro ? "Back to the side-panel layout" : "Pro layout — trading desk under the chart, feeds on the right"}
+                  style={{ ...chip(layoutPro), padding: "4px 11px", fontSize: 9.5, fontWeight: 900, letterSpacing: 1, color: layoutPro ? T.blue : T.dim, borderColor: layoutPro ? `${T.blue}66` : T.border }}>
+                  {layoutPro ? "◧ SIDE LAYOUT" : "⿲ PRO LAYOUT"}
+                </button>
+              </div>
               {chartBlock}
             </div>
-            {/* LIVE TRADES ⇄ CHAT — side by side, minimize tabs on the outer edges */}
-            {selected ? (
+            {/* PRO LAYOUT: the full trading desk sits under the chart */}
+            {layoutPro && selected ? (
+              <div style={{ marginTop: 4, border: `1px solid ${T.border2}`, borderRadius: 12, overflow: "hidden", background: T.panel }}>
+                {/* tabs fused to the desk — the border wraps buttons and content as one */}
+                <div style={{ display: "flex", borderBottom: `1px solid ${T.border}` }}>
+                  {[["ticket", "🧾 ORDER TICKET", T.blue], ["auto", "🤖 TRADER", T.amber], ["bots", `📊 MY BOTS · ${pendingOrders.filter((o) => !o.runId).length + botRuns.filter((r) => r.status === "live").length}`, T.amber]].map(([k, lab, col], i) => (
+                    <button key={k} onClick={() => setTicketTab(k)}
+                      style={{ flex: 1, border: "none", borderRight: i < 2 ? `1px solid ${T.border}` : "none",
+                        borderBottom: ticketTab === k ? `2px solid ${col}` : "2px solid transparent",
+                        background: ticketTab === k ? "rgba(255,255,255,0.035)" : "transparent",
+                        color: ticketTab === k ? col : T.dim, padding: "8px 8px", fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>
+                      {lab}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ padding: 6 }}>
+                  <div>
+                    {ticketTab === "bots" ? (
+                      <AllBotsPanel tokens={tokens} curTokenId={selected && selected.id} pendingOrders={pendingOrders} botRuns={botRuns}
+                        onEdit={(id, tid) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(id); }}
+                        onCancel={cancelBot} onSellRun={sellRun} onSellAll={sellAllRuns} onOpenBotRun={(id) => setBotRunOpen(id)}
+                        onHighlight={(id, tid) => { setSel(tid); setSelLineId(id); }}
+                        onEditLine={(id, tid) => {
+                  setSel(tid); setSelLineId(id);
+                  const isExit = typeof id === "string" && id.endsWith("::vtSell");
+                  const base = pendingOrders.find((o) => String(o.id) === String(isExit ? id.slice(0, -8) : id));
+                  setEditLineReq({ id, level: base ? (isExit ? base.vtSell : base.level) : null, n: Date.now() });
+                }} />
+                    ) : ticketTab === "auto" ? (
+                      <AutoTraderPanel solBalance={solBalance} valoWallet={valoWallet} token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
+                        wide
+                        dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
+                        onStageSide={(m) => setBotSide(m)} onArmPair={armVisualPair}
+                        onSetDragSet={(v) => setBotDragSet(!!v)} onLinesChange={(l) => setVtLines(l)}
+                        onReadyArm={(fn) => { quickArmRef.current = fn; setQuickArmOn(!!fn); }}
+                        onExecute={(o) => execute(selected, o)}
+                        onDraftLevel={(lvl, tid, side) => setBotDraftLevel(lvl ? { tokenId: tid != null ? tid : selected.id, level: lvl, side: side || botSide } : null)}
+                        pendingOrders={pendingOrders} botRuns={botRuns}
+                        editingBotId={editingBotId} setEditingBotId={setEditingBotId}
+                        onRelaunch={(id, o) => relaunchBot(id, o, selected)}
+                        onCancelBot={cancelBot} onSellRun={sellRun} onOpenBotRun={(id) => setBotRunOpen(id)}
+                        onOpenTokenAuto={(tid, botId) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(botId || null); }} />
+                    ) : (
+                      <ProOrderBar token={selected} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
+                        solBalance={solBalance} valoBalance={valoWallet} position={positions[selected.id]}
+                        clickMode={clickMode} setClickMode={setClickMode}
+                        realized24={realized24For(selected.sym)}
+                        onExecute={(o) => execute(selected, o)} onPosTrade={onPosTrade} />
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : !layoutPro && selected ? (
               <div style={{ display: "flex", gap: 8, alignItems: "stretch", marginTop: 10, minWidth: 0 }}>
                 {ltMin ? (
                   <button onClick={() => setLtMin(false)} title="Expand live trades"
@@ -6435,10 +6943,43 @@ export default function App() {
                   </div>
                 )}
               </div>
-            ) : chatBlock}
+            ) : layoutPro ? null : chatBlock}
           </div>
 
-          {/* trade options — ORDER TICKET ⇄ AUTO TRADER */}
+          {/* trade options — ORDER TICKET ⇄ AUTO TRADER · pro layout swaps this
+              column for the LIVE TRADES + CHAT rail, both collapsible */}
+          {layoutPro ? (
+          <div style={{ position: "sticky", top: 70, maxHeight: "calc(100vh - 90px)", overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, overflow: "hidden" }}>
+              <button onClick={() => setLtMin((v) => !v)}
+                style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", border: "none", background: "rgba(255,255,255,0.02)", padding: "10px 13px", cursor: "pointer", fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, color: T.dim }}>
+                <span>⚡ LIVE TRADES</span><span>{ltMin ? "▸" : "▾"}</span>
+              </button>
+              {!ltMin && selected && (
+                <div style={{ padding: 8 }}>
+                  <LiveTrades token={selected} isMobile={false} traderPrefs={traderPrefs}
+                    onPickTrader={(row) => setMarkerInfo({ trader: row.trader, side: row.isBuy ? "buy" : "sell", sym: selected.sym,
+                      t: row.at, amt: +row.sol.toFixed(3), unit: "SOL", price: selected.price, mc: row.mc,
+                      pnlPct: row.pnlPct != null ? row.pnlPct : null, pnlMoney: null, tx: row.tx })} />
+                </div>
+              )}
+            </div>
+            {selected && (
+              <div style={{ marginTop: -10 }}>
+                <MyPositionsHub tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
+                  onOpenToken={(id) => { setSel(id); setClickMode(null); }} onSellPos={sellPos} onCloseTickets={closeAllTickets}
+                  onSellRun={sellRun} onSellAllBots={sellAllRuns} onCancelBot={cancelBot} />
+              </div>
+            )}
+            <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, overflow: "hidden" }}>
+              <button onClick={() => setChatMin((v) => !v)}
+                style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", border: "none", background: "rgba(255,255,255,0.02)", padding: "10px 13px", cursor: "pointer", fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, color: T.dim }}>
+                <span>💬 CHAT</span><span>{chatMin ? "▸" : "▾"}</span>
+              </button>
+              {!chatMin && <div style={{ padding: 8 }}>{chatBlock}</div>}
+            </div>
+          </div>
+          ) : (
           <div style={{ position: "sticky", top: 70, maxHeight: "calc(100vh - 90px)", overflowY: "auto" }}>
             {selected && (
               <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
@@ -6448,16 +6989,22 @@ export default function App() {
               </div>
             )}
             {selected && ticketTab === "bots" ? (
-              <AllBotsPanel tokens={tokens} pendingOrders={pendingOrders} botRuns={botRuns}
+              <AllBotsPanel tokens={tokens} curTokenId={selected && selected.id} pendingOrders={pendingOrders} botRuns={botRuns}
                 onEdit={(id, tid) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(id); }}
                 onCancel={cancelBot} onSellRun={sellRun} onSellAll={sellAllRuns} onOpenBotRun={(id) => setBotRunOpen(id)}
                 onHighlight={(id, tid) => { setSel(tid); setSelLineId(id); }}
-                onEditLine={(id, tid) => { setSel(tid); setSelLineId(id); setEditLineReq({ id, n: Date.now() }); }} />
+                onEditLine={(id, tid) => {
+                  setSel(tid); setSelLineId(id);
+                  const isExit = typeof id === "string" && id.endsWith("::vtSell");
+                  const base = pendingOrders.find((o) => String(o.id) === String(isExit ? id.slice(0, -8) : id));
+                  setEditLineReq({ id, level: base ? (isExit ? base.vtSell : base.level) : null, n: Date.now() });
+                }} />
             ) : selected && ticketTab === "auto" ? (
-              <AutoTraderPanel token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
+              <AutoTraderPanel solBalance={solBalance} valoWallet={valoWallet} token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
                 dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
                 onStageSide={(m) => setBotSide(m)} onArmPair={armVisualPair}
                 onSetDragSet={(v) => setBotDragSet(!!v)} onLinesChange={(l) => setVtLines(l)}
+                onReadyArm={(fn) => { quickArmRef.current = fn; setQuickArmOn(!!fn); }}
                 onExecute={(o) => execute(selected, o)}
                 onDraftLevel={(lvl, tid, side) => setBotDraftLevel(lvl ? { tokenId: tid != null ? tid : selected.id, level: lvl, side: side || botSide } : null)}
                 pendingOrders={pendingOrders} botRuns={botRuns}
@@ -6494,6 +7041,7 @@ export default function App() {
                 onSellRun={sellRun} onSellAllBots={sellAllRuns} onCancelBot={cancelBot} />
             )}
           </div>
+          )}
 
           {/* portfolio — its own column to the right of trade options.
               Collapses into a slim vertical rail to free width for the chart. */}
@@ -6620,6 +7168,22 @@ export default function App() {
       {/* WHITEPAPER MODAL — interactive reader with expandable TOC sidebar */}
       {wpOpen && <WhitepaperModal onClose={() => setWpOpen(false)} isMobile={isMobile} />}
       {calloutHubOpen && <CalloutHubModal onClose={() => setCalloutHubOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} />}
+      {!isMobile && quickArmOn && armPop && (
+        <button data-armpop="1" onClick={() => { const fn = quickArmRef.current; fn && fn(); setArmPop(null); }}
+          title="Arm this strategy at the line you just set"
+          style={{ position: "fixed", left: armPop.x + 14, top: Math.max(8, armPop.y - 48), zIndex: 92,
+            border: "none", borderRadius: 9, padding: "7px 14px", fontFamily: T.mono, fontWeight: 900, letterSpacing: 1.2,
+            background: T.blue, color: "#07101d", cursor: "pointer", boxShadow: `0 4px 18px rgba(46,112,204,0.55), 0 0 10px ${T.blue}66`,
+            animation: "coPop .18s ease", textAlign: "left", lineHeight: 1.25 }}>
+          <span style={{ fontSize: 11.5 }}>⚡ ARM · {(parseFloat(amount) || 0).toFixed(1)} {pay}</span>
+          <span style={{ display: "block", fontSize: 8, fontWeight: 800, opacity: 0.8 }}>
+            ≈ ${((parseFloat(amount) || 0) * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })} buy-in
+          </span>
+        </button>
+      )}
+      {burnOpen && <BurnModal onClose={() => setBurnOpen(false)} isMobile={isMobile} myBurned={myBurned} siteBurned={burned} />}
+      {lbOpen && <LeaderboardModal onClose={() => setLbOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens}
+        onOpenUser={(u) => setProfileUser(u)} />}
       {tierListOpen && <TierListModal onClose={() => setTierListOpen(false)} isMobile={isMobile}
         myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)} />}
       {myCalloutsOpen && <MyCalloutsModal onClose={() => setMyCalloutsOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username} onOpenToken={navigateToToken} />}
@@ -6638,7 +7202,7 @@ export default function App() {
           if (friendsList.includes(profileUser)) return;
           setSentFriendReqs((L) => (L.includes(profileUser) ? L.filter((x) => x !== profileUser) : [...L, profileUser])); // tap again cancels
         }}
-        onOpenTierList={() => setTierListOpen(true)} onOpenLeaderboard={() => setCalloutHubOpen(true)}
+        onOpenTierList={() => setTierListOpen(true)} onOpenLeaderboard={() => setLbOpen(true)}
         incomingReq={friendReqs.includes(profileUser)}
         onAcceptReq={() => { setFriendsList((F) => (F.includes(profileUser) ? F : [...F, profileUser])); setFriendReqs((R) => R.filter((x) => x !== profileUser)); }}
         onDeclineReq={() => setFriendReqs((R) => R.filter((x) => x !== profileUser))}
@@ -6666,6 +7230,8 @@ export default function App() {
             price={selected.price} sym={selected.sym} isMobile height={Math.round((typeof window !== "undefined" ? window.innerHeight : 800) * 0.38)}
             pendingLevels={[
               ...pendingOrders.filter((o) => String(o.tokenId) === String(selected.id)),
+              ...pendingOrders.filter((o) => String(o.tokenId) === String(selected.id) && o.vt && o.side === "buy" && o.vtSell > 0)
+                .map((o) => ({ id: o.id + "::vtSell", level: o.vtSell, side: "sell", vt: true, amt: o.amt, pay: o.pay })),
               ...(vtLines && String(vtLines.tokenId) === String(selected.id) ? [
                 ...(vtLines.buy > 0 ? [{ level: vtLines.buy, side: "buy", vt: true }] : []),
                 ...(vtLines.sell > 0 ? [{ level: vtLines.sell, side: "sell", vt: true }] : []),
@@ -6676,7 +7242,7 @@ export default function App() {
             botSetMode={botDragSet} onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq}
             onLineSelect={(id) => setSelLineId(id)}
             onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
-            onBotSet={(lvl) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); }} />
+            onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop(at); }} />
           {/* drag-set toggle + page tabs — chart above stays in view for both */}
           <div style={{ display: "flex", gap: 5, padding: "7px 10px 0" }}>
             <button onClick={() => setBotDragSet((v) => !v)} style={{ ...chip(botDragSet), flex: 1.2, textAlign: "center", padding: "7px 2px", fontFamily: T.mono, fontSize: 8, fontWeight: 800, color: botDragSet ? T.amber : T.dim, borderColor: botDragSet ? `${T.amber}66` : T.border }}>✋ DRAG-SET {botDragSet ? "ON" : "OFF"}</button>
@@ -6686,13 +7252,18 @@ export default function App() {
           </div>
           <div style={{ flex: 1, overflowY: "auto", padding: 10 }}>
             {mobPageTab === "bots" ? (
-              <AllBotsPanel tokens={tokens} pendingOrders={pendingOrders} botRuns={botRuns}
+              <AllBotsPanel tokens={tokens} curTokenId={selected && selected.id} pendingOrders={pendingOrders} botRuns={botRuns}
                 onEdit={(id, tid) => { setSel(tid); setClickMode(null); setEditingBotId(id);
                   const ord = pendingOrders.find((o) => o.id === id);
                   setMobPageTab(ord && ord.vt ? "visual" : "trader"); }}
                 onCancel={cancelBot} onSellRun={sellRun} onSellAll={sellAllRuns} onOpenBotRun={(id) => setBotRunOpen(id)}
                 onHighlight={(id, tid) => { setSel(tid); setSelLineId(id); }}
-                onEditLine={(id, tid) => { setSel(tid); setSelLineId(id); setEditLineReq({ id, n: Date.now() }); }} />
+                onEditLine={(id, tid) => {
+                  setSel(tid); setSelLineId(id);
+                  const isExit = typeof id === "string" && id.endsWith("::vtSell");
+                  const base = pendingOrders.find((o) => String(o.id) === String(isExit ? id.slice(0, -8) : id));
+                  setEditLineReq({ id, level: base ? (isExit ? base.vtSell : base.level) : null, n: Date.now() });
+                }} />
             ) : mobPageTab === "visual" ? (
               <>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "8px 11px", marginBottom: 8, fontFamily: T.mono }}>
@@ -6939,6 +7510,11 @@ export default function App() {
               <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, marginTop: 4 }}>
                 {loyaltyMult >= 2.5 ? "MAXED at ×2.5" : `${loyaltyDays}d held · +0.1× tomorrow → ×${Math.min(2.5, loyaltyMult + 0.1).toFixed(1)}`}
               </div>
+              {calloutBonus.total > 0 && (
+                <div style={{ fontFamily: T.mono, fontSize: 9, color: VALO_PURPLE, marginTop: 5 }}>
+                  🏆 CALLOUT BOARDS +{calloutBonus.total.toFixed(2)}× · {calloutBonus.hits.length} board{calloutBonus.hits.length === 1 ? "" : "s"} ({calloutBonus.hits.map((h) => `${h.p} #${h.rank}`).join(" · ")}) → EFFECTIVE ×{stackNow.toFixed(2)}
+                </div>
+              )}
               {loyaltyOpen && (
                 <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.dim, lineHeight: 1.7, marginTop: 8, borderTop: `1px solid ${T.border}`, paddingTop: 8 }}>
                   The longer you hold your epoch rewards <b style={{ color: T.text }}>without withdrawing</b>, the bigger your multiplier on the pool.
@@ -6983,6 +7559,7 @@ export default function App() {
                 ["HOLDER WEIGHT", `${(holdPctNow * 100).toFixed(3)}%`, "of pool", T.text],
                 ["VOLUME WEIGHT", `${(volPctNow * 100).toFixed(3)}%`, "of pool", T.text],
                 ["LOYALTY STACK", `×${loyaltyMult.toFixed(1)}`, `${loyaltyDays}d held`, T.amber],
+                ["CALLOUT BONUS", `+${calloutBonus.total.toFixed(2)}×`, calloutBonus.hits.length ? `${calloutBonus.hits.length} boards` : "top-100 any board", VALO_PURPLE],
                 ["VAULT THIS EPOCH", `${vaultTotal.toFixed(3)} SOL`, `≈ $${(vaultTotal * SOL_USD).toFixed(0)}`, T.green],
               ].map(([k, v, sub, c]) => (
                 <div key={k} style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 8, padding: "8px 10px" }}>
@@ -7321,6 +7898,10 @@ export default function App() {
         }
         @keyframes wallSlide{ from{ transform: translateX(-100%); opacity:0; } to{ transform: translateX(0); opacity:1; } }
         .ticker-track{ display:flex; width:max-content; animation: tickerScroll 130s linear infinite; }
+        .lb-row{ transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
+        .lb-row:hover{ transform: translateX(5px); box-shadow: 0 0 14px rgba(125,92,240,0.3); border-color: rgba(125,92,240,0.55) !important; }
+        .lb-pod{ transition: transform .16s ease, box-shadow .16s ease; }
+        .lb-pod:hover{ transform: translateY(-6px) scale(1.03); }
         .ticker-half{ display:flex; align-items:center; padding-left: 96px; }
         .ticker.paused .ticker-track{ animation-play-state: paused; }
         @keyframes tickerScroll{ from{ transform:translateX(0); } to{ transform:translateX(-50%); } }
