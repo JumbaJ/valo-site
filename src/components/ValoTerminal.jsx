@@ -75,6 +75,61 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 // ---- fee schedule: 50% burn pool / 50% airdrop vault ----
 const TAX = { SOL: 0.6, VALO: 0.3 };            // % per transaction
 const taxFor = (pay) => (pay === "SOL" ? TAX.SOL : TAX.VALO);
+// 👁 viewer engine — deterministic, so every mount agrees, yet it breathes:
+// smooth sin-wobble makes people "join and leave" live; totals only ever climb
+const VIEW_EPOCH = 1700000000000;
+const liveViewersOf = (t, mode) => {
+  const seed = ((t && t.id) * 9301 + 11) % 233;
+  const base = mode === "valo" ? 7 + (seed % 21) : 24 + (seed % 150);
+  const w = Math.sin(Date.now() / 9000 + seed) * base * 0.22 + Math.sin(Date.now() / 2400 + seed * 3) * 2.6;
+  return Math.max(1, Math.round(base + w));
+};
+const totalViewsOf = (t, mode) => {
+  const seed = ((t && t.id) * 7919 + 5) % 997;
+  const stepSec = mode === "valo" ? 14 + (seed % 9) : 5 + (seed % 6); // one new view every few seconds
+  const base = mode === "valo" ? 900 + seed * 34 : 4200 + seed * 165;
+  return base + Math.floor((Date.now() - VIEW_EPOCH) / 1000 / stepSec);
+};
+// drawn eye icons (no emojis) — open eye = watching now, closed eye = all-time
+const EyeOpenIcon = ({ c = "#16C784", s = 13 }) => (
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.1" strokeLinecap="round" style={{ flex: "0 0 auto", display: "block" }}>
+    <path d="M2 12s3.6-6.2 10-6.2S22 12 22 12s-3.6 6.2-10 6.2S2 12 2 12z" />
+    <circle cx="12" cy="12" r="2.7" fill={c} stroke="none" />
+  </svg>
+);
+const EyeClosedIcon = ({ c = "#8a94a8", s = 13 }) => (
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.1" strokeLinecap="round" style={{ flex: "0 0 auto", display: "block" }}>
+    <path d="M3 11c2.6 3.4 6 5 9 5s6.4-1.6 9-5" />
+    <path d="M5.5 14.8L4 17M9.6 16.4l-.8 2.5M14.4 16.4l.8 2.5M18.5 14.8L20 17" />
+  </svg>
+);
+// the two eye counters — live watchers + all-time views. Bare icons + numbers,
+// fixed slots so ticking never shifts the layout. Click flips BOTH between
+// pump.fun (green) and the VALO terminal's own numbers (purple).
+function ViewerPills({ token, small = false }) {
+  const [mode, setMode] = useState("pump");
+  const [, setTick] = useState(0);
+  useEffect(() => { const iv = setInterval(() => setTick((x) => x + 1), 1400); return () => clearInterval(iv); }, []);
+  if (!token) return null;
+  const live = liveViewersOf(token, mode);
+  const total = totalViewsOf(token, mode);
+  const col = mode === "valo" ? VALO_PURPLE : T.green;
+  const fs = small ? 8.5 : 9.5;
+  return (
+    <span onClick={() => setMode((m) => (m === "pump" ? "valo" : "pump"))}
+      title={`${mode === "pump" ? "pump.fun" : "VALO terminal"} viewers — tap to flip to ${mode === "pump" ? "VALO" : "pump.fun"}`}
+      style={{ display: "inline-flex", gap: small ? 8 : 11, alignItems: "center", cursor: "pointer", fontFamily: T.mono, userSelect: "none" }}>
+      <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+        <EyeOpenIcon c={col} s={small ? 12 : 14} />
+        <b style={{ color: col, fontSize: fs, minWidth: small ? 26 : 32, textAlign: "left" }}>{live.toLocaleString()}</b>
+      </span>
+      <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+        <EyeClosedIcon c={mode === "valo" ? "#9d8df0" : T.dim} s={small ? 12 : 14} />
+        <b style={{ color: mode === "valo" ? "#9d8df0" : T.dim, fontSize: fs, minWidth: small ? 34 : 40, textAlign: "left" }}>{fmtQty(total)}</b>
+      </span>
+    </span>
+  );
+}
 // fee-safe buy sizing: every %/MAX chip shaves the site tax + a tx-fee cushion
 // off the top, so a MAX buy clears cleanly instead of bouncing on the last cent
 const feeSafe = (raw, pay) => {
@@ -344,7 +399,7 @@ const ratingColor = (s) => (s >= 66 ? T.green : s >= 40 ? T.amber : T.red);
 // ================================================================
 // CHART
 // ================================================================
-function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect }) {
+function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null }) {
   const wrapRef = useRef(null);
   const cvsRef = useRef(null);
   const [cross, setCross] = useState(null);
@@ -773,16 +828,19 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const it = touchIntentRef.current; const p0 = e.touches && e.touches[0];
       if (pendGrabRef.current && p0) {
         const r0 = cvs.getBoundingClientRect();
-        const mx = Math.abs(p0.clientX - r0.left - pendGrabRef.current.x), my = Math.abs(p0.clientY - r0.top - pendGrabRef.current.y);
+        const sc0 = r0.width / (cvs.clientWidth || r0.width) || 1;
+        const mx = Math.abs((p0.clientX - r0.left) / sc0 - pendGrabRef.current.x), my = Math.abs((p0.clientY - r0.top) / sc0 - pendGrabRef.current.y);
         if (Math.max(mx, my) > 7) { clearTimeout(pendGrabRef.current.timer); pendGrabRef.current = null; } // moved → it's a pan
       }
       if (it && !it.decided && p0) {
         if (chartForced()) { it.decided = true; }
         else {
           const dx = Math.abs(p0.clientX - it.x), dy = Math.abs(p0.clientY - it.y);
-          if (Math.max(dx, dy) > 7) {
+          if (Math.max(dx, dy) > 6) {
             it.decided = true;
-            it.scroll = dy > dx * 1.25; // clearly vertical → let the page move
+            // page wins any ambiguity — the chart only claims a swipe that is
+            // CLEARLY horizontal, so scrolling never catches
+            it.scroll = dy >= dx * 0.8;
             if (it.scroll) { dragRef.current = null; setCross(null); }
           }
         }
@@ -792,7 +850,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const ldm = stickyRef.current || lineDragRef.current;
       if (ldm && p0 && botSetRef.current.lineDrag) {
         const r = cvs.getBoundingClientRect();
-        const cy = p0.clientY - r.top;
+        const scm = r.width / (cvs.clientWidth || r.width) || 1;
+        const cy = (p0.clientY - r.top) / scm;
         botSetRef.current.lineDrag(ldm.id, stickyRef.current ? stickyPriceAt(cy) : priceAtY(Math.min(Math.max(cy, geom.current.padT), geom.current.padT + geom.current.chartH)), false);
         return;
       }
@@ -818,7 +877,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
         const r = cvs.getBoundingClientRect();
         const p0 = e.changedTouches && e.changedTouches[0];
         if (p0 && botSetRef.current.lineDrag) {
-          const cy = p0.clientY - r.top;
+          const sce = r.width / (cvs.clientWidth || r.width) || 1;
+          const cy = (p0.clientY - r.top) / sce;
           botSetRef.current.lineDrag(ld0.id, stickyRef.current ? stickyPriceAt(cy) : priceAtY(Math.min(Math.max(cy, geom.current.padT), geom.current.padT + geom.current.chartH)), true);
         }
         stickyRef.current = null; lineDragRef.current = null;
@@ -831,7 +891,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
         const p0 = e.changedTouches && e.changedTouches[0];
         if (p0) {
           const g = geom.current;
-          const cy = Math.min(Math.max(p0.clientY - r.top, g.padT), g.padT + g.chartH);
+          const scb = r.width / (cvs.clientWidth || r.width) || 1;
+          const cy = Math.min(Math.max((p0.clientY - r.top) / scb, g.padT), g.padT + g.chartH);
           bs.set && bs.set(g.hi - ((cy - g.padT) / g.chartH) * (g.hi - g.lo));
         }
         dragRef.current = null;
@@ -865,9 +926,13 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   }, [onMarkerClick]);
 
   const ptOf = (e) => {
-    const r = cvsRef.current.getBoundingClientRect();
+    const cvs = cvsRef.current;
+    const r = cvs.getBoundingClientRect();
+    // an ancestor zoom (PC bigger-text) scales the rect but not the canvas's
+    // coordinate space — divide it out so the crosshair sits dead-center
+    const sc = r.width / (cvs.clientWidth || r.width) || 1;
     const p = e.touches ? e.touches[0] : e.changedTouches ? e.changedTouches[0] : e;
-    return { cx: p.clientX - r.left, cy: p.clientY - r.top };
+    return { cx: (p.clientX - r.left) / sc, cy: (p.clientY - r.top) / sc };
   };
   const axisRef = useRef(null); // dragging the price-axis strip = zoom
   const onDown = (e) => {
@@ -937,6 +1002,10 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       botSetRef.current.lineDrag && botSetRef.current.lineDrag(st.id, stickyPriceAt(cy), false);
       return;
     }
+    if (e.touches) {
+      const it = touchIntentRef.current;
+      if (it && (it.scroll || !it.decided) && !chartForced()) return; // page owns it — chart holds still
+    }
     const ld = lineDragRef.current;
     if (ld) {
       const g = geom.current;
@@ -986,6 +1055,10 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     }
   };
   const onUp = (e) => {
+    if (e.touches) {
+      const it = touchIntentRef.current;
+      if (it && (it.scroll || !it.decided) && !chartForced()) return; // page owns it — chart holds still
+    }
     const ld = lineDragRef.current;
     if (ld) {
       const { cy } = ptOf(e);
@@ -1046,7 +1119,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
               <span style={{ color: chg >= 0 ? T.green : T.red }}>{pct(chg)}</span>
             </>)}
           </div>
-          <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+          <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}>
+            {eyesToken && <ViewerPills token={eyesToken} small />}
             <button onClick={() => setView({ count: 18, offset: 0, priceOff: 0, follow: true })}
               style={{ height: 22, padding: "0 9px", borderRadius: 6, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.15)", color: T.blue, cursor: "pointer", fontSize: 9.5, fontWeight: 700, fontFamily: T.mono }}>◉ LIVE</button>
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
@@ -1066,7 +1140,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
               <span style={{ color: chg >= 0 ? T.green : T.red }}>{pct(chg)}</span>
             </>)}
           </div>
-          <div style={{ position: "absolute", top: 8, right: 82, zIndex: 3, display: "flex", gap: 4 }}>
+          <div style={{ position: "absolute", top: 8, right: 82, zIndex: 3, display: "flex", gap: 8, alignItems: "center" }}>
+            {eyesToken && <ViewerPills token={eyesToken} small />}
             <button onClick={() => setView({ count: 18, offset: 0, priceOff: 0, follow: true })}
               title="Zoom to the live edge and follow the price"
               style={{ height: 24, padding: "0 10px", borderRadius: 6, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.15)", color: T.blue, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: T.mono }}>◉ LIVE</button>
@@ -1255,14 +1330,14 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       {/* BUY-IN AMOUNT — swap SOL / $VALO freely */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <label style={{ ...lbl, marginBottom: 0 }}>Buy-in amount</label>
-        {setPay && (
+        {setPay && !compactArm && (
           <span style={{ display: "flex", gap: 4 }}>
             <button onClick={() => setPay("SOL")} style={{ ...chip(pay === "SOL"), padding: "3px 9px", fontSize: 8.5, fontWeight: 800, color: pay === "SOL" ? T.blue : T.faint }}>SOL</button>
             <button onClick={() => setPay("VALO")} style={{ ...chip(pay === "VALO"), padding: "3px 9px", fontSize: 8.5, fontWeight: 800, color: pay === "VALO" ? VALO_PURPLE : T.faint }}>$VALO</button>
           </span>
         )}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "5px 0 4px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, margin: compactArm ? "3px 0 3px" : "5px 0 4px" }}>
         <button onClick={() => setAmount && setAmount(Math.max(0, (parseFloat(amount) || 0) - 0.1).toFixed(1))}
           style={{ ...chip(false), flex: "0 0 auto", padding: wide ? "6px 10px" : "9px 12px", fontSize: 13, fontWeight: 900 }}>−</button>
         <input value={amount} onChange={(e) => setAmount && setAmount(e.target.value)} inputMode="decimal"
@@ -1271,13 +1346,20 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
           style={{ ...chip(false), flex: "0 0 auto", padding: wide ? "6px 10px" : "9px 12px", fontSize: 13, fontWeight: 900 }}>+</button>
         <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 800, color: pay === "SOL" ? T.blue : VALO_PURPLE, flex: "0 0 auto" }}>{pay}</span>
       </div>
-      <div style={{ display: "flex", gap: 5, marginBottom: wide ? 4 : 10 }}>
+      <div style={{ display: "flex", gap: 5, marginBottom: wide ? 4 : compactArm ? 5 : 10 }}>
         {tpQuick.map((v, ci) => (
           <button key={ci} onClick={() => setAmount && setAmount(String(v))}
             {...chipEditProps(() => { askAmt(v, (nv) => setTpQuick((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
             style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "5px 0", fontSize: 9.5, fontWeight: 800 }}>{v}</button>
         ))}
         <span style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, alignSelf: "center", flex: "0 0 auto", marginLeft: 4 }}>
+          {compactArm && setPay && (
+            <b onClick={() => setPay(pay === "SOL" ? "VALO" : "SOL")}
+              title="Tap to swap settlement currency"
+              style={{ color: pay === "SOL" ? T.blue : VALO_PURPLE, cursor: "pointer", marginRight: 5, fontSize: 10, textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
+              {pay === "SOL" ? "SOL" : "$VALO"}
+            </b>
+          )}
           ≈ ${(amt * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD
         </span>
       </div>
@@ -1286,6 +1368,15 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
         const unit$ = pay === "SOL" ? SOL_USD : 0.0125;
         return (
           <>
+            {!wide && (
+              <button disabled={invalid} onClick={armNow}
+                style={{ width: "100%", marginBottom: 6, border: "none", borderRadius: 8, padding: "9px", fontFamily: T.mono, fontSize: 11.5, letterSpacing: 1.3, fontWeight: 900,
+                  background: invalid ? "#1a2030" : editBot ? T.amber : T.blue, color: invalid ? T.faint : editBot ? "#1d1503" : "#07101d", cursor: invalid ? "not-allowed" : "pointer",
+                  transform: flashOn ? "scale(1.02)" : "scale(1)", transition: "transform .18s, box-shadow .18s",
+                  boxShadow: flashOn ? `0 0 20px ${editBot ? T.amber : T.blue}` : "none" }}>
+                {flashOn ? "✓ ARMED" : editBot ? "🔁 RELAUNCH" : "🤖 ARM"}
+              </button>
+            )}
             <div style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.blue,
               background: "rgba(76,154,255,0.10)", border: `1px solid ${T.blue}55`, borderRadius: 8,
               padding: "6px 10px", margin: "4px 0 6px", display: "flex", justifyContent: "space-between", alignItems: "baseline",
@@ -2026,7 +2117,9 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
   }, [period, myCallouts, tokens]);
   const myRank = board.findIndex((e) => e.you) + 1;
   const focusRank = focusUser ? board.findIndex((e) => !e.you && e.user === focusUser) + 1 : 0;
-  const listEnd = focusRank > 25 && focusRank <= 250 ? focusRank + 2 : 25;
+  const listEnd = 250; // full top 250 on every duration
+  const youRef = useRef(null);
+  const myEntry = board.find((e) => e.you);
   useEffect(() => {
     if (focusRank > 0 && focusRef.current) focusRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [focusRank, period]);
@@ -2047,8 +2140,14 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
         </div>
         <div style={{ padding: embed ? "9px 2px 4px" : "9px 11px 12px" }}>
           {myRank > 0 && (
-            <div style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, color: myRank <= 100 ? T.green : T.faint, border: `1px solid ${myRank <= 100 ? "rgba(22,199,132,0.4)" : T.border}`, background: myRank <= 100 ? "rgba(22,199,132,0.07)" : "transparent", borderRadius: 9, padding: "6px 9px", marginBottom: 8 }}>
-              YOU · #{myRank} {period}{lbBonus(myRank) > 0 ? ` → +${lbBonus(myRank).toFixed(2)}× every epoch (stacks across boards)` : " · crack the top 100 for an epoch bonus"}
+            <div onClick={() => { if (myRank <= 250 && youRef.current) youRef.current.scrollIntoView({ block: "center", behavior: "smooth" }); }}
+              title={myRank <= 250 ? "Tap: jump to your spot on this board" : "Climb into the top 250 to appear on the board"}
+              style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, cursor: myRank <= 250 ? "pointer" : "default",
+                color: myRank <= 100 ? T.green : T.faint, border: `1px solid ${myRank <= 100 ? "rgba(22,199,132,0.4)" : T.border}`,
+                background: myRank <= 100 ? "rgba(22,199,132,0.07)" : "rgba(255,255,255,0.02)", borderRadius: 9, padding: "6px 9px", marginBottom: 8,
+                display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <span>YOU · #{myRank} {period}{myEntry ? ` · ×${myEntry.mult.toFixed(1)}` : ""}</span>
+              <span style={{ color: VALO_PURPLE }}>{lbBonus(myRank) > 0 ? `+${lbBonus(myRank).toFixed(2)}×/epoch` : "top 100 pays"}{myRank <= 250 ? " · TAP ↓" : ""}</span>
             </div>
           )}
           {!isMobile && !embed && board.length >= 3 && (
@@ -2077,7 +2176,7 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
             const tr = calloutTier(r.mult);
             const isFocus = focusRank === rk && !r.you;
             return (
-              <div key={i} ref={isFocus ? focusRef : undefined} className="lb-row" onClick={() => !r.you && onOpenUser && onOpenUser(r.user)}
+              <div key={i} ref={r.you ? youRef : isFocus ? focusRef : undefined} className="lb-row" onClick={() => !r.you && onOpenUser && onOpenUser(r.user)}
                 title={r.you ? "That's you" : `Open @${r.user}'s portfolio`}
                 style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", borderRadius: 9, marginBottom: 3, cursor: r.you ? "default" : "pointer",
                 border: r.you ? `1.5px solid ${T.green}` : isFocus && hl ? `1.5px solid ${VALO_PURPLE}` : `1px solid ${rk <= 3 ? `${tr.color}55` : T.border}`,
@@ -2175,6 +2274,183 @@ function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 
           {tab === "tiers"
             ? <TierListModal embed isMobile={isMobile} myBest={myBest} />
             : <LeaderboardModal embed isMobile={isMobile} myCallouts={myCallouts} tokens={tokens} onOpenUser={onOpenUser} focusUser={inTop250 ? focusUser : null} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ◆ $VALO TOKEN STATS — pop-out page: live price/TVL/flow/PnL/supply with a
+// duration-aware chart; every stat re-times to the selected window. Pre-mainnet
+// this runs as a faithful demonstration feed.
+function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned = 0, valoWallet = 0 }) {
+  const DURS = ["1H", "4H", "1D", "7D", "30D", "ALL"];
+  const VOL = { "1H": 0.004, "4H": 0.007, "1D": 0.012, "7D": 0.028, "30D": 0.055, "ALL": 0.10 };
+  const [dur, setDur] = useState("1D");
+  const [livePx, setLivePx] = useState(valoUsd);
+  useEffect(() => {
+    const iv = setInterval(() => setLivePx((p) => Math.max(0.0001, p * (1 + (Math.random() - 0.48) * 0.006))), 2000);
+    return () => clearInterval(iv);
+  }, []);
+  // seeded walk backward from the live price — same seed per duration, so the
+  // shape is stable while the tail ticks live
+  const closes = useMemo(() => {
+    let s = 0; for (const c of dur) s += c.charCodeAt(0);
+    let x = s * 9301 + 49297; const rnd = () => { x = (x * 9301 + 49297) % 233280; return x / 233280; };
+    const N = 72; const arr = new Array(N); arr[N - 1] = livePx;
+    for (let i = N - 2; i >= 0; i--) arr[i] = Math.max(0.0001, arr[i + 1] / (1 + (rnd() - 0.485) * VOL[dur]));
+    return arr;
+  }, [dur, livePx]);
+  const first = closes[0], last = closes[closes.length - 1];
+  const chg = ((last - first) / first) * 100;
+  const up = chg >= 0;
+  // duration-scaled activity (deterministic per window, feels alive via price)
+  const durMult = { "1H": 1, "4H": 3.4, "1D": 11, "7D": 52, "30D": 170, "ALL": 660 }[dur];
+  const buys = Math.round(140 * durMult * (1 + chg / 200));
+  const sells = Math.round(120 * durMult * (1 - chg / 300));
+  const netFlow = (buys - sells) * 92 * (1 + Math.abs(chg) / 40);
+  const tvlNow = tvl * (1 + chg / 160);
+  const myPnl = valoWallet * (last - first); // holding $VALO through this window
+  const circ = Math.max(0, 1e9 - burned);
+  const cvsRef = useRef(null);
+  const [cross, setCross] = useState(null); // {i} — traced slot (hover on PC, finger on mobile)
+  const traceAt = (clientX) => {
+    const cvs = cvsRef.current; if (!cvs) return;
+    const r = cvs.getBoundingClientRect();
+    const step = r.width / closes.length;
+    const i = Math.max(0, Math.min(closes.length - 1, Math.floor((clientX - r.left) / step)));
+    setCross({ i });
+  };
+  // how long ago each slot is, in the selected window's units
+  const WIN_MIN = { "1H": 60, "4H": 240, "1D": 1440, "7D": 10080, "30D": 43200, "ALL": 259200 };
+  const agoTxt = (i) => {
+    const mins = ((closes.length - 1 - i) / (closes.length - 1)) * WIN_MIN[dur];
+    if (mins < 1) return "now";
+    if (mins < 60) return `${Math.round(mins)}m ago`;
+    if (mins < 1440) return `${(mins / 60).toFixed(1)}h ago`;
+    return `${(mins / 1440).toFixed(1)}d ago`;
+  };
+  useEffect(() => {
+    const cvs = cvsRef.current; if (!cvs) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = cvs.clientWidth, h = cvs.clientHeight;
+    cvs.width = w * dpr; cvs.height = h * dpr;
+    const ctx = cvs.getContext("2d"); ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+    let lo = Math.min(...closes), hi = Math.max(...closes);
+    const pad = (hi - lo) * 0.12 || hi * 0.02; lo -= pad; hi += pad;
+    const y = (p) => 6 + (1 - (p - lo) / (hi - lo)) * (h - 12);
+    const step = w / closes.length;
+    // area fill under a smooth line, VALO purple
+    ctx.beginPath(); ctx.moveTo(0, y(closes[0]));
+    closes.forEach((c, i) => ctx.lineTo(i * step + step / 2, y(c)));
+    ctx.lineTo(w, y(last)); ctx.strokeStyle = up ? "#16C784" : "#ea3943"; ctx.lineWidth = 1.8; ctx.stroke();
+    ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
+    const gr = ctx.createLinearGradient(0, 0, 0, h);
+    gr.addColorStop(0, up ? "rgba(22,199,132,0.25)" : "rgba(234,57,67,0.25)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = gr; ctx.fill();
+    // candles overlaid, light
+    closes.forEach((c, i) => {
+      const o = i ? closes[i - 1] : c;
+      const col = c >= o ? "#16C784" : "#ea3943";
+      ctx.fillStyle = col; ctx.globalAlpha = 0.85;
+      const x0 = i * step + step * 0.18;
+      ctx.fillRect(x0, Math.min(y(o), y(c)), Math.max(1.5, step * 0.64), Math.max(1.5, Math.abs(y(o) - y(c))));
+      ctx.globalAlpha = 1;
+    });
+    // live tail dot
+    ctx.beginPath(); ctx.arc(w - step / 2, y(last), 3.2, 0, Math.PI * 2);
+    ctx.fillStyle = "#7D5CF0"; ctx.shadowColor = "#7D5CF0"; ctx.shadowBlur = 8; ctx.fill(); ctx.shadowBlur = 0;
+    // TRACE — crosshair at the hovered/touched slot, same feel as the main charts
+    if (cross && cross.i >= 0 && cross.i < closes.length) {
+      const ci = cross.i, cxp = ci * step + step / 2, cyp = y(closes[ci]);
+      ctx.setLineDash([3, 3]); ctx.strokeStyle = "rgba(230,236,247,0.45)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(cxp, 0); ctx.lineTo(cxp, h); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, cyp); ctx.lineTo(w, cyp); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(cxp, cyp, 3.6, 0, Math.PI * 2);
+      ctx.fillStyle = "#e6ecf7"; ctx.strokeStyle = "#7D5CF0"; ctx.lineWidth = 2; ctx.fill(); ctx.stroke();
+      // readout: price · % vs window start · how long ago
+      const pTr = closes[ci];
+      const dPct = ((pTr - first) / first) * 100;
+      const txt1 = `$${pTr.toFixed(4)}`;
+      const txt2 = `${dPct >= 0 ? "+" : "−"}${Math.abs(dPct).toFixed(2)}% · ${agoTxt(ci)}`;
+      ctx.font = "bold 11px 'JetBrains Mono', monospace";
+      const bw = Math.max(ctx.measureText(txt1).width, ctx.measureText(txt2).width) + 16;
+      const bx = Math.max(4, Math.min(w - bw - 4, cxp + 10));
+      const by = 6;
+      ctx.fillStyle = "rgba(12,15,22,0.94)"; ctx.strokeStyle = "#7D5CF0";
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(bx, by, bw, 34, 7) : ctx.rect(bx, by, bw, 34); ctx.lineWidth = 1; ctx.fill(); ctx.stroke();
+      ctx.fillStyle = dPct >= 0 ? "#16C784" : "#ea3943";
+      ctx.fillText(txt1, bx + 8, by + 14);
+      ctx.font = "9px 'JetBrains Mono', monospace"; ctx.fillStyle = "#8a94a8";
+      ctx.fillText(txt2, bx + 8, by + 27);
+    }
+  }, [closes, up, cross, dur]);
+  const stat = (label, val, sub, col) => (
+    <div style={{ border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "8px 10px" }}>
+      <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.2, color: T.faint, marginBottom: 3 }}>{label}</div>
+      <div style={{ fontFamily: T.mono, fontSize: 14.5, fontWeight: 900, color: col || T.text }}>{val}</div>
+      {sub && <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.dim, marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+  const tot = buys + sells || 1;
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 76, background: "rgba(4,6,10,0.84)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+      padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 380 : 660, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "88vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
+        <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, padding: "11px 13px 9px", borderBottom: `1px solid ${T.border}` }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontFamily: T.mono, fontSize: isMobile ? 11 : 12.5, fontWeight: 900, letterSpacing: 1.5 }}>
+              <span style={{ color: VALO_PURPLE }}>◆</span> $VALO · TOKEN STATS
+            </span>
+            <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <span style={{ fontFamily: T.mono, fontSize: 7, fontWeight: 900, letterSpacing: 1, color: T.amber, border: `1px solid ${T.amber}55`, background: "rgba(240,185,11,0.08)", borderRadius: 6, padding: "2px 6px" }}>DEMO · PRE-MAINNET</span>
+              <button onClick={onClose} style={{ ...chip(false), padding: "4px 8px", fontSize: 11 }}>✕</button>
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 3 }}>
+            {DURS.map((p) => (
+              <button key={p} onClick={() => setDur(p)} style={{ ...chip(dur === p), flex: 1, textAlign: "center", padding: "4px 0", fontSize: 8.5, fontWeight: 800 }}>{p}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ padding: "10px 12px 13px" }}>
+          {/* headline price for the window */}
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 7 }}>
+            <span style={{ fontFamily: T.mono, fontSize: 24, fontWeight: 900, color: VALO_PURPLE }}>${livePx.toFixed(4)}</span>
+            <span style={{ fontFamily: T.mono, fontSize: 12.5, fontWeight: 900, color: up ? T.green : T.red }}>{up ? "▲ +" : "▼ −"}{Math.abs(chg).toFixed(2)}% <span style={{ fontSize: 8.5, color: T.faint, fontWeight: 700 }}>past {dur}</span></span>
+            <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 7.5, color: T.green }}>● LIVE</span>
+          </div>
+          <canvas ref={cvsRef}
+            onMouseMove={(e) => traceAt(e.clientX)} onMouseLeave={() => setCross(null)}
+            onTouchStart={(e) => { const t = e.touches[0]; if (t) traceAt(t.clientX); }}
+            onTouchMove={(e) => { const t = e.touches[0]; if (t) traceAt(t.clientX); }}
+            onTouchEnd={() => setCross(null)}
+            style={{ width: "100%", height: isMobile ? 150 : 190, display: "block", background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 10, touchAction: "none", cursor: "crosshair" }} />
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: 7, marginBottom: 8 }}>
+            {stat(`PRICE CHANGE · ${dur}`, `${up ? "+" : "−"}${Math.abs(chg).toFixed(2)}%`, `$${first.toFixed(4)} → $${last.toFixed(4)}`, up ? T.green : T.red)}
+            {stat("TVL", fmt$(tvlNow), "total value locked, live", T.text)}
+            {stat(`NET FLOW · ${dur}`, `${netFlow >= 0 ? "+" : "−"}${fmt$(Math.abs(netFlow))}`, netFlow >= 0 ? "money flowing IN" : "money flowing OUT", netFlow >= 0 ? T.green : T.red)}
+            {stat(`YOUR PNL · ${dur}`, `${myPnl >= 0 ? "+" : "−"}$${Math.abs(myPnl).toFixed(2)}`, `from holding ${fmtQty(valoWallet)} $VALO`, myPnl >= 0 ? T.green : T.red)}
+            {stat("TOTAL SUPPLY", "1.00B", "genesis, fixed forever", T.text)}
+            {stat("CIRCULATING", fmtQty(circ), "shrinks with every burn — live", T.green)}
+          </div>
+          {/* buys vs sells for the window */}
+          <div style={{ border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "8px 10px", marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 8, marginBottom: 5 }}>
+              <span style={{ color: T.green, fontWeight: 800 }}>▲ {buys.toLocaleString()} BUY-INS</span>
+              <span style={{ color: T.faint, letterSpacing: 1 }}>{dur}</span>
+              <span style={{ color: T.red, fontWeight: 800 }}>{sells.toLocaleString()} SELL-OUTS ▼</span>
+            </div>
+            <div style={{ height: 6, borderRadius: 3, overflow: "hidden", display: "flex", background: "#1a1f2a" }}>
+              <div style={{ width: `${(buys / tot) * 100}%`, background: T.green }} />
+              <div style={{ width: `${100 - (buys / tot) * 100}%`, background: T.red }} />
+            </div>
+          </div>
+          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, lineHeight: 1.6 }}>
+            Every number re-times to the selected window — switch durations and the chart, flow, counts, and your PnL all follow. This is a faithful DEMONSTRATION: the live on-chain feed switches on the moment $VALO launches on mainnet.
+          </div>
         </div>
       </div>
     </div>
@@ -3014,16 +3290,16 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
       </div>
       )}
       <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1 1 220px", minWidth: 210 } : undefined}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: compactArm ? 3 : 5 }}>
         <label style={{ ...lbl, marginBottom: 0 }}>Buy-in amount</label>
-        {setPay && (
+        {setPay && !compactArm && (
           <span style={{ display: "flex", gap: 4 }}>
             <button onClick={() => setPay("SOL")} style={{ ...chip(pay === "SOL"), padding: "3px 9px", fontSize: 8.5, fontWeight: 800, color: pay === "SOL" ? T.blue : T.faint }}>SOL</button>
             <button onClick={() => setPay("VALO")} style={{ ...chip(pay === "VALO"), padding: "3px 9px", fontSize: 8.5, fontWeight: 800, color: pay === "VALO" ? VALO_PURPLE : T.faint }}>$VALO</button>
           </span>
         )}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: compactArm ? 6 : 10 }}>
         <button onClick={() => setAmount && setAmount(Math.max(0, (parseFloat(amount) || 0) - 0.1).toFixed(1))}
           style={{ ...chip(false), flex: "0 0 auto", padding: "8px 11px", fontSize: 13, fontWeight: 900 }}>−</button>
         <input value={amount} onChange={(e) => setAmount && setAmount(e.target.value)} inputMode="decimal"
@@ -3031,7 +3307,15 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
         <button onClick={() => setAmount && setAmount(((parseFloat(amount) || 0) + 0.1).toFixed(1))}
           style={{ ...chip(false), flex: "0 0 auto", padding: "8px 11px", fontSize: 13, fontWeight: 900 }}>+</button>
         <span style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 800, color: pay === "SOL" ? T.blue : VALO_PURPLE }}>{pay}</span>
-        <span style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>≈ ${(amt * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+        <span style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>
+          {compactArm && setPay && (
+            <b onClick={() => setPay(pay === "SOL" ? "VALO" : "SOL")}
+              title="Tap to swap settlement currency"
+              style={{ color: pay === "SOL" ? T.blue : VALO_PURPLE, cursor: "pointer", marginRight: 5, fontSize: 10, textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
+              {pay === "SOL" ? "SOL" : "$VALO"}
+            </b>
+          )}
+          ≈ ${(amt * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
       </div>
       <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
         {vtQuick.map((v, ci) => (
@@ -3442,7 +3726,7 @@ function pnlSeries(range, seed, unreal, realized) {
   return pts.map((p) => p * scale);
 }
 
-function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realizedPnl, unrealizedPnl, extraEquity = 0,
+function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realizedPnl, unrealizedPnl, extraEquity = 0, walletConnected = true, onConnectWallet,
   tab, setTab, range, setRange, mode, setMode, seed, onDeposit, onWithdraw, onSwap,
   hideBalance, setHideBalance, heldSlot, maxDeposit = 0, maxWithdraw = 0, activity = [], onOpenToken,
   username, setUsername, isNameTaken,
@@ -3512,7 +3796,24 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   };
 
   return (
-    <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14, marginTop: 12 }}>
+    <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14, marginTop: 12, position: "relative", overflow: "hidden" }}>
+      {/* PHANTOM GATE — funds stay blurred until the user's own wallet is in */}
+      {!walletConnected && (
+        <div style={{ position: "absolute", inset: 0, zIndex: 6, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: 20,
+          background: "rgba(10,13,19,0.35)", backdropFilter: "blur(2px)" }}>
+          <div style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, letterSpacing: 1.5, color: T.text }}>🔒 CONNECT TO UNLOCK</div>
+          <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.dim, textAlign: "center", maxWidth: 240, lineHeight: 1.6 }}>
+            Your funds, positions and PnL stay hidden until your own Phantom wallet is added. One tap — unlocked on sight.
+          </div>
+          <button onClick={() => onConnectWallet && onConnectWallet()}
+            style={{ border: "none", borderRadius: 11, padding: "12px 22px", fontFamily: T.mono, fontSize: 12, fontWeight: 900, letterSpacing: 1,
+              background: "linear-gradient(135deg, #AB9FF2, #7D5CF0)", color: "#120b26", cursor: "pointer", boxShadow: "0 6px 22px rgba(125,92,240,0.5)" }}>
+            👻 CONNECT PHANTOM
+          </button>
+          <div style={{ fontFamily: T.mono, fontSize: 7, color: T.faint }}>DEMO · real Phantom hookup goes live at mainnet</div>
+        </div>
+      )}
+      <div style={!walletConnected ? { filter: "blur(9px)", pointerEvents: "none", userSelect: "none" } : undefined}>
       {/* username row */}
       {username && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${T.border}` }}>
@@ -3901,6 +4202,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
         </>
       )}
     </div>
+    </div>
   );
 }
 
@@ -4065,6 +4367,7 @@ function CardMiniChart({ candles, hue, mode, tfMin = 15, count = 90, full = fals
 }
 
 function TokenCard({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf = 15 }) {
+  const liveEyes = liveViewersOf(t, "pump"); // re-renders ride the price ticks
   const score = scoreToken(t);
   const rc = ratingColor(score);
   const net = t.greenUsd - t.redUsd;
@@ -4081,6 +4384,9 @@ function TokenCard({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf 
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={20} />
             <span style={{ fontWeight: 800, fontSize: 14 }}>{t.sym}</span>
+            <span title="Watching right now" style={{ display: "inline-flex", alignItems: "center", gap: 3, fontFamily: T.mono, fontSize: 8, fontWeight: 800, color: T.green }}>
+              <EyeOpenIcon c={T.green} s={11} />{liveEyes}
+            </span>
             {t.isNew && <span style={{ fontSize: 8, background: T.amber, color: "#1a1508", padding: "1px 5px", borderRadius: 4, fontWeight: 800 }}>NEW</span>}
             <span style={{ fontSize: 8, border: `1px solid ${T.border2}`, color: T.dim, padding: "1px 5px", borderRadius: 4, fontFamily: T.mono }}>
               {t.chain === "pump" ? "PUMP" : "RBHD"}
@@ -4473,7 +4779,37 @@ function WpFeeTable() {
   );
 }
 
+const PATCH_NOTES = [
+  { v: "1.0.1", name: "THE PRO UPDATE", date: "July 2026", accent: "#F0B90B", items: [
+    "PC PRO DESK v2 — trading desk fused to the chart: one border, tabs on top, wide BUY|SELL bar, segment cards",
+    "Chart pulls from every edge: token strip (left), taller chart (up), wider panels & wallet (right)",
+    "⚡ARM popup appears AT your line with the exact buy-in — bottom arm buttons retired on PC",
+    "ESCROW WALLET — arming a buy takes the funds instantly; cancel refunds; can never over-commit or go below zero",
+    "Realized/unrealized now catch every close site-wide — bots, exits, trailing fires, manual sells",
+    "CALLOUT RANK BONUSES — top-100 on any duration pays +0.10× to +0.50× per epoch, stacking across all 8 boards (to +4.0×)",
+    "🎖 RANKS page — tiers & top-250 leaderboards side by side; badge-tap jumps to a trader's glowing row",
+    "🔥 BURN TRACKER — your burn, site burn, live circulating supply",
+    "◆ $VALO TOKEN STATS pop-out — duration-aware live chart, flow, supply, your PnL (traceable crosshair)",
+    "👁 live viewer eyes on every chart + scanner bar, pump.fun ⇄ VALO flip",
+    "👻 Phantom gate — wallet blurred until connected",
+    "Mobile: two-tap confirm on BUY/SELL, hold-to-edit ANY chip via in-app editor, tap-balance auto-fill (fee-safe), classic axis zoom",
+    "Fee-safe sizing — every %/MAX chip covers site tax + tx fees so buys always clear",
+    "Callout cooldown → 4 hours",
+  ]},
+  { v: "1.0.0", name: "GENESIS", date: "July 2026", accent: "#7D5CF0", items: [
+    "The VALO Terminal launches — live multi-token charts, order ticket, instant buys/sells in SOL or $VALO",
+    "🤖 AUTO TRADER — buy-in slider, stop loss, trailing take-profit legs; bots wait as chart lines and fill themselves",
+    "👁 VISUAL TRADING — tap BUY IN, tap EXIT POINT, arm the pair; lines stay painted until hit, drag any line to re-price live",
+    "Double-click drag-set on PC — plant unlimited bots straight on the chart",
+    "MY POSITIONS hub — bots | both | tickets with per-row and bulk sell-alls",
+    "Social layer — chat profiles, friends & DMs, follows with callout alerts, trader tracking in your colors",
+    "📣 CALLOUTS — tier ladder from JEET to DIAMOND APEX, site-wide banner for the best calls",
+    "🎁 HOURLY EPOCHS — creator fees split 25/25/50, hourly claims, loyalty multiplier to ×2.5",
+    "Whitepaper v1 — tokenomics, epochs, security, roadmap",
+  ]},
+];
 function WhitepaperModal({ onClose, isMobile }) {
+  const [wpTab, setWpTab] = useState("paper"); // paper | patches
   const [active, setActive] = useState(WP_SECTIONS[0].id);
   const [tocOpen, setTocOpen] = useState(!isMobile);
   const [progress, setProgress] = useState(0);
@@ -4536,7 +4872,8 @@ function WhitepaperModal({ onClose, isMobile }) {
               <button onClick={() => setTocOpen((v) => !v)} title="Contents"
                 style={{ ...chip(tocOpen), padding: isMobile ? "7px 11px" : "5px 9px", fontSize: isMobile ? 13 : 13, fontWeight: 700 }}>☰ {isMobile ? "Contents" : ""}</button>
               <span style={{ fontFamily: T.sans, fontWeight: 900, fontSize: isMobile ? 17 : 20, color: VALO_PURPLE, letterSpacing: -0.5 }}>VALO</span>
-              {!isMobile && <span style={{ fontFamily: T.mono, fontSize: 10, letterSpacing: 2, color: T.dim }}>WHITEPAPER v1.0</span>}
+              <button onClick={() => setWpTab("paper")} style={{ ...chip(wpTab === "paper"), padding: "4px 10px", fontSize: 9, fontWeight: 900 }}>📖 {isMobile ? "PAPER" : "WHITEPAPER"}</button>
+              <button onClick={() => setWpTab("patches")} style={{ ...chip(wpTab === "patches"), padding: "4px 10px", fontSize: 9, fontWeight: 900, color: wpTab === "patches" ? T.amber : T.dim, borderColor: wpTab === "patches" ? `${T.amber}66` : T.border }}>📜 PATCH NOTES</button>
             </div>
             <button onClick={onClose} aria-label="Close whitepaper"
               style={{ display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
@@ -4548,6 +4885,29 @@ function WhitepaperModal({ onClose, isMobile }) {
           <div style={{ position: "absolute", left: 0, bottom: 0, height: 3, width: `${progress * 100}%`, background: `linear-gradient(90deg, ${VALO_PURPLE}, ${T.green})`, transition: "width .1s" }} />
         </div>
 
+        {wpTab === "patches" ? (
+          <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? "12px 12px 20px" : "16px 22px 26px" }}>
+            <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 12 }}>
+              EVERY SHIPPED RELEASE, NEWEST FIRST · new patches land here the day they go live
+            </div>
+            {PATCH_NOTES.map((pn) => (
+              <div key={pn.v} style={{ border: `1px solid ${pn.accent}44`, background: `${pn.accent}0a`, borderRadius: 13, padding: isMobile ? "12px 13px" : "15px 18px", marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 9, flexWrap: "wrap" }}>
+                  <span style={{ fontFamily: T.mono, fontSize: isMobile ? 15 : 18, fontWeight: 900, color: pn.accent }}>PATCH {pn.v}</span>
+                  <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: T.text, letterSpacing: 1.5 }}>{pn.name}</span>
+                  <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 8, color: T.faint }}>{pn.date}</span>
+                </div>
+                {pn.items.map((it, i) => (
+                  <div key={i} style={{ display: "flex", gap: 8, marginBottom: 5 }}>
+                    <span style={{ color: pn.accent, fontFamily: T.mono, fontSize: 10, flex: "0 0 auto" }}>▸</span>
+                    <span style={{ fontFamily: T.mono, fontSize: isMobile ? 9.5 : 10.5, color: T.text, lineHeight: 1.55 }}>{it}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, lineHeight: 1.6 }}>◆ Community-built — you ask, we ship. Requests become line items here.</div>
+          </div>
+        ) : (
         <div style={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
           {/* TOC sidebar */}
           <div style={{
@@ -4614,6 +4974,7 @@ function WhitepaperModal({ onClose, isMobile }) {
               style={{ ...chip(false), fontSize: 10, padding: "6px 12px" }}>↑ back to top</button>
           </div>
         </div>
+        )}
       </div>
     </div>
   );
@@ -5251,6 +5612,17 @@ export default function App() {
   }, []);
   const [sellPcts, setSellPcts] = useState([10, 25, 50, 75, 100]);
   const [hbConfirm, setHbConfirm] = useState(null);                // hotbar two-tap: "buy" | "sell" | "sellall"
+  const [mobPnlMode, setMobPnlMode] = useState("live");            // mobile bar PNL cell: "live" | a duration key
+  const [pnlDrop, setPnlDrop] = useState(null);                    // {x,y} — duration dropdown anchor
+  const pnlBtnRef = useRef(null);
+  useEffect(() => {
+    if (!pnlDrop) return;
+    const off = (e) => { if (e.target && e.target.closest && e.target.closest("[data-pnldrop]")) return; setPnlDrop(null); };
+    window.addEventListener("pointerdown", off, true);
+    return () => window.removeEventListener("pointerdown", off, true);
+  }, [pnlDrop != null]);
+  const MOB_PNL_DURS = ["24H", "1H", "4H", "7D", "30D", "ALL"];
+  const MOB_PNL_MS = { "1H": 36e5, "4H": 144e5, "24H": 864e5, "7D": 6048e5, "30D": 2592e6, "ALL": Infinity };
   const hbConfirmRef = useRef(null);
   const holdRef = useRef(null);
   // press-and-hold (~500ms) any chip to change its number to whatever you want
@@ -5566,6 +5938,22 @@ export default function App() {
   const epochRef = useRef(epochOf(Date.now()));
   const [myBurned, setMyBurned] = useState(0);
   const [burnOpen, setBurnOpen] = useState(false); // 🔥 burn tracker popup
+  const [walletConnected, setWalletConnected] = useState(false);   // 👻 phantom gate — funds blurred until added
+  const [isFs, setIsFs] = useState(false);                          // ⛶ fullscreen state (Esc exits natively)
+  useEffect(() => {
+    const on = () => setIsFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", on);
+    return () => document.removeEventListener("fullscreenchange", on);
+  }, []);
+  const connectPhantom = async () => {
+    try {
+      const ph = typeof window !== "undefined" && window.solana;
+      if (ph && ph.isPhantom) { await ph.connect(); setWalletConnected(true); return; }
+    } catch (e) { /* user dismissed — stay locked */ return; }
+    // no extension (or mobile in-app) — pre-mainnet demo unlock
+    setWalletConnected(true);
+  };
+  const [valoStatsOpen, setValoStatsOpen] = useState(false); // ◆ $VALO token stats pop-out
   // the SITE burn keeps climbing with everyone else's trades, live
   useEffect(() => {
     const iv = setInterval(() => setBurned((b) => b + 40 + Math.random() * 140), 2600);
@@ -6394,7 +6782,7 @@ export default function App() {
                     onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
                     onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop(at); }}
                     onBotArm={(lvl) => armAtLevel(lvl)}
-                    onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq}
+                    onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq} eyesToken={selected}
                     onLineSelect={(id) => setSelLineId(id)}
                     isMobile={isMobile} height={isMobile ? mobChartH : 480 + extraH + Math.round(pcCrunch * 150)} />
 
@@ -6590,6 +6978,46 @@ export default function App() {
   const ticketBlock = null;
 
   // compact hotbar — the only trade controls; MAX & SELL ALL included
+  const botPnlWindow = (key) => {
+    const cut = Date.now() - (MOB_PNL_MS[key] || Infinity);
+    return botRuns.reduce((s, r) => s + r.exits.reduce((a, e) => (e.ts >= cut ? a + e.pnlUsd : a), 0), 0);
+  };
+  const mobStatsBar = (
+    <div style={{ display: "flex", gap: 0, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, overflow: "hidden", marginBottom: 8, fontFamily: T.mono }}>
+      {[
+        ["SOL", <b onClick={() => { setPay("SOL"); setAmount(String(feeSafe(solBalance, "SOL"))); }}
+          style={{ color: T.blue, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{solBalance.toFixed(2)}</b>],
+        ["$VALO", <b onClick={() => { setPay("VALO"); setAmount(String(feeSafe(valoWallet, "VALO"))); }}
+          style={{ color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(valoWallet)}</b>],
+        [mobPnlMode === "live" ? "LIVE BOT PNL" : `BOT PNL · ${mobPnlMode}`, (() => {
+          const v = mobPnlMode === "live" ? botUnrealized : botPnlWindow(mobPnlMode);
+          const onDur = mobPnlMode !== "live";
+          // a real <button> — the global no-select CSS applies, so the HOLD
+          // actually fires instead of the browser highlighting text
+          return <button ref={pnlBtnRef} data-pnldrop="1" className="pnl-cell" onClick={() => setMobPnlMode((m) => (m === "live" ? "24H" : "live"))}
+            {...chipEditProps(() => {
+              const r = pnlBtnRef.current && pnlBtnRef.current.getBoundingClientRect();
+              setPnlDrop(r ? { x: Math.min(r.left, window.innerWidth - 150), y: r.bottom + 4 } : { x: 40, y: 120 });
+            })}
+            title="Tap: live ⇄ 24H · hold: pick any duration"
+            style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, cursor: "pointer",
+              color: v >= 0 ? T.green : T.red,
+              background: onDur ? "rgba(125,92,240,0.14)" : "none",
+              border: onDur ? `1px solid ${VALO_PURPLE}66` : "1px solid transparent",
+              borderRadius: 6, padding: "1px 7px",
+              boxShadow: onDur ? `0 0 8px ${VALO_PURPLE}44` : "none",
+              transition: "background .15s, border-color .15s, box-shadow .15s" }}>
+            {v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}</button>;
+        })()],
+        ["TOTAL", <b style={{ color: T.text }}>${(solBalance * SOL_USD + valoWallet * 0.0125 + strategyEquityUsd).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b>],
+      ].map(([k, v], i) => (
+        <div key={i} style={{ flex: 1, textAlign: "center", padding: "6px 2px", borderLeft: i ? `1px solid ${T.border}` : "none", minWidth: 0 }}>
+          <div style={{ color: T.faint, fontSize: 6.5, letterSpacing: 0.8, marginBottom: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k}</div>
+          <div style={{ fontSize: 9.5, fontWeight: 800 }}>{v}</div>
+        </div>
+      ))}
+    </div>
+  );
   const mobileTradeStrip = selected && (() => {
     const a = parseFloat(amount) || 0;
     const usdOf = (amtSol) => amtSol * SOL_USD;
@@ -6931,7 +7359,8 @@ export default function App() {
                 ["24H PnL", <b style={{ color: platformPnl >= 0 ? T.green : T.red }}>{platformPnl >= 0 ? "+" : "−"}${Math.abs(platformPnl).toFixed(0)}</b>],
                 ["🔥 BURN", <b onClick={() => setBurnOpen(true)} style={{ color: "#f97316", cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(burned)}</b>],
               ].map(([k, v], i) => (
-                <div key={k} style={{ flex: 1, textAlign: "center", padding: "6px 2px", borderLeft: i ? `1px solid ${T.border}` : "none" }}>
+                <div key={k} onClick={() => { if (k !== "🔥 BURN") setValoStatsOpen(true); }}
+                  style={{ flex: 1, textAlign: "center", padding: "6px 2px", borderLeft: i ? `1px solid ${T.border}` : "none", cursor: k !== "🔥 BURN" ? "pointer" : "default" }}>
                   <div style={{ color: T.faint, fontSize: 7.5, letterSpacing: 0.8, marginBottom: 2 }}>{k}</div>
                   {v}
                 </div>
@@ -6955,7 +7384,8 @@ export default function App() {
               ["NET FLOW", `${gNet >= 0 ? "+" : "−"}${fmt$(Math.abs(gNet))}`, gNet >= 0 ? T.green : T.red, null],
               ["24H PnL", `${platformPnl >= 0 ? "+" : "−"}$${Math.abs(platformPnl).toFixed(0)}`, platformPnl >= 0 ? T.green : T.red, "Your realized + unrealized PnL across all coins"],
             ].map(([k, v, col, tip]) => (
-              <div key={k} title={tip || ""} style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${T.border}`, borderRadius: 9, padding: "6px 13px", minWidth: 78 }}>
+              <div key={k} onClick={() => setValoStatsOpen(true)} title={(tip ? tip + " · " : "") + "Tap: full $VALO token stats"}
+                style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${T.border}`, borderRadius: 9, padding: "6px 13px", minWidth: 78, cursor: "pointer" }}>
                 <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>{k}</div>
                 <div style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: col }}>{v}</div>
               </div>
@@ -7336,7 +7766,7 @@ export default function App() {
             </button>
             <PortfolioPanel big
               solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
@@ -7452,6 +7882,37 @@ export default function App() {
           </span>
         </button>
       )}
+      {!isMobile && (
+        <button onClick={() => { try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); } catch (e) {} }}
+          title={isFs ? "Press Esc to exit fullscreen" : "Fullscreen — same proportions, stretched to fill your screen. Esc exits."}
+          style={{ position: "fixed", top: 6, right: 12, zIndex: 55, display: "flex", alignItems: "center", gap: 6,
+            background: "rgba(15,19,28,0.72)", border: `1px solid ${T.border}`, borderRadius: 8, padding: "4px 9px", cursor: "pointer" }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={isFs ? VALO_PURPLE : "#8a94a8"} strokeWidth="2.4" strokeLinecap="round">
+            <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+          </svg>
+          <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: "rgba(138,148,168,0.7)", fontWeight: 800 }}>{isFs ? "ESC TO EXIT" : "FULLSCREEN"}</span>
+        </button>
+      )}
+      {pnlDrop && (
+        <div data-pnldrop="1" style={{ position: "fixed", left: pnlDrop.x, top: pnlDrop.y, zIndex: 96,
+          background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 11, padding: 5, minWidth: 142,
+          boxShadow: "0 14px 40px rgba(0,0,0,0.6)", animation: "coPop .14s ease" }}>
+          <div style={{ fontFamily: T.mono, fontSize: 6.5, letterSpacing: 1.2, color: T.faint, padding: "3px 8px 5px" }}>BOT PNL · PICK A WINDOW</div>
+          {["live", ...MOB_PNL_DURS].map((k) => {
+            const v = k === "live" ? botUnrealized : botPnlWindow(k);
+            const on = mobPnlMode === k;
+            return (
+              <button key={k} onClick={() => { setMobPnlMode(k); setPnlDrop(null); }}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, width: "100%",
+                  border: "none", background: on ? "rgba(125,92,240,0.16)" : "transparent", borderRadius: 8,
+                  padding: "6px 9px", cursor: "pointer", fontFamily: T.mono }}>
+                <span style={{ fontSize: 9, fontWeight: 900, color: on ? VALO_PURPLE : T.dim }}>{k === "live" ? "● LIVE" : k}</span>
+                <span style={{ fontSize: 9, fontWeight: 800, color: v >= 0 ? T.green : T.red }}>{v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
       {chipEditCfg && (
         <div onClick={() => setChipEditCfg(null)} style={{ position: "fixed", inset: 0, zIndex: 95, background: "rgba(4,6,10,0.7)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 300, background: T.panel, border: `1px solid ${chipEditErr ? T.red : T.border2}`, borderRadius: 14, padding: 15, boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
@@ -7471,6 +7932,8 @@ export default function App() {
           </div>
         </div>
       )}
+      {valoStatsOpen && <ValoStatsModal onClose={() => setValoStatsOpen(false)} isMobile={isMobile}
+        valoUsd={valoUsdPrice} tvl={gTvl} burned={burned} valoWallet={valoWallet} />}
       {burnOpen && <BurnModal onClose={() => setBurnOpen(false)} isMobile={isMobile} myBurned={myBurned} siteBurned={burned} />}
       {ranksOpen && <RanksModal onClose={() => setRanksOpen(null)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens}
         myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)}
@@ -7532,7 +7995,7 @@ export default function App() {
               ...(botDraftLevel && String(botDraftLevel.tokenId) === String(selected.id) ? [{ level: botDraftLevel.level, side: botDraftLevel.side || "buy", draft: true, vt: !!vtLines }] : []),
             ]}
             botRuns={botRuns.filter((r) => r.status === "live" && String(r.tokenId) === String(selected.id))}
-            botSetMode={botDragSet} onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq}
+            botSetMode={botDragSet} onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq} eyesToken={selected}
             onLineSelect={(id) => setSelLineId(id)}
             onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
             onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop(at); }} />
@@ -7545,6 +8008,8 @@ export default function App() {
           </div>
           <div style={{ flex: 1, overflowY: "auto", padding: 10 }}>
             {mobPageTab === "bots" ? (
+              <>
+              {mobStatsBar}
               <AllBotsPanel tokens={tokens} curTokenId={selected && selected.id} pendingOrders={pendingOrders} botRuns={botRuns}
                 onEdit={(id, tid) => { setSel(tid); setClickMode(null); setEditingBotId(id);
                   const ord = pendingOrders.find((o) => o.id === id);
@@ -7557,18 +8022,10 @@ export default function App() {
                   const base = pendingOrders.find((o) => String(o.id) === String(isExit ? id.slice(0, -8) : id));
                   setEditLineReq({ id, level: base ? (isExit ? base.vtSell : base.level) : null, n: Date.now() });
                 }} />
+              </>
             ) : mobPageTab === "visual" ? (
               <>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "8px 11px", marginBottom: 8, fontFamily: T.mono }}>
-                <span style={{ fontSize: 7.5, letterSpacing: 1.5, color: T.faint }}>💼 WALLET</span>
-                <span onClick={() => { setPay("SOL"); setAmount(String(feeSafe(solBalance, "SOL"))); }}
-                  title="tap a balance to load it as your buy-in (a hair under, to cover tax + tx fees)"
-                  style={{ fontSize: 10, fontWeight: 800, color: T.blue, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{solBalance.toFixed(2)} SOL</span>
-                <span onClick={() => { setPay("VALO"); setAmount(String(feeSafe(valoWallet, "VALO"))); }}
-                  title="tap a balance to load it as your buy-in (a hair under, to cover tax + tx fees)"
-                  style={{ fontSize: 10, fontWeight: 800, color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(valoWallet)} $VALO</span>
-                <span style={{ fontSize: 10.5, fontWeight: 900, color: T.text }}>${(solBalance * SOL_USD + valoWallet * valoUsdPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-              </div>
+              {mobStatsBar}
               <VisualTrading token={selected} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} compactArm
                 editBot={pendingOrders.find((o) => o.id === editingBotId && o.vt) || null}
                 botLock={botLock} onStageSide={(m) => setBotSide(m)} onArmPair={armVisualPair}
@@ -7579,21 +8036,14 @@ export default function App() {
             ) : (
             <>
             {/* live wallet — state-driven, so it moves the instant any bot or trade does */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "8px 11px", marginBottom: 8, fontFamily: T.mono }}>
-              <span style={{ fontSize: 7.5, letterSpacing: 1.5, color: T.faint }}>💼 WALLET</span>
-              <span onClick={() => { setPay("SOL"); setAmount(String(feeSafe(solBalance, "SOL"))); }}
-                title="tap a balance to load it as your buy-in (a hair under, to cover tax + tx fees)"
-                style={{ fontSize: 10, fontWeight: 800, color: T.blue, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{solBalance.toFixed(2)} SOL</span>
-              <span onClick={() => { setPay("VALO"); setAmount(String(feeSafe(valoWallet, "VALO"))); }}
-                title="tap a balance to load it as your buy-in (a hair under, to cover tax + tx fees)"
-                style={{ fontSize: 10, fontWeight: 800, color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(valoWallet)} $VALO</span>
-              <span style={{ fontSize: 10.5, fontWeight: 900, color: T.text }}>${(solBalance * SOL_USD + valoWallet * valoUsdPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-            </div>
+            {mobStatsBar}
             {/* live auto trader — arm or relaunch right here under the chart */}
             <TradePanel key={editingBotId || "mnew"} token={selected} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} compactArm
               onExecute={(o) => execute(selected, o)}
               editBot={pendingOrders.find((o) => o.id === editingBotId) || null}
               onRelaunch={(id, o) => relaunchBot(id, o, selected)} botLock={botLock}
+              dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
+              solBalance={solBalance} valoWallet={valoWallet}
               onDraftLevel={(lvl, tid, side) => setBotDraftLevel(lvl ? { tokenId: tid != null ? tid : selected.id, level: lvl, side: side || botSide } : null)} />
             <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1.5, margin: "12px 0 7px" }}>BOT METRICS · CLOSEST TRIGGER FIRST</div>
             {pendingOrders.length === 0 && <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center", padding: 24 }}>No bots armed yet — arm buy/sell and tap the chart, or use the auto strategy.</div>}
@@ -7983,7 +8433,7 @@ export default function App() {
             </div>
             <PortfolioPanel big
               solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
@@ -8200,6 +8650,7 @@ export default function App() {
         @keyframes wallSlide{ from{ transform: translateX(-100%); opacity:0; } to{ transform: translateX(0); opacity:1; } }
         .ticker-track{ display:flex; width:max-content; animation: tickerScroll 130s linear infinite; }
         button{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; -webkit-tap-highlight-color: transparent; }
+        .pnl-cell:active{ transform: scale(0.94); background: rgba(125,92,240,0.2) !important; }
         .lb-row{ transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
         .lb-row:hover{ transform: translateX(5px); box-shadow: 0 0 14px rgba(125,92,240,0.3); border-color: rgba(125,92,240,0.55) !important; }
         .lb-pod{ transition: transform .16s ease, box-shadow .16s ease; }
