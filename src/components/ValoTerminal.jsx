@@ -75,6 +75,13 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 // ---- fee schedule: 50% burn pool / 50% airdrop vault ----
 const TAX = { SOL: 0.6, VALO: 0.3 };            // % per transaction
 const taxFor = (pay) => (pay === "SOL" ? TAX.SOL : TAX.VALO);
+// fee-safe buy sizing: every %/MAX chip shaves the site tax + a tx-fee cushion
+// off the top, so a MAX buy clears cleanly instead of bouncing on the last cent
+const feeSafe = (raw, pay) => {
+  const net = raw * (1 - taxFor(pay) / 100) - (pay === "SOL" ? 0.002 : 0);
+  const v = Math.max(0, net * 0.999);
+  return pay === "SOL" ? +v.toFixed(3) : Math.floor(v);
+};
 const splitFee = (amt, pay) => {
   const total = amt * (taxFor(pay) / 100);
   return { total, burn: total / 2, vault: total / 2 };
@@ -1090,7 +1097,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       {position && position.amt > 0 && lastPxRef.current.visible && (() => {
         const entry = position.entry;
         const pnlPct = ((price - entry) / entry) * 100;
-        const pnlMoney = position.amt * (pnlPct / 100);
+        // EXACT same math as every Live P/L display: settlement units → USD
+        const pnlMoney = (position.amt * (price / entry) - position.amt) * ((position.pay || "SOL") === "SOL" ? SOL_USD : 0.0125);
         const col = pnlPct > 0.001 ? T.green : pnlPct < -0.001 ? T.red : T.dim;
         const top = Math.max(14, Math.min(height - 46, lastPxRef.current.y - 22));
         // hug the LATEST candle: sit just right of it, clamped inside the plot,
@@ -1099,9 +1107,9 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
         // rigid to the bar with breathing room (+18px) — and when the bar rides
         // the right edge, the box slides OVER the price axis (half-visible past
         // the edge) instead of being blocked by that right-side wall
-        const left = Math.max(6, Math.min((lp.x != null ? lp.x : lp.plotW) + 18, lp.plotW + 46));
+        const left = Math.max(6, Math.min((lp.x != null ? lp.x : lp.plotW) + (isMobile ? 12 : 18), lp.plotW + 46));
         return (
-          <div style={{ position: "absolute", left, top, zIndex: 4, pointerEvents: "none",
+          <div style={{ position: "absolute", left, top, zIndex: 4, pointerEvents: "none", transform: isMobile ? "scale(0.78)" : "none", transformOrigin: "left top",
             background: "rgba(10,13,19,0.94)", border: `1px solid ${col}`, borderRadius: 8, padding: "5px 8px",
             fontFamily: T.mono, textAlign: "right", boxShadow: `0 0 12px ${col}44` }}>
             <div style={{ fontSize: 8, letterSpacing: 1, color: T.faint }}>POSITION PnL</div>
@@ -1116,6 +1124,33 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
 }
 
 // ---------------- UI atoms ----------------
+// double-tap (mobile), hold ~500ms, double-click or right-click (PC) → edit the chip
+const chipEditProps = (fn) => ({
+  // HOLD (~450ms) to edit — mobile-first. PC: double-click or right-click.
+  onTouchStart: (e) => {
+    const n = e.currentTarget; const t = e.touches && e.touches[0]; if (!t) return;
+    n._hx = t.clientX; n._hy = t.clientY;
+    if (n._ht) clearTimeout(n._ht);
+    n._ht = setTimeout(() => {
+      n._ht = null; n._held = true;
+      if (navigator.vibrate) navigator.vibrate(12);
+      fn();
+    }, 450);
+  },
+  onTouchMove: (e) => {
+    const n = e.currentTarget; const t = e.touches && e.touches[0];
+    if (t && n._ht && (Math.abs(t.clientX - n._hx) > 10 || Math.abs(t.clientY - n._hy) > 10)) { clearTimeout(n._ht); n._ht = null; }
+  },
+  onTouchEnd: (e) => { const n = e.currentTarget; if (n._ht) { clearTimeout(n._ht); n._ht = null; } },
+  onClickCapture: (e) => { const n = e.currentTarget; if (n._held) { n._held = false; e.preventDefault(); e.stopPropagation(); } },
+  onContextMenu: (e) => { e.preventDefault(); fn(); },
+  onDoubleClick: (e) => { e.preventDefault(); fn(); },
+})
+// sandboxed frames (like the Claude preview) block window.prompt — so the chip
+// editor is a real in-app sheet, registered by App and callable from any panel
+let __openChipEditor = null;
+const askPct = (cur, cb) => { __openChipEditor && __openChipEditor({ title: "SET CHIP — PERCENT", hint: "any whole % from 1 to 100", value: String(cur), unit: "%", validate: (v) => { const n = parseFloat(v); return n >= 1 && n <= 100 ? Math.round(n) : null; }, cb }); };
+const askAmt = (cur, cb) => { __openChipEditor && __openChipEditor({ title: "SET CHIP — AMOUNT", hint: "0.01 and up — anything you like", value: String(cur), unit: "", validate: (v) => { const n = parseFloat(v); return n >= 0.01 ? n : null; }, cb }); };
 const chip = (active) => ({
   border: `1px solid ${active ? T.border2 : T.border}`,
   background: active ? T.panel2 : "transparent",
@@ -1144,6 +1179,8 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
   const [stopLoss, setStopLoss] = useState(25);
   const [armFlash, setArmFlash] = useState(0); // lights the arm button when a bot goes live
   const [showLine, setShowLine] = useState(false); // 📍 buy-in line painted on the chart
+  const [tpQuick, setTpQuick] = useState([0.5, 1, 2, 5]);   // dbl-tap a chip to retype it
+  const [tpPcts, setTpPcts] = useState([25, 50, 75, 100]);
   useEffect(() => {
     if (!showLine) return;
     const cancel = (e) => {
@@ -1235,26 +1272,31 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
         <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 800, color: pay === "SOL" ? T.blue : VALO_PURPLE, flex: "0 0 auto" }}>{pay}</span>
       </div>
       <div style={{ display: "flex", gap: 5, marginBottom: wide ? 4 : 10 }}>
-        {[0.5, 1, 2, 5].map((v) => (
-          <button key={v} onClick={() => setAmount && setAmount(String(v))}
+        {tpQuick.map((v, ci) => (
+          <button key={ci} onClick={() => setAmount && setAmount(String(v))}
+            {...chipEditProps(() => { askAmt(v, (nv) => setTpQuick((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
             style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "5px 0", fontSize: 9.5, fontWeight: 800 }}>{v}</button>
         ))}
         <span style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, alignSelf: "center", flex: "0 0 auto", marginLeft: 4 }}>
           ≈ ${(amt * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD
         </span>
       </div>
-      {wide && (() => {
+      {!compactArm && (() => {
         const bal = pay === "SOL" ? solBalance : valoWallet;
         const unit$ = pay === "SOL" ? SOL_USD : 0.0125;
         return (
           <>
-            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, margin: "2px 0 4px" }}>
-              💼 WALLET <b style={{ color: pay === "SOL" ? T.blue : VALO_PURPLE }}>{bal.toFixed(2)} {pay}</b>
-              <span style={{ color: T.faint }}> · ≈ ${(bal * unit$).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD</span>
+            <div style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.blue,
+              background: "rgba(76,154,255,0.10)", border: `1px solid ${T.blue}55`, borderRadius: 8,
+              padding: "6px 10px", margin: "4px 0 6px", display: "flex", justifyContent: "space-between", alignItems: "baseline",
+              boxShadow: "0 0 12px rgba(76,154,255,0.18)" }}>
+              <span>💼 {bal.toFixed(2)} {pay}</span>
+              <span style={{ fontSize: 9.5, opacity: 0.85 }}>≈ ${(bal * unit$).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD</span>
             </div>
             <div style={{ display: "flex", gap: 4 }}>
-              {[25, 50, 75, 100].map((pc) => (
-                <button key={pc} onClick={() => setAmount && setAmount(((bal * pc) / 100).toFixed(2))}
+              {tpPcts.map((pc, ci) => (
+                <button key={ci} onClick={() => setAmount && setAmount(String(feeSafe((bal * pc) / 100, pay)))}
+                  {...chipEditProps(() => { askPct(pc, (nv) => setTpPcts((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
                   style={{ ...chip(false), flex: 1, textAlign: "center", padding: "3px 0", fontSize: 8.5, fontWeight: 800 }}>{pc === 100 ? "MAX" : `${pc}%`}</button>
               ))}
             </div>
@@ -1493,6 +1535,9 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
 }
 
 function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, setAmount, pay, setPay, position, solBalance, valoBalance, positions, tokens, onOpenToken, onCloseAll, bestMult, pctSel, setPctSel, pendingOrders = [], onOpenBot, onCancelBot, onPosTrade, onDraftLevel, realized24 = 0 }) {
+  const [dtBuyPcts, setDtBuyPcts] = useState([10, 25, 50, 75, 100]);  // dbl-click / right-click a chip to retype it
+  const [dtSellPcts, setDtSellPcts] = useState([10, 25, 50, 75, 100]);
+  const [dtFixed, setDtFixed] = useState([0.5, 1, 2, 5]);
   const [autoOpen, setAutoOpen] = useState(false); // AUTO-TRADING collapsible
   const amt = parseFloat(amount) || 0;
   const fee = splitFee(amt, pay);
@@ -1551,7 +1596,20 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
       </div>
 
       <label style={lbl}>Amount ({pay === "SOL" ? "SOL" : "$VALO"})</label>
-      <input value={amount} onChange={(e) => { setAmount(e.target.value); setPctSel && setPctSel(null); }} style={{ ...inp, width: "100%", marginBottom: 10 }} />
+      <input value={amount} onChange={(e) => { setAmount(e.target.value); setPctSel && setPctSel(null); }} style={{ ...inp, width: "100%", marginBottom: 6 }} />
+      {(() => {
+        const balP = pay === "SOL" ? solBalance : valoBalance;
+        const unitP = pay === "SOL" ? SOL_USD : 0.0125;
+        return (
+          <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: T.blue,
+            background: "rgba(76,154,255,0.10)", border: `1px solid ${T.blue}55`, borderRadius: 8,
+            padding: "5px 10px", marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "baseline",
+            boxShadow: "0 0 12px rgba(76,154,255,0.18)" }}>
+            <span>💼 {pay === "SOL" ? balP.toFixed(2) : fmtQty(balP)} {pay === "SOL" ? "SOL" : "$VALO"}</span>
+            <span style={{ fontSize: 9, opacity: 0.85 }}>≈ ${(balP * unitP).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD</span>
+          </div>
+        );
+      })()}
 
       {(() => {
         const bidSol = pay === "SOL" ? amt : (amt * token.price) / SOL_USD;
@@ -1562,10 +1620,12 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
           <div style={{ background: "rgba(22,199,132,0.05)", border: "1px solid rgba(22,199,132,0.25)", borderRadius: 10, padding: 10, marginBottom: 8 }}>
             <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.green, letterSpacing: 1, marginBottom: 6 }}>BUY · % of your {pay === "SOL" ? `${solBalance.toFixed(2)} SOL` : `${Math.floor(valoBalance).toLocaleString()} $VALO`}</div>
             <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
-              {[10, 25, 50, 75, 100].map((p) => {
+              {dtBuyPcts.map((p, ci) => {
                 const on = pctSel && pctSel.side === "buy" && pctSel.p === p;
                 return (
-                  <button key={p} onClick={() => { setPct(p, false); setPctSel && setPctSel({ side: "buy", p }); }}
+                  <button key={ci} onClick={() => { setPct(p, false); setPctSel && setPctSel({ side: "buy", p }); }}
+                    {...chipEditProps(() => askPct(p, (nv) => setDtBuyPcts((A) => A.map((x, j) => (j === ci ? nv : x)))))}
+                    title="Double-click or right-click to set your own %"
                     style={{ ...chip(false), flex: 1, textAlign: "center", padding: "5px 0", fontSize: 9.5,
                       fontWeight: on ? 900 : 400,
                       color: on ? "#07130d" : p === 100 ? T.amber : T.dim,
@@ -1575,6 +1635,15 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
                       transition: "background .15s, color .15s, box-shadow .15s" }}>{p === 100 ? "MAX" : p + "%"}</button>
                 );
               })}
+            </div>
+            {/* fixed amounts — same chips as the mobile hotbar & traders, editable too */}
+            <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
+              {dtFixed.map((v, ci) => (
+                <button key={ci} onClick={() => { setAmount(String(v)); setPctSel && setPctSel(null); }}
+                  {...chipEditProps(() => askAmt(v, (nv) => setDtFixed((A) => A.map((x, j) => (j === ci ? nv : x)))))}
+                  title="Double-click or right-click to set your own amount"
+                  style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "4px 0", fontSize: 9, fontWeight: 800, color: T.green }}>{v}</button>
+              ))}
             </div>
             <button onClick={() => onExecute({ side: "buy", pay, amt, mode: "instant", tax: taxFor(pay), burn: fee.total, legs: [] })}
               style={{ width: "100%", border: "none", borderRadius: 9, padding: "10px 6px", fontFamily: T.mono, fontWeight: 900, cursor: "pointer", background: T.green, color: "#07130d", boxShadow: "0 0 16px rgba(22,199,132,0.25)", lineHeight: 1.25 }}>
@@ -1587,10 +1656,12 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
           <div style={{ background: "rgba(234,57,67,0.05)", border: "1px solid rgba(234,57,67,0.25)", borderRadius: 10, padding: 10, marginBottom: 12 }}>
             <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.red, letterSpacing: 1, marginBottom: 6 }}>SELL · % of your {held > 0 ? `${heldSol.toFixed(3)} SOL held` : "position"}</div>
             <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
-              {[10, 25, 50, 75, 100].map((p) => {
+              {dtSellPcts.map((p, ci) => {
                 const on = pctSel && pctSel.side === "sell" && pctSel.p === p;
                 return (
-                  <button key={p} onClick={() => { setPct(p, true); setPctSel && setPctSel({ side: "sell", p }); }} disabled={held <= 0}
+                  <button key={ci} onClick={() => { setPct(p, true); setPctSel && setPctSel({ side: "sell", p }); }} disabled={held <= 0}
+                    {...chipEditProps(() => askPct(p, (nv) => setDtSellPcts((A) => A.map((x, j) => (j === ci ? nv : x)))))}
+                    title="Double-click or right-click to set your own %"
                     style={{ ...chip(false), flex: 1, textAlign: "center", padding: "5px 0", fontSize: 9.5,
                       fontWeight: on ? 900 : 400,
                       color: on ? "#170808" : held <= 0 ? T.faint : p === 100 ? T.amber : T.dim,
@@ -1881,8 +1952,30 @@ function genLeaderboard(period) {
   return out.sort((a, b) => b.mult - a.mult);
 }
 // full tier ladder — JEET at the bottom, DIAMOND APEX at the top
-function TierListModal({ onClose, isMobile, myBest = 0 }) {
+function TierListModal({ onClose, isMobile, myBest = 0, embed = false }) {
   const ladder = [...CALLOUT_TIERS].slice().reverse(); // highest first
+  if (embed) return (
+    <div style={{ padding: "8px 2px 4px" }}>
+      <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, marginBottom: 10 }}>
+        Your best peak decides your rank — from JEET all the way to DIAMOND APEX. Every tier upgrades your ring.
+      </div>
+      {ladder.map((tr) => {
+        const mine = myBest >= tr.min && (ladder.find((x) => x.min > tr.min && myBest >= x.min) == null);
+        return (
+          <div key={tr.label} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 9px", borderRadius: 10, marginBottom: 4,
+            border: mine ? `1.5px solid ${tr.color}` : `1px solid ${tr.color}33`, background: mine ? `${tr.color}14` : `${tr.color}07`,
+            boxShadow: mine ? `0 0 12px ${tr.color}44` : "none" }}>
+            <CalloutRing mult={Math.max(tr.min, 1.01)} size={27} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: tr.color }}>{tr.label}{mine ? " · YOU" : ""}</div>
+              <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>peak ×{tr.min}{tr.apex ? "+ — the summit" : "+"}</div>
+            </div>
+            <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: tr.color }}>×{tr.min}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 76, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
@@ -1918,8 +2011,11 @@ function TierListModal({ onClose, isMobile, myBest = 0 }) {
 
 // compact leaderboard — the tier-list's sibling: same frame, top-10 badges per
 // duration, your rank, and the epoch bonus each placement pays
-function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser }) {
+function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser, embed = false, focusUser = null }) {
   const [period, setPeriod] = useState("1D");
+  const [hl, setHl] = useState(!!focusUser); // the jumped-to name glows, then fades
+  const focusRef = useRef(null);
+  useEffect(() => { if (!focusUser) return; const t = setTimeout(() => setHl(false), 5000); return () => clearTimeout(t); }, [focusUser]);
   const lbBonus = (r) => r < 1 ? 0 : r === 1 ? 0.5 : r === 2 ? 0.42 : r === 3 ? 0.36 : r === 4 ? 0.32 : r === 5 ? 0.29 : r === 6 ? 0.26 : r === 7 ? 0.23 : r === 8 ? 0.20 : r === 9 ? 0.17 : r === 10 ? 0.14 : r <= 100 ? 0.10 : 0;
   const board = useMemo(() => {
     const mine = Object.entries(myCallouts).map(([id, c]) => {
@@ -1929,29 +2025,33 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
     return [...genLeaderboard(period), ...mine].sort((a, b) => b.mult - a.mult);
   }, [period, myCallouts, tokens]);
   const myRank = board.findIndex((e) => e.you) + 1;
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 76, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
-      padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 620, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "82vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
-        <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, padding: "11px 13px 9px", borderBottom: `1px solid ${T.border}` }}>
+  const focusRank = focusUser ? board.findIndex((e) => !e.you && e.user === focusUser) + 1 : 0;
+  const listEnd = focusRank > 25 && focusRank <= 250 ? focusRank + 2 : 25;
+  useEffect(() => {
+    if (focusRank > 0 && focusRef.current) focusRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [focusRank, period]);
+  const body = (
+    <>
+        <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, padding: embed ? "6px 2px 8px" : "11px 13px 9px", borderBottom: `1px solid ${T.border}` }}>
+          {!embed && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
             <span style={{ fontFamily: T.mono, fontSize: isMobile ? 11 : 13, fontWeight: 900, letterSpacing: 1.5 }}>📊 CALLOUT LEADERBOARD</span>
             <button onClick={onClose} style={{ ...chip(false), padding: "4px 8px", fontSize: 11 }}>✕</button>
           </div>
+          )}
           <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
             {Object.keys(LB_MAX).map((p) => (
               <button key={p} onClick={() => setPeriod(p)} style={{ ...chip(period === p), padding: "3px 7px", fontSize: 8, fontWeight: 800 }}>{p}</button>
             ))}
           </div>
         </div>
-        <div style={{ padding: "9px 11px 12px" }}>
+        <div style={{ padding: embed ? "9px 2px 4px" : "9px 11px 12px" }}>
           {myRank > 0 && (
             <div style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, color: myRank <= 100 ? T.green : T.faint, border: `1px solid ${myRank <= 100 ? "rgba(22,199,132,0.4)" : T.border}`, background: myRank <= 100 ? "rgba(22,199,132,0.07)" : "transparent", borderRadius: 9, padding: "6px 9px", marginBottom: 8 }}>
               YOU · #{myRank} {period}{lbBonus(myRank) > 0 ? ` → +${lbBonus(myRank).toFixed(2)}× every epoch (stacks across boards)` : " · crack the top 100 for an epoch bonus"}
             </div>
           )}
-          {/* PC podium — the top three get their moment */}
-          {!isMobile && board.length >= 3 && (
+          {!isMobile && !embed && board.length >= 3 && (
             <div style={{ display: "flex", alignItems: "flex-end", gap: 10, margin: "4px 0 14px" }}>
               {[1, 0, 2].map((bi) => {
                 const r = board[bi]; const rk = bi + 1; const tr = calloutTier(r.mult);
@@ -1972,18 +2072,21 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
               })}
             </div>
           )}
-          {board.slice(isMobile ? 0 : 3, 25).map((r, i) => {
-            const rk = (isMobile ? 0 : 3) + i + 1;
+          {board.slice(0, listEnd).map((r, i) => {
+            const rk = i + 1;
             const tr = calloutTier(r.mult);
+            const isFocus = focusRank === rk && !r.you;
             return (
-              <div key={i} className="lb-row" onClick={() => !r.you && onOpenUser && onOpenUser(r.user)}
+              <div key={i} ref={isFocus ? focusRef : undefined} className="lb-row" onClick={() => !r.you && onOpenUser && onOpenUser(r.user)}
                 title={r.you ? "That's you" : `Open @${r.user}'s portfolio`}
                 style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", borderRadius: 9, marginBottom: 3, cursor: r.you ? "default" : "pointer",
-                border: r.you ? `1.5px solid ${T.green}` : `1px solid ${rk <= 3 ? `${tr.color}55` : T.border}`,
-                background: r.you ? "rgba(22,199,132,0.08)" : rk <= 3 ? `${tr.color}0a` : "rgba(255,255,255,0.015)" }}>
+                border: r.you ? `1.5px solid ${T.green}` : isFocus && hl ? `1.5px solid ${VALO_PURPLE}` : `1px solid ${rk <= 3 ? `${tr.color}55` : T.border}`,
+                background: r.you ? "rgba(22,199,132,0.08)" : isFocus && hl ? "rgba(125,92,240,0.16)" : rk <= 3 ? `${tr.color}0a` : "rgba(255,255,255,0.015)",
+                boxShadow: isFocus && hl ? `0 0 18px ${VALO_PURPLE}66` : "none",
+                transition: "background 1.2s ease, border-color 1.2s ease, box-shadow 1.2s ease" }}>
                 <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: rk <= 3 ? tr.color : T.faint, width: 26 }}>#{rk}</span>
                 {rk <= 10 && <CalloutRing mult={r.mult} size={rk <= 3 ? 26 : 21} />}
-                <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, color: r.you ? T.green : T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{r.user}</span>
+                <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, color: r.you ? T.green : isFocus && hl ? VALO_PURPLE : T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{r.user}</span>
                 <span style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>${r.sym}</span>
                 <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: tr.color }}>×{r.mult.toFixed(1)}</span>
                 {lbBonus(rk) > 0 && <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 800, color: VALO_PURPLE }}>+{lbBonus(rk).toFixed(2)}×</span>}
@@ -1994,6 +2097,14 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
             Top 100 of ANY duration earns an epoch bonus: #1 +0.50× · #2 +0.42× · #3 +0.36× … #10 +0.14× · #11–100 +0.10×. Bonuses stack across every board — up to +4.0× total.
           </div>
         </div>
+    </>
+  );
+  if (embed) return body;
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 76, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+      padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 620, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "82vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
+        {body}
       </div>
     </div>
   );
@@ -2032,6 +2143,38 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0 }) {
           <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 8, lineHeight: 1.6 }}>
             Numbers move in real time — every buy, sell, and bot fill on the site feeds the burn, and the hourly creator-fee buyback torches its slice on top. Burns are permanent: supply only goes down.
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// badge page — tiers & leaderboards side by side; jumped-to names glow & fade
+function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 0, focusUser = null, onOpenUser }) {
+  const inTop250 = useMemo(() => {
+    if (!focusUser) return false;
+    const rk = genLeaderboard("1D").sort((a, b) => b.mult - a.mult).findIndex((e) => e.user === focusUser) + 1;
+    return rk > 0 && rk <= 250;
+  }, [focusUser]);
+  const [tab, setTab] = useState(inTop250 ? "board" : "tiers");
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 82, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+      padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 560, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "82vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
+        <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 3, padding: "11px 13px 0", borderBottom: `1px solid ${T.border}` }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 9 }}>
+            <span style={{ fontFamily: T.mono, fontSize: isMobile ? 11 : 12.5, fontWeight: 900, letterSpacing: 1.5 }}>🎖 CALLOUT RANKS</span>
+            <button onClick={onClose} style={{ ...chip(false), padding: "4px 8px", fontSize: 11 }}>✕</button>
+          </div>
+          <div style={{ display: "flex", gap: 6, paddingBottom: 9 }}>
+            <button onClick={() => setTab("tiers")} style={{ ...chip(tab === "tiers"), flex: 1, textAlign: "center", padding: "8px", fontSize: 10, fontWeight: 900 }}>🏆 TIERS</button>
+            <button onClick={() => setTab("board")} style={{ ...chip(tab === "board"), flex: 1, textAlign: "center", padding: "8px", fontSize: 10, fontWeight: 900, color: tab === "board" ? VALO_PURPLE : T.dim, borderColor: tab === "board" ? `${VALO_PURPLE}66` : T.border }}>📊 LEADERBOARD</button>
+          </div>
+        </div>
+        <div style={{ padding: "4px 11px 12px" }}>
+          {tab === "tiers"
+            ? <TierListModal embed isMobile={isMobile} myBest={myBest} />
+            : <LeaderboardModal embed isMobile={isMobile} myCallouts={myCallouts} tokens={tokens} onOpenUser={onOpenUser} focusUser={inTop250 ? focusUser : null} />}
         </div>
       </div>
     </div>
@@ -2295,7 +2438,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
               <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 800 }}>@{name}</div>
               <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{fols} followers · {folg} following</div>
             </div>
-            <div onClick={() => onOpenTierList && onOpenTierList()} title="Tap: tier list"
+            <div onClick={() => onOpenTierList && onOpenTierList()} title="Tap: tiers & leaderboards — if they're on the board, we jump straight to their name"
               style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
               <CalloutRing mult={peak} size={38} />
               <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 800, color: tier.color }}>{tier.label}</span>
@@ -2322,14 +2465,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
           <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 6 }}>
             Followers get this user's callouts as alerts · friends can also DM & send SOL/$VALO
           </div>
-          {/* quiet links, split from the actions by a hairline — no pill borders */}
-          <div style={{ height: 1, background: T.border, margin: "10px 0 7px" }} />
-          <div style={{ display: "flex", gap: 18 }}>
-            <button onClick={() => onOpenTierList && onOpenTierList()}
-              style={{ border: "none", background: "none", padding: 0, fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, letterSpacing: 0.5, color: T.text, cursor: "pointer" }}>🏆 TIER LIST</button>
-            <button onClick={() => onOpenLeaderboard && onOpenLeaderboard()}
-              style={{ border: "none", background: "none", padding: 0, fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, letterSpacing: 0.5, color: VALO_PURPLE, cursor: "pointer" }}>📊 LEADERBOARD</button>
-          </div>
+
         </div>
         {/* friends-only: DM + send funds */}
         {friends && (
@@ -2806,6 +2942,8 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
   const [sellLvl, setSellLvl] = useState(null);
   const [trail, setTrail] = useState(0);
   const [flash, setFlash] = useState(0);
+  const [vtQuick, setVtQuick] = useState([0.5, 1, 2, 5]);   // dbl-tap a chip to retype it
+  const [vtPcts, setVtPcts] = useState([25, 50, 75, 100]);
   // EDIT: clicking a visual pair loads its prices right back into the boxes
   useEffect(() => {
     if (!editBot || !editBot.vt) return;
@@ -2895,24 +3033,29 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
         <span style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 800, color: pay === "SOL" ? T.blue : VALO_PURPLE }}>{pay}</span>
         <span style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>≈ ${(amt * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
       </div>
-      {wide && (() => {
+      <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
+        {vtQuick.map((v, ci) => (
+          <button key={ci} onClick={() => setAmount && setAmount(String(v))}
+            {...chipEditProps(() => { askAmt(v, (nv) => setVtQuick((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
+            style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "4px 0", fontSize: 9, fontWeight: 800 }}>{v}</button>
+        ))}
+      </div>
+      {!compactArm && (() => {
         const bal = pay === "SOL" ? solBalance : valoWallet;
         const unit$ = pay === "SOL" ? SOL_USD : 0.0125;
         return (
           <>
-            <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
-              {[0.5, 1, 2, 5].map((v) => (
-                <button key={v} onClick={() => setAmount && setAmount(String(v))}
-                  style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "4px 0", fontSize: 9, fontWeight: 800 }}>{v}</button>
-              ))}
-            </div>
-            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, margin: "2px 0 4px" }}>
-              💼 WALLET <b style={{ color: pay === "SOL" ? T.blue : VALO_PURPLE }}>{bal.toFixed(2)} {pay}</b>
-              <span style={{ color: T.faint }}> · ≈ ${(bal * unit$).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD</span>
+            <div style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.blue,
+              background: "rgba(76,154,255,0.10)", border: `1px solid ${T.blue}55`, borderRadius: 8,
+              padding: "6px 10px", margin: "4px 0 6px", display: "flex", justifyContent: "space-between", alignItems: "baseline",
+              boxShadow: "0 0 12px rgba(76,154,255,0.18)" }}>
+              <span>💼 {bal.toFixed(2)} {pay}</span>
+              <span style={{ fontSize: 9.5, opacity: 0.85 }}>≈ ${(bal * unit$).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD</span>
             </div>
             <div style={{ display: "flex", gap: 4 }}>
-              {[25, 50, 75, 100].map((pc) => (
-                <button key={pc} onClick={() => setAmount && setAmount(((bal * pc) / 100).toFixed(2))}
+              {vtPcts.map((pc, ci) => (
+                <button key={ci} onClick={() => setAmount && setAmount(String(feeSafe((bal * pc) / 100, pay)))}
+                  {...chipEditProps(() => { askPct(pc, (nv) => setVtPcts((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
                   style={{ ...chip(false), flex: 1, textAlign: "center", padding: "3px 0", fontSize: 8.5, fontWeight: 800 }}>{pc === 100 ? "MAX" : `${pc}%`}</button>
               ))}
             </div>
@@ -3050,6 +3193,9 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
 
 // PRO LAYOUT order ticket — one wide bar under the chart, buy & sell side by side
 function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, valoBalance = 0, position, onExecute, onPosTrade, clickMode, setClickMode, realized24 = 0 }) {
+  const [poPcts, setPoPcts] = useState([25, 50, 75, 100]);      // dbl-click / right-click to retype
+  const [poFixed, setPoFixed] = useState([0.5, 1, 2, 5]);
+  const [poSellPcts, setPoSellPcts] = useState([10, 25, 50, 75]);
   const amt = parseFloat(amount) || 0;
   const bal = pay === "SOL" ? solBalance : valoBalance;
   const unit$ = pay === "SOL" ? SOL_USD : 0.0125;
@@ -3077,12 +3223,29 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
           <button onClick={() => setAmount((amt + 0.1).toFixed(1))} style={{ ...chip(false), padding: "7px 10px", fontWeight: 900 }}>+</button>
         </div>
         <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
-          {[25, 50, 75, 100].map((pc) => (
-            <button key={pc} onClick={() => setAmount(((bal * pc) / 100).toFixed(2))}
+          {poPcts.map((pc, ci) => (
+            <button key={ci} onClick={() => setAmount(String(feeSafe((bal * pc) / 100, pay)))}
+              {...chipEditProps(() => askPct(pc, (nv) => setPoPcts((A) => A.map((x, j) => (j === ci ? nv : x)))))}
+              title="Double-click or right-click to set your own %"
               style={{ ...chip(false), flex: 1, textAlign: "center", padding: "3px 0", fontSize: 8.5, fontWeight: 800 }}>{pc === 100 ? "MAX" : `${pc}%`}</button>
           ))}
         </div>
-        <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, marginTop: 5 }}>≈ ${(amt * unit$).toLocaleString(undefined, { maximumFractionDigits: 0 })} · wallet {bal.toFixed(2)} {pay}</div>
+        <div style={{ display: "flex", gap: 4, marginTop: 5 }}>
+          {poFixed.map((v, ci) => (
+            <button key={ci} onClick={() => setAmount(String(v))}
+              {...chipEditProps(() => askAmt(v, (nv) => setPoFixed((A) => A.map((x, j) => (j === ci ? nv : x)))))}
+              title="Double-click or right-click to set your own amount"
+              style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "3px 0", fontSize: 8.5, fontWeight: 800, color: T.green }}>{v}</button>
+          ))}
+        </div>
+        <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, marginTop: 5 }}>≈ ${(amt * unit$).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD buy</div>
+        <div style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.blue,
+          background: "rgba(76,154,255,0.10)", border: `1px solid ${T.blue}55`, borderRadius: 8,
+          padding: "6px 10px", marginTop: 5, display: "flex", justifyContent: "space-between", alignItems: "baseline",
+          boxShadow: "0 0 12px rgba(76,154,255,0.18)" }}>
+          <span>💼 {bal.toFixed(2)} {pay}</span>
+          <span style={{ fontSize: 9.5, opacity: 0.85 }}>≈ ${(bal * unit$).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD</span>
+        </div>
       </div>
       {/* BUY | SELL side by side */}
       <div style={{ flex: "2 1 340px", minWidth: 300, display: "flex", gap: 8 }}>
@@ -3103,8 +3266,10 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
       <div style={{ ...seg, flex: "1 1 190px", minWidth: 180 }}>
         <div style={{ ...lbl }}>Sell % of held</div>
         <div style={{ display: "flex", gap: 4 }}>
-          {[10, 25, 50, 75].map((pc) => (
-            <button key={pc} disabled={!held} onClick={() => fire("sell", +(held * pc / 100).toFixed(4))}
+          {poSellPcts.map((pc, ci) => (
+            <button key={ci} disabled={!held} onClick={() => fire("sell", +(held * pc / 100).toFixed(4))}
+              {...chipEditProps(() => askPct(pc, (nv) => setPoSellPcts((A) => A.map((x, j) => (j === ci ? nv : x)))))}
+              title="Double-click or right-click to set your own %"
               style={{ ...chip(false), flex: 1, textAlign: "center", padding: "6px 0", fontSize: 9, fontWeight: 800, color: held ? T.red : T.faint, borderColor: held ? `${T.red}44` : T.border, cursor: held ? "pointer" : "not-allowed" }}>{pc}%</button>
           ))}
         </div>
@@ -3277,7 +3442,7 @@ function pnlSeries(range, seed, unreal, realized) {
   return pts.map((p) => p * scale);
 }
 
-function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realizedPnl, unrealizedPnl,
+function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realizedPnl, unrealizedPnl, extraEquity = 0,
   tab, setTab, range, setRange, mode, setMode, seed, onDeposit, onWithdraw, onSwap,
   hideBalance, setHideBalance, heldSlot, maxDeposit = 0, maxWithdraw = 0, activity = [], onOpenToken,
   username, setUsername, isNameTaken,
@@ -3306,11 +3471,12 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   const valoUsd = 0.0125; // API: live $VALO price
   const liveValue = Object.entries(positions).reduce((a, [id, p]) => {
     const t = tokens.find((x) => x.id === +id); if (!t || !p) return a;
-    return a + p.amt * (t.price / p.entry); // current worth of open positions (in settlement units, approx)
+    // TRUE USD: settlement units converted at their own rate — no unit mixing
+    return a + p.amt * (t.price / p.entry) * (p.pay === "SOL" ? SOL_USD : valoUsd);
   }, 0);
   const walletUsd = solBalance * SOL_USD + valoWallet * valoUsd;
   const totalPnl = realizedPnl + unrealizedPnl;
-  const totalEquity = walletUsd + Math.max(0, liveValue);
+  const totalEquity = walletUsd + Math.max(0, liveValue) + (extraEquity || 0); // + live bots & escrowed arms
   const [swapAmt, setSwapAmt] = useState("1");
   const [swapDir, setSwapDir] = useState("sol2valo"); // sol2valo | valo2sol
   const [swapArmed, setSwapArmed] = useState(false);
@@ -4210,6 +4376,11 @@ const WP_SECTIONS = [
     { t: "p", x: "You do not need to be online when an epoch fires. Every unclaimed epoch stacks in your pending list — each with its own amount and published root — and can sit there indefinitely. When you claim, all stacked epochs collect in a single action. Sleeping through twelve epochs simply means twelve payouts waiting when you wake up." },
     { t: "h", x: "Claiming & the loyalty trade-off" },
     { t: "p", x: "Claiming fetches your Merkle proof and submits the claim transaction — you pay your own SOL gas, and tokens land directly in your wallet; the distributor never touches your keys. But claiming is a strategic choice: withdrawing resets your loyalty multiplier to ×1, while letting rewards ride grows it +0.1× per day toward ×2.5 — meaning a patient wallet earns up to 2.5× more from every future epoch. Auto-withdraw can run this strategy for you: collect every epoch, or hold to a target multiplier (×1.5 / ×2 / ×2.5), auto-collect, and repeat." },
+    { t: "h", x: "Callout leaderboard bonuses" },
+    { t: "p", x: "Your callouts don't just build reputation — they pay. Land anywhere in the top 100 of ANY leaderboard duration (1H, 12H, 1D, 7D, 30D, 180D, 365D, or LIFETIME) and every epoch snapshot adds a bonus to your multiplier: #1 +0.50× · #2 +0.42× · #3 +0.36× · #4 +0.32× · #5 +0.29× · #6 +0.26× · #7 +0.23× · #8 +0.20× · #9 +0.17× · #10 +0.14× · #11–100 +0.10×." },
+    { t: "p", x: "Bonuses STACK across every duration you place on. Rank on three boards and you collect all three bonuses, every hour. Hold #1 across all eight durations and you'd stack the maximum +4.0× on top of your loyalty multiplier — the single largest earnings lever on the platform, earned purely by calling great plays." },
+    { t: "b", x: "Applied automatically at every hourly snapshot — no claiming, no opting in. Your claim panel shows the exact boards, ranks, and stacked total feeding your effective multiplier." },
+    { t: "b", x: "Callouts are limited to one every 4 hours, which keeps boards honest: you can't spray every token and farm rank — every call has to count." },
     { t: "note", x: "Why hourly? Daily or weekly rewards ask you to trust a payout you can't see coming. An hourly epoch is short enough to watch fill, verify, and receive within one trading session — trust is replaced by observation." },
   ]},
   { id: "loyalty", icon: "⭐", n: "6", title: "Loyalty Stack", accent: "#F0B90B", body: [
@@ -4244,7 +4415,7 @@ const WP_SECTIONS = [
     { t: "b", x: "Building in public: features ship from community requests, and the changelog is the conversation. If enough of you want it, it gets built." },
     { t: "b", x: "Funding the community from real revenue: the airdrop vault — half of every site fee — goes back to holders every hour, forever. The community is paid before the team is." },
     { t: "b", x: "Running community trading competitions with vault-funded prize pools: best PnL, best callout, best new-token spot." },
-    { t: "b", x: "Spotlighting the community's best: top callers ride the callout banner site-wide, and the tier ladder (from JEET all the way to DIAMOND APEX) gives every trader a rank worth grinding for." },
+    { t: "b", x: "Spotlighting the community's best: top callers ride the callout banner site-wide, the tier ladder (from JEET all the way to DIAMOND APEX) gives every trader a rank worth grinding for — and top-100 leaderboard spots pay a real, stacking bonus on every hourly epoch (see the Airdrop section)." },
     { t: "b", x: "Staying reachable: the team trades on the same terminal, in the same chat rooms, with the same wallet rules as everyone else." },
     { t: "h", x: "What the community does here" },
     { t: "b", x: "Call your plays: post callouts on coins you believe in — your entry MC is stamped publicly, and when it moons, everyone sees your multiplier. Reputation here is earned on-chain, not claimed." },
@@ -4954,6 +5125,7 @@ export default function App() {
     const proceeds = r.remaining * (t.price / r.entry);
     if (r.pay === "SOL") setSolBalance((b) => b + proceeds); else setValoWallet((v) => v + proceeds);
     const pnlUsd = (proceeds - r.remaining) * (r.pay === "SOL" ? SOL_USD : 0.0125);
+    setRealizedPnl((r2) => r2 + pnlUsd); // manual bot sell-outs land in realized too
     setBotRuns((R) => R.map((x) => x.id === runId ? { ...x, exits: [...x.exits, { ts: Date.now(), price: t.price, amt: x.remaining, pnlUsd, trail: null, kind: "MANUAL" }], remaining: 0, status: "sold" } : x));
     setPendingOrders((P) => P.filter((o) => o.runId !== runId)); // its exit bots die with it
     sayPrivate({ type: "note", text: `🤖 bot sold out of ${r.sym} @ $${fmtP(t.price)} · PnL ${pnlUsd >= 0 ? "+" : "−"}$${Math.abs(pnlUsd).toFixed(2)}` });
@@ -4986,6 +5158,10 @@ export default function App() {
   // VISUAL TRADING pair — buy line + sell-all point, armed as one bot
   const armVisualPair = ({ buy, sell, amt: a, trail, editId = null }) => {
     if (!selected || !(buy > 0) || !(sell > 0) || !(a > 0)) return;
+    const oldB = editId ? pendingOrders.find((x) => x.id === editId) : null;
+    const credit = oldB && oldB.side === "buy" && oldB.pay === pay ? oldB.amt : 0;
+    if (!takeEscrow(a, pay, credit)) return; // funds leave the wallet the moment the pair arms
+    if (oldB && oldB.side === "buy") refundEscrow(oldB.amt, oldB.pay);
     const dir = buy <= selected.price ? -1 : 1;
     setPendingOrders((P) => [...P.filter((o) => o.id !== editId), { id: Date.now() + Math.random(), tokenId: selected.id, side: "buy", level: buy, dir, amt: a, pay, tax: taxFor(pay), stopLoss: null, tpMult: null, legs: [], vt: true, vtSell: sell, vtTrail: trail > 0 ? trail : null, ts: Date.now() }]);
     if (editId) setEditingBotId(null);
@@ -4994,17 +5170,36 @@ export default function App() {
   };
   // PC drag-set double-click: arms a bot at that level instantly — no ARM press,
   // and as many as you like
+  // wallet escrow: arming a BUY takes the funds instantly; cancelling refunds.
+  // No phantom balances — you can never arm more than the wallet holds.
+  const refundEscrow = (amt, payK) => { if (amt > 0) { if (payK === "SOL") setSolBalance((b) => b + amt); else setValoWallet((v) => v + amt); } };
+  const takeEscrow = (amt, payK, extraCredit = 0) => {
+    const bal = (payK === "SOL" ? solBalance : valoWallet) + extraCredit;
+    if (bal < amt - 1e-9) {
+      sayPrivate({ type: "note", text: `⛔ can't arm — needs ${amt} ${payK}, wallet holds ${(bal - extraCredit).toFixed(3)}` });
+      return false;
+    }
+    if (payK === "SOL") setSolBalance((b) => Math.max(0, b - amt)); else setValoWallet((v) => Math.max(0, v - amt));
+    return true;
+  };
   const armAtLevel = (lvl) => {
     if (!selected || !(lvl > 0)) return;
     const side = botSide;
     const a = parseFloat(side === "sell" ? exitAmt : amount) || 0;
     if (a <= 0) return;
+    if (side === "buy" && !takeEscrow(a, pay)) return; // funds leave the wallet NOW
     const dir = lvl <= selected.price ? -1 : 1;
     setPendingOrders((P) => [...P, { id: Date.now() + Math.random(), tokenId: selected.id, side, level: lvl, dir, amt: a, pay, tax: taxFor(pay), stopLoss: null, tpMult: null, legs: [], ts: Date.now() }]);
     sayPrivate({ type: "note", text: `${side === "sell" ? "🔻" : "🤖"} dbl-click armed — ${side.toUpperCase()} ${a} ${pay} @ $${fmtP(lvl)}` });
   };
   // relaunch an edited bot from the PC auto-trader form
   const relaunchBot = (id, o, t) => {
+    const oldB = pendingOrders.find((x) => x.id === id);
+    if (oldB && oldB.side === "buy") {
+      const credit = oldB.pay === pay ? oldB.amt : 0;
+      if (!takeEscrow(o.amt, pay, credit)) return; // can't cover the new size — old bot stays
+      refundEscrow(oldB.amt, oldB.pay);
+    }
     setPendingOrders((P) => P.map((x) => {
       if (x.id !== id) return x;
       const level = o.limitBuyPrice > 0 ? o.limitBuyPrice : t.price;
@@ -5015,7 +5210,14 @@ export default function App() {
     setEditingBotId(null); setBotDraftLevel(null);
     sayPrivate({ type: "note", text: `🔁 bot relaunched — waits @ $${fmtP(o.limitBuyPrice > 0 ? o.limitBuyPrice : t.price)}` });
   };
-  const saveBot = (id, d) => setPendingOrders((P) => P.map((o) => {
+  const saveBot = (id, d) => {
+    const oldB = pendingOrders.find((x) => x.id === id);
+    const newAmt = parseFloat(d.amt) || (oldB ? oldB.amt : 0);
+    if (oldB && oldB.side === "buy" && !oldB.runId && Math.abs(newAmt - oldB.amt) > 1e-9) {
+      if (!takeEscrow(newAmt, oldB.pay, oldB.amt)) return; // delta not coverable
+      refundEscrow(oldB.amt, oldB.pay);
+    }
+    setPendingOrders((P) => P.map((o) => {
     if (o.id !== id) return o;
     const t = tokens.find((x) => String(x.id) === String(o.tokenId));
     const level = parseFloat(d.level) || o.level;
@@ -5025,13 +5227,39 @@ export default function App() {
       tpMult: parseFloat(d.tpMult) > 1 ? parseFloat(d.tpMult) : null,
       legs: Array.isArray(d.legs) ? d.legs.filter((l) => l.mult > 1 && l.alloc > 0) : o.legs };
   }));
-  const cancelBot = (id) => setPendingOrders((P) => P.filter((o) => o.id !== id));
+  };
+  const cancelBot = (id) => {
+    const o = pendingOrders.find((x) => x.id === id);
+    if (o && o.side === "buy" && !o.runId) refundEscrow(o.amt, o.pay); // escrow back
+    setPendingOrders((P) => P.filter((x) => x.id !== id));
+  };
   // instant partial buy/sell straight from a position card
   const onPosTrade = (t, side, amt) => {
     const payU = positions[t.id]?.pay || pay;
     execute(t, { side, pay: payU, amt, mode: "instant", tax: taxFor(payU), burn: splitFee(amt, payU).total, legs: [] }, {});
   };
-  const [pctSel, setPctSel] = useState(null); // { side: "buy" | "sell", p: number }
+  const [pctSel, setPctSel] = useState(null);
+  const [buyChipMode, setBuyChipMode] = useState("pct");           // hotbar buy chips: % of wallet ⇄ fixed amounts
+  const [buyPcts, setBuyPcts] = useState([10, 25, 50, 75, 100]);   // hold a chip to retype its number
+  const [buyFixed, setBuyFixed] = useState([0.5, 1, 2, 5]);
+  const [chipEditCfg, setChipEditCfg] = useState(null);            // in-app chip editor (prompt is blocked in iframes)
+  const [chipEditVal, setChipEditVal] = useState("");
+  const [chipEditErr, setChipEditErr] = useState(false);
+  useEffect(() => {
+    __openChipEditor = (cfg) => { setChipEditCfg(cfg); setChipEditVal(cfg.value); setChipEditErr(false); };
+    return () => { __openChipEditor = null; };
+  }, []);
+  const [sellPcts, setSellPcts] = useState([10, 25, 50, 75, 100]);
+  const [hbConfirm, setHbConfirm] = useState(null);                // hotbar two-tap: "buy" | "sell" | "sellall"
+  const hbConfirmRef = useRef(null);
+  const holdRef = useRef(null);
+  // press-and-hold (~500ms) any chip to change its number to whatever you want
+  const holdEdit = (fn) => ({
+    onTouchStart: () => { holdRef.current = setTimeout(() => { holdRef.current = null; fn(); }, 500); },
+    onTouchEnd: () => { if (holdRef.current) { clearTimeout(holdRef.current); holdRef.current = null; } },
+    onTouchMove: () => { if (holdRef.current) { clearTimeout(holdRef.current); holdRef.current = null; } },
+    onContextMenu: (e) => { e.preventDefault(); fn(); }, // long-press also fires this on many phones; right-click on PC
+  }); // { side: "buy" | "sell", p: number }
   useEffect(() => { setPctSel(null); }, [sel, pay]);
   // ---- MY MC CALLOUTS — "📣 CALLOUT" on the chart stamps the current market
   // cap; the ring then tracks your best multiplier since. Peak only ratchets UP.
@@ -5041,6 +5269,7 @@ export default function App() {
   const [myCalloutsOpen, setMyCalloutsOpen] = useState(false); // your callout history popup
   const [tierListOpen, setTierListOpen] = useState(false);     // full tier-ladder popup
   const [lbOpen, setLbOpen] = useState(false);                 // compact leaderboard popup
+  const [ranksOpen, setRanksOpen] = useState(null);            // badge page: {focus} — tiers + leaderboard tabs
   const [nameChangedAt, setNameChangedAt] = useState(0);      // weekly username-change lock
   // ---- social graph + notifications (API: wire real social service) ----
   const [followersList, setFollowersList] = useState(() => { const r = seededRand(4242); return Array.from({ length: 7 }, () => randomHandle(r)); });
@@ -5591,6 +5820,7 @@ export default function App() {
         sayPrivate({ type: "note", text: `🔻 sell-out trader armed — SELL ${o.amt} ${o.pay} on ${t.sym} waits @ $${fmtP(lvl)}` });
         return;
       }
+      if (!takeEscrow(o.amt, o.pay)) return; // armed buys take the money instantly
       const legs = (o.legs || []).filter((l) => l.mult > 1 && l.alloc > 0);
       const tp = !legs.length && o.legs && o.legs[0] && o.legs[0].mult > 1 ? o.legs[0].mult : null;
       setPendingOrders((P) => [...P, { id: Date.now() + Math.random(), tokenId: t.id, side: "buy", level: lvl, dir, amt: o.amt, pay: o.pay, tax: o.tax, stopLoss: parseFloat(o.stopLoss) > 0 ? lvl * (1 - parseFloat(o.stopLoss) / 100) : null, tpMult: tp, legs, ts: Date.now() }]);
@@ -5745,13 +5975,8 @@ export default function App() {
       if (!t) return;
       if (o.side === "buy") {
         // fill → a RUNNING BOT with its own book, kept out of the Live P/L box
-        const balNow = o.pay === "SOL" ? solBalance : valoWallet;
-        if (balNow < o.amt - 1e-9) {
-          sayPrivate({ type: "note", text: `⛔ bot cancelled — needed ${o.amt} ${o.pay} to buy ${t.sym}, wallet holds ${balNow.toFixed(3)}` });
-          return;
-        }
+        // funds already escrowed at arm time — the fill just converts them
         const runId = "run" + Date.now() + Math.random();
-        if (o.pay === "SOL") setSolBalance((b) => Math.max(0, b - o.amt)); else setValoWallet((v) => Math.max(0, v - o.amt));
         setBotRuns((R) => [...R, { id: runId, tokenId: o.tokenId, sym: t.sym, hue: t.hue, entry: t.price, level: o.level, amt: o.amt, remaining: o.amt, pay: o.pay, legs: o.legs || [], stopLossPrice: o.stopLoss || null, filledTs: Date.now(), exits: [], status: "live" }]);
         sayPrivate({ type: "note", text: `🎯 bot filled — BOUGHT ${o.amt} ${o.pay} of ${t.sym} @ $${fmtP(t.price)} (armed @ $${fmtP(o.level)})` });
         const follow = [];
@@ -5775,6 +6000,7 @@ export default function App() {
         const proceeds = portion * (t.price / r.entry);
         if (r.pay === "SOL") setSolBalance((b) => b + proceeds); else setValoWallet((v) => v + proceeds);
         const pnlUsd = (proceeds - portion) * (r.pay === "SOL" ? SOL_USD : 0.0125);
+        setRealizedPnl((r2) => r2 + pnlUsd); // bot exits count in your realized, always
         const remaining = +(r.remaining - portion).toFixed(6);
         const done = remaining <= r.amt * 0.001;
         setBotRuns((R) => R.map((x) => x.id === r.id ? { ...x, exits: [...x.exits, { ts: Date.now(), price: t.price, amt: portion, pnlUsd, trail: o.trail || null, kind: o.exitKind || "TP" }], remaining, status: done ? "sold" : "live" } : x));
@@ -5799,7 +6025,20 @@ export default function App() {
     if (!tk || !p) return a;
     return a + p.amt * ((tk.price - p.entry) / p.entry);
   }, 0);
-  const platformPnl = realizedPnl + unrealizedPnl;
+  const botUnrealized = botRuns.reduce((a, r) => {
+    if (r.status !== "live") return a;
+    const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return a;
+    return a + (r.remaining * (t.price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : 0.0125);
+  }, 0);
+  const unrealizedAll = unrealizedPnl + botUnrealized; // every open exposure, one number
+  // money that's committed but not idle: live bot positions at current value
+  // plus escrow sitting inside armed-but-unfilled buys — equity never "loses" it
+  const strategyEquityUsd = botRuns.reduce((a, r) => {
+    if (r.status !== "live") return a;
+    const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return a;
+    return a + r.remaining * (t.price / r.entry) * (r.pay === "SOL" ? SOL_USD : 0.0125);
+  }, 0) + pendingOrders.reduce((a, o) => (o.side === "buy" && !o.runId ? a + o.amt * (o.pay === "SOL" ? SOL_USD : 0.0125) : a), 0);
+  const platformPnl = realizedPnl + unrealizedAll;
   const valoUsdPrice = 0.0125; // API: live $VALO price
   const walletUsd = solBalance * SOL_USD + valoWallet * valoUsdPrice;
   const liveValueUsd = Object.entries(positions).reduce((a, [id, p]) => {
@@ -6355,17 +6594,28 @@ export default function App() {
     const pos = positions[selected.id];
     const held = pos?.amt || 0;
     const pnlPct = pos ? ((selected.price - pos.entry) / pos.entry) * 100 : 0;
-    const heldSol = pay === "SOL" ? held : (held * selected.price) / SOL_USD;
-    const livePnlUsd = pos ? (heldSol * pnlPct / 100) * SOL_USD : 0;
+    const posPay = (pos && pos.pay) || "SOL";
+    const heldSol = posPay === "SOL" ? held : (held * 0.0125) / SOL_USD; // held value expressed in SOL
+    const livePnlUsd = pos ? (held * (selected.price / pos.entry) - held) * (posPay === "SOL" ? SOL_USD : 0.0125) : 0;
     const liveMult = pos ? selected.price / pos.entry : 0;
     const gain = livePnlUsd >= 0;
     const sellCol = !pos ? T.red : pnlPct > 0.05 ? T.green : pnlPct < -0.05 ? T.red : "#4a5266";
     const bidSol = pay === "SOL" ? a : (a * selected.price) / SOL_USD;
     const sellAllSol = pay === "SOL" ? held : (held * selected.price) / SOL_USD;
     const bestMult = bestMultByToken[selected.id];
+    const confirmTap = (side, fire) => {
+      if (hbConfirmRef.current && hbConfirmRef.current.side === side) {
+        clearTimeout(hbConfirmRef.current.t); hbConfirmRef.current = null; setHbConfirm(null);
+        fire();
+      } else {
+        if (hbConfirmRef.current) clearTimeout(hbConfirmRef.current.t);
+        const t = setTimeout(() => { hbConfirmRef.current = null; setHbConfirm(null); }, 2600);
+        hbConfirmRef.current = { side, t }; setHbConfirm(side);
+      }
+    };
     const setPct = (p, ofHoldings) => {
       if (ofHoldings) setAmount(pay === "SOL" ? (held * p / 100).toFixed(4) : Math.floor(held * p / 100).toString());
-      else { const bal = pay === "SOL" ? solBalance : myHoldings; setAmount(pay === "SOL" ? (bal * p / 100).toFixed(2) : Math.floor(bal * p / 100).toString()); }
+      else { const bal = pay === "SOL" ? solBalance : myHoldings; setAmount(String(feeSafe(bal * p / 100, pay))); }
     };
     return (
     <div>
@@ -6391,12 +6641,15 @@ export default function App() {
         </div>
       ) : null}
 
-      {/* settlement flip + amount */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 7, alignItems: "center" }}>
+      {/* settlement flip (shows your live balance of each) + amount */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
         <button onClick={() => setPay(pay === "SOL" ? "VALO" : "SOL")}
-          style={{ ...chip(true), padding: "8px 9px", fontSize: 10, minWidth: 54 }}>{pay === "SOL" ? "SOL" : "$VALO"}</button>
+          title="Tap to swap settlement — the label is your live balance"
+          style={{ ...chip(true), padding: "6px 8px", fontSize: 9, minWidth: 62, lineHeight: 1.3 }}>
+          {pay === "SOL" ? `${solBalance.toFixed(1)} SOL` : `${fmtQty(valoWallet)} $VALO`}
+        </button>
         <input value={amount} onChange={(e) => { setAmount(e.target.value); setPctSel(null); }}
-          style={{ ...inp, flex: 1, minWidth: 0, padding: "9px 6px", fontSize: 13, textAlign: "center" }} />
+          style={{ ...inp, flex: 1, minWidth: 0, padding: "6px 6px", fontSize: 12.5, textAlign: "center" }} />
         <button onClick={() => setMobileBotScreen(true)}
           style={{ flex: "0 0 auto", border: `1px solid ${pendingOrders.length ? `${T.amber}88` : T.border2}`, background: pendingOrders.length ? "rgba(240,185,11,0.12)" : "rgba(255,255,255,0.03)",
             color: pendingOrders.length ? T.amber : T.dim, borderRadius: 8, padding: "8px 10px", fontFamily: T.mono, fontSize: 10, fontWeight: 900, cursor: "pointer",
@@ -6410,10 +6663,16 @@ export default function App() {
         {/* BUY side */}
         <div style={{ flex: 1, background: "rgba(22,199,132,0.06)", border: "1px solid rgba(22,199,132,0.28)", borderRadius: 10, padding: 6 }}>
           <div style={{ display: "flex", gap: 3, marginBottom: 5 }}>
-            {[10, 25, 50, 75, 100].map((p) => {
+            <button onClick={() => setBuyChipMode((m) => (m === "pct" ? "fix" : "pct"))}
+              title="Switch between % of wallet and fixed amounts"
+              style={{ flex: "0 0 auto", ...chip(false), padding: "5px 5px", fontSize: 7.5, fontWeight: 900, color: T.green, borderColor: "rgba(22,199,132,0.4)" }}>
+              {buyChipMode === "pct" ? "%" : pay === "SOL" ? "◎" : "$V"}
+            </button>
+            {buyChipMode === "pct" ? buyPcts.map((p, ci) => {
               const on = pctSel && pctSel.side === "buy" && pctSel.p === p;
               return (
-                <button key={p} onClick={() => { setPct(p, false); setPctSel({ side: "buy", p }); }}
+                <button key={ci} onClick={() => { setPct(p, false); setPctSel({ side: "buy", p }); }}
+                  {...chipEditProps(() => { askPct(p, (nv) => setBuyPcts((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
                   style={{ flex: 1, ...chip(false), padding: "5px 0", fontSize: 8, textAlign: "center",
                     fontWeight: on ? 900 : 400,
                     color: on ? "#07130d" : p === 100 ? T.amber : T.dim,
@@ -6421,21 +6680,28 @@ export default function App() {
                     borderColor: on ? T.green : p === 100 ? "rgba(240,185,11,0.4)" : T.border,
                     boxShadow: on ? "0 0 8px rgba(22,199,132,0.4)" : "none" }}>{p === 100 ? "MAX" : p}</button>
               );
-            })}
+            }) : buyFixed.map((v, ci) => (
+              <button key={"f" + ci} onClick={() => { setAmount(String(v)); setPctSel(null); }}
+                {...chipEditProps(() => { askAmt(v, (nv) => setBuyFixed((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
+                style={{ flex: 1, ...chip(parseFloat(amount) === v), padding: "5px 0", fontSize: 8, textAlign: "center", fontWeight: 800, color: T.green }}>{v}</button>
+            ))}
           </div>
-          <button onClick={() => execute(selected, { side: "buy", pay, amt: a, mode: "instant", tax: taxFor(pay), burn: splitFee(a, pay).total, legs: [] })}
-            style={{ width: "100%", border: "none", borderRadius: 8, padding: "10px 4px", fontFamily: T.mono, fontWeight: 900, background: T.green, color: "#07130d", cursor: "pointer", boxShadow: "0 0 12px rgba(22,199,132,0.28)", lineHeight: 1.15 }}>
-            <div style={{ fontSize: 13 }}>⚡ BUY</div>
-            <div style={{ fontSize: 8, opacity: 0.85 }}>{bidSol.toFixed(2)} SOL</div>
+          <button onClick={() => confirmTap("buy", () => execute(selected, { side: "buy", pay, amt: a, mode: "instant", tax: taxFor(pay), burn: splitFee(a, pay).total, legs: [] }))}
+            style={{ width: "100%", border: "none", borderRadius: 8, padding: "10px 4px", fontFamily: T.mono, fontWeight: 900,
+              background: hbConfirm === "buy" ? T.amber : T.green, color: hbConfirm === "buy" ? "#1d1503" : "#07130d", cursor: "pointer",
+              boxShadow: hbConfirm === "buy" ? "0 0 16px rgba(240,185,11,0.55)" : "0 0 12px rgba(22,199,132,0.28)", lineHeight: 1.15, transition: "background .15s, box-shadow .15s" }}>
+            <div style={{ fontSize: hbConfirm === "buy" ? 11.5 : 13 }}>{hbConfirm === "buy" ? "⚠ CONFIRM BUY" : "⚡ BUY"}</div>
+            <div style={{ fontSize: 8, opacity: 0.9 }}>{hbConfirm === "buy" ? "tap again to fire" : `${bidSol.toFixed(2)} SOL`}</div>
           </button>
         </div>
         {/* SELL side */}
         <div style={{ flex: 1, background: "rgba(234,57,67,0.06)", border: "1px solid rgba(234,57,67,0.28)", borderRadius: 10, padding: 6 }}>
           <div style={{ display: "flex", gap: 3, marginBottom: 5 }}>
-            {[10, 25, 50, 75, 100].map((p) => {
+            {sellPcts.map((p, ci) => {
               const on = pctSel && pctSel.side === "sell" && pctSel.p === p;
               return (
-                <button key={p} onClick={() => { setPct(p, true); setPctSel({ side: "sell", p }); }} disabled={held <= 0}
+                <button key={ci} onClick={() => { setPct(p, true); setPctSel({ side: "sell", p }); }} disabled={held <= 0}
+                  {...chipEditProps(() => { askPct(p, (nv) => setSellPcts((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
                   style={{ flex: 1, ...chip(false), padding: "5px 0", fontSize: 8, textAlign: "center",
                     fontWeight: on ? 900 : 400,
                     color: on ? "#170808" : held <= 0 ? T.faint : p === 100 ? T.amber : T.dim,
@@ -6447,15 +6713,18 @@ export default function App() {
             })}
           </div>
           <div style={{ display: "flex", gap: 4 }}>
-            <button onClick={() => execute(selected, { side: "sell", pay, amt: a, mode: "instant", tax: taxFor(pay), burn: splitFee(a, pay).total, legs: [] })}
-              style={{ flex: 1.5, border: "none", borderRadius: 8, padding: "10px 2px", fontFamily: T.mono, fontWeight: 900, background: sellCol, color: "#170808", cursor: "pointer", lineHeight: 1.15, transition: "background .3s" }}>
-              <div style={{ fontSize: 12 }}>⚡ SELL</div>
-              <div style={{ fontSize: 7.5, opacity: 0.85 }}>{bidSol.toFixed(2)} SOL</div>
+            <button onClick={() => confirmTap("sell", () => execute(selected, { side: "sell", pay, amt: a, mode: "instant", tax: taxFor(pay), burn: splitFee(a, pay).total, legs: [] }))}
+              style={{ flex: 1.5, border: "none", borderRadius: 8, padding: "10px 2px", fontFamily: T.mono, fontWeight: 900,
+                background: hbConfirm === "sell" ? T.amber : sellCol, color: hbConfirm === "sell" ? "#1d1503" : "#170808", cursor: "pointer", lineHeight: 1.15,
+                boxShadow: hbConfirm === "sell" ? "0 0 16px rgba(240,185,11,0.55)" : "none", transition: "background .15s, box-shadow .15s" }}>
+              <div style={{ fontSize: hbConfirm === "sell" ? 10.5 : 12 }}>{hbConfirm === "sell" ? "⚠ CONFIRM SELL" : "⚡ SELL"}</div>
+              <div style={{ fontSize: 7.5, opacity: 0.9 }}>{hbConfirm === "sell" ? "tap again to fire" : `${bidSol.toFixed(2)} SOL`}</div>
             </button>
-            <button onClick={() => { if (held > 0) execute(selected, { side: "sell", pay, amt: held, mode: "instant", tax: taxFor(pay), burn: splitFee(held, pay).total, legs: [] }); }}
+            <button onClick={() => { if (held > 0) confirmTap("sellall", () => execute(selected, { side: "sell", pay, amt: held, mode: "instant", tax: taxFor(pay), burn: splitFee(held, pay).total, legs: [] })); }}
               disabled={held <= 0}
-              style={{ flex: 1, border: `1px solid ${sellCol}`, borderRadius: 8, padding: "10px 2px", fontFamily: T.mono, fontWeight: 800, background: `${sellCol}22`, color: sellCol, cursor: held > 0 ? "pointer" : "not-allowed", opacity: held > 0 ? 1 : 0.5, lineHeight: 1.1 }}>
-              <div style={{ fontSize: 9 }}>ALL</div>
+              style={{ flex: 1, border: `1px solid ${hbConfirm === "sellall" ? T.amber : sellCol}`, borderRadius: 8, padding: "10px 2px", fontFamily: T.mono, fontWeight: 800,
+                background: hbConfirm === "sellall" ? "rgba(240,185,11,0.25)" : `${sellCol}22`, color: hbConfirm === "sellall" ? T.amber : sellCol, cursor: held > 0 ? "pointer" : "not-allowed", opacity: held > 0 ? 1 : 0.5, lineHeight: 1.1 }}>
+              <div style={{ fontSize: 9 }}>{hbConfirm === "sellall" ? "⚠2×" : "ALL"}</div>
               <div style={{ fontSize: 7, opacity: 0.85 }}>{held > 0 ? `${sellAllSol.toFixed(1)}◎` : "—"}</div>
             </button>
           </div>
@@ -7065,7 +7334,7 @@ export default function App() {
             </button>
             <PortfolioPanel big
               solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedPnl}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
@@ -7181,7 +7450,29 @@ export default function App() {
           </span>
         </button>
       )}
+      {chipEditCfg && (
+        <div onClick={() => setChipEditCfg(null)} style={{ position: "fixed", inset: 0, zIndex: 95, background: "rgba(4,6,10,0.7)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 300, background: T.panel, border: `1px solid ${chipEditErr ? T.red : T.border2}`, borderRadius: 14, padding: 15, boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
+            <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, letterSpacing: 1.5, marginBottom: 3 }}>{chipEditCfg.title}</div>
+            <div style={{ fontFamily: T.mono, fontSize: 8, color: chipEditErr ? T.red : T.faint, marginBottom: 9 }}>{chipEditErr ? "that number's outside the range" : chipEditCfg.hint}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 11 }}>
+              <input autoFocus value={chipEditVal} onChange={(e) => { setChipEditVal(e.target.value); setChipEditErr(false); }} inputMode="decimal"
+                onKeyDown={(e) => { if (e.key === "Enter") { const v = chipEditCfg.validate(chipEditVal); if (v == null) setChipEditErr(true); else { chipEditCfg.cb(v); setChipEditCfg(null); } } }}
+                style={{ ...inp, flex: 1, minWidth: 0, fontSize: 17, fontWeight: 900, padding: "10px 12px", textAlign: "center" }} />
+              {chipEditCfg.unit && <span style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 900, color: VALO_PURPLE }}>{chipEditCfg.unit}</span>}
+            </div>
+            <div style={{ display: "flex", gap: 7 }}>
+              <button onClick={() => setChipEditCfg(null)} style={{ ...chip(false), flex: 1, textAlign: "center", padding: "10px", fontSize: 10.5, fontWeight: 800 }}>CANCEL</button>
+              <button onClick={() => { const v = chipEditCfg.validate(chipEditVal); if (v == null) setChipEditErr(true); else { chipEditCfg.cb(v); setChipEditCfg(null); } }}
+                style={{ flex: 1, border: "none", borderRadius: 8, padding: "10px", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, background: VALO_PURPLE, color: "#120b26", cursor: "pointer", boxShadow: `0 0 12px ${VALO_PURPLE}55` }}>SET</button>
+            </div>
+          </div>
+        </div>
+      )}
       {burnOpen && <BurnModal onClose={() => setBurnOpen(false)} isMobile={isMobile} myBurned={myBurned} siteBurned={burned} />}
+      {ranksOpen && <RanksModal onClose={() => setRanksOpen(null)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens}
+        myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)}
+        focusUser={ranksOpen.focus || null} onOpenUser={(u) => { setRanksOpen(null); setProfileUser(u); }} />}
       {lbOpen && <LeaderboardModal onClose={() => setLbOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens}
         onOpenUser={(u) => setProfileUser(u)} />}
       {tierListOpen && <TierListModal onClose={() => setTierListOpen(false)} isMobile={isMobile}
@@ -7202,7 +7493,7 @@ export default function App() {
           if (friendsList.includes(profileUser)) return;
           setSentFriendReqs((L) => (L.includes(profileUser) ? L.filter((x) => x !== profileUser) : [...L, profileUser])); // tap again cancels
         }}
-        onOpenTierList={() => setTierListOpen(true)} onOpenLeaderboard={() => setLbOpen(true)}
+        onOpenTierList={() => setRanksOpen({ focus: profileUser })} onOpenLeaderboard={() => setRanksOpen({ focus: profileUser })}
         incomingReq={friendReqs.includes(profileUser)}
         onAcceptReq={() => { setFriendsList((F) => (F.includes(profileUser) ? F : [...F, profileUser])); setFriendReqs((R) => R.filter((x) => x !== profileUser)); }}
         onDeclineReq={() => setFriendReqs((R) => R.filter((x) => x !== profileUser))}
@@ -7268,8 +7559,12 @@ export default function App() {
               <>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "8px 11px", marginBottom: 8, fontFamily: T.mono }}>
                 <span style={{ fontSize: 7.5, letterSpacing: 1.5, color: T.faint }}>💼 WALLET</span>
-                <span style={{ fontSize: 10, fontWeight: 800, color: T.blue }}>{solBalance.toFixed(2)} SOL</span>
-                <span style={{ fontSize: 10, fontWeight: 800, color: VALO_PURPLE }}>{fmtQty(valoWallet)} $VALO</span>
+                <span onClick={() => { setPay("SOL"); setAmount(String(feeSafe(solBalance, "SOL"))); }}
+                  title="tap a balance to load it as your buy-in (a hair under, to cover tax + tx fees)"
+                  style={{ fontSize: 10, fontWeight: 800, color: T.blue, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{solBalance.toFixed(2)} SOL</span>
+                <span onClick={() => { setPay("VALO"); setAmount(String(feeSafe(valoWallet, "VALO"))); }}
+                  title="tap a balance to load it as your buy-in (a hair under, to cover tax + tx fees)"
+                  style={{ fontSize: 10, fontWeight: 800, color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(valoWallet)} $VALO</span>
                 <span style={{ fontSize: 10.5, fontWeight: 900, color: T.text }}>${(solBalance * SOL_USD + valoWallet * valoUsdPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
               </div>
               <VisualTrading token={selected} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} compactArm
@@ -7284,8 +7579,12 @@ export default function App() {
             {/* live wallet — state-driven, so it moves the instant any bot or trade does */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "8px 11px", marginBottom: 8, fontFamily: T.mono }}>
               <span style={{ fontSize: 7.5, letterSpacing: 1.5, color: T.faint }}>💼 WALLET</span>
-              <span style={{ fontSize: 10, fontWeight: 800, color: T.blue }}>{solBalance.toFixed(2)} SOL</span>
-              <span style={{ fontSize: 10, fontWeight: 800, color: VALO_PURPLE }}>{fmtQty(valoWallet)} $VALO</span>
+              <span onClick={() => { setPay("SOL"); setAmount(String(feeSafe(solBalance, "SOL"))); }}
+                title="tap a balance to load it as your buy-in (a hair under, to cover tax + tx fees)"
+                style={{ fontSize: 10, fontWeight: 800, color: T.blue, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{solBalance.toFixed(2)} SOL</span>
+              <span onClick={() => { setPay("VALO"); setAmount(String(feeSafe(valoWallet, "VALO"))); }}
+                title="tap a balance to load it as your buy-in (a hair under, to cover tax + tx fees)"
+                style={{ fontSize: 10, fontWeight: 800, color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(valoWallet)} $VALO</span>
               <span style={{ fontSize: 10.5, fontWeight: 900, color: T.text }}>${(solBalance * SOL_USD + valoWallet * valoUsdPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
             </div>
             {/* live auto trader — arm or relaunch right here under the chart */}
@@ -7682,7 +7981,7 @@ export default function App() {
             </div>
             <PortfolioPanel big
               solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedPnl}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
@@ -7898,6 +8197,7 @@ export default function App() {
         }
         @keyframes wallSlide{ from{ transform: translateX(-100%); opacity:0; } to{ transform: translateX(0); opacity:1; } }
         .ticker-track{ display:flex; width:max-content; animation: tickerScroll 130s linear infinite; }
+        button{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; -webkit-tap-highlight-color: transparent; }
         .lb-row{ transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
         .lb-row:hover{ transform: translateX(5px); box-shadow: 0 0 14px rgba(125,92,240,0.3); border-color: rgba(125,92,240,0.55) !important; }
         .lb-pod{ transition: transform .16s ease, box-shadow .16s ease; }
