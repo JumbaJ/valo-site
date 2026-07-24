@@ -5338,6 +5338,8 @@ export default function App() {
   const [callouts, setCallouts] = useState([]); // [{id, tokenId, user, mcAt, ts}]
   const [bannerPaused, setBannerPaused] = useState(false);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
+  // browser tab reads VALO, not the repo name
+  useEffect(() => { try { document.title = "VALO"; } catch (e) {} }, []);
   // the popup clears itself when you tap anywhere that isn't the popup
   useEffect(() => {
     if (!armPop) return;
