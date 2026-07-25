@@ -2064,9 +2064,61 @@ function BullHead({ size = 20, horn, glow, rage = 0 }) {
   );
 }
 // little 3D metal/gem insignia for the GOLD → ONYX tiers + the spinning apex
+// ✦ DIAMOND APEX — the one-of-one. A prismatic star-cut stone that cycles the
+// whole spectrum, with a spinning ray-burst behind it, twin orbiting sparks
+// and a heartbeat-white core. Looks like nothing below it.
+function ApexGem({ size = 16 }) {
+  return (
+    <span style={{ position: "relative", width: size, height: size, display: "grid", placeItems: "center" }}>
+      {/* spinning star-burst rays behind the stone */}
+      <svg width={size * 1.9} height={size * 1.9} viewBox="0 0 40 40"
+        style={{ position: "absolute", animation: "apexRay 6s linear infinite", transformOrigin: "center", opacity: 0.85 }}>
+        {Array.from({ length: 8 }).map((_, i) => (
+          <path key={i} d="M20 20 L20 1.5" stroke="url(#apxRayG)" strokeWidth={i % 2 ? 0.8 : 1.6} strokeLinecap="round"
+            transform={`rotate(${i * 45} 20 20)`} />
+        ))}
+        <defs>
+          <linearGradient id="apxRayG" x1="0" y1="1" x2="0" y2="0">
+            <stop offset="0" stopColor="#9ceaff" stopOpacity="0" /><stop offset="1" stopColor="#ffffff" stopOpacity="0.9" />
+          </linearGradient>
+        </defs>
+      </svg>
+      {/* the prismatic star-cut stone — spectrum cycling via hue-rotate */}
+      <svg width={size} height={size} viewBox="0 0 24 24"
+        style={{ position: "relative", overflow: "visible", animation: "apexSpin 2.4s linear infinite, apexHue 3.5s linear infinite", transformOrigin: "center",
+          filter: "drop-shadow(0 0 5px #9ceaff)" }}>
+        <defs>
+          <linearGradient id="apxG" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#41d1ff" /><stop offset="0.3" stopColor="#c07dff" /><stop offset="0.55" stopColor="#ffffff" /><stop offset="0.8" stopColor="#7de3ff" /><stop offset="1" stopColor="#ff7dd8" />
+          </linearGradient>
+        </defs>
+        {/* star-cut: 8-point stone instead of the brilliant cut */}
+        <path d="M12 0.8 L14.6 8 L22.6 8.6 L16.4 13.4 L18.6 21.6 L12 17 L5.4 21.6 L7.6 13.4 L1.4 8.6 L9.4 8 Z"
+          fill="url(#apxG)" stroke="#ffffffaa" strokeWidth="0.6" />
+        <path d="M12 0.8 L12 17 M14.6 8 L5.4 21.6 M9.4 8 L18.6 21.6 M1.4 8.6 L22.6 8.6"
+          stroke="#ffffff" strokeWidth="0.45" opacity="0.65" fill="none" />
+        {/* heartbeat core */}
+        <circle cx="12" cy="11" r="2.1" fill="#ffffff">
+          <animate attributeName="r" values="1.4;2.6;1.4" dur="1.1s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.55;1;0.55" dur="1.1s" repeatCount="indefinite" />
+        </circle>
+      </svg>
+      {/* twin orbiting sparks */}
+      <span style={{ position: "absolute", inset: -2, animation: "coOrbit 2.8s linear infinite" }}>
+        <span style={{ position: "absolute", top: -1, left: "50%", width: 3.5, height: 3.5, marginLeft: -1.75, borderRadius: "50%",
+          background: "#fff", boxShadow: "0 0 6px 2px #9ceaff" }} />
+      </span>
+      <span style={{ position: "absolute", inset: -2, animation: "coOrbitR 2.1s linear infinite" }}>
+        <span style={{ position: "absolute", bottom: -1, left: "50%", width: 2.5, height: 2.5, marginLeft: -1.25, borderRadius: "50%",
+          background: "#ffd6f5", boxShadow: "0 0 5px 2px #ff7dd8" }} />
+      </span>
+    </span>
+  );
+}
 function MetalGem({ kind, size = 16 }) {
+  if (kind === "apex") return <ApexGem size={size} />;
   const id = "mg" + kind;
-  const spin = kind === "apex";
+  const spin = false;
   return (
     <svg width={size} height={size} viewBox="0 0 24 24"
       style={{ display: "block", overflow: "visible", animation: spin ? "apexSpin 2.4s linear infinite" : "none", transformOrigin: "center" }}>
@@ -2125,6 +2177,17 @@ function CalloutRing({ mult, size = 34 }) {
         {/* ticked track — radar/terminal style */}
         <circle cx={s / 2} cy={s / 2} r={r} fill="none" stroke={T.border2} strokeWidth="2.5"
           strokeDasharray="1.6 3.1" opacity="0.8" />
+        {/* every tier past PLEB stamps another glowing tick onto the dial —
+            count = how far up the ladder you are */}
+        {(() => {
+          const ti = CALLOUT_TIERS.indexOf(tier);
+          const nT = Math.min(Math.max(0, ti - 1), 14);
+          return nT > 0 && Array.from({ length: nT }).map((_, i) => {
+            const a = (i / 14) * Math.PI * 2;
+            return <circle key={i} cx={s / 2 + Math.cos(a) * (r - 5.6)} cy={s / 2 + Math.sin(a) * (r - 5.6)} r="0.8"
+              fill={tier.color} opacity="0.8" style={{ filter: `drop-shadow(0 0 2px ${tier.color})` }} />;
+          });
+        })()}
         {/* fx1+: inner hairline in the tier metal */}
         {fx >= 1 && <circle cx={s / 2} cy={s / 2} r={r - 3.2} fill="none" stroke={tier.color} strokeWidth="0.75" opacity="0.35" />}
         {/* fx2+: slow-orbiting dashed halo */}
@@ -2134,10 +2197,49 @@ function CalloutRing({ mult, size = 34 }) {
               strokeDasharray="1.2 5.2" opacity="0.55" strokeLinecap="round" />
           </g>
         )}
+        {/* fx3+: cardinal sparkles + the arc starts to breathe */}
+        {fx >= 3 && [0, 90, 180, 270].map((deg, i) => {
+          const a = (deg / 180) * Math.PI;
+          return (
+            <circle key={deg} cx={s / 2 + Math.cos(a) * (r + 2.6)} cy={s / 2 + Math.sin(a) * (r + 2.6)} r="1.1" fill="#fff">
+              <animate attributeName="opacity" values="0;1;0" dur="1.7s" begin={`${i * 0.42}s`} repeatCount="indefinite" />
+            </circle>
+          );
+        })}
+        {/* fx4+: a second halo counter-orbiting the first */}
+        {fx >= 4 && (
+          <g style={{ ...spinO, animation: "coOrbitR 4.6s linear infinite" }}>
+            <circle cx={s / 2} cy={s / 2} r={r + 4.6} fill="none" stroke={tier.color} strokeWidth="0.75"
+              strokeDasharray="0.9 6.5" opacity="0.5" strokeLinecap="round" />
+          </g>
+        )}
+        {/* fx5 (APEX): comet screaming around the ring + spectrum aura */}
+        {fx >= 5 && (
+          <>
+            <circle cx={s / 2} cy={s / 2} r={r + 6.4} fill="none" stroke="url(#coApexAura)" strokeWidth="1.1" opacity="0.65">
+              <animate attributeName="opacity" values="0.35;0.8;0.35" dur="1.6s" repeatCount="indefinite" />
+            </circle>
+            <defs>
+              <linearGradient id="coApexAura" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stopColor="#41d1ff" /><stop offset="0.5" stopColor="#c07dff" /><stop offset="1" stopColor="#ff7dd8" />
+              </linearGradient>
+              <linearGradient id="coComet" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stopColor="#ffffff" stopOpacity="0" /><stop offset="1" stopColor="#ffffff" />
+              </linearGradient>
+            </defs>
+            <g style={{ ...spinO, animation: "coOrbit 1.9s linear infinite" }}>
+              <path d={`M ${s / 2 + r + 6.4} ${s / 2} a ${r + 6.4} ${r + 6.4} 0 0 0 ${-(r + 6.4) * 0.5} ${-(r + 6.4) * 0.86}`}
+                fill="none" stroke="url(#coComet)" strokeWidth="1.6" strokeLinecap="round" />
+              <circle cx={s / 2 + r + 6.4} cy={s / 2} r="1.7" fill="#fff" style={{ filter: "drop-shadow(0 0 4px #9ceaff)" }} />
+            </g>
+          </>
+        )}
         {/* tier progress arc */}
         <circle cx={s / 2} cy={s / 2} r={r} fill="none" stroke={tier.color} strokeWidth="2.5"
           strokeDasharray={`${C * frac} ${C}`} strokeLinecap="round"
-          style={{ filter: `drop-shadow(0 0 ${fx >= 1 ? 4 : 2.5}px ${tier.color})` }} />
+          style={{ filter: `drop-shadow(0 0 ${fx >= 1 ? 4 : 2.5}px ${tier.color})` }}>
+          {fx >= 3 && <animate attributeName="stroke-opacity" values="1;0.55;1" dur="1.5s" repeatCount="indefinite" />}
+        </circle>
       </svg>
       {(() => {
         const gemKind = tier.apex ? "apex" : tier.bull ? null
@@ -2830,6 +2932,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   const { tier } = calloutTier(peak);
   const [dmDraft, setDmDraft] = useState("");
   const [fundAmt, setFundAmt] = useState("");
+  const [holdsOpen, setHoldsOpen] = useState(false); // 💼 all-holdings dropdown
   const friends = friendStatus === "friends";
   // ---- current holdings + full tx history (seeded; API: on-chain wallet scan) ----
   const [txFrom, setTxFrom] = useState("");
@@ -2843,7 +2946,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     while (holds.length < nH && seen.size < tokens.length) {
       const t = tokens[Math.floor(r2() * tokens.length)];
       if (seen.has(t.id)) continue; seen.add(t.id);
-      holds.push({ t, qty: Math.floor(1200 + r2() * 900000), entry: t.price * (0.4 + r2() * 1.4) });
+      holds.push({ t, qty: Math.floor(1200 + r2() * 900000), entry: t.price * (0.4 + r2() * 1.4), since: Date.now() - Math.floor((0.2 + r2() * 89) * 86400e3) });
     }
     const now = Date.now();
     const txAll = Array.from({ length: 26 }, () => {
@@ -2896,7 +2999,68 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
           <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 6 }}>
             Followers get this user's callouts as alerts · friends can also DM & send SOL/$VALO
           </div>
-
+          {/* 💼 PORTFOLIO HOLDINGS — one professional box: total balance, top
+              holding, and a dropdown with every token they hold */}
+          {(() => {
+            const rows = holds.map((h) => {
+              const val = h.qty * h.t.price;
+              const pnl = (h.t.price - h.entry) * h.qty;
+              const pnlPct = h.entry > 0 ? ((h.t.price - h.entry) / h.entry) * 100 : 0;
+              const days = Math.max(0, (Date.now() - (h.since || Date.now())) / 86400e3);
+              const held = days >= 1 ? `${Math.floor(days)}d` : `${Math.max(1, Math.floor(days * 24))}h`;
+              return { ...h, val, pnl, pnlPct, held };
+            }).sort((a, b) => b.val - a.val);
+            const totalBal = rows.reduce((s, x) => s + x.val, 0);
+            const top = rows[0];
+            return (
+              <div style={{ marginTop: 10, border: `1px solid ${T.border2}`, borderRadius: 12, background: "linear-gradient(180deg, rgba(22,27,37,0.9), rgba(12,15,22,0.95))", overflow: "hidden" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.5, color: T.faint }}>TOTAL BALANCE</div>
+                    <div style={{ fontFamily: T.mono, fontSize: 17, fontWeight: 900, color: T.text }}>${totalBal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                  </div>
+                  {top && (
+                    <div onClick={() => onOpenToken(top.t.id)} title={`Open the $${top.t.sym} chart`}
+                      style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.03)", borderRadius: 10, padding: "6px 9px" }}>
+                      <TokenAvatar sym={top.t.sym} hue={top.t.hue} img={top.t.img} size={19} />
+                      <div style={{ lineHeight: 1.25 }}>
+                        <div style={{ fontFamily: T.mono, fontSize: 7, letterSpacing: 1.2, color: T.faint }}>TOP HOLDING</div>
+                        <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: accent(top.t.hue) }}>${top.t.sym} <span style={{ color: T.text }}>${top.val.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => setHoldsOpen((v) => !v)}
+                  style={{ width: "100%", border: "none", borderTop: `1px solid ${T.border}`, background: holdsOpen ? "rgba(125,92,240,0.1)" : "rgba(255,255,255,0.02)",
+                    color: holdsOpen ? VALO_PURPLE : T.dim, padding: "7px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.5, cursor: "pointer" }}>
+                  {holdsOpen ? "▴ HIDE" : "▾ ALL HOLDINGS"} · {rows.length} TOKENS
+                </button>
+                {holdsOpen && (
+                  <div style={{ padding: "4px 8px 8px" }}>
+                    {rows.map((h, i) => {
+                      const up = h.pnl >= 0;
+                      return (
+                        <div key={i} onClick={() => onOpenToken(h.t.id)} title={`Open the $${h.t.sym} chart`}
+                          style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", border: `1px solid ${T.border}`, borderLeft: `2px solid ${up ? T.green : T.red}`,
+                            background: "#0c0f16", borderRadius: 9, padding: "7px 9px", marginTop: 4 }}>
+                          <TokenAvatar sym={h.t.sym} hue={h.t.hue} img={h.t.img} size={18} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: accent(h.t.hue) }}>${h.t.sym}
+                              <span style={{ color: T.text, marginLeft: 6 }}>${h.val.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
+                            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim }}>{fmtQty(h.qty)} tokens · held {h.held}</div>
+                          </div>
+                          <div style={{ textAlign: "right", lineHeight: 1.3 }}>
+                            <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: up ? T.green : T.red }}>{up ? "+" : "−"}${Math.abs(h.pnl).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                            <div style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 800, color: up ? T.green : T.red }}>{pct(h.pnlPct)} since hold</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
         {/* friends-only: DM + send funds */}
         {friends && (
@@ -2926,28 +3090,6 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
             </div>
           </div>
         )}
-        {/* current holdings — mini token cards; each opens that chart */}
-        <div style={{ padding: "11px 14px", borderBottom: `1px solid ${T.border}` }}>
-<div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1.5, marginBottom: 6 }}>💼 CURRENT HOLDINGS · {holds.length}</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
-            {holds.map((h, i) => {
-              const pnl = (h.t.price - h.entry) * h.qty;
-              const up = pnl >= 0;
-              return (
-                <div key={i} onClick={() => onOpenToken(h.t.id)} title={`Open the $${h.t.sym} chart`}
-                  style={{ border: `1px solid ${up ? "rgba(22,199,132,0.3)" : "rgba(234,57,67,0.3)"}`, background: up ? "rgba(22,199,132,0.05)" : "rgba(234,57,67,0.05)", borderRadius: 10, padding: "8px 9px", cursor: "pointer" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                    <TokenAvatar sym={h.t.sym} hue={h.t.hue} img={h.t.img} size={17} />
-                    <span style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 800, color: accent(h.t.hue), flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>${h.t.sym}</span>
-                    <span style={{ fontFamily: T.mono, fontSize: 8.5, color: T.dim }}>${fmtP(h.t.price)}</span>
-                  </div>
-                  <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.dim }}>{h.qty >= 1e6 ? (h.qty / 1e6).toFixed(2) + "M" : h.qty >= 1e3 ? (h.qty / 1e3).toFixed(1) + "K" : h.qty} tokens</div>
-                  <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: up ? T.green : T.red }}>{up ? "+" : "−"}${Math.abs(pnl).toLocaleString(undefined, { maximumFractionDigits: 0 })} PnL</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
         {/* activity — full tx log with an inclusive date-range filter or show-all */}
         <div style={{ padding: "11px 14px", borderBottom: `1px solid ${T.border}` }}>
           <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1.5, marginBottom: 6 }}>⚡ ACTIVITY · {txShown.length} TX</div>
@@ -4294,6 +4436,14 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                           {a.side === "buy" ? "BUY" : "SELL"} <span style={{ color: T.text }}>{a.sym}</span>
                         </div>
                         <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>{mask(`${a.amt} ${a.unit}`)} · {new Date(a.t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                        {a.tokQty != null && (
+                          <div style={{ fontFamily: T.mono, fontSize: 8, color: a.side === "buy" ? T.green : T.red }}>
+                            {mask(`🪙 ${a.side === "buy" ? "+" : "−"}${fmtQty(a.tokQty)} ${a.sym}`)}
+                            {a.valUsd != null && <span style={{ color: T.faint }}> (${a.valUsd.toFixed(2)})</span>}
+                            {a.side === "sell" && a.pnlMoney != null && <span style={{ color: a.pnlMoney >= 0 ? T.green : T.red }}> · Δ {mask(`${a.pnlMoney >= 0 ? "+" : "−"}$${Math.abs(a.pnlMoney * SOL_USD).toFixed(2)}`)}</span>}
+                            {a.side === "sell" && a.remQty != null && <span style={{ color: T.dim }}> · {a.remQty > 0.5 ? mask(`${fmtQty(a.remQty)} left`) : "closed"}</span>}
+                          </div>
+                        )}
                       </div>
                       {a.mult != null && <MultBadge mult={a.mult} small />}
                       {a.pnlMoney != null && (
@@ -4376,6 +4526,14 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                               {a.side === "buy" ? "BUY" : "SELL"} <span style={{ color: T.text }}>{a.sym}</span>
                             </div>
                             <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>{mask(`${a.amt} ${a.unit}`)} · {new Date(a.t).toLocaleDateString([], { month: "short", day: "numeric" })} {new Date(a.t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                            {a.tokQty != null && (
+                              <div style={{ fontFamily: T.mono, fontSize: 8, color: a.side === "buy" ? T.green : T.red }}>
+                                {mask(`🪙 ${a.side === "buy" ? "+" : "−"}${fmtQty(a.tokQty)} ${a.sym}`)}
+                                {a.valUsd != null && <span style={{ color: T.faint }}> (${a.valUsd.toFixed(2)})</span>}
+                                {a.side === "sell" && a.pnlMoney != null && <span style={{ color: a.pnlMoney >= 0 ? T.green : T.red }}> · Δ {mask(`${a.pnlMoney >= 0 ? "+" : "−"}$${Math.abs(a.pnlMoney * SOL_USD).toFixed(2)}`)}</span>}
+                                {a.side === "sell" && a.remQty != null && <span style={{ color: T.dim }}> · {a.remQty > 0.5 ? mask(`${fmtQty(a.remQty)} left`) : "closed"}</span>}
+                              </div>
+                            )}
                           </div>
                           {a.mult != null && <MultBadge mult={a.mult} small />}
                           {a.pnlMoney != null && (
@@ -5271,7 +5429,7 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
   }, [token.id, Math.round(token.price * 1e7)]);
   const holdTxt = (m) => (m < 60 ? `${m}m` : m < 1440 ? `${(m / 60).toFixed(1)}h` : `${(m / 1440).toFixed(1)}d`);
   return (
-    <div style={{ marginTop: 10, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden" }}>
+    <div data-lth={isMobile ? "1" : undefined} style={{ marginTop: 10, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden" }}>
       <div style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 8px 6px 6px", background: "rgba(255,255,255,0.02)" }}>
         <span style={{ display: "flex", gap: 4 }}>
           <button onClick={() => { setView("trades"); setOpen(true); }}
@@ -5295,7 +5453,7 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
           </div>
           {topHolders.map((h) => (
             <div key={h.i}
-              onClick={() => onPickTrader && onPickTrader({ trader: h.name || h.wal, isBuy: true, usd: h.usd, holder: true })}
+              onClick={() => onPickTrader && onPickTrader({ trader: h.name || h.wal, isBuy: true, usd: h.usd, qty: h.qty, holder: true })}
               onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(240,185,11,0.09)"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
               title="Open this holder — pin them, set colour & icon, follow"
@@ -5650,7 +5808,7 @@ function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, ec
 }
 
 // ---------------- marker receipt — single trade OR a consolidated badge group ----------------
-function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {}, setTraderPref, myName, onOpenUser }) {
+function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {}, setTraderPref, myName, onOpenUser, token = null }) {
   const list = info.list && info.list.length ? info.list : [info];
   const [pg, setPg] = useState(0);
   const i = Math.max(0, Math.min(list.length - 1, pg));
@@ -5752,6 +5910,61 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
             )}
           </div>
         )}
+
+        {/* trader dossier — holdings + name/pfp, mini chart, every trade here */}
+        {(() => {
+          if (!token || !traderKey || traderKey === "__me__" || (tr.sym && token.sym !== tr.sym)) return null;
+          const trades = (traderTradesFor(token, traderKey) || []).slice().sort((a, b) => b.t - a.t);
+          let hq = info.holderQty, hu = info.holderUsd;
+          if (hq == null) { // seeded fallback when opened from a live-trade tx
+            let s3 = hashStr("hold-" + traderKey + token.sym);
+            const r3 = () => { s3 = (s3 * 1664525 + 1013904223) >>> 0; return s3 / 4294967296; };
+            hq = Math.floor(4000 + r3() * 420000);
+          }
+          if (hu == null) hu = hq * token.price;
+          const ago2 = (ms) => { const m = Math.floor((Date.now() - ms) / 60000); return m < 60 ? `${m}m` : m < 1440 ? `${(m / 60).toFixed(1)}h` : `${(m / 1440).toFixed(1)}d`; };
+          return (
+            <div style={{ border: `1px solid ${T.border2}`, borderRadius: 11, background: "rgba(255,255,255,0.02)", padding: "9px 10px", marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
+                {/* profile picture + name → their portfolio */}
+                <span onClick={() => onOpenUser && onOpenUser(traderKey)} title="Open their portfolio"
+                  style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", minWidth: 0, flex: 1 }}>
+                  <span style={{ width: 26, height: 26, borderRadius: "50%", flex: "0 0 auto", overflow: "hidden",
+                    background: `linear-gradient(135deg, ${myColor}, ${T.blue})`, display: "grid", placeItems: "center",
+                    fontFamily: T.mono, fontWeight: 900, fontSize: 12, color: "#0a0713", border: `1.5px solid ${myColor}` }}>
+                    {myIcon ? <img src={myIcon} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (traderKey[0] || "?").toUpperCase()}
+                  </span>
+                  <span style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 800, color: myColor, textDecoration: "underline dotted", textUnderlineOffset: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{traderKey}</span>
+                </span>
+                {/* current holdings on this token */}
+                <span style={{ textAlign: "right", lineHeight: 1.3 }}>
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 6.5, letterSpacing: 1.2, color: T.faint }}>CURRENT HOLDINGS</span>
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: T.text }}>{fmtQty(hq)} <span style={{ color: accent(token.hue) }}>${token.sym}</span> · {fmt$(hu)}</span>
+                </span>
+              </div>
+              <TraceMini candles={token.candles} hue={token.hue} h={62} />
+              <div style={{ fontFamily: T.mono, fontSize: 7, letterSpacing: 1.2, color: T.faint, margin: "7px 0 4px" }}>THEIR TRADES ON ${token.sym} · {trades.length}</div>
+              <div style={{ maxHeight: 130, overflowY: "auto" }}>
+                {trades.length === 0 && <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, padding: "6px 0" }}>No trades recorded on this token yet.</div>}
+                {trades.map((x, k) => {
+                  const usd = (x.amt || 0) * (x.unit === "SOL" ? SOL_USD : 0.0125);
+                  const pUsd = x.pnlMoney != null ? x.pnlMoney * (x.unit === "SOL" ? SOL_USD : 0.0125) : null;
+                  const buy = x.side === "buy";
+                  return (
+                    <div key={k} style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: T.mono, borderBottom: `1px solid ${T.border}`, padding: "4px 1px" }}>
+                      <span style={{ fontSize: 9, fontWeight: 900, color: buy ? T.green : T.red, width: 26 }}>{buy ? "▲ B" : "▼ S"}</span>
+                      <span style={{ fontSize: 8.5, color: T.faint, width: 34 }}>{ago2(x.t)}</span>
+                      <span style={{ fontSize: 10, fontWeight: 800, color: T.text, flex: 1 }}>${usd.toFixed(2)}</span>
+                      <span style={{ fontSize: 9.5, fontWeight: 800, color: pUsd == null ? T.faint : pUsd >= 0 ? T.green : T.red }}>
+                        {pUsd == null ? "—" : `${pUsd >= 0 ? "+" : "−"}$${Math.abs(pUsd).toFixed(2)}`}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* group summary bar */}
         {list.length > 1 && (
@@ -6000,6 +6213,7 @@ export default function App() {
     return () => window.removeEventListener("pointerdown", cancel, true);
   }, [botDragSet]);
   const [mobPageTab, setMobPageTab] = useState("trader");          // mobile bot page: trader | bots
+  const [mobPillPos, setMobPillPos] = useState(false);             // pill bar: watchlist ⇄ my-positions swap
   // manual SELL on a running bot — dumps its whole remaining position at market
   const sellRun = (runId) => {
     const r = botRuns.find((x) => x.id === runId && x.status === "live"); if (!r) return;
@@ -6289,7 +6503,16 @@ export default function App() {
   const chartRaf = useRef(0);
   const chartDragStart = (which) => (e) => {
     e.stopPropagation(); // never arm the sheet's swipe-to-close from a resize handle
-    chartDrag.current = { which, y0: e.touches[0].clientY, h0: mobChartH, c0: metricsCrunch };
+    const d = { which, y0: e.touches[0].clientY, h0: mobChartH, c0: metricsCrunch };
+    if (which === "bottom") {
+      // cap the pull right above the LIVE TRADES / HOLDERS tab — never cover it
+      try {
+        const hb = e.currentTarget.getBoundingClientRect();
+        const lth = document.querySelector("[data-lth]");
+        if (lth) d.capH = mobChartH + Math.max(0, Math.round(lth.getBoundingClientRect().top - hb.bottom - 8));
+      } catch (err) {}
+    }
+    chartDrag.current = d;
   };
   useEffect(() => {
     const mv = (e) => {
@@ -6298,8 +6521,16 @@ export default function App() {
       const dy = e.touches[0].clientY - d.y0;
       // stash the target and flush once per frame — per-event setState made the
       // heavy chart re-render mid-gesture and the drag felt rough/sticky
-      if (d.which === "bottom") d.nextH = Math.round(Math.min(Math.max(560, window.innerHeight - 205), Math.max(150, d.h0 + dy)) / 2) * 2;
-      else d.nextC = Math.round(Math.min(1, Math.max(0, d.c0 - dy / 110)) * 100) / 100; // pull up → crunch away
+      if (d.which === "bottom") {
+        const hardMax = d.capH != null ? d.capH : Math.max(560, window.innerHeight - 205);
+        d.nextH = Math.round(Math.min(hardMax, Math.max(150, d.h0 + dy)) / 2) * 2;
+      }
+      else {
+        d.nextC = Math.round(Math.min(1, Math.max(0, d.c0 - dy / 110)) * 100) / 100; // pull up → crunch away
+        // the chart itself rides the pull — height tracks crunch toward full
+        const fullH = Math.max(400, Math.round(window.innerHeight - 205));
+        d.nextH = Math.round(348 + d.nextC * (fullH - 348));
+      }
       if (!chartRaf.current) chartRaf.current = requestAnimationFrame(() => {
         chartRaf.current = 0;
         const d2 = chartDrag.current; if (!d2) return;
@@ -6307,7 +6538,16 @@ export default function App() {
         if (d2.nextC != null) setMetricsCrunch(d2.nextC);
       });
     };
-    const end = () => { chartDrag.current = null; };
+    const end = () => {
+      const d = chartDrag.current; chartDrag.current = null;
+      // top-pull SNAP — never rest half-way covering things: either fully up
+      // (name + price only) or fully back down
+      if (d && d.which === "top" && d.nextC != null) {
+        const fullH = Math.max(400, Math.round(window.innerHeight - 205));
+        if (d.nextC > 0.33) { setMetricsCrunch(1); setMobChartH(fullH); }
+        else { setMetricsCrunch(0); setMobChartH(348); }
+      }
+    };
     window.addEventListener("touchmove", mv, { passive: false });
     window.addEventListener("touchend", end); window.addEventListener("touchcancel", end);
     return () => { window.removeEventListener("touchmove", mv); window.removeEventListener("touchend", end); window.removeEventListener("touchcancel", end); };
@@ -6449,11 +6689,9 @@ export default function App() {
     if (typeof window !== "undefined" && window.innerWidth < 900) return;
     const id = setTimeout(() => {
       const mp = computeMaxPull();
-      const mr = computeMaxRight();
-      if (mp > 0 || mr > 0) {
-        if (mp > 0) setPullX(mp);   // hug the left wall
-        if (mr > 0) setPullR(mr);   // and take up the right-hand slack
-        didInitPull.current = true;
+      if (mp > 0) {
+        setPullX(mp);               // hug the left wall — the RIGHT slack stays
+        didInitPull.current = true; // free so pulling right has real travel
       }
     }, 260);
     return () => clearTimeout(id);
@@ -6501,6 +6739,7 @@ export default function App() {
   const [renamingSec, setRenamingSec] = useState(null);
   const [secName, setSecName] = useState("");
   const [scanOrder, setScanOrder] = useState(null);         // curated left-column slots
+  const [scanSec, setScanSec] = useState(null);             // watchlist subsection currently LOADED into the scanner
   const wallAutoRef = useRef(false);                        // opened by a drag → close after drop
   const [wallDragHot, setWallDragHot] = useState(false);    // closed tab lights up when a drag hovers it
   const [ecoDim, setEcoDim] = useState(false);              // search fades while an HTML5 drag is live
@@ -6511,22 +6750,38 @@ export default function App() {
     window.addEventListener("pointerdown", off, true);
     return () => window.removeEventListener("pointerdown", off, true);
   }, [watchMenu != null]);
+  const loadSecToScanner = (s2) => {
+    if (scanSec === s2.id) { setScanSec(null); setScanOrder(null); return; } // toggle back to the full scanner
+    if (!s2.ids.length) return;
+    setScanSec(s2.id); setScanOrder([...s2.ids]);
+  };
   const [mDrag, setMDrag] = useState(null);       // PC hold-drag ghost {id,sym,hue,from}
   const mDragRef = useRef(null);
   const ghostRef = useRef(null);                  // ghost follows the cursor via raw DOM — buttery
   const posRef = useRef({ x: 0, y: 0 });
   const [dragOverSlot, setDragOverSlot] = useState(null); // scanner slot about to be REPLACED
+  const [dragOverId, setDragOverId] = useState(null);     // tile under the drag right now — pulses so you SEE the drag
+  const dragGhostRef = useRef(null);                      // file-drag style pill riding the pointer
+  const ghostShow = (t, x, y) => { const el = dragGhostRef.current; if (!el || !t) return;
+    el.textContent = `⠿ $${t.sym}`; el.style.borderColor = accent(t.hue); el.style.color = accent(t.hue);
+    el.style.display = "flex"; el.style.transform = `translate(${x + 14}px, ${y + 14}px)`; };
+  const ghostMove = (x, y) => { const el = dragGhostRef.current; if (el && el.style.display !== "none") el.style.transform = `translate(${x + 14}px, ${y + 14}px)`; };
+  const ghostHide = () => { const el = dragGhostRef.current; if (el) el.style.display = "none"; };
+  const dragOverRef = useRef(null);
+  const markOver = (id) => { if (dragOverRef.current !== id) { dragOverRef.current = id; setDragOverId(id); } };
   const [slotFlash, setSlotFlash] = useState(null);       // just-replaced slot pulses
   const [dropFx, setDropFx] = useState(null);             // pill flying INTO its new home
   const shownRef = useRef([]);
-  const reorderScanner = (dragId, targetId) => {
-    if (dragId === targetId) return;
-    const base = scanOrder || shownRef.current.map((x) => x.id);
-    if (!base.includes(dragId) || !base.includes(targetId)) return;
-    const n = base.filter((x) => x !== dragId);
-    const i = n.indexOf(targetId);
-    setScanOrder([...n.slice(0, i), dragId, ...n.slice(i)]);
-  };
+  // PC reorder = EXACTLY the mobile logic: remove the dragged id, re-insert at
+  // the target's index. Down-drags land ON the next slot (the old version
+  // inserted BEFORE the target, so one-slot-down was a dead no-op and you had
+  // to overshoot 1.5 tokens to see anything).
+  const reorderScanner = (dragId, targetId) => setScanOrder((prev) => {
+    const base = prev || shownRef.current.map((x) => x.id);
+    const from = base.indexOf(dragId), to = base.indexOf(targetId);
+    if (from < 0 || to < 0 || from === to) return prev;
+    const n = [...base]; n.splice(from, 1); n.splice(to, 0, dragId); return n;
+  });
   const replaceSlot = (targetId, dragId) => {
     const base = scanOrder || shownRef.current.map((x) => x.id);
     const si = base.indexOf(targetId); if (si < 0 || targetId === dragId) return;
@@ -6539,26 +6794,39 @@ export default function App() {
       const d = mDragRef.current; if (!d) return;
       try {
         posRef.current = { x: e.clientX, y: e.clientY };
+        ghostMove(e.clientX, e.clientY);
         const el = document.elementFromPoint(e.clientX, e.clientY);
         if (!el || !el.closest) return;
         if (d.zone === "scanner") {
           const slot = el.closest("[data-slot]");
           if (slot) {
             const tid = +slot.dataset.slot;
-            if (tid !== d.id && tid !== d.lastT) { d.lastT = tid; reorderScanner(d.id, tid); }
-          }
+            if (tid !== d.id) {
+              // HALF-WAY LOCK: swap only once the cursor crosses the slot's midpoint
+              const rect = slot.getBoundingClientRect();
+              const order = shownRef.current.map((x) => x.id);
+              const iD = order.findIndex((x) => String(x) === String(d.id));
+              const iO = order.findIndex((x) => String(x) === String(tid));
+              const passed = iD < 0 || iO < 0 ? true
+                : iO > iD ? e.clientY >= rect.top + rect.height * 0.15
+                : e.clientY <= rect.bottom - rect.height * 0.15;
+              if (passed) { markOver(tid); if (tid !== d.lastT) { d.lastT = tid; reorderScanner(d.id, tid); } }
+              else markOver(null);
+            } else markOver(null);
+          } else { markOver(null); d.lastT = null; }
         } else if (d.zone === "wall") {
           const wrow = el.closest("[data-wrow]");
           if (wrow) {
             const tid = +wrow.dataset.wrow;
+            markOver(tid !== d.id ? tid : null);
             if (tid !== d.id && tid !== d.lastT) { d.lastT = tid; reorderWatch(d.id, tid); }
-          }
+          } else markOver(null);
         }
       } catch (err) { /* never freeze on a stray event */ }
     };
     const cancel = () => {
       if (!mDragRef.current) return;
-      mDragRef.current = null; setMDrag(null);
+      mDragRef.current = null; setMDrag(null); markOver(null); ghostHide();
       document.body.classList.remove("valo-dragging");
     };
     const mu = () => cancel();
@@ -6573,6 +6841,42 @@ export default function App() {
   // hold a token (~600ms) on mobile, or right-click on PC → the add-to-list menu.
   // On PC, hold the mouse ~280ms → a ghost lifts and you DRAG it: onto a scanner
   // slot (replaces it), the watchlist wall, or any subsection.
+  const mobReorder = useRef(null); // {id} — finger-drag reorder on the mobile scanner
+  const moveScan = (dragId, overId) => setScanOrder((prev) => {
+    const base = prev || shownRef.current.map((x) => x.id);
+    const from = base.indexOf(dragId), to = base.indexOf(overId);
+    if (from < 0 || to < 0 || from === to) return prev;
+    const n = [...base]; n.splice(from, 1); n.splice(to, 0, dragId); return n;
+  });
+  useEffect(() => {
+    const mv = (e) => {
+      const d = mobReorder.current; if (!d) return;
+      e.preventDefault(); // page never scrolls while re-slotting a token
+      const t0 = e.touches && e.touches[0]; if (!t0) return;
+      ghostMove(t0.clientX, t0.clientY);
+      const el = document.elementFromPoint(t0.clientX, t0.clientY);
+      const slot = el && el.closest && el.closest("[data-mslot]");
+      if (slot) {
+        const raw = slot.getAttribute("data-mslot");
+        const over = raw != null ? (isNaN(+raw) ? raw : +raw) : null;
+        if (over != null && String(over) !== String(d.id)) {
+          // HALF-WAY LOCK: only take the slot once the finger crosses its midpoint
+          const rect = slot.getBoundingClientRect();
+          const order = shownRef.current.map((x) => x.id);
+          const iD = order.findIndex((x) => String(x) === String(d.id));
+          const iO = order.findIndex((x) => String(x) === String(over));
+          const passed = iD < 0 || iO < 0 ? true
+            : iO > iD ? t0.clientY >= rect.top + rect.height * 0.3
+            : t0.clientY <= rect.bottom - rect.height * 0.3;
+          if (passed) { markOver(over); moveScan(d.id, over); } else markOver(null);
+        } else markOver(null);
+      } else markOver(null);
+    };
+    const end = () => { if (mobReorder.current) { mobReorder.current = null; setMDrag(null); markOver(null); ghostHide(); document.body.classList.remove("valo-dragging"); } };
+    window.addEventListener("touchmove", mv, { passive: false });
+    window.addEventListener("touchend", end); window.addEventListener("touchcancel", end);
+    return () => { window.removeEventListener("touchmove", mv); window.removeEventListener("touchend", end); window.removeEventListener("touchcancel", end); };
+  }, []);
   const tdProps = (t) => ({
     onMouseDown: (e) => {
       if (e.button !== 0) return;
@@ -6586,6 +6890,7 @@ export default function App() {
         posRef.current = { x: n._mx, y: n._my };
         mDragRef.current = { id: t.id, zone, lastT: null };
         setMDrag(mDragRef.current);
+        ghostShow(t, n._mx, n._my);
         document.body.classList.add("valo-dragging");
       }, 280);
     },
@@ -6600,16 +6905,29 @@ export default function App() {
       const n = e.currentTarget; n._gx = t0.clientX; n._gy = t0.clientY;
       if (n._gt) clearTimeout(n._gt);
       n._gt = setTimeout(() => {
-        n._gt = null; n._gm = true;
+        n._gt = null; n._gm = true; n._garmed = true;
         if (navigator.vibrate) navigator.vibrate(12);
-        setWatchMenu({ id: t.id, sym: t.sym, x: Math.min(n._gx, window.innerWidth - 190), y: Math.min(n._gy, window.innerHeight - 200) });
-      }, 600);
+      }, 320);
     },
     onTouchMove: (e) => {
       const t0 = e.touches && e.touches[0]; const n = e.currentTarget;
-      if (t0 && n._gt && (Math.abs(t0.clientX - n._gx) > 10 || Math.abs(t0.clientY - n._gy) > 10)) { clearTimeout(n._gt); n._gt = null; }
+      if (t0 && n._gt && (Math.abs(t0.clientX - n._gx) > 16 || Math.abs(t0.clientY - n._gy) > 16)) { clearTimeout(n._gt); n._gt = null; }
+      // held + finger keeps moving → this is a REORDER drag, not a menu
+      if (t0 && n._garmed && !mobReorder.current && (Math.abs(t0.clientX - n._gx) > 6 || Math.abs(t0.clientY - n._gy) > 6)) {
+        n._garmed = false;
+        mobReorder.current = { id: t.id };
+        setMDrag({ id: t.id, zone: "mscan" });
+        ghostShow(t, t0.clientX, t0.clientY);
+        document.body.classList.add("valo-dragging");
+        if (navigator.vibrate) navigator.vibrate(8);
+      }
     },
-    onTouchEnd: (e) => { const n = e.currentTarget; if (n._gt) { clearTimeout(n._gt); n._gt = null; } },
+    onTouchEnd: (e) => {
+      const n = e.currentTarget; if (n._gt) { clearTimeout(n._gt); n._gt = null; }
+      // held and lifted without dragging → open the add/remove menu
+      if (n._garmed) { n._garmed = false;
+        setWatchMenu({ id: t.id, sym: t.sym, x: Math.min(n._gx, window.innerWidth - 190), y: Math.min(n._gy, window.innerHeight - 200) }); }
+    },
     onClickCapture: (e) => { const n = e.currentTarget; if (n._gm || n._mfired) { n._gm = false; n._mfired = false; e.preventDefault(); e.stopPropagation(); } },
     onContextMenu: (e) => {
       e.preventDefault(); e.stopPropagation();
@@ -7031,10 +7349,17 @@ export default function App() {
         return { ...M, [t.id]: better };
       });
     }
-    // portfolio activity feed — one bar per trade
+    // portfolio activity feed — one bar per trade, with full token accounting:
+    // how many tokens moved, their $ value, and (on sells) what's still held
+    const txValUsd = unit === "SOL" ? o.amt * SOL_USD : o.amt * 0.0125;
+    const txTokQty = txValUsd / (t.price || 1);
+    const posBefore = positions[t.id];
+    const heldQty = posBefore && posBefore.amt > 0 ? posTokenQty(t, posBefore) : 0;
+    const txRemQty = o.side === "sell" ? Math.max(0, heldQty - txTokQty) : heldQty + txTokQty;
     setMyActivity((A) => [{
       id: Math.random().toString(36).slice(2), t: Date.now(),
       sym: t.sym, hue: t.hue, img: t.img, side: o.side, amt: o.amt, unit,
+      tokQty: txTokQty, valUsd: txValUsd, remQty: txRemQty,
       price: t.price, pnlMoney: o.side === "sell" ? sellPnlMoney : null, pnlPct: o.side === "sell" ? sellPnlPct : null,
       mult: exitMult,
       tx: Array.from({ length: 8 }, () => "abcdef0123456789"[Math.floor(Math.random() * 16)]).join(""),
@@ -7376,6 +7701,47 @@ export default function App() {
     );
   };
 
+  // hold (mobile) / right-click (PC) on the token name or price in the header:
+  // normally opens the add-to-watchlist menu; if you're viewing this token
+  // THROUGH the subsection currently loaded in the scanner, it asks to remove
+  // it instead — confirming pulls it from the subsection AND closes the chart.
+  const headWatchFire = (x, y) => {
+    if (!selected) return;
+    const sec2 = scanSec != null ? watchSections.find((s) => s.id === scanSec) : null;
+    const inSec = !!(sec2 && sec2.ids.includes(selected.id));
+    if (navigator.vibrate) navigator.vibrate(10);
+    setWatchMenu(inSec
+      ? { id: selected.id, sym: selected.sym, confirmRemove: sec2.id, secName: sec2.name, x: Math.min(x, window.innerWidth - 230), y: Math.min(y, window.innerHeight - 170) }
+      : { id: selected.id, sym: selected.sym, x: Math.min(x, window.innerWidth - 190), y: Math.min(y, window.innerHeight - 200) });
+  };
+  const headWatchProps = {
+    onContextMenu: (e) => { e.preventDefault(); e.stopPropagation(); headWatchFire(e.clientX, e.clientY); },
+    onTouchStart: (e) => {
+      const t0 = e.touches && e.touches[0]; if (!t0) return;
+      const n = e.currentTarget; n._hx = t0.clientX; n._hy = t0.clientY;
+      if (n._ht) clearTimeout(n._ht);
+      n._ht = setTimeout(() => { n._ht = null; n._hf = true; headWatchFire(n._hx, n._hy); }, 450);
+    },
+    onTouchMove: (e) => { const t0 = e.touches && e.touches[0]; const n = e.currentTarget; if (t0 && n._ht && (Math.abs(t0.clientX - n._hx) > 12 || Math.abs(t0.clientY - n._hy) > 12)) { clearTimeout(n._ht); n._ht = null; } },
+    onTouchEnd: (e) => { const n = e.currentTarget; if (n._ht) { clearTimeout(n._ht); n._ht = null; } },
+    onClickCapture: (e) => { const n = e.currentTarget; if (n._hf) { n._hf = false; e.preventDefault(); e.stopPropagation(); } },
+  };
+  // clicking a live trade OR a holder opens the same trader receipt — holders
+  // arrive with their whole trade list on this token pre-loaded
+  const pickTraderRow = (row) => {
+    if (!selected) return;
+    const trs = traderTradesFor(selected, row.trader) || [];
+    if (row.holder) {
+      setMarkerInfo({
+        trader: row.trader, sym: selected.sym, holderQty: row.qty, holderUsd: row.usd,
+        list: trs.length ? trs : [{ t: Date.now(), side: "buy", p: selected.price, price: selected.price, amt: 0, unit: "SOL", mc: mcOf(selected), sym: selected.sym, trader: row.trader, pnlPct: null, pnlMoney: null }],
+      });
+    } else {
+      setMarkerInfo({ trader: row.trader, side: row.isBuy ? "buy" : "sell", sym: selected.sym,
+        t: row.at, amt: +row.sol.toFixed(3), unit: "SOL", price: selected.price, mc: row.mc,
+        pnlPct: row.pnlPct != null ? row.pnlPct : null, pnlMoney: null, tx: row.tx });
+    }
+  };
   const chartBlock = (
             !selected ? (
               <div style={{ border: `1px dashed ${T.border2}`, borderRadius: 12, padding: 70, textAlign: "center", color: T.faint, fontFamily: T.mono, fontSize: 12 }}>
@@ -7385,6 +7751,9 @@ export default function App() {
               <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                    <span {...headWatchProps} title="Hold (right-click on PC): add to watchlist — or remove if viewing from the open subsection"
+                      style={{ display: "flex", alignItems: "center", gap: 9,
+                        userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" }}>
                     <TokenAvatar sym={selected.sym} hue={selected.hue} img={selected.img} size={22} />
                     <span style={{ fontWeight: 800, fontSize: 16 }}>{selected.sym}<span style={{ color: T.faint, fontWeight: 400 }}>/SOL</span></span>
                     <span onClick={() => setPriceMode((m) => (m + 1) % 3)} title="Tap: price → market cap → your tokens"
@@ -7392,6 +7761,7 @@ export default function App() {
                       {priceMode === 1 ? `MC ${fmt$(mcOf(selected))}`
                         : priceMode === 2 ? `${positions[selected.id] && positions[selected.id].amt > 0 ? fmtQty(posTokenQty(selected, positions[selected.id])) : "0"} ${selected.sym}`
                         : `$${fmtP(selected.price)}`}
+                    </span>
                     </span>
                     <span style={{ fontSize: 8.5, border: `1px solid ${ratingColor(scoreToken(selected))}66`, background: `${ratingColor(scoreToken(selected))}14`, color: ratingColor(scoreToken(selected)), padding: "2px 7px", borderRadius: 5, fontFamily: T.mono, fontWeight: 800 }}>
                       {scoreToken(selected)} {rating(scoreToken(selected))}
@@ -7421,7 +7791,7 @@ export default function App() {
                         <button onClick={() => setChartMode("candles")} style={chip(chartMode === "candles")}>▮ Candles</button>
                         <button onClick={() => setChartMode("line")} style={chip(chartMode === "line")}>∿ Line</button>
                         <div style={{ width: 1, height: 18, background: T.border, margin: "0 2px" }} />
-                        {calloutWidget(false)}
+                        {calloutWidget(true, 38, true)}
                       </>
                     )}
                   </div>
@@ -7673,9 +8043,7 @@ export default function App() {
 
                 {/* live on-chain trades — mobile keeps it here; PC moves it beside chat */}
                 {isMobile && <LiveTrades token={selected} isMobile={isMobile} traderPrefs={traderPrefs}
-                  onPickTrader={(row) => setMarkerInfo({ trader: row.trader, side: row.isBuy ? "buy" : "sell", sym: selected.sym,
-                    t: row.at, amt: +row.sol.toFixed(3), unit: "SOL", price: selected.price, mc: row.mc,
-                    pnlPct: row.pnlPct != null ? row.pnlPct : null, pnlMoney: null, tx: row.tx })} />}
+                  onPickTrader={pickTraderRow} />}
                 {/* auto-trader entry now lives in the hotbar (🤖 button) */}
               </div>
             )
@@ -7796,14 +8164,18 @@ export default function App() {
     <div
       onTouchStart={(e) => {
         const n = e.currentTarget; const t0 = e.touches && e.touches[0]; if (!t0) return;
-        if (e.target && e.target.closest && e.target.closest("[data-poscell]")) return; // wallet cell has its own hold
+        if (!(e.target && e.target.closest && e.target.closest("[data-wtotal]"))) return; // ONLY holding the TOTAL amount pops the wallet
+        document.body.classList.add("valo-nosel"); // hard-block any screen highlight while held
         n._wx = t0.clientX; n._wy = t0.clientY;
         if (n._wt) clearTimeout(n._wt);
         n._wt = setTimeout(() => { n._wt = null; if (navigator.vibrate) navigator.vibrate(10); setWalletPop({ x: Math.min(n._wx, window.innerWidth - 150), y: Math.max(40, n._wy - 54) }); }, 450);
       }}
-      onTouchMove={(e) => { const n = e.currentTarget; const t0 = e.touches && e.touches[0]; if (t0 && n._wt && (Math.abs(t0.clientX - n._wx) > 10 || Math.abs(t0.clientY - n._wy) > 10)) { clearTimeout(n._wt); n._wt = null; } }}
-      onTouchEnd={(e) => { const n = e.currentTarget; if (n._wt) { clearTimeout(n._wt); n._wt = null; } }}
-      style={{ display: "flex", gap: 0, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, overflow: "hidden", marginBottom: 8, fontFamily: T.mono }}>
+      onTouchMove={(e) => { const n = e.currentTarget; const t0 = e.touches && e.touches[0]; if (t0 && n._wt && (Math.abs(t0.clientX - n._wx) > 10 || Math.abs(t0.clientY - n._wy) > 10)) { clearTimeout(n._wt); n._wt = null; document.body.classList.remove("valo-nosel"); } }}
+      onTouchEnd={(e) => { const n = e.currentTarget; if (n._wt) { clearTimeout(n._wt); n._wt = null; } document.body.classList.remove("valo-nosel"); }}
+      onTouchCancel={() => document.body.classList.remove("valo-nosel")}
+      onContextMenu={(e) => e.preventDefault()}
+      style={{ display: "flex", gap: 0, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, overflow: "hidden", marginBottom: 8, fontFamily: T.mono,
+        userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" }}>
       {[
         [posArm ? "TAP TO OPEN" : "SOL", posArm
           ? <b data-poscell="1" onClick={() => { setPosArm(false); setPosDrawer(true); }}
@@ -7835,7 +8207,7 @@ export default function App() {
         })()],
         ["TOTAL", <b style={{ color: T.text }}>${(solBalance * SOL_USD + valoWallet * 0.0125 + strategyEquityUsd).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b>],
       ].map(([k, v], i) => (
-        <div key={i} style={{ flex: 1, textAlign: "center", padding: "6px 2px", borderLeft: i ? `1px solid ${T.border}` : "none", minWidth: 0 }}>
+        <div key={i} data-wtotal={k === "TOTAL" ? "1" : undefined} style={{ flex: 1, textAlign: "center", padding: "6px 2px", borderLeft: i ? `1px solid ${T.border}` : "none", minWidth: 0 }}>
           <div style={{ color: T.faint, fontSize: 6.5, letterSpacing: 0.8, marginBottom: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k}</div>
           <div style={{ fontSize: 9.5, fontWeight: 800 }}>{v}</div>
         </div>
@@ -8330,9 +8702,9 @@ export default function App() {
             <div style={{ display: "grid", gap: compactList ? 6 : 10, paddingRight: 6 }}>
               {shown.map((t) => (
                 compactList
-                  ? <div key={t.id} {...tdProps(t)}><TokenRow t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} tf={tf}
+                  ? <div key={t.id} data-mslot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 10, transition: "opacity .12s, transform .12s" }} {...tdProps(t)}><TokenRow t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} tf={tf}
                       onOpen={() => { setSel(sel === t.id ? null : t.id); setClickMode(null); }} /></div>
-                  : <div key={t.id} data-slot={t.id} style={{ position: "relative", opacity: mDrag && mDrag.id === t.id ? 0.55 : 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
+                  : <div key={t.id} data-slot={t.id} data-mslot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ position: "relative", opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
                       onDrop={(e) => { e.preventDefault(); const id = dragIdOf(e); if (id == null || id === t.id) return;
                         const base = (scanOrder || shown.map((x) => x.id));
                         const si = base.indexOf(t.id); if (si < 0) return;
@@ -8361,7 +8733,7 @@ export default function App() {
           {/* scanner — slides left as the chart is pulled over, stays same width */}
           <div ref={scannerRef} style={{ transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s", display: "grid", gap: 10, maxHeight: "calc(100vh - 185px)", overflowY: "auto", padding: "2px 10px 2px 2px" }}>
             {shown.map((t) => (
-              <div key={t.id} data-slot={t.id} style={{ position: "relative", opacity: mDrag && mDrag.id === t.id ? 0.55 : 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
+              <div key={t.id} data-slot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ position: "relative", opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s, transform .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => { e.preventDefault(); const id = dragIdOf(e); if (id == null || id === t.id) return;
                   const base = (scanOrder || shown.map((x) => x.id));
                   const si = base.indexOf(t.id); if (si < 0) return;
@@ -8455,9 +8827,7 @@ export default function App() {
                       style={{ width: 22, flex: "0 0 auto", border: `1px solid ${T.border}`, background: "transparent", borderRadius: 8, cursor: "pointer", color: T.faint, fontSize: 10 }}>◂</button>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <LiveTrades token={selected} isMobile={false} traderPrefs={traderPrefs}
-                        onPickTrader={(row) => setMarkerInfo({ trader: row.trader, side: row.isBuy ? "buy" : "sell", sym: selected.sym,
-                          t: row.at, amt: +row.sol.toFixed(3), unit: "SOL", price: selected.price, mc: row.mc,
-                          pnlPct: row.pnlPct != null ? row.pnlPct : null, pnlMoney: null, tx: row.tx })} />
+                        onPickTrader={pickTraderRow} />
                     </div>
                   </div>
                 )}
@@ -8489,9 +8859,7 @@ export default function App() {
               {!ltMin && selected && (
                 <div style={{ padding: 8 }}>
                   <LiveTrades token={selected} isMobile={false} traderPrefs={traderPrefs}
-                    onPickTrader={(row) => setMarkerInfo({ trader: row.trader, side: row.isBuy ? "buy" : "sell", sym: selected.sym,
-                      t: row.at, amt: +row.sol.toFixed(3), unit: "SOL", price: selected.price, mc: row.mc,
-                      pnlPct: row.pnlPct != null ? row.pnlPct : null, pnlMoney: null, tx: row.tx })} />
+                    onPickTrader={pickTraderRow} />
                 </div>
               )}
             </div>
@@ -8705,13 +9073,13 @@ export default function App() {
                         className="wall-bar" title={exp ? "Tap again: open the full chart" : "Tap: live stats · right-click: remove · drag: move"}
                         style={{ pointerEvents: "auto", cursor: "pointer", border: `1px solid ${exp ? VALO_PURPLE : sel === t.id ? accent(t.hue, 45) : T.border}`, textAlign: "left", width: "100%",
                           background: exp ? "rgba(125,92,240,0.07)" : "linear-gradient(90deg, rgba(22,27,37,0.9), rgba(17,21,29,0.8))",
-                          borderRadius: exp ? "8px 8px 0 0" : 8, padding: "7px 9px", marginBottom: exp ? 0 : 5,
+                          borderRadius: exp ? "8px 8px 0 0" : 8, padding: "8px 10px", marginBottom: exp ? 0 : 5,
                           display: "flex", alignItems: "center", gap: 8 }}>
-                        <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={16} />
-                        <span style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 800, color: T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{t.sym}</span>
-                        <span style={{ fontFamily: T.mono, fontSize: 9, color: T.dim }}>{fmt$(mcOf(t))}</span>
-                        <span style={{ fontFamily: T.mono, fontSize: 9, color: ch >= 0 ? T.green : T.red, minWidth: 42, textAlign: "right" }}>{pct(ch)}</span>
-                        <span style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 800, color: rc, borderLeft: `1px solid ${T.border}`, paddingLeft: 7 }}>{score}</span>
+                        <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={18} />
+                        <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 800, color: T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.sym}</span>
+                        <span style={{ fontFamily: T.mono, fontSize: 10, color: T.dim, whiteSpace: "nowrap" }}>{fmt$(mcOf(t))}</span>
+                        <span style={{ fontFamily: T.mono, fontSize: 10, color: ch >= 0 ? T.green : T.red, minWidth: 46, textAlign: "right", whiteSpace: "nowrap" }}>{pct(ch)}</span>
+                        <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 800, color: rc, borderLeft: `1px solid ${T.border}`, paddingLeft: 7 }}>{score}</span>
                       </button>
                       {exp && (
                         <div style={{ pointerEvents: "auto", border: `1px solid ${VALO_PURPLE}55`, borderTop: "none", borderRadius: "0 0 10px 10px", background: "rgba(12,15,22,0.92)", padding: "8px 9px", marginBottom: 6 }}>
@@ -8749,8 +9117,11 @@ export default function App() {
                           } else if (id != null) { watchAdd(id, s2.id); if (wallAutoRef.current) { setWallOpen(false); wallAutoRef.current = false; } }
                           window.__valoDrag = null; }}>
                         <div draggable={renamingSec !== s2.id} onDragStart={(e) => { if (renamingSec === s2.id) { e.preventDefault(); return; } window.__valoDrag = { sec: s2.id, secMove: true }; e.dataTransfer.setData("text/valo-sec", String(s2.id)); }}
+                          onClick={() => { if (renamingSec !== s2.id) loadSecToScanner(s2); }}
                           onDoubleClick={() => { setRenamingSec(s2.id); setSecName(s2.name); }}
-                          style={{ pointerEvents: "auto", display: "flex", alignItems: "center", gap: 6, margin: "8px 0 5px", cursor: "grab" }}>
+                          style={{ pointerEvents: "auto", display: "flex", alignItems: "center", gap: 6, margin: "8px 0 5px", cursor: "grab",
+                            background: scanSec === s2.id ? "rgba(125,92,240,0.12)" : "none", borderRadius: 7, padding: scanSec === s2.id ? "3px 5px" : 0,
+                            outline: scanSec === s2.id ? `1px solid ${VALO_PURPLE}66` : "none" }}>
                           <span style={{ height: 1, flex: "0 0 8px", background: VALO_PURPLE }} />
                           {renamingSec === s2.id ? (
                             <input autoFocus value={secName} onChange={(e) => setSecName(e.target.value)}
@@ -8759,10 +9130,11 @@ export default function App() {
                               onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
                               style={{ ...inp, fontSize: 8.5, padding: "2px 6px", width: 120 }} />
                           ) : (
-                            <span title="Double-click: rename · drag onto another header: swap places"
-                              style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1.5, color: VALO_PURPLE }}>{s2.name.toUpperCase()}</span>
+                            <span title="Click: load this list into the scanner · double-click: rename · drag onto another header: swap places"
+                              style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 1.5, color: VALO_PURPLE, whiteSpace: "nowrap" }}>{s2.name.toUpperCase()}</span>
                           )}
-                          <span style={{ fontFamily: T.mono, fontSize: 7, color: T.faint }}>{s2.ids.length}</span>
+                          <span style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>{s2.ids.length}</span>
+                          {scanSec === s2.id && <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, color: T.green, textShadow: `0 0 7px ${T.green}` }}>● IN SCANNER</span>}
                           <span style={{ height: 1, flex: 1, background: T.border }} />
                         </div>
                         {s2.ids.map(tokOf).filter(Boolean).map((t) => row(t, s2.id))}
@@ -8790,7 +9162,7 @@ export default function App() {
 
       {/* TRADE MARKER RECEIPT */}
       {markerInfo && (
-        <MarkerReceipt info={markerInfo} isMobile={isMobile} onClose={() => setMarkerInfo(null)}
+        <MarkerReceipt info={markerInfo} token={selected} isMobile={isMobile} onClose={() => setMarkerInfo(null)}
           onOpenUser={(u) => setProfileUser(u)}
           onHighlight={(tx) => setHighlightTx(tx)}
           traderPrefs={traderPrefs} setTraderPref={setTraderPref} myName={username} />
@@ -8967,6 +9339,11 @@ export default function App() {
           </>
         );
       })()}
+      {/* file-drag ghost — follows the pointer during any scanner drag */}
+      <div ref={dragGhostRef} style={{ display: "none", position: "fixed", left: 0, top: 0, zIndex: 120, pointerEvents: "none",
+        alignItems: "center", gap: 5, background: "rgba(17,21,29,0.96)", border: `1.5px solid ${VALO_PURPLE}`, borderRadius: 999,
+        padding: "5px 12px", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, whiteSpace: "nowrap",
+        boxShadow: "0 10px 28px rgba(0,0,0,0.6), 0 0 12px rgba(125,92,240,0.5)" }} />
       {walletPop && (
         <>
           <div onClick={() => setWalletPop(null)} style={{ position: "fixed", inset: 0, zIndex: 93 }} />
@@ -8982,25 +9359,48 @@ export default function App() {
         <div data-wmenu="1" style={{ position: "fixed", left: watchMenu.x, top: watchMenu.y, zIndex: 96,
           background: T.panel, border: `1px solid ${VALO_PURPLE}66`, borderRadius: 11, padding: 5, minWidth: 176,
           boxShadow: "0 14px 40px rgba(0,0,0,0.6)", animation: "coPop .12s ease" }}>
-          <div style={{ fontFamily: T.mono, fontSize: 7, letterSpacing: 1.2, color: T.faint, padding: "3px 8px 5px" }}>ADD {watchMenu.sym} TO…</div>
-          <button onClick={() => { watchAdd(watchMenu.id, null); popPlus(); setWatchMenu(null); }}
+          {watchMenu.confirmRemove != null && (
+            <>
+              <div style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1, color: T.text, fontWeight: 800, padding: "4px 8px 7px", maxWidth: 210 }}>
+                Remove <span style={{ color: VALO_PURPLE }}>${watchMenu.sym}</span> from <span style={{ color: VALO_PURPLE }}>{(watchMenu.secName || "this list").toUpperCase()}</span>?
+              </div>
+              <button onClick={() => {
+                  setWatchSections((S) => S.map((x) => (x.id === watchMenu.confirmRemove ? { ...x, ids: x.ids.filter((i) => i !== watchMenu.id) } : x)));
+                  setScanOrder((prev) => (prev || shownRef.current.map((x) => x.id)).filter((x) => x !== watchMenu.id));
+                  if (sel === watchMenu.id) setSel(null); // close the chart — stays blank until a new one opens
+                  setWatchMenu(null);
+                }}
+                style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "rgba(234,57,67,0.14)", color: T.red, borderRadius: 8, padding: "8px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, marginBottom: 3 }}>
+                🗑 REMOVE & CLOSE CHART
+              </button>
+              <button onClick={() => setWatchMenu(null)}
+                style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "rgba(255,255,255,0.03)", color: T.dim, borderRadius: 8, padding: "7px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 9, fontWeight: 800 }}>
+                ✕ KEEP IT
+              </button>
+            </>
+          )}
+          {watchMenu.confirmRemove == null && <div style={{ fontFamily: T.mono, fontSize: 7, letterSpacing: 1.2, color: T.faint, padding: "3px 8px 5px" }}>ADD {watchMenu.sym} TO…</div>}
+          {watchMenu.confirmRemove == null && <button onClick={() => { watchAdd(watchMenu.id, null); popPlus(); setWatchMenu(null); }}
             style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "rgba(125,92,240,0.12)", color: VALO_PURPLE, borderRadius: 8, padding: "8px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, marginBottom: 3 }}>
             📋 WATCHLIST
-          </button>
-          {watchSections.map((s2) => (
+          </button>}
+          {watchMenu.confirmRemove == null && watchSections.map((s2) => (
             <button key={s2.id} onClick={() => { watchAdd(watchMenu.id, s2.id); popPlus(); setWatchMenu(null); }}
               style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "rgba(255,255,255,0.03)", color: T.text, borderRadius: 8, padding: "7px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 9, fontWeight: 800, marginBottom: 3 }}>
               ▸ {s2.name.toUpperCase()}
             </button>
           ))}
-          {!watchMenu.slot && (
+          {watchMenu.confirmRemove == null && !((scanOrder || shownRef.current.map((x) => x.id)).includes(watchMenu.id)) && (
             <button onClick={() => { const base = scanOrder || shownRef.current.map((x) => x.id); if (!base.includes(watchMenu.id)) setScanOrder([watchMenu.id, ...base]); setWatchMenu(null); }}
               style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "rgba(125,92,240,0.12)", color: VALO_PURPLE, borderRadius: 8, padding: "7px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 9, fontWeight: 900, marginBottom: 3 }}>
               📡 ADD TO SCANNER
             </button>
           )}
-          {watchMenu.slot && (
-            <button onClick={() => { setScanOrder((scanOrder || shownRef.current.map((x) => x.id)).filter((x) => x !== watchMenu.id)); setWatchMenu(null); }}
+          {watchMenu.confirmRemove == null && (scanOrder || shownRef.current.map((x) => x.id)).includes(watchMenu.id) && (
+            <button onClick={() => {
+                setScanOrder((scanOrder || shownRef.current.map((x) => x.id)).filter((x) => x !== watchMenu.id));
+                if (scanSec != null) setWatchSections((S) => S.map((x) => (x.id === scanSec ? { ...x, ids: x.ids.filter((i) => i !== watchMenu.id) } : x)));
+                setWatchMenu(null); }}
               style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "rgba(234,57,67,0.12)", color: T.red, borderRadius: 8, padding: "7px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 9, fontWeight: 900 }}>
               ✕ REMOVE FROM SCANNER
             </button>
@@ -9115,7 +9515,8 @@ export default function App() {
                 realized24={realized24For(selected.sym)} />}
       {/* MOBILE AUTO-TRADER PAGE — chart + bot metrics on one screen */}
       {isMobile && mobileBotScreen && selected && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 66, background: T.bg, display: "flex", flexDirection: "column" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 66, background: T.bg, display: "flex", flexDirection: "column",
+          userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", borderBottom: `1px solid ${T.border}` }}>
             <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 800 }}>🤖 AUTO-TRADER · <span style={{ color: accent(selected.hue) }}>${selected.sym}</span></div>
             <button onClick={() => { setMobileBotScreen(false); setEditingBotId(null); setBotDraftLevel(null); }} style={{ ...chip(false), padding: "5px 11px", fontSize: 12 }}>✕ Close</button>
@@ -9139,14 +9540,35 @@ export default function App() {
             onLineSelect={(id) => setSelLineId(id)}
             onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
             onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop(at); }} />
-          {/* drag-set toggle + page tabs — chart above stays in view for both */}
-          <div style={{ display: "flex", gap: 5, padding: "7px 10px 0", overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}>
-            <button onClick={() => setBotDragSet((v) => !v)} style={{ ...chip(botDragSet), flex: 1.2, textAlign: "center", padding: "7px 2px", fontFamily: T.mono, fontSize: 8, fontWeight: 800, color: botDragSet ? T.amber : T.dim, borderColor: botDragSet ? `${T.amber}66` : T.border }}>✋ DRAG-SET {botDragSet ? "ON" : "OFF"}</button>
-            <button onClick={() => setMobPageTab("trader")} style={{ ...chip(mobPageTab === "trader"), flex: 1, textAlign: "center", padding: "7px 2px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 800 }}>🤖 TRADER</button>
-            <button onClick={() => setMobPageTab("visual")} style={{ ...chip(mobPageTab === "visual"), flex: 1, textAlign: "center", padding: "7px 2px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, color: mobPageTab === "visual" ? T.amber : T.dim, borderColor: mobPageTab === "visual" ? `${T.amber}66` : T.border }}>👁 VISUAL</button>
-            <button onClick={() => setMobPageTab("bots")} style={{ ...chip(mobPageTab === "bots"), flex: 1, textAlign: "center", padding: "7px 2px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 800 }}>📊 ALL BOTS</button>
-            <button onClick={() => { setMobWatch(true); setDrawerOpen(true); setQuickWatch(true); }}
-              style={{ ...chip(false), flex: "0 0 auto", textAlign: "center", padding: "7px 12px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: VALO_PURPLE, borderColor: `${VALO_PURPLE}66`, background: "rgba(125,92,240,0.1)" }}>📋 WATCHLIST</button>
+          {/* SKINNY PILL BAR — one line, sits right under the chart where the
+              times live. drag-set · trader · visual · all bots · watchlist.
+              HOLD the watchlist pill and it swaps into 📊 POSITIONS (the auto
+              page's normal tab-out); hold again to swap back. */}
+          <div onContextMenu={(e) => e.preventDefault()}
+            style={{ display: "flex", gap: 3, alignItems: "stretch", margin: "5px 10px 0", padding: 3,
+              border: `1px solid ${T.border2}`, borderRadius: 999, background: "rgba(255,255,255,0.03)",
+              userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" }}>
+            {[
+              ["drag", botDragSet ? "✋ DRAG ON" : "✋ DRAG", () => setBotDragSet((v) => !v), botDragSet, T.amber],
+              ["trader", "🤖 TRADER", () => setMobPageTab("trader"), mobPageTab === "trader", null],
+              ["visual", "👁 VISUAL", () => setMobPageTab("visual"), mobPageTab === "visual", T.amber],
+              ["bots", "📊 BOTS", () => setMobPageTab("bots"), mobPageTab === "bots", null],
+            ].map(([k, lab, fn, on, col]) => (
+              <button key={k} onClick={fn}
+                style={{ flex: 1, minWidth: 0, border: on ? `1px solid ${(col || VALO_PURPLE)}66` : "1px solid transparent",
+                  background: on ? `${col ? "rgba(249,180,22,0.12)" : "rgba(125,92,240,0.14)"}` : "none",
+                  color: on ? (col || VALO_PURPLE) : T.dim, borderRadius: 999, padding: "4px 2px",
+                  fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", cursor: "pointer" }}>{lab}</button>
+            ))}
+            <button
+              onClick={() => { if (mobPillPos) { setPosDrawer(true); } else { setMobWatch(true); setDrawerOpen(true); setQuickWatch(true); } }}
+              {...chipEditProps(() => setMobPillPos((v) => !v))}
+              title="Hold to swap watchlist ⇄ positions"
+              style={{ flex: 1.15, minWidth: 0, border: `1px solid ${VALO_PURPLE}66`, background: "rgba(125,92,240,0.12)",
+                color: VALO_PURPLE, borderRadius: 999, padding: "4px 2px",
+                fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", cursor: "pointer" }}>
+              {mobPillPos ? "📊 POSITIONS" : "📋 WATCHLIST"}
+            </button>
           </div>
           <div style={{ flex: 1, overflowY: "auto", padding: 10 }}>
             {mobPageTab === "bots" ? (
@@ -9530,14 +9952,14 @@ export default function App() {
 
           <div onClick={() => setDrawerOpen(false)}
             style={{
-              position: "fixed", inset: 0, zIndex: 50,
+              position: "fixed", inset: 0, zIndex: 84,
               background: "rgba(4,6,10,0.55)", backdropFilter: "blur(2px)",
               opacity: drawerOpen ? 1 : 0, pointerEvents: drawerOpen ? "auto" : "none",
               transition: "opacity .28s ease",
             }} />
 
           <div style={{
-            position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 51,
+            position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 85,
             width: "min(90vw, 400px)", background: "rgba(12,15,22,0.98)",
             borderLeft: `1px solid ${T.border2}`, boxShadow: "-12px 0 40px rgba(0,0,0,0.6)",
             transform: drawerOpen ? "translateX(0)" : "translateX(102%)",
@@ -9577,12 +9999,12 @@ export default function App() {
                       onContextMenu={(e) => { e.preventDefault(); setWatchTrash({ id: t.id, sec: secId, x: e.clientX, y: e.clientY }); }}
                       {...chipEditProps(() => setWatchTrash({ id: t.id, sec: secId, x: 60, y: 220 }))}
                       style={{ width: "100%", textAlign: "left", border: `1px solid ${exp ? VALO_PURPLE : T.border}`, background: exp ? "rgba(125,92,240,0.07)" : "#141a26",
-                        borderRadius: exp ? "8px 8px 0 0" : 8, padding: "8px 9px", marginBottom: exp ? 0 : 5, display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+                        borderRadius: exp ? "8px 8px 0 0" : 8, padding: "9px 10px", marginBottom: exp ? 0 : 5, display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
                         transform: mobSwipe === t.id ? "translateX(-64px)" : "translateX(0)", transition: "transform .18s ease", position: "relative", zIndex: 2 }}>
-                      <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={16} />
-                      <span style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 800, color: T.text, flex: 1 }}>{t.sym}</span>
-                      <span style={{ fontFamily: T.mono, fontSize: 9, color: ch >= 0 ? T.green : T.red }}>{pct(ch)}</span>
-                      <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: rc }}>{score}</span>
+                      <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={18} />
+                      <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 800, color: T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.sym}</span>
+                      <span style={{ fontFamily: T.mono, fontSize: 10, color: ch >= 0 ? T.green : T.red, whiteSpace: "nowrap" }}>{pct(ch)}</span>
+                      <span style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 800, color: rc }}>{score}</span>
                     </button>
                     {!exp && <button onClick={() => { watchRemove(t.id, secId); setMobSwipe(null); }}
                       style={{ position: "absolute", right: 0, top: 0, bottom: 5, width: 58, zIndex: 1,
@@ -9619,9 +10041,17 @@ export default function App() {
                           onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
                           style={{ ...inp, fontSize: 9, padding: "3px 7px", width: 140, margin: "9px 0 5px" }} />
                       ) : (
-                        <div onClick={() => { setRenamingSec(s2.id); setSecName(s2.name); }} title="Tap: rename this list"
-                          style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1.5, color: VALO_PURPLE, margin: "9px 0 5px", cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
-                          {s2.name.toUpperCase()} <span style={{ color: T.faint, fontWeight: 700 }}>{s2.ids.length}</span> ✎
+                        <div title="Tap: load this list into the scanner · ✎ to rename"
+                          style={{ display: "flex", alignItems: "center", gap: 7, margin: "9px 0 5px",
+                            background: scanSec === s2.id ? "rgba(125,92,240,0.12)" : "none", borderRadius: 7, padding: scanSec === s2.id ? "4px 6px" : 0,
+                            outline: scanSec === s2.id ? `1px solid ${VALO_PURPLE}66` : "none" }}>
+                          <span onClick={() => { loadSecToScanner(s2); if (navigator.vibrate) navigator.vibrate(8); }}
+                            style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 1.5, color: VALO_PURPLE, cursor: "pointer", whiteSpace: "nowrap" }}>
+                            {s2.name.toUpperCase()} <span style={{ color: T.faint, fontWeight: 700 }}>{s2.ids.length}</span>
+                          </span>
+                          {scanSec === s2.id && <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, color: T.green, textShadow: `0 0 7px ${T.green}` }}>● IN SCANNER</span>}
+                          <span onClick={() => { setRenamingSec(s2.id); setSecName(s2.name); }}
+                            style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 10, color: T.dim, cursor: "pointer", padding: "0 3px" }}>✎</span>
                         </div>
                       )}
                       {s2.ids.map(tokOf).filter(Boolean).map((t) => row(t, s2.id))}
@@ -9655,11 +10085,11 @@ export default function App() {
           </button>
 
           <div onClick={() => setPortfolioDrawer(false)}
-            style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(4,6,10,0.55)", backdropFilter: "blur(2px)",
+            style={{ position: "fixed", inset: 0, zIndex: 84, background: "rgba(4,6,10,0.55)", backdropFilter: "blur(2px)",
               opacity: portfolioDrawer ? 1 : 0, pointerEvents: portfolioDrawer ? "auto" : "none", transition: "opacity .28s ease" }} />
 
           <div style={{
-            position: "fixed", top: 0, right: 0, bottom: 0, left: 0, zIndex: 51,
+            position: "fixed", top: 0, right: 0, bottom: 0, left: 0, zIndex: 85,
             width: "100vw", background: "rgba(12,15,22,0.98)",
             boxShadow: "-12px 0 40px rgba(0,0,0,0.6)",
             transform: portfolioDrawer ? "translateX(0)" : "translateX(102%)",
@@ -9765,6 +10195,10 @@ export default function App() {
         button, [role="button"], a, input[type="range"] { touch-action: manipulation; }
         button { -webkit-tap-highlight-color: transparent; }
         body.valo-dragging, body.valo-dragging *{ cursor: grabbing !important; user-select: none !important; }
+        body.valo-nosel, body.valo-nosel *{ user-select: none !important; -webkit-user-select: none !important; -webkit-touch-callout: none !important; }
+        @keyframes valoDragPulse{ 0%,100%{ box-shadow: 0 0 0 0 rgba(125,92,240,0); } 50%{ box-shadow: 0 0 18px 3px rgba(125,92,240,0.55); } }
+        .valo-drag-src{ animation: valoDragPulse .85s ease infinite; background: rgba(125,92,240,0.20) !important; transform: scale(0.93); opacity: 0.92; }
+        .valo-drag-over{ transform: scale(1.03); outline: 2px dashed #7D5CF0 !important; outline-offset: 2px; background: rgba(125,92,240,0.10); border-radius: 12px; }
         .dragGhost{ transform: translate(-50%,-50%) rotate(-3deg); animation: ghostPop .16s ease, ghostBreathe 1.1s ease-in-out .16s infinite; }
         @keyframes ghostPop{ 0%{ transform: translate(-50%,-50%) scale(.6) rotate(0deg); opacity:.4; } 100%{ transform: translate(-50%,-50%) scale(1) rotate(-3deg); opacity:1; } }
         @keyframes ghostBreathe{ 0%,100%{ box-shadow: 0 10px 30px rgba(0,0,0,0.65), 0 0 14px rgba(125,92,240,0.5); } 50%{ box-shadow: 0 10px 30px rgba(0,0,0,0.65), 0 0 26px rgba(125,92,240,0.9); } }
@@ -9778,6 +10212,8 @@ export default function App() {
         }
         @keyframes posSlide{ from{ transform: translateX(102%); } to{ transform: translateX(0); } }
         @keyframes apexSpin{ 0%{ transform: scaleX(1); } 25%{ transform: scaleX(0.12); } 50%{ transform: scaleX(-1); } 75%{ transform: scaleX(-0.12); } 100%{ transform: scaleX(1); } }
+        @keyframes apexHue{ from{ filter: drop-shadow(0 0 5px #9ceaff) hue-rotate(0deg); } to{ filter: drop-shadow(0 0 5px #9ceaff) hue-rotate(360deg); } }
+        @keyframes apexRay{ from{ transform: rotate(0deg) scale(1); } 50%{ transform: rotate(180deg) scale(1.12); } to{ transform: rotate(360deg) scale(1); } }
         @keyframes plusFloat { 0%{ opacity:0; transform: translateY(6px);} 20%{opacity:1;} 100%{ opacity:0; transform: translateY(-16px);} }
         .qchip{ transition: box-shadow .55s ease, border-color .55s ease, background .55s ease; }
         .qchip:active{ transition: none; box-shadow: 0 0 14px rgba(125,92,240,0.7) !important; border-color: #7D5CF0 !important; background: rgba(125,92,240,0.22) !important; }
