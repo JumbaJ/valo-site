@@ -75,6 +75,27 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 // ---- fee schedule: 50% burn pool / 50% airdrop vault ----
 const TAX = { SOL: 0.6, VALO: 0.3 };            // % per transaction
 const taxFor = (pay) => (pay === "SOL" ? TAX.SOL : TAX.VALO);
+// 🧪 BACKEND TEST HARNESS — when enabled (LIVE DATA toggle or ?test=1), every
+// trade, escrow move, bot fill/exit and a 10s wallet snapshot stream to a tiny
+// local server (valo-test-server.js) that reconciles the books and reports
+// anything broken before mainnet. Silently no-ops if the server isn't running.
+const TestLog = {
+  on: false, dead: false, buf: [],
+  url: "http://localhost:8787/log",
+  push(type, data) {
+    if (!this.on) return;
+    this.buf.push({ ts: Date.now(), type, ...data });
+    if (this.buf.length >= 8) this.flush();
+  },
+  async flush() {
+    if (this.dead || !this.buf.length) return;
+    const batch = this.buf.splice(0);
+    try {
+      await fetch(this.url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(batch) });
+    } catch (e) { this.dead = true; console.warn("[VALO TEST] server unreachable — events stay in console. Run: node valo-test-server.js"); console.table(batch.slice(0, 5)); }
+  },
+};
+if (typeof window !== "undefined") window.__valoTest = TestLog;
 // 👁 viewer engine — deterministic, so every mount agrees, yet it breathes:
 // smooth sin-wobble makes people "join and leave" live; totals only ever climb
 const VIEW_EPOCH = 1700000000000;
@@ -787,6 +808,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   const lineDragRef = useRef(null);    // active line drag: {id}
   const touchIntentRef = useRef(null); // first-move decision: chart gesture vs page scroll
   const pendGrabRef = useRef(null);    // touch press-and-hold before a line grab engages
+  const traceRef = useRef(false);      // touch hold-to-trace: crosshair rides the finger, no panning
+  const pendTraceRef = useRef(null);
   const stickyRef = useRef(null);      // instant-edit: the line rides the cursor until you click/release
   useEffect(() => {
     if (!editLineReq || editLineReq.id == null) return;
@@ -817,15 +840,41 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     // the chart takes the gesture and the page holds still.
     const chartForced = () => {
       const d = dragRef.current, bs = botSetRef.current;
-      return (bs && bs.on) || lineDragRef.current || axisRef.current || (d && d.botset);
+      return (bs && bs.on) || lineDragRef.current || axisRef.current || traceRef.current || (d && d.botset);
     };
     const onTS = (e) => {
       const p0 = e.touches && e.touches[0]; if (!p0) return;
       touchIntentRef.current = { x: p0.clientX, y: p0.clientY, decided: false, scroll: false };
       if (chartForced()) { touchIntentRef.current.decided = true; e.preventDefault(); }
+      else if (!pendGrabRef.current) {
+        // hold still ~350ms → TRACER: crosshair follows the finger, chart holds still
+        if (pendTraceRef.current) clearTimeout(pendTraceRef.current.timer);
+        const sx = p0.clientX, sy = p0.clientY;
+        pendTraceRef.current = { x: sx, y: sy, timer: setTimeout(() => {
+          pendTraceRef.current = null;
+          const it2 = touchIntentRef.current;
+          if (it2 && !it2.decided) {
+            traceRef.current = true; it2.decided = true; it2.scroll = false;
+            if (navigator.vibrate) navigator.vibrate(8);
+            const r2 = cvs.getBoundingClientRect();
+            const sc2 = r2.width / (cvs.clientWidth || r2.width) || 1;
+            setCross({ cx: (sx - r2.left) / sc2, cy: (sy - r2.top) / sc2 });
+          }
+        }, 350) };
+      }
     };
     const onTM = (e) => {
       const it = touchIntentRef.current; const p0 = e.touches && e.touches[0];
+      if (traceRef.current && p0) {
+        e.preventDefault();
+        const r3 = cvs.getBoundingClientRect();
+        const sc3 = r3.width / (cvs.clientWidth || r3.width) || 1;
+        setCross({ cx: (p0.clientX - r3.left) / sc3, cy: (p0.clientY - r3.top) / sc3 });
+        return;
+      }
+      if (pendTraceRef.current && p0) {
+        if (Math.abs(p0.clientX - pendTraceRef.current.x) > 8 || Math.abs(p0.clientY - pendTraceRef.current.y) > 8) { clearTimeout(pendTraceRef.current.timer); pendTraceRef.current = null; }
+      }
       if (pendGrabRef.current && p0) {
         const r0 = cvs.getBoundingClientRect();
         const sc0 = r0.width / (cvs.clientWidth || r0.width) || 1;
@@ -869,6 +918,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     // Native touchend for $ markers AND armed trades. React's synthetic
     // touchend is unreliable on mobile, so BOTH paths must live here.
     const onTouchEndNative = (e) => {
+      if (pendTraceRef.current) { clearTimeout(pendTraceRef.current.timer); pendTraceRef.current = null; }
+      if (traceRef.current) { traceRef.current = false; setCross(null); }
       if (pendGrabRef.current) { clearTimeout(pendGrabRef.current.timer); pendGrabRef.current = null; }
       const it = touchIntentRef.current; touchIntentRef.current = null;
       if (it && it.decided && it.scroll) { lineDragRef.current = null; return; }
@@ -1107,28 +1158,36 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       onTouchStart={(e) => e.stopPropagation()} onTouchMove={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()}
       data-chart="1"
       style={{ position: "relative", background: "#0c0f16", border: `1px solid ${clickMode ? (clickMode === "buy" ? T.green : T.red) : T.border}`, borderRadius: 10, overflow: "hidden", transition: "border-color .2s", touchAction: "pan-y", overscrollBehavior: "contain" }}>
-      {/* mobile: OHLC readout + LIVE/fit share a flow header row ABOVE the chart */}
+      {/* mobile: stacked in-chart overlays — OHLC pill on top, eyes under it,
+          LIVE/fit under that. The canvas runs full height beneath them. */}
       {isMobile ? (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, padding: "7px 10px 4px", background: "#0c0f16", flexWrap: "nowrap" }}>
-          <div style={{ fontFamily: T.mono, fontSize: 9, color: T.dim, display: "flex", gap: 7, flexWrap: "wrap", minWidth: 0 }}>
-            {ohlc && (<>
+        <>
+          {ohlc && (
+            <div style={{ position: "absolute", top: 6, left: "50%", transform: "translateX(-50%)", zIndex: 3, pointerEvents: "none",
+              display: "flex", gap: 7, alignItems: "center", whiteSpace: "nowrap",
+              fontFamily: T.mono, fontSize: 8.5, color: T.dim,
+              background: "rgba(12,15,22,0.88)", border: `1px solid ${T.border}`, borderRadius: 20, padding: "4px 11px" }}>
               <span>O <b style={{ color: T.text }}>{fmtP(ohlc.o)}</b></span>
               <span>H <b style={{ color: T.green }}>{fmtP(ohlc.h)}</b></span>
               <span>L <b style={{ color: T.red }}>{fmtP(ohlc.l)}</b></span>
               <span>C <b style={{ color: chg >= 0 ? T.green : T.red }}>{fmtP(ohlc.c)}</b></span>
               <span style={{ color: chg >= 0 ? T.green : T.red }}>{pct(chg)}</span>
-            </>)}
-          </div>
-          <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}>
-            {eyesToken && <ViewerPills token={eyesToken} small />}
+            </div>
+          )}
+          {eyesToken && (
+            <div style={{ position: "absolute", top: 32, left: 10, zIndex: 3 }}>
+              <ViewerPills token={eyesToken} small />
+            </div>
+          )}
+          <div style={{ position: "absolute", top: 52, left: 10, zIndex: 3, display: "flex", gap: 6, alignItems: "center" }}>
             <button onClick={() => setView({ count: 18, offset: 0, priceOff: 0, follow: true })}
-              style={{ height: 22, padding: "0 9px", borderRadius: 6, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.15)", color: T.blue, cursor: "pointer", fontSize: 9.5, fontWeight: 700, fontFamily: T.mono }}>◉ LIVE</button>
+              style={{ height: 21, padding: "0 9px", borderRadius: 6, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 9, fontWeight: 700, fontFamily: T.mono }}>◉ LIVE</button>
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
               <button onClick={() => setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, follow: false })}
-                style={{ height: 22, padding: "0 8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.85)", color: T.dim, cursor: "pointer", fontSize: 9.5, fontFamily: T.mono }}>⤢ fit</button>
+                style={{ height: 21, padding: "0 8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.9)", color: T.dim, cursor: "pointer", fontSize: 9, fontFamily: T.mono }}>⤢ fit</button>
             )}
           </div>
-        </div>
+        </>
       ) : (
         <>
           <div style={{ position: "absolute", top: 8, left: 10, zIndex: 3, fontFamily: T.mono, fontSize: 10.5, color: T.dim, display: "flex", gap: 10, flexWrap: "wrap", pointerEvents: "none" }}>
@@ -1250,11 +1309,27 @@ function Meter({ label, value, color }) {
 }
 
 // ---------------- order ticket (right side) ----------------
-function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editBot, onRelaunch, setAmount, botLock, dragSetOn, onToggleDragSet, compactArm = false, wide = false, onReadyArm, solBalance = 0, valoWallet = 0 }) {
+function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editBot, onRelaunch, setAmount, botLock, dragSetOn, onToggleDragSet, compactArm = false, wide = false, onReadyArm, solBalance = 0, valoWallet = 0, onOpenSearch = null }) {
   const [stopLoss, setStopLoss] = useState(25);
   const [armFlash, setArmFlash] = useState(0); // lights the arm button when a bot goes live
+  const [armEdit, setArmEdit] = useState(false);   // right-click ARM → retype the amount in place
+  const [armDraft, setArmDraft] = useState("");
+  const armEditRow = (mb = 6) => (
+    <div style={{ display: "flex", gap: 5, width: "100%", marginBottom: mb }}>
+      <input autoFocus value={armDraft} inputMode="decimal" onChange={(e) => setArmDraft(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") { setAmount && setAmount(armDraft); setArmEdit(false); } if (e.key === "Escape") setArmEdit(false); }}
+        style={{ ...inp, flex: 1, padding: "8px", fontSize: 13, fontWeight: 800, textAlign: "center", borderColor: T.blue, boxShadow: `0 0 10px ${T.blue}44` }} />
+      <span style={{ alignSelf: "center", fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: pay === "SOL" ? T.blue : VALO_PURPLE }}>{pay}</span>
+      <button onClick={() => { setAmount && setAmount(armDraft); setArmEdit(false); }}
+        style={{ border: "none", borderRadius: 8, padding: "0 14px", background: T.green, color: "#07130d", fontWeight: 900, cursor: "pointer", fontSize: 15 }}>✓</button>
+    </div>
+  );
+  const armCtx = (e) => { e.preventDefault(); e.stopPropagation(); setArmDraft(String(amount)); setArmEdit(true); };
   const [showLine, setShowLine] = useState(false); // 📍 buy-in line painted on the chart
   const [tpQuick, setTpQuick] = useState([0.5, 1, 2, 5]);   // dbl-tap a chip to retype it
+  const sideM = !wide && !compactArm; // PC side panel: half-size meters, side by side, legs beneath
+  const [tpStatsOpen, setTpStatsOpen] = useState(false);
+  const [tpStatDur, setTpStatDur] = useState("24H");
   const [tpPcts, setTpPcts] = useState([25, 50, 75, 100]);
   useEffect(() => {
     if (!showLine) return;
@@ -1312,7 +1387,48 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       {!wide && (
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <div style={{ fontFamily: T.mono, fontSize: 11, letterSpacing: 2, color: T.dim, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          🤖 AUTO TRADER · <b style={{ color: accent(token.hue) }}>{token.sym}</b>
+          <b style={{ color: accent(token.hue), fontSize: 12 }}>{token.sym}</b>
+          {onOpenSearch && (
+            <button onClick={(e) => { e.stopPropagation(); onOpenSearch(); }} title="Search the ecosystem without leaving the trader"
+              style={{ ...chip(false), marginLeft: 6, padding: "2px 8px", fontSize: 10, fontWeight: 900, color: VALO_PURPLE, borderColor: `${VALO_PURPLE}55` }}>🔍</button>
+          )}
+          <button onClick={(e) => { e.stopPropagation(); setTpStatsOpen((v) => !v); }}
+            style={{ ...chip(tpStatsOpen), marginLeft: 8, padding: "2px 8px", fontSize: 8.5, fontWeight: 900, color: tpStatsOpen ? VALO_PURPLE : T.dim, borderColor: tpStatsOpen ? `${VALO_PURPLE}66` : T.border }}>
+            📊 STATS
+          </button>
+          {tpStatsOpen && (() => {
+            const durs = ["1H", "4H", "24H", "7D"];
+            const k = { "1H": 0.09, "4H": 0.3, "24H": 1, "7D": 5.6 }[tpStatDur];
+            const base = token.candles[Math.max(0, token.candles.length - Math.min(token.candles.length - 1, Math.round(96 * k)))].c;
+            const ch = ((token.price - base) / base) * 100;
+            const st = (l2, v2, c2) => (
+              <span style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ color: T.faint }}>{l2}</span><b style={{ color: c2 || T.text }}>{v2}</b>
+              </span>
+            );
+            return (
+              <div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 30, width: 250, background: T.panel, border: `1px solid ${VALO_PURPLE}55`, borderRadius: 11, padding: 9, boxShadow: "0 16px 46px rgba(0,0,0,0.6)", animation: "coPop .12s ease" }}>
+                <div style={{ display: "flex", gap: 3, marginBottom: 7 }}>
+                  {durs.map((d2) => (
+                    <button key={d2} onClick={() => setTpStatDur(d2)} style={{ ...chip(tpStatDur === d2), flex: 1, textAlign: "center", padding: "3px 0", fontSize: 8, fontWeight: 800 }}>{d2}</button>
+                  ))}
+                </div>
+                <div style={{ display: "grid", gap: 4, fontFamily: T.mono, fontSize: 8.5 }}>
+                  {st(`Δ PRICE · ${tpStatDur}`, `${ch >= 0 ? "+" : ""}${ch.toFixed(2)}%`, ch >= 0 ? T.green : T.red)}
+                  {st("PRICE", `$${fmtP(token.price)}`)}
+                  {st(`VOL · ${tpStatDur}`, fmt$((token.greenUsd + token.redUsd) * k))}
+                  {st("BUYS", fmt$(token.greenUsd * k), T.green)}
+                  {st("SELLS", fmt$(token.redUsd * k), T.red)}
+                  {st("MC", fmt$(mcOf(token)))}
+                  {st("TVL", fmt$(token.tvl))}
+                  {st("MOMENTUM", Math.round(token.momentum), token.momentum > 60 ? T.green : T.dim)}
+                  {st("HOLDERS", token.traders.toLocaleString())}
+                  {st("TOP 10 HOLD", `${(16 + ((token.id * 7) % 26)).toFixed(1)}%`, T.amber)}
+                  {st("SAFETY", scoreToken(token), ratingColor(scoreToken(token)))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
         {compactArm && (
           <button disabled={invalid} onClick={armNow}
@@ -1348,7 +1464,7 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       </div>
       <div style={{ display: "flex", gap: 5, marginBottom: wide ? 4 : compactArm ? 5 : 10 }}>
         {tpQuick.map((v, ci) => (
-          <button key={ci} onClick={() => setAmount && setAmount(String(v))}
+          <button className="qchip" key={ci} onClick={() => setAmount && setAmount(String(v))}
             {...chipEditProps(() => { askAmt(v, (nv) => setTpQuick((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
             style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "5px 0", fontSize: 9.5, fontWeight: 800 }}>{v}</button>
         ))}
@@ -1368,16 +1484,19 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
         const unit$ = pay === "SOL" ? SOL_USD : 0.0125;
         return (
           <>
-            {!wide && (
-              <button disabled={invalid} onClick={armNow}
+            {!wide && (armEdit ? armEditRow() : (
+              <button disabled={invalid} onClick={armNow} onContextMenu={armCtx}
+                title="Right-click: retype the buy-in amount right here"
                 style={{ width: "100%", marginBottom: 6, border: "none", borderRadius: 8, padding: "9px", fontFamily: T.mono, fontSize: 11.5, letterSpacing: 1.3, fontWeight: 900,
                   background: invalid ? "#1a2030" : editBot ? T.amber : T.blue, color: invalid ? T.faint : editBot ? "#1d1503" : "#07101d", cursor: invalid ? "not-allowed" : "pointer",
                   transform: flashOn ? "scale(1.02)" : "scale(1)", transition: "transform .18s, box-shadow .18s",
                   boxShadow: flashOn ? `0 0 20px ${editBot ? T.amber : T.blue}` : "none" }}>
-                {flashOn ? "✓ ARMED" : editBot ? "🔁 RELAUNCH" : "🤖 ARM"}
+                {flashOn ? "✓ ARMED" : editBot ? "🔁 RELAUNCH" : `🤖 ARM · ${amount} ${pay}`}
               </button>
-            )}
-            <div style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.blue,
+            ))}
+            <div onClick={() => setAmount && setAmount(String(feeSafe(bal, pay)))}
+              title="Tap: load your whole balance as the amount (fees covered)"
+              style={{ cursor: "pointer", fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.blue,
               background: "rgba(76,154,255,0.10)", border: `1px solid ${T.blue}55`, borderRadius: 8,
               padding: "6px 10px", margin: "4px 0 6px", display: "flex", justifyContent: "space-between", alignItems: "baseline",
               boxShadow: "0 0 12px rgba(76,154,255,0.18)" }}>
@@ -1386,7 +1505,7 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
             </div>
             <div style={{ display: "flex", gap: 4 }}>
               {tpPcts.map((pc, ci) => (
-                <button key={ci} onClick={() => setAmount && setAmount(String(feeSafe((bal * pc) / 100, pay)))}
+                <button className="qchip" key={ci} onClick={() => setAmount && setAmount(String(feeSafe((bal * pc) / 100, pay)))}
                   {...chipEditProps(() => { askPct(pc, (nv) => setTpPcts((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
                   style={{ ...chip(false), flex: 1, textAlign: "center", padding: "3px 0", fontSize: 8.5, fontWeight: 800 }}>{pc === 100 ? "MAX" : `${pc}%`}</button>
               ))}
@@ -1396,7 +1515,8 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       })()}
 
       </div>
-      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1.1 1 230px", minWidth: 220 } : undefined}>
+      <div style={sideM ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 12, alignItems: "start", marginTop: 8 } : { display: "contents" }}>
+      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1.1 1 230px", minWidth: 220 } : sideM ? { gridColumn: 1, gridRow: "1 / span 2", minWidth: 0 } : undefined}>
       {/* buy-in price slider — tracks live price, drag to set a higher/lower entry */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 7 }}>
         {onDraftLevel && (
@@ -1427,16 +1547,16 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       </div>
 
       </div>
-      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1.3 1 260px", minWidth: 250 } : undefined}>
-      <label style={{ ...lbl, marginTop: wide ? 0 : 12 }}>Stop loss — {stopLoss}% below entry</label>
-      <input type="range" min={1} max={100} value={stopLoss} onChange={(e) => setStopLoss(+e.target.value)} style={{ width: "100%", accentColor: T.red }} />
+      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1.3 1 260px", minWidth: 250 } : sideM ? { display: "contents" } : undefined}>
+      <label style={{ ...lbl, marginTop: wide || sideM ? 0 : 12, ...(sideM ? { gridColumn: 2, gridRow: 1 } : {}) }}>Stop loss — {stopLoss}% below entry</label>
+      <input type="range" min={1} max={100} value={stopLoss} onChange={(e) => setStopLoss(+e.target.value)} style={{ width: "100%", accentColor: T.red, ...(sideM ? { gridColumn: 2, gridRow: 2, alignSelf: "start" } : {}) }} />
 
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, marginBottom: 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: sideM ? 6 : 10, marginBottom: 6, ...(sideM ? { gridColumn: "1 / -1", borderTop: `1px solid ${T.border}`, paddingTop: 7 } : {}) }}>
         <span style={{ ...lbl, marginBottom: 0 }}>Trailing take-profit legs</span>
         <span style={{ fontFamily: T.mono, fontSize: 10, color: allocTotal === 100 ? T.green : T.red }}>Σ {allocTotal}% {allocTotal === 100 ? "✓" : "must=100"}</span>
       </div>
       {legs.map((l, i) => (
-        <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 28px", gap: wide ? 4 : 6, marginBottom: wide ? 3 : 6 }}>
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 28px", gap: wide ? 4 : 6, marginBottom: wide ? 3 : 6, ...(sideM ? { gridColumn: "1 / -1" } : {}) }}>
           <div>
             <span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>at ×</span><input value={l.mult} onChange={(e) => setLeg(i, "mult", e.target.value)} style={inpS} />
             {(() => { const m = parseFloat(l.mult) || 0, al = Number(l.alloc || 0); const est = amt * (al / 100) * (m - 1) * (pay === "SOL" ? SOL_USD : 0.0125);
@@ -1447,16 +1567,18 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
           <button onClick={() => setLegs((L) => L.filter((_, j) => j !== i))} style={{ ...chip(false), alignSelf: "end", padding: "5px 0", textAlign: "center" }}>−</button>
         </div>
       ))}
-      <button onClick={() => setLegs((L) => [...L, { mult: 3, trail: 12, alloc: 0 }])} style={{ ...chip(false), width: "100%", textAlign: "center" }}>+ add leg</button>
-      {wide && (
-        <button disabled={invalid} onClick={armNow}
+      <button onClick={() => setLegs((L) => [...L, { mult: 3, trail: 12, alloc: 0 }])} style={{ ...chip(false), width: "100%", textAlign: "center", ...(sideM ? { gridColumn: "1 / -1" } : {}) }}>+ add leg</button>
+      {wide && (armEdit ? <div style={{ marginTop: 7 }}>{armEditRow(0)}</div> : (
+        <button disabled={invalid} onClick={armNow} onContextMenu={armCtx}
+          title="Right-click: retype the buy-in amount right here"
           style={{ width: "100%", marginTop: 7, border: "none", borderRadius: 8, padding: "8px", fontFamily: T.mono, fontSize: 11, letterSpacing: 1.2, fontWeight: 900,
             background: invalid ? "#1a2030" : editBot ? T.amber : T.blue, color: invalid ? T.faint : editBot ? "#1d1503" : "#07101d", cursor: invalid ? "not-allowed" : "pointer",
             transform: flashOn ? "scale(1.02)" : "scale(1)", transition: "transform .18s, box-shadow .18s",
             boxShadow: flashOn ? `0 0 20px ${editBot ? T.amber : T.blue}` : "none" }}>
-          {flashOn ? "✓ ARMED" : editBot ? "🔁 RELAUNCH" : "🤖 ARM"}
+          {flashOn ? "✓ ARMED" : editBot ? "🔁 RELAUNCH" : `🤖 ARM · ${amount} ${pay}`}
         </button>
-      )}
+      ))}
+      </div>
       </div>
       {!(compactArm || wide) && !onReadyArm && (
         <button disabled={invalid} onClick={armNow}
@@ -1714,7 +1836,7 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
               {dtBuyPcts.map((p, ci) => {
                 const on = pctSel && pctSel.side === "buy" && pctSel.p === p;
                 return (
-                  <button key={ci} onClick={() => { setPct(p, false); setPctSel && setPctSel({ side: "buy", p }); }}
+                  <button className="qchip" key={ci} onClick={() => { setPct(p, false); setPctSel && setPctSel({ side: "buy", p }); }}
                     {...chipEditProps(() => askPct(p, (nv) => setDtBuyPcts((A) => A.map((x, j) => (j === ci ? nv : x)))))}
                     title="Double-click or right-click to set your own %"
                     style={{ ...chip(false), flex: 1, textAlign: "center", padding: "5px 0", fontSize: 9.5,
@@ -1730,7 +1852,7 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
             {/* fixed amounts — same chips as the mobile hotbar & traders, editable too */}
             <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
               {dtFixed.map((v, ci) => (
-                <button key={ci} onClick={() => { setAmount(String(v)); setPctSel && setPctSel(null); }}
+                <button className="qchip" key={ci} onClick={() => { setAmount(String(v)); setPctSel && setPctSel(null); }}
                   {...chipEditProps(() => askAmt(v, (nv) => setDtFixed((A) => A.map((x, j) => (j === ci ? nv : x)))))}
                   title="Double-click or right-click to set your own amount"
                   style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "4px 0", fontSize: 9, fontWeight: 800, color: T.green }}>{v}</button>
@@ -1750,7 +1872,7 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
               {dtSellPcts.map((p, ci) => {
                 const on = pctSel && pctSel.side === "sell" && pctSel.p === p;
                 return (
-                  <button key={ci} onClick={() => { setPct(p, true); setPctSel && setPctSel({ side: "sell", p }); }} disabled={held <= 0}
+                  <button className="qchip" key={ci} onClick={() => { setPct(p, true); setPctSel && setPctSel({ side: "sell", p }); }} disabled={held <= 0}
                     {...chipEditProps(() => askPct(p, (nv) => setDtSellPcts((A) => A.map((x, j) => (j === ci ? nv : x)))))}
                     title="Double-click or right-click to set your own %"
                     style={{ ...chip(false), flex: 1, textAlign: "center", padding: "5px 0", fontSize: 9.5,
@@ -1941,6 +2063,50 @@ function BullHead({ size = 20, horn, glow, rage = 0 }) {
     </svg>
   );
 }
+// little 3D metal/gem insignia for the GOLD → ONYX tiers + the spinning apex
+function MetalGem({ kind, size = 16 }) {
+  const id = "mg" + kind;
+  const spin = kind === "apex";
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24"
+      style={{ display: "block", overflow: "visible", animation: spin ? "apexSpin 2.4s linear infinite" : "none", transformOrigin: "center" }}>
+      <defs>
+        <linearGradient id={id + "g"} x1="0" y1="0" x2="1" y2="1">
+          {kind === "gold" && (<><stop offset="0" stopColor="#8a6a10" /><stop offset="0.45" stopColor="#f0b90b" /><stop offset="0.7" stopColor="#ffe9a3" /><stop offset="1" stopColor="#b8860b" /></>)}
+          {kind === "platinum" && (<><stop offset="0" stopColor="#9aa4b5" /><stop offset="0.45" stopColor="#eef2f8" /><stop offset="0.75" stopColor="#c9d2e0" /><stop offset="1" stopColor="#8d97a8" /></>)}
+          {(kind === "diamond" || kind === "apex") && (<><stop offset="0" stopColor="#3fb9e6" /><stop offset="0.45" stopColor="#dff7ff" /><stop offset="0.75" stopColor="#7de3ff" /><stop offset="1" stopColor="#2e9cc9" /></>)}
+          {kind === "onyx" && (<><stop offset="0" stopColor="#2a2438" /><stop offset="0.5" stopColor="#8a80a8" /><stop offset="1" stopColor="#1c1728" /></>)}
+        </linearGradient>
+      </defs>
+      {kind === "gold" ? (
+        <g style={{ filter: "drop-shadow(0 0 3px #f0b90b88)" }}>
+          {/* stacked ingot */}
+          <path d="M5 10 L19 10 L21.5 15.5 L2.5 15.5 Z" fill={`url(#${id}g)`} stroke="#6b520c" strokeWidth="0.6" />
+          <path d="M7 4.5 L17 4.5 L19 9 L5 9 Z" fill={`url(#${id}g)`} stroke="#6b520c" strokeWidth="0.6" />
+          <path d="M7.6 5.2 L16 5.2" stroke="#fff6d8" strokeWidth="0.9" opacity="0.8" strokeLinecap="round">
+            <animate attributeName="opacity" values="0.25;0.95;0.25" dur="2.2s" repeatCount="indefinite" />
+          </path>
+          <path d="M5.8 10.8 L18 10.8" stroke="#fff6d8" strokeWidth="0.8" opacity="0.5" strokeLinecap="round">
+            <animate attributeName="opacity" values="0.9;0.2;0.9" dur="2.2s" repeatCount="indefinite" />
+          </path>
+        </g>
+      ) : (
+        <g style={{ filter: `drop-shadow(0 0 3px ${kind === "onyx" ? "#8a80a8" : kind === "platinum" ? "#dfe6ef" : "#7de3ff"}88)` }}>
+          {/* classic brilliant-cut gem */}
+          <path d="M6 4 L18 4 L22 9.5 L12 21 L2 9.5 Z" fill={`url(#${id}g)`} stroke={kind === "onyx" ? "#141020" : "#ffffff66"} strokeWidth="0.6" />
+          <path d="M6 4 L9 9.5 L12 21 M18 4 L15 9.5 L12 21 M2 9.5 L9 9.5 L15 9.5 L22 9.5 M9 9.5 L12 4 L15 9.5"
+            stroke={kind === "onyx" ? "#b5a9d6" : "#ffffff"} strokeWidth="0.5" opacity="0.55" fill="none" />
+          <circle cx="8" cy="7" r="0.9" fill="#fff">
+            <animate attributeName="opacity" values="0;1;0" dur="1.6s" repeatCount="indefinite" />
+          </circle>
+          <circle cx="16.5" cy="12" r="0.7" fill="#fff">
+            <animate attributeName="opacity" values="0;1;0" dur="1.6s" begin="0.8s" repeatCount="indefinite" />
+          </circle>
+        </g>
+      )}
+    </svg>
+  );
+}
 // Circular gauge for a live callout. Terminal-styled radar ring that gains
 // layers the higher the tier: fx0 plain arc · fx1 +inner hairline ·
 // fx2 +orbiting dashed halo · fx3 +cardinal sparkles & pulsing arc ·
@@ -1968,46 +2134,31 @@ function CalloutRing({ mult, size = 34 }) {
               strokeDasharray="1.2 5.2" opacity="0.55" strokeLinecap="round" />
           </g>
         )}
-        {/* fx4+: counter-orbiting outer halo */}
-        {fx >= 4 && (
-          <g style={{ ...spinO, animation: "coOrbitR 11s linear infinite" }}>
-            <circle cx={s / 2} cy={s / 2} r={r + 4.6} fill="none" stroke={tier.color} strokeWidth="0.7"
-              strokeDasharray="3.6 7.4" opacity="0.4" strokeLinecap="round" />
-          </g>
-        )}
-        {/* charge arc */}
+        {/* tier progress arc */}
         <circle cx={s / 2} cy={s / 2} r={r} fill="none" stroke={tier.color} strokeWidth="2.5"
-          strokeLinecap="round" strokeDasharray={`${C * frac} ${C}`} className={fx >= 3 ? "co-pulse" : undefined}
-          style={{ filter: `drop-shadow(0 0 4px ${tier.color})`, transition: "stroke-dasharray .5s ease, stroke .5s ease" }} />
-        {/* fx3+: twinkling cardinal sparkles */}
-        {fx >= 3 && [0, 90, 180, 270].map((a, i) => (
-          <circle key={a} cx={s / 2 + (r + 2.6) * Math.cos((a * Math.PI) / 180)} cy={s / 2 + (r + 2.6) * Math.sin((a * Math.PI) / 180)}
-            r="1" fill={tier.color} style={{ animation: `coTwinkle 1.8s ease-in-out ${i * 0.45}s infinite`, filter: `drop-shadow(0 0 2px ${tier.color})` }} />
-        ))}
-        {/* fx5: comet orbit — apex only */}
-        {fx >= 5 && (
-          <g style={{ ...spinO, animation: "coOrbit 3.2s linear infinite" }}>
-            <circle cx={s / 2 + r + 4.6} cy={s / 2} r="1.4" fill="#d9f9ff" style={{ filter: "drop-shadow(0 0 3px #7de3ff)" }} />
-          </g>
-        )}
+          strokeDasharray={`${C * frac} ${C}`} strokeLinecap="round"
+          style={{ filter: `drop-shadow(0 0 ${fx >= 1 ? 4 : 2.5}px ${tier.color})` }} />
       </svg>
-      {/* center: multiplier / bull head / apex diamond */}
-      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-        {tier.apex ? (
-          <span style={{ width: s * 0.32, height: s * 0.32, borderRadius: 3,
-            background: "linear-gradient(135deg, #d9f9ff, #7de3ff 45%, #c3b6ff)",
-            boxShadow: "0 0 10px #7de3ff, 0 0 22px rgba(125,227,255,0.55)",
-            animation: "coSpin 2.6s linear infinite" }} />
-        ) : tier.bull ? (
-          <span style={{ filter: `drop-shadow(0 0 4px ${tier.color}88)`, marginTop: s * 0.06 }}>
-            <BullHead size={s * 0.66} horn={tier.horn} glow={tier.hornGlow} rage={tier.rage || 0} />
+      {(() => {
+        const gemKind = tier.apex ? "apex" : tier.bull ? null
+          : tier.min >= 40 ? "onyx" : tier.min >= 25 ? "diamond" : tier.min >= 20 ? "platinum" : tier.min >= 13 ? "gold" : null;
+        if (!tier.bull && !gemKind) return (
+          <span style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center",
+            fontFamily: T.mono, fontSize: Math.max(7, s * 0.26), fontWeight: 900, color: tier.color,
+            textShadow: fx >= 1 ? `0 0 7px ${tier.color}` : "none", lineHeight: 1 }}>{multTxt}</span>
+        );
+        return (
+          <span style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
+            {tier.bull
+              ? <BullHead size={s * 0.68} horn={tier.horn} glow={tier.hornGlow} rage={tier.rage || 0} />
+              : <MetalGem kind={gemKind} size={s * 0.55} />}
+            <span style={{ position: "absolute", bottom: -3, left: "50%", transform: "translateX(-50%)",
+              fontFamily: T.mono, fontSize: Math.max(6, s * 0.17), fontWeight: 900, color: tier.color, lineHeight: 1,
+              background: "rgba(10,13,19,0.9)", border: `1px solid ${tier.color}66`, borderRadius: 6, padding: "1px 4px",
+              textShadow: `0 0 6px ${tier.color}`, whiteSpace: "nowrap" }}>{multTxt}</span>
           </span>
-        ) : null}
-        <span style={{ fontFamily: T.mono, fontWeight: 900, color: tier.color,
-          fontSize: tier.bull || tier.apex ? s * 0.17 : s * 0.26,
-          marginTop: tier.bull || tier.apex ? 0.5 : 0,
-          textShadow: `0 0 6px ${tier.color}66` }}>{multTxt}</span>
-      </div>
+        );
+      })()}
     </div>
   );
 }
@@ -2210,7 +2361,7 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
 }
 
 // 🔥 burn stats — everything the burn buttons track, moving live with trades
-function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0 }) {
+function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0 }, valoUsd = 0.0125) {
   const TOTAL = 1e9; // genesis supply
   const circ = Math.max(0, TOTAL - siteBurned);
   const pct = (siteBurned / TOTAL) * 100;
@@ -2233,6 +2384,10 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0 }) {
           {row("YOUR TOTAL BURNED", `${myBurned.toFixed(4)} $VALO`, "the burn slice of every fee you've ever paid", "#f97316")}
           {row("SITE TOTAL BURN", `${fmtQty(siteBurned)} $VALO`, "every trader's burn pool + hourly buyback burns, on-chain forever", T.red)}
           {row("CIRCULATING SUPPLY", `${fmtQty(circ)} $VALO`, `of ${fmtQty(TOTAL)} genesis — shrinking with every trade`, T.green)}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, border: `1.5px solid ${VALO_PURPLE}66`, background: "rgba(125,92,240,0.10)", borderRadius: 10, padding: "8px 11px", marginTop: 7, boxShadow: `0 0 12px ${VALO_PURPLE}33` }}>
+            <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: VALO_PURPLE, fontWeight: 900 }}>◆ $VALO PRICE · LIVE</span>
+            <span style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 900, color: VALO_PURPLE }}>${(valoUsd * (1 + Math.sin(Date.now() / 4000) * 0.003)).toFixed(4)}</span>
+          </div>
           <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, margin: "4px 0 5px", display: "flex", justifyContent: "space-between" }}>
             <span>SUPPLY BURNED</span><span style={{ color: "#f97316", fontWeight: 800 }}>{pct.toFixed(5)}%</span>
           </div>
@@ -3124,7 +3279,7 @@ function BotRunStatsModal({ run, onClose, isMobile }) {
 }
 
 // ---- PC AUTO TRADER TAB — form on top, bot bars below with sub-tabs -------
-function AutoTraderPanel({ wide = false, solBalance = 0, valoWallet = 0, token, tokens = [], amount, setAmount, pay, setPay, onExecute, onDraftLevel, botLock, dragSetOn, onToggleDragSet, onSetDragSet, onLinesChange, onStageSide, onArmPair, onReadyArm,
+function AutoTraderPanel({ wide = false, solBalance = 0, valoWallet = 0, position = null, token, tokens = [], amount, setAmount, pay, setPay, onExecute, onDraftLevel, botLock, dragSetOn, onToggleDragSet, onSetDragSet, onLinesChange, onStageSide, onArmPair, onReadyArm, onOpenSearch = null,
   pendingOrders = [], botRuns = [], editingBotId, setEditingBotId, onRelaunch, onCancelBot, onSellRun, onOpenBotRun, onOpenTokenAuto }) {
   const [listTab, setListTab] = useState("live");   // live | inactive
   const [scope, setScope] = useState("token");      // token | site
@@ -3146,7 +3301,7 @@ function AutoTraderPanel({ wide = false, solBalance = 0, valoWallet = 0, token, 
         <button onClick={() => setSubTab("visual")} style={{ ...chip(subTab === "visual"), flex: 1, textAlign: "center", padding: "7px", fontSize: 9.5, fontWeight: 800, color: subTab === "visual" ? T.amber : T.dim, borderColor: subTab === "visual" ? `${T.amber}66` : T.border }}>👁 VISUAL TRADING</button>
       </div>
       {subTab === "visual" ? (
-        <VisualTrading token={token} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} wide={wide}
+        <VisualTrading token={token} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} wide={wide} position={position}
           botLock={botLock} onStageSide={onStageSide} onArmPair={onArmPair}
           dragSetOn={dragSetOn} onToggleDragSet={onToggleDragSet} onDraftLevel={onDraftLevel}
           onSetDragSet={onSetDragSet} onLinesChange={onLinesChange} onReadyArm={onReadyArm}
@@ -3156,12 +3311,13 @@ function AutoTraderPanel({ wide = false, solBalance = 0, valoWallet = 0, token, 
       <TradePanel key={editingBotId || "new"} token={token} amount={amount} setAmount={setAmount} pay={pay} wide={wide}
         onExecute={onExecute} onDraftLevel={onDraftLevel} editBot={editBot} onRelaunch={onRelaunch} botLock={botLock}
         dragSetOn={dragSetOn} onToggleDragSet={onToggleDragSet} setPay={setPay} onReadyArm={onReadyArm}
-        solBalance={solBalance} valoWallet={valoWallet} />
+        solBalance={solBalance} valoWallet={valoWallet} onOpenSearch={onOpenSearch} />
       )}
     </div>
     <div style={wide ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, alignItems: "start" } : undefined}>
-      {/* placed orders — only appears once something is actually armed or running */}
-      {(pend.length + running.length + sold.length) > 0 && (
+      {/* placed orders — only appears once something is actually armed or running.
+          Hidden in the wide pro desk: MY BOTS is its home there, no popups. */}
+      {!wide && (pend.length + running.length + sold.length) > 0 && (
       <div style={{ marginTop: wide ? 8 : 12, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 12, padding: 11 }}>
         {listTab === "live" ? (
           <>
@@ -3213,12 +3369,25 @@ function AutoTraderPanel({ wide = false, solBalance = 0, valoWallet = 0, token, 
 // every bot in one place — overall PnL bar on top, then live & finished bots
 // VISUAL TRADING — set a buy-in line, then a sell-all point; the pair trades
 // itself with zero interference between bots
-function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStageSide, onArmPair, dragSetOn, onToggleDragSet, onDraftLevel, onSetDragSet, onLinesChange, editBot = null, compactArm = false, onReadyArm, wide = false, solBalance = 0, valoWallet = 0 }) {
+function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStageSide, onArmPair, dragSetOn, onToggleDragSet, onDraftLevel, onSetDragSet, onLinesChange, editBot = null, compactArm = false, onReadyArm, wide = false, solBalance = 0, valoWallet = 0, position = null }) {
   const [buyLvl, setBuyLvl] = useState(null);
   const [sellLvl, setSellLvl] = useState(null);
   const [trail, setTrail] = useState(0);
   const [flash, setFlash] = useState(0);
   const [vtQuick, setVtQuick] = useState([0.5, 1, 2, 5]);   // dbl-tap a chip to retype it
+  const [vArmEdit, setVArmEdit] = useState(false);  // right-click ARM PAIR → retype the amount
+  const [vArmDraft, setVArmDraft] = useState("");
+  const vArmCtx = (e) => { e.preventDefault(); e.stopPropagation(); setVArmDraft(String(amount)); setVArmEdit(true); };
+  const vArmRow = (
+    <div style={{ display: "flex", gap: 5, width: "100%" }}>
+      <input autoFocus value={vArmDraft} inputMode="decimal" onChange={(e) => setVArmDraft(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") { setAmount && setAmount(vArmDraft); setVArmEdit(false); } if (e.key === "Escape") setVArmEdit(false); }}
+        style={{ ...inp, flex: 1, padding: "8px", fontSize: 13, fontWeight: 800, textAlign: "center", borderColor: T.blue, boxShadow: `0 0 10px ${T.blue}44` }} />
+      <span style={{ alignSelf: "center", fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: pay === "SOL" ? T.blue : VALO_PURPLE }}>{pay}</span>
+      <button onClick={() => { setAmount && setAmount(vArmDraft); setVArmEdit(false); }}
+        style={{ border: "none", borderRadius: 8, padding: "0 14px", background: T.green, color: "#07130d", fontWeight: 900, cursor: "pointer", fontSize: 15 }}>✓</button>
+    </div>
+  );
   const [vtPcts, setVtPcts] = useState([25, 50, 75, 100]);
   // EDIT: clicking a visual pair loads its prices right back into the boxes
   useEffect(() => {
@@ -3319,7 +3488,7 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
       </div>
       <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
         {vtQuick.map((v, ci) => (
-          <button key={ci} onClick={() => setAmount && setAmount(String(v))}
+          <button className="qchip" key={ci} onClick={() => setAmount && setAmount(String(v))}
             {...chipEditProps(() => { askAmt(v, (nv) => setVtQuick((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
             style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "4px 0", fontSize: 9, fontWeight: 800 }}>{v}</button>
         ))}
@@ -3329,7 +3498,9 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
         const unit$ = pay === "SOL" ? SOL_USD : 0.0125;
         return (
           <>
-            <div style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.blue,
+            <div onClick={() => setAmount && setAmount(String(feeSafe(bal, pay)))}
+              title="Tap: load your whole balance as the amount (fees covered)"
+              style={{ cursor: "pointer", fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.blue,
               background: "rgba(76,154,255,0.10)", border: `1px solid ${T.blue}55`, borderRadius: 8,
               padding: "6px 10px", margin: "4px 0 6px", display: "flex", justifyContent: "space-between", alignItems: "baseline",
               boxShadow: "0 0 12px rgba(76,154,255,0.18)" }}>
@@ -3338,7 +3509,7 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
             </div>
             <div style={{ display: "flex", gap: 4 }}>
               {vtPcts.map((pc, ci) => (
-                <button key={ci} onClick={() => setAmount && setAmount(String(feeSafe((bal * pc) / 100, pay)))}
+                <button className="qchip" key={ci} onClick={() => setAmount && setAmount(String(feeSafe((bal * pc) / 100, pay)))}
                   {...chipEditProps(() => { askPct(pc, (nv) => setVtPcts((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
                   style={{ ...chip(false), flex: 1, textAlign: "center", padding: "3px 0", fontSize: 8.5, fontWeight: 800 }}>{pc === 100 ? "MAX" : `${pc}%`}</button>
               ))}
@@ -3376,16 +3547,38 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
         {trail > 0 ? `after your sell point hits, it rides the peak and sells all when price drops ${trail}% from it` : "0% = sell the instant your sell point is hit"}
       </div>
       </div>
-      {!(compactArm || wide) && !onReadyArm && (
-        <button disabled={!canArm} onClick={armPair}
+      {!(compactArm || wide) && !onReadyArm && (vArmEdit ? vArmRow : (
+        <button disabled={!canArm} onClick={armPair} onContextMenu={vArmCtx}
+          title="Right-click: retype the buy-in amount right here"
           style={{ gridColumn: wide ? "1 / -1" : undefined, width: "100%", border: "none", borderRadius: 9, padding: wide ? "9px" : "12px", fontFamily: T.mono, fontSize: wide ? 11.5 : 12, letterSpacing: 1.5, fontWeight: 900,
             background: !canArm ? "#1a2030" : flash ? T.green : editBot && editBot.vt ? T.amber : T.blue,
             color: !canArm ? T.faint : flash ? "#07130d" : editBot && editBot.vt ? "#1d1503" : "#07101d", cursor: canArm ? "pointer" : "not-allowed",
             transform: flash ? "scale(1.02)" : "scale(1)", transition: "transform .18s, background .18s",
             boxShadow: flash ? `0 0 22px ${T.green}` : "none" }}>
-          {flash ? "✓ PAIR ARMED" : editBot && editBot.vt ? "🔁 RE-ARM VISUAL PAIR" : "👁 ARM VISUAL PAIR"}
+          {flash ? "✓ PAIR ARMED" : editBot && editBot.vt ? "🔁 RE-ARM VISUAL PAIR" : `👁 ARM VISUAL PAIR · ${amount} ${pay}`}
         </button>
-      )}
+      ))}
+      {wide && (() => {
+        const held2 = position && position.amt > 0 ? position.amt : 0;
+        const pnl2 = held2 ? (held2 * (token.price / position.entry) - held2) * ((position.pay || "SOL") === "SOL" ? SOL_USD : 0.0125) : 0;
+        const pc2 = held2 ? ((token.price - position.entry) / position.entry) * 100 : 0;
+        const g2 = pnl2 >= 0;
+        return (
+          <div style={{ border: `1.5px solid ${held2 ? (g2 ? T.green : T.red) + "66" : T.border}`, borderRadius: 10, padding: "8px 10px", flex: "1 1 190px", minWidth: 180,
+            background: held2 ? (g2 ? "rgba(22,199,132,0.07)" : "rgba(234,57,67,0.07)") : "rgba(255,255,255,0.015)",
+            boxShadow: held2 ? `0 0 16px ${g2 ? "rgba(22,199,132,0.25)" : "rgba(234,57,67,0.25)"}` : "none",
+            display: "flex", flexDirection: "column", justifyContent: "center" }}>
+            <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.2, color: T.faint, marginBottom: 3 }}>LIVE P/L · {token.sym}</div>
+            {held2 ? (
+              <div style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 900, lineHeight: 1.05, color: g2 ? T.green : T.red, textShadow: `0 0 14px ${g2 ? "rgba(22,199,132,0.5)" : "rgba(234,57,67,0.5)"}` }}>
+                {g2 ? "+" : "−"}${Math.abs(pnl2).toFixed(2)} <span style={{ fontSize: 11 }}>({g2 ? "+" : ""}{pc2.toFixed(1)}%)</span>
+              </div>
+            ) : (
+              <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>No open position on {token.sym}.</div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -3508,7 +3701,7 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
         </div>
         <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
           {poPcts.map((pc, ci) => (
-            <button key={ci} onClick={() => setAmount(String(feeSafe((bal * pc) / 100, pay)))}
+            <button className="qchip" key={ci} onClick={() => setAmount(String(feeSafe((bal * pc) / 100, pay)))}
               {...chipEditProps(() => askPct(pc, (nv) => setPoPcts((A) => A.map((x, j) => (j === ci ? nv : x)))))}
               title="Double-click or right-click to set your own %"
               style={{ ...chip(false), flex: 1, textAlign: "center", padding: "3px 0", fontSize: 8.5, fontWeight: 800 }}>{pc === 100 ? "MAX" : `${pc}%`}</button>
@@ -3516,7 +3709,7 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
         </div>
         <div style={{ display: "flex", gap: 4, marginTop: 5 }}>
           {poFixed.map((v, ci) => (
-            <button key={ci} onClick={() => setAmount(String(v))}
+            <button className="qchip" key={ci} onClick={() => setAmount(String(v))}
               {...chipEditProps(() => askAmt(v, (nv) => setPoFixed((A) => A.map((x, j) => (j === ci ? nv : x)))))}
               title="Double-click or right-click to set your own amount"
               style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "3px 0", fontSize: 8.5, fontWeight: 800, color: T.green }}>{v}</button>
@@ -3563,11 +3756,12 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
         </div>
       </div>
       {/* live position */}
-      <div style={{ ...seg, flex: "1 1 200px", minWidth: 190 }}>
+      <div style={{ ...seg, flex: "1 1 200px", minWidth: 190,
+        ...(held ? { border: `1.5px solid ${gain ? T.green : T.red}66`, background: gain ? "rgba(22,199,132,0.07)" : "rgba(234,57,67,0.07)", boxShadow: `0 0 16px ${gain ? "rgba(22,199,132,0.25)" : "rgba(234,57,67,0.25)"}` } : {}) }}>
         <div style={{ ...lbl }}>Live P/L · {token.sym}</div>
         {held ? (
           <>
-            <div style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 900, color: gain ? T.green : T.red }}>{gain ? "+" : "−"}${Math.abs(livePnlUsd).toFixed(2)} <span style={{ fontSize: 10 }}>({gain ? "+" : ""}{livePct.toFixed(1)}%)</span></div>
+            <div style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 900, lineHeight: 1.05, color: gain ? T.green : T.red, textShadow: `0 0 14px ${gain ? "rgba(22,199,132,0.5)" : "rgba(234,57,67,0.5)"}` }}>{gain ? "+" : "−"}${Math.abs(livePnlUsd).toFixed(2)} <span style={{ fontSize: 11 }}>({gain ? "+" : ""}{livePct.toFixed(1)}%)</span></div>
             <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 3 }}>
               {fmtQty(posTokenQty(token, position))} tokens · avg ${fmtP(position.entry)}
               <span style={{ color: (realized24 || 0) >= 0 ? T.green : T.red }}> · R24H {(realized24 || 0) >= 0 ? "+" : "−"}${Math.abs(realized24 || 0).toFixed(2)}</span>
@@ -4286,6 +4480,27 @@ function PerfChart({ series, mode, height = 130 }) {
 // ---------------- scanner card ----------------
 // token picture — uses the real token image once metadata resolves,
 // falls back to a deterministic gradient identicon until it does.
+// the drop pill: flies from your cursor INTO the slot/watchlist and vanishes
+function DropFxPill({ fx }) {
+  const r = useRef(null);
+  useEffect(() => {
+    const el = r.current; if (!el || !el.animate) return;
+    el.animate([
+      { transform: "translate(-50%,-50%) scale(1) rotate(-3deg)", opacity: 1 },
+      { transform: `translate(calc(-50% + ${fx.tx - fx.fx}px), calc(-50% + ${fx.ty - fx.fy}px)) scale(0.1) rotate(8deg)`, opacity: 0.1 },
+    ], { duration: 300, easing: "cubic-bezier(.3,.75,.35,1)", fill: "forwards" });
+  }, [fx.key]);
+  return (
+    <div ref={r} style={{ position: "fixed", left: fx.fx, top: fx.fy, zIndex: 97, pointerEvents: "none",
+      fontFamily: T.mono, fontWeight: 900, fontSize: 13,
+      background: `linear-gradient(135deg, hsl(${fx.hue},70%,24%), hsl(${fx.hue},80%,40%))`,
+      border: `1.5px solid ${VALO_PURPLE}`, color: "#fff", borderRadius: 11, padding: "9px 14px",
+      boxShadow: `0 8px 26px rgba(0,0,0,0.6), 0 0 16px ${VALO_PURPLE}88` }}>
+      {fx.sym}
+    </div>
+  );
+}
+
 function TokenAvatar({ sym, hue, img, size = 22 }) {
   const [ok, setOk] = useState(!!img);
   useEffect(() => { setOk(!!img); }, [img]);
@@ -4780,6 +4995,21 @@ function WpFeeTable() {
 }
 
 const PATCH_NOTES = [
+  { v: "1.0.2", name: "PATCH V 1.0.2", date: "July 2026", accent: "#7D5CF0", items: [
+    "📋 WATCHLIST WALL — left pull-tab on PC with a loose list + your own named SUBSECTIONS: ＋ LIST to create, double-click to rename, drag section headers to reorder, right-click any row to move/remove",
+    "📊 MY POSITIONS slide-over — every open bot & ticket in one tab: BOTS | BOTH | TICKETS scoping, live scoped PnL with unrealized + realized, per-asset 10–100% sell chips showing exact SOL/$VALO, scoped SELL ALL",
+    "Hold your wallet amount → it morphs into MY POSITIONS · tap any asset → straight to its chart (bots land on ALL BOTS) · partial bot sells are now real exits with proper realized PnL",
+    "🔍 ECOSYSTEM SEARCH — pump.fun-style token cards with score/B/S/momentum/viewers/dev, ALL·PUMP.FUN·ROBINHOOD + 🔥TRENDING/TOP TRADERS/NEW/SAFE⊕RISKY filters living inside the search, metallic GOLD borders + sweeping shine on hot tokens",
+    "🔍 in the auto trader header — pull the full search down mid-trade; wallet pill on top: balance, live bot PnL, POSITIONS shortcut",
+    "👥 HOLDERS tab beside LIVE TRADES — top-25 book with tokens · $ · % of circ · B/S · P/L · hold time; text enlarged across both tabs; every row opens the trader popup",
+    "PC hold-drag REORDER — pull scanner tokens or watchlist rows up/down inside their own tab; right-click adds to scanner / any subsection / removes",
+    "PC layout locks — scanner + both right columns follow you down the page; bigger text site-wide; search bar solid and glued flush under the banner; page filters folded into the search",
+    "Mobile chart v2 — OHLC pill + eyes + LIVE/fit stacked INSIDE a taller chart; tap the purple pulley → chart COVERS the page to the token name (drag covers too, nothing scrunches); tap the price → market cap → your token amount",
+    "Tier insignia — bull heads return with tier-metal horns, rage eyes & nose smoke; GOLD ingots + PLATINUM/DIAMOND/ONYX gems with live sparkle; DIAMOND APEX spins",
+    "Right-click ARM (auto trader & visual) → retype the buy-in in place, Enter/✓ locks it, the button remembers your amount",
+    "Mobile flow — taps de-stickied site-wide, swipe a watchlist bar left → 🗑 (closed bars only), 📋 WATCHLIST hidden right of ALL BOTS, hold the stats bar → OPEN WALLET, compact toggle beside search, CARD CHART off the home",
+    "◆ VALO tab icon — the site favicon is the brand diamond",
+  ]},
   { v: "1.0.1", name: "THE PRO UPDATE", date: "July 2026", accent: "#F0B90B", items: [
     "PC PRO DESK v2 — trading desk fused to the chart: one border, tabs on top, wide BUY|SELL bar, segment cards",
     "Chart pulls from every edge: token strip (left), taller chart (up), wider panels & wallet (right)",
@@ -4983,6 +5213,7 @@ function WhitepaperModal({ onClose, isMobile }) {
 // ---------------- live on-chain trades feed (collapsible) ----------------
 function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
   const [open, setOpen] = useState(true);
+  const [view, setView] = useState("trades"); // trades | holders
   const [rows, setRows] = useState([]);
   const [holders, setHolders] = useState(token.traders);
   const shortAddr = () => {
@@ -5018,21 +5249,80 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
   }
   const ago = (ms) => { const s = Math.floor((Date.now() - ms) / 1000); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m`; };
 
+  // deterministic top-holder book, biggest first — refreshed live off the price
+  const topHolders = useMemo(() => {
+    const supply = 1e9 * (0.35 + ((token.id * 13) % 50) / 100);
+    let x = token.id * 77 + 13; const rnd2 = () => { x = (x * 9301 + 49297) % 233280; return x / 233280; };
+    const N = 25;
+    let share = 0.062 + rnd2() * 0.03; // whale at the top
+    return Array.from({ length: N }, (_, i) => {
+      const name = i % 3 === 0 ? CALLERS[(token.id * 3 + i) % CALLERS.length] : null;
+      const wal = ((token.id * 2654435761 + i * 97) >>> 0).toString(16).padStart(8, "0");
+      const qty = supply * share;
+      share *= 0.72 + rnd2() * 0.16; // decaying book
+      const avgIn = token.price * (0.4 + rnd2() * 1.1);
+      const boughtUsd = qty * avgIn * (1 + rnd2() * 0.4);
+      const soldUsd = boughtUsd * rnd2() * 0.45;
+      const holdMin = 40 + Math.floor(rnd2() * 60 * 24 * 9);
+      return { i, name, wal: wal.slice(0, 4).toUpperCase() + "…" + wal.slice(-4).toUpperCase(),
+        qty, usd: qty * token.price, supPct: (qty / supply) * 100, boughtUsd, soldUsd,
+        pnlUsd: qty * (token.price - avgIn), holdMin };
+    });
+  }, [token.id, Math.round(token.price * 1e7)]);
+  const holdTxt = (m) => (m < 60 ? `${m}m` : m < 1440 ? `${(m / 60).toFixed(1)}h` : `${(m / 1440).toFixed(1)}d`);
   return (
     <div style={{ marginTop: 10, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden" }}>
-      <button onClick={() => setOpen((v) => !v)}
-        style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 12px", border: "none", background: "rgba(255,255,255,0.02)", cursor: "pointer" }}>
-        <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: T.text }}>
-          <span style={{ color: T.green }}>●</span> LIVE TRADES <span style={{ color: T.faint, fontWeight: 400 }}>· on-chain</span>
+      <div style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 8px 6px 6px", background: "rgba(255,255,255,0.02)" }}>
+        <span style={{ display: "flex", gap: 4 }}>
+          <button onClick={() => { setView("trades"); setOpen(true); }}
+            style={{ ...chip(view === "trades"), padding: "5px 10px", fontSize: 9.5, fontWeight: 800, color: view === "trades" ? T.green : T.dim, borderColor: view === "trades" ? `${T.green}66` : T.border }}>
+            ● LIVE TRADES
+          </button>
+          <button onClick={() => { setView("holders"); setOpen(true); }}
+            style={{ ...chip(view === "holders"), padding: "5px 10px", fontSize: 9.5, fontWeight: 800, color: view === "holders" ? T.amber : T.dim, borderColor: view === "holders" ? `${T.amber}66` : T.border }}>
+            👥 HOLDERS
+          </button>
         </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 10, fontFamily: T.mono, fontSize: 10 }}>
-          <span style={{ color: T.dim }}>👥 {holders.toLocaleString()} holders</span>
+        <button onClick={() => setOpen((v) => !v)} style={{ border: "none", background: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, fontFamily: T.mono, fontSize: 9.5 }}>
+          <span style={{ color: T.dim }}>👥 {holders.toLocaleString()}</span>
           <span style={{ color: T.faint }}>{open ? "▲" : "▼"}</span>
-        </span>
-      </button>
-      {open && (
+        </button>
+      </div>
+      {open && view === "holders" && (
         <div style={{ maxHeight: isMobile ? 240 : 300, overflowY: "auto" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "38px 1fr 62px 46px 26px", gap: 6, padding: "6px 12px", position: "sticky", top: 0, background: T.panel, borderBottom: `1px solid ${T.border}`, fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 0.5 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "20px 1fr 82px 70px 48px" : "18px 1fr 74px 62px 44px", gap: 6, padding: "6px 12px", position: "sticky", top: 0, background: T.panel, borderBottom: `1px solid ${T.border}`, fontFamily: T.mono, fontSize: isMobile ? 9.5 : 8, color: T.faint, letterSpacing: 0.5, zIndex: 1 }}>
+            <span>#</span><span>HOLDER · TOKENS</span><span style={{ textAlign: "right" }}>B / S</span><span style={{ textAlign: "right" }}>P/L</span><span style={{ textAlign: "right" }}>HELD</span>
+          </div>
+          {topHolders.map((h) => (
+            <div key={h.i}
+              onClick={() => onPickTrader && onPickTrader({ trader: h.name || h.wal, isBuy: true, usd: h.usd, holder: true })}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(240,185,11,0.09)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+              title="Open this holder — pin them, set colour & icon, follow"
+              style={{ display: "grid", gridTemplateColumns: isMobile ? "20px 1fr 82px 70px 48px" : "18px 1fr 74px 62px 44px", gap: 6, padding: isMobile ? "7px 12px" : "6px 12px", alignItems: "center", borderBottom: `1px solid ${T.border}`, borderLeft: `3px solid ${h.i < 10 ? T.amber : T.border}`, cursor: "pointer", transition: "background .12s" }}>
+              <span style={{ fontFamily: T.mono, fontSize: isMobile ? 10 : 8.5, color: h.i < 10 ? T.amber : T.faint, fontWeight: 800 }}>{h.i + 1}</span>
+              <span>
+                <div style={{ fontFamily: T.mono, fontSize: isMobile ? 11.5 : 10, fontWeight: 800,
+                  color: (h.name && traderPrefs[h.name] && traderPrefs[h.name].color) || T.text, textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
+                  {h.name && traderPrefs[h.name] && traderPrefs[h.name].following ? "📌 " : ""}{h.name ? "@" + h.name : h.wal}
+                </div>
+                <div style={{ fontFamily: T.mono, fontSize: isMobile ? 9.5 : 8, color: T.dim }}>{fmtQty(h.qty)} · <b style={{ color: T.text }}>{fmt$(h.usd)}</b> · <b style={{ color: T.amber }}>{h.supPct.toFixed(2)}%</b> <span style={{ fontSize: isMobile ? 8 : 6.5 }}>of circ</span></div>
+              </span>
+              <span style={{ fontFamily: T.mono, fontSize: isMobile ? 9.5 : 8, textAlign: "right", lineHeight: isMobile ? 1.5 : 1.3 }}>
+                <span style={{ color: T.green }}>{fmt$(h.boughtUsd)}</span><br /><span style={{ color: T.red }}>{fmt$(h.soldUsd)}</span>
+              </span>
+              <span style={{ fontFamily: T.mono, fontSize: isMobile ? 10.5 : 9, fontWeight: 800, textAlign: "right", color: h.pnlUsd >= 0 ? T.green : T.red }}>
+                {h.pnlUsd >= 0 ? "+" : "−"}{fmt$(Math.abs(h.pnlUsd))}
+              </span>
+              <span style={{ fontFamily: T.mono, fontSize: isMobile ? 10 : 8.5, textAlign: "right", color: T.dim }}>{holdTxt(h.holdMin)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {open && view === "holders" ? null : null}
+      {open && view === "trades" && (
+        <div style={{ maxHeight: isMobile ? 240 : 300, overflowY: "auto" }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "40px 1fr 70px 52px 26px" : "38px 1fr 62px 46px 26px", gap: 6, padding: "6px 12px", position: "sticky", top: 0, background: T.panel, borderBottom: `1px solid ${T.border}`, fontFamily: T.mono, fontSize: isMobile ? 9.5 : 8, color: T.faint, letterSpacing: 0.5 }}>
             <span>AGE</span><span>USD / SOL</span><span style={{ textAlign: "right" }}>MCAP</span><span style={{ textAlign: "right" }}>PNL</span><span></span>
           </div>
           {rows.map((r) => (
@@ -5041,11 +5331,11 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
               onMouseEnter={(e) => { e.currentTarget.style.background = r.isBuy ? "rgba(22,199,132,0.12)" : "rgba(234,57,67,0.12)"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
               title="Open this transaction — pin the trader, set colour & icon"
-              style={{ display: "grid", gridTemplateColumns: "38px 1fr 62px 46px 26px", gap: 6, padding: "6px 12px", alignItems: "center", borderBottom: `1px solid ${T.border}`, borderLeft: `3px solid ${r.isBuy ? T.green : T.red}`, background: "transparent", cursor: "pointer", transition: "background .12s" }}>
-              <span style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{ago(r.at)}</span>
+              style={{ display: "grid", gridTemplateColumns: isMobile ? "40px 1fr 70px 52px 26px" : "38px 1fr 62px 46px 26px", gap: 6, padding: isMobile ? "7px 12px" : "6px 12px", alignItems: "center", borderBottom: `1px solid ${T.border}`, borderLeft: `3px solid ${r.isBuy ? T.green : T.red}`, background: "transparent", cursor: "pointer", transition: "background .12s" }}>
+              <span style={{ fontFamily: T.mono, fontSize: isMobile ? 10.5 : 9, color: T.faint }}>{ago(r.at)}</span>
               <span>
-                <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: r.isBuy ? T.green : T.red }}>{r.isBuy ? "↑" : "↓"} ${r.usd.toFixed(2)}</div>
-                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>
+                <div style={{ fontFamily: T.mono, fontSize: isMobile ? 13 : 11, fontWeight: 800, color: r.isBuy ? T.green : T.red }}>{r.isBuy ? "↑" : "↓"} ${r.usd.toFixed(2)}</div>
+                <div style={{ fontFamily: T.mono, fontSize: isMobile ? 9.5 : 8, color: T.faint }}>
                   {r.sol.toFixed(3)} SOL ·{" "}
                   <span
                     style={{ color: (traderPrefs[r.trader] && traderPrefs[r.trader].color) || T.blue,
@@ -5055,8 +5345,8 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
                   </span>
                 </div>
               </span>
-              <span style={{ fontFamily: T.mono, fontSize: 10, color: T.text, textAlign: "right" }}>{fmt$(r.mc)}</span>
-              <span style={{ fontFamily: T.mono, fontSize: 9.5, textAlign: "right", color: r.pnlPct == null ? T.faint : r.pnlPct >= 0 ? T.green : T.red }}>
+              <span style={{ fontFamily: T.mono, fontSize: isMobile ? 11.5 : 10, color: T.text, textAlign: "right" }}>{fmt$(r.mc)}</span>
+              <span style={{ fontFamily: T.mono, fontSize: isMobile ? 11 : 9.5, textAlign: "right", color: r.pnlPct == null ? T.faint : r.pnlPct >= 0 ? T.green : T.red }}>
                 {r.pnlPct == null ? "—" : `${r.pnlPct >= 0 ? "+" : ""}${r.pnlPct.toFixed(0)}%`}
               </span>
               <a href={`https://solscan.io/tx/${r.tx}`} target="_blank" rel="noopener noreferrer" title="View on Solscan"
@@ -5071,7 +5361,220 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
 }
 
 // ---------------- search bar (tokens + users) with live suggestions ----------------
-function SearchBar({ tokens, onPickToken, onPickUser, username, full = false }) {
+// ---- search ecosystem helpers: platform, dev, description (deterministic) ----
+const platOf = (t) => (((t.id * 7 + 3) % 10) < 7 ? "pump" : "rh");
+const devOf = (t) => {
+  const n = CALLERS[(t.id * 5 + 2) % CALLERS.length];
+  const wal = ((t.id * 2654435761) >>> 0).toString(16).padStart(8, "0");
+  return { name: n, short: wal.slice(0, 4).toUpperCase() + "…" + wal.slice(-4).toUpperCase() };
+};
+const DESC_BITS = [
+  "Community-driven launch with a locked LP and renounced mint.",
+  "Deflationary meme play — every trade feeds the burn.",
+  "Built by a serial pump.fun dev with three prior graduations.",
+  "Cult ticker energy. The chart does the talking.",
+  "Zero-tax stealth launch that found its own legs.",
+  "Backed by a raid-hungry TG and a CTO takeover.",
+  "The dev streams every buyback live. Full transparency.",
+  "Micro-cap moonshot with a meme that refuses to die.",
+];
+const descOf = (t) => (((t.id * 11 + 1) % 13) < 9 ? DESC_BITS[(t.id * 3 + 1) % DESC_BITS.length] : null);
+const gainOf = (t) => { const c = t.candles[t.candles.length - 1]; return ((c.c - c.o) / c.o) * 100; };
+const isHotTok = (t) => t.momentum > 78 || Math.abs(gainOf(t)) > 1.4;
+
+// live faded bar-chart backdrop — each card breathes with its own token
+function FadedBars({ candles, h = "100%" }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const cvs = ref.current; if (!cvs) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = cvs.clientWidth, hh = cvs.clientHeight;
+    if (!w || !hh) return;
+    cvs.width = w * dpr; cvs.height = hh * dpr;
+    const ctx = cvs.getContext("2d"); ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, hh);
+    const cs = candles.slice(-42);
+    let lo = Infinity, hi = -Infinity;
+    cs.forEach((cd) => { lo = Math.min(lo, cd.c); hi = Math.max(hi, cd.c); });
+    const pad = (hi - lo) * 0.15 || hi * 0.02; lo -= pad; hi += pad;
+    const bw = w / cs.length;
+    cs.forEach((cd, i) => {
+      const up = cd.c >= cd.o;
+      const t2 = (cd.c - lo) / (hi - lo);
+      const bh = Math.max(2, t2 * hh * 0.92);
+      ctx.fillStyle = up ? "rgba(22,199,132,0.30)" : "rgba(234,57,67,0.30)";
+      ctx.fillRect(i * bw + bw * 0.16, hh - bh, Math.max(1.4, bw * 0.68), bh);
+    });
+  }, [candles[candles.length - 1] && candles[candles.length - 1].c]);
+  return <canvas ref={ref} style={{ position: "absolute", inset: 0, width: "100%", height: h, opacity: 0.5, pointerEvents: "none",
+    maskImage: "linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.55) 45%, rgba(0,0,0,0.95) 100%)",
+    WebkitMaskImage: "linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.55) 45%, rgba(0,0,0,0.95) 100%)" }} />;
+}
+
+// the full-screen token ecosystem behind the search bar
+// compact traceable live chart for watchlist expansions
+function TraceMini({ candles, hue = 265, h = 88 }) {
+  const ref = useRef(null);
+  const [cx, setCxState] = useState(null);
+  const [, setTk] = useState(0);
+  useEffect(() => { const iv = setInterval(() => setTk((x) => x + 1), 1600); return () => clearInterval(iv); }, []);
+  const closes = candles.slice(-90).map((c) => c.c);
+  useEffect(() => {
+    const cvs = ref.current; if (!cvs) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = cvs.clientWidth, hh = cvs.clientHeight;
+    cvs.width = w * dpr; cvs.height = hh * dpr;
+    const ctx = cvs.getContext("2d"); ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, hh);
+    let lo = Math.min(...closes), hi = Math.max(...closes); const pad = (hi - lo) * 0.12 || hi * 0.02; lo -= pad; hi += pad;
+    const y = (p) => 4 + (1 - (p - lo) / (hi - lo)) * (hh - 8);
+    const step = w / closes.length;
+    const up = closes[closes.length - 1] >= closes[0];
+    ctx.beginPath(); ctx.moveTo(0, y(closes[0]));
+    closes.forEach((c, i) => ctx.lineTo(i * step + step / 2, y(c)));
+    ctx.strokeStyle = up ? "#16C784" : "#ea3943"; ctx.lineWidth = 1.6; ctx.stroke();
+    ctx.lineTo(w, hh); ctx.lineTo(0, hh); ctx.closePath();
+    const gr = ctx.createLinearGradient(0, 0, 0, hh);
+    gr.addColorStop(0, up ? "rgba(22,199,132,0.22)" : "rgba(234,57,67,0.22)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = gr; ctx.fill();
+    if (cx != null) {
+      const i = Math.max(0, Math.min(closes.length - 1, Math.floor(cx / step)));
+      const px = i * step + step / 2, py = y(closes[i]);
+      ctx.setLineDash([3, 3]); ctx.strokeStyle = "rgba(230,236,247,0.4)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, hh); ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fillStyle = "#e6ecf7"; ctx.strokeStyle = "#7D5CF0"; ctx.lineWidth = 1.6; ctx.fill(); ctx.stroke();
+      const txt = "$" + fmtP(closes[i]);
+      ctx.font = "bold 10px monospace";
+      const bw = ctx.measureText(txt).width + 12;
+      const bx = Math.max(2, Math.min(w - bw - 2, px + 8));
+      ctx.fillStyle = "rgba(12,15,22,0.95)"; ctx.strokeStyle = "#7D5CF0";
+      ctx.beginPath(); ctx.rect(bx, 4, bw, 16); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#e6ecf7"; ctx.fillText(txt, bx + 6, 15.5);
+    }
+  }, [closes.join(","), cx]);
+  const move = (clientX) => { const r = ref.current.getBoundingClientRect(); setCxState(clientX - r.left); };
+  return <canvas ref={ref}
+    onMouseMove={(e) => move(e.clientX)} onMouseLeave={() => setCxState(null)}
+    onTouchStart={(e) => e.touches[0] && move(e.touches[0].clientX)}
+    onTouchMove={(e) => e.touches[0] && move(e.touches[0].clientX)}
+    onTouchEnd={() => setCxState(null)}
+    style={{ width: "100%", height: h, display: "block", background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 8, touchAction: "none", cursor: "crosshair" }} />;
+}
+
+function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "72vh", onWatchAdd, tdProps = null }) {
+  const [plat, setPlat] = useState("all");        // all | pump | rh (exclusive)
+  const [flags, setFlags] = useState({ trend: false, top: false, fresh: false, safe: false, risky: false });
+  const [hov, setHov] = useState(null);
+  const [, setTick] = useState(0);
+  useEffect(() => { const iv = setInterval(() => setTick((x) => x + 1), 1500); return () => clearInterval(iv); }, []);
+  const flag = (k) => setFlags((F) => {
+    const n = { ...F, [k]: !F[k] };
+    if (k === "safe" && n.safe) n.risky = false;       // safe ⊕ risky
+    if (k === "risky" && n.risky) n.safe = false;
+    return n;
+  });
+  const ql = q.trim().toLowerCase();
+  let list = tokens.filter((t) => !ql || t.sym.toLowerCase().includes(ql) || (t.name || "").toLowerCase().includes(ql) || (t.ca || "").toLowerCase().includes(ql));
+  if (plat !== "all") list = list.filter((t) => platOf(t) === plat);
+  if (flags.trend) list = list.filter(isHotTok);
+  if (flags.top) list = list.filter((t) => t.traders > 900);
+  if (flags.fresh) list = list.filter((t) => t.isNew || t.ageMin < 90);
+  if (flags.safe) list = list.filter((t) => scoreToken(t) >= 62);
+  if (flags.risky) list = list.filter((t) => scoreToken(t) < 50);
+  // pump/rh picked with nothing else → trending & movers float first
+  list = [...list].sort((a, b) => (isHotTok(b) ? 1 : 0) - (isHotTok(a) ? 1 : 0) || b.momentum - a.momentum);
+  const fbtn = (on, label, click, col) => (
+    <button onClick={click} style={{ ...chip(on), padding: isMobile ? "5px 9px" : "5px 12px", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 900, letterSpacing: 0.5,
+      color: on ? (col || VALO_PURPLE) : T.dim, borderColor: on ? `${col || VALO_PURPLE}88` : T.border,
+      background: on ? `${col || VALO_PURPLE}1e` : "transparent", boxShadow: on ? `0 0 10px ${col || VALO_PURPLE}44` : "none" }}>{label}</button>
+  );
+  return (
+    <div style={{ display: "flex", flexDirection: "column", maxHeight: maxH, minHeight: 0 }}>
+      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", padding: "9px 10px", borderBottom: `1px solid ${T.border}`, flexShrink: 0, position: "sticky", top: 0, background: T.panel, zIndex: 2 }}>
+        {fbtn(plat === "all", "ALL", () => setPlat("all"), T.blue)}
+        {fbtn(plat === "pump", "PUMP.FUN", () => setPlat("pump"), T.green)}
+        {fbtn(plat === "rh", "ROBINHOOD", () => setPlat("rh"), "#c6f24e")}
+        <span style={{ width: 1, background: T.border, margin: "0 2px" }} />
+        {fbtn(flags.trend, "🔥 TRENDING", () => flag("trend"), T.amber)}
+        {fbtn(flags.top, "TOP TRADERS", () => flag("top"), VALO_PURPLE)}
+        {fbtn(flags.fresh, "NEW", () => flag("fresh"), T.amber)}
+        {fbtn(flags.safe, "SAFE", () => flag("safe"), T.green)}
+        {fbtn(flags.risky, "RISKY", () => flag("risky"), T.red)}
+      </div>
+      <div data-ecozone="1" style={{ overflowY: "auto", padding: "8px 8px 12px", minHeight: 0 }}>
+        {list.length === 0 && <div style={{ padding: 16, textAlign: "center", fontFamily: T.mono, fontSize: 10, color: T.faint }}>Nothing matches those filters{ql ? ` + "${q}"` : ""} — loosen one.</div>}
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 160 : 236}px, 1fr))`, gap: 8 }}>
+        {list.map((t) => {
+          const score = scoreToken(t); const rc = ratingColor(score);
+          const dev = devOf(t); const desc = descOf(t); const hot = isHotTok(t);
+          const g = gainOf(t);
+          return (
+            <div key={t.id} onClick={() => onPick && onPick(t.id)}
+              {...(tdProps ? tdProps(t) : {})}
+              onMouseEnter={() => !isMobile && setHov(t.id)} onMouseLeave={() => !isMobile && setHov((h) => (h === t.id ? null : h))}
+              className={hot ? "goldb" : undefined}
+              style={hot ? {
+                position: "relative", overflow: "hidden", borderRadius: 12, cursor: "pointer",
+                border: "1.5px solid transparent",
+                background: `linear-gradient(180deg, rgba(20,25,36,0.96), rgba(13,17,25,0.97)) padding-box,
+                             linear-gradient(120deg, #8a6a10 0%, #F0B90B 28%, #ffe9a3 50%, #F0B90B 72%, #8a6a10 100%) border-box`,
+                boxShadow: hov === t.id ? "0 0 18px rgba(240,185,11,0.4)" : "0 0 9px rgba(240,185,11,0.22)",
+                transition: "box-shadow .12s",
+              } : {
+                position: "relative", overflow: "hidden", borderRadius: 12, cursor: "pointer",
+                border: `1px solid ${hov === t.id ? VALO_PURPLE : T.border}`,
+                background: "linear-gradient(180deg, rgba(20,25,36,0.92), rgba(13,17,25,0.95))",
+                boxShadow: hov === t.id ? `0 0 16px ${VALO_PURPLE}33` : "none",
+                transition: "border-color .12s, box-shadow .12s" }}>
+              {hot && <span className="goldglare" />}
+              <div style={{ position: "relative", padding: isMobile ? "8px 9px 7px" : "10px 11px 8px" }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 5 }}>
+                  <div style={{ width: isMobile ? 34 : 42, height: isMobile ? 34 : 42, borderRadius: 9, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                    background: `linear-gradient(135deg, hsl(${t.hue},70%,22%), hsl(${t.hue},80%,42%))`,
+                    border: `1px solid hsl(${t.hue},70%,55%)`, fontFamily: T.mono, fontWeight: 900, fontSize: isMobile ? 11 : 13, color: "#fff" }}>
+                    {t.sym.slice(0, 2)}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <b style={{ fontFamily: T.mono, fontSize: isMobile ? 10.5 : 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.sym}</b>
+                      <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: isMobile ? 9.5 : 10.5, fontWeight: 900, color: g >= 0 ? T.green : T.red }}>{g >= 0 ? "+" : ""}{g.toFixed(1)}%</span>
+                    </div>
+                    <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>({t.name})</div>
+                    <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim }}>
+                      MC <b style={{ color: T.green }}>{fmt$(mcOf(t))}</b> · <b style={{ color: T.text }}>${fmtP(t.price)}</b>
+                    </div>
+                  </div>
+                </div>
+                {desc && <div style={{ fontFamily: T.mono, fontSize: isMobile ? 7.5 : 8.5, color: "rgba(200,208,224,0.88)", lineHeight: 1.45, marginBottom: 5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{desc}</div>}
+                <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center", fontFamily: T.mono, fontSize: 7.5, color: T.dim }}>
+                  <span style={{ fontWeight: 800, color: rc }}>S {score}</span>
+                  <span style={{ color: T.green }}>B {fmt$(t.greenUsd)}</span>
+                  <span style={{ color: T.red }}>S {fmt$(t.redUsd)}</span>
+                  <span>M {Math.round(t.momentum)}</span>
+                  <span>👥{t.traders}</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}><EyeOpenIcon c={T.green} s={9} />{liveViewersOf(t, "pump")}</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}><EyeClosedIcon c={T.dim} s={9} />{fmtQty(totalViewsOf(t, "pump"))}</span>
+                  <span style={{ fontSize: 6.5, fontWeight: 800, color: platOf(t) === "pump" ? T.green : "#c6f24e", marginLeft: "auto" }}>{platOf(t) === "pump" ? "PUMP" : "RH"}</span>
+                </div>
+                <button onClick={(e) => { e.stopPropagation(); onOpenUser && onOpenUser(dev.name); }}
+                  title="Open the dev's VALO profile"
+                  style={{ border: "none", background: "none", padding: 0, marginTop: 4, fontFamily: T.mono, fontSize: 7.5, color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
+                  DEV @{dev.name} · {dev.short}
+                </button>
+                {onWatchAdd && isMobile && (
+                  <button onClick={(e) => { e.stopPropagation(); onWatchAdd(t.id); }}
+                    title="Add to your watchlist"
+                    style={{ position: "absolute", top: 6, right: 6, border: `1px solid ${VALO_PURPLE}55`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE, borderRadius: 7, padding: "2px 6px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, cursor: "pointer" }}>☆+</button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, eco = false, isMobile = false, onFullEco }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -5089,14 +5592,24 @@ function SearchBar({ tokens, onPickToken, onPickUser, username, full = false }) 
 
   return (
     <div ref={ref} style={{ position: "relative", width: full ? "100%" : 240 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.04)", border: `1px solid ${open ? VALO_PURPLE : T.border2}`, borderRadius: 9, padding: "6px 10px", transition: "border-color .15s" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, background: T.panel, border: `1px solid ${open ? VALO_PURPLE : T.border2}`, borderRadius: 9, padding: "7px 10px", transition: "border-color .15s", boxShadow: "0 4px 14px rgba(0,0,0,0.35)" }}>
         <span style={{ fontSize: 12, color: T.faint }}>🔍</span>
-        <input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
+        <input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+          onFocus={(e) => { if (eco && isMobile && onFullEco) { e.target.blur(); onFullEco(); return; } setOpen(true); }}
           placeholder="Search tokens, CA, or users…"
           style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: T.text, fontFamily: T.mono, fontSize: 12 }} />
         {q && <button onClick={() => { setQ(""); setOpen(false); }} style={{ background: "none", border: "none", color: T.faint, cursor: "pointer", fontSize: 12 }}>✕</button>}
       </div>
-      {open && ql && (
+      {eco && open && !isMobile && (
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 40, background: T.panel, border: `1px solid ${VALO_PURPLE}55`, borderRadius: 12, boxShadow: "0 26px 70px rgba(0,0,0,0.7)", overflow: "hidden",
+          opacity: (typeof window !== "undefined" && window.__valoEcoDim) ? 0.07 : 1, pointerEvents: (typeof window !== "undefined" && window.__valoEcoDim) ? "none" : "auto", transition: "opacity .22s ease" }}>
+          <TokenEcosystem tokens={tokens} q={q} isMobile={false} maxH="min(72vh, 760px)" tdProps={(typeof window !== "undefined" && window.__valoTdProps) || null}
+            onPick={(id) => { onPickToken && onPickToken(id); setOpen(false); setQ(""); }}
+            onWatchAdd={typeof window !== "undefined" && window.__valoWatchAdd ? window.__valoWatchAdd : undefined}
+            onOpenUser={(u) => { onPickUser && onPickUser(u); }} />
+        </div>
+      )}
+      {!eco && open && ql && (
         <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 40, background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 10, boxShadow: "0 18px 50px rgba(0,0,0,0.6)", overflow: "hidden", maxHeight: 340, overflowY: "auto" }}>
           {!hasResults && <div style={{ padding: "12px", fontFamily: T.mono, fontSize: 10.5, color: T.faint, textAlign: "center" }}>No matches for "{q}"</div>}
           {tokMatches.length > 0 && (
@@ -5373,7 +5886,15 @@ function StickySearch({ top, children }) {
 }
 
 export default function App() {
-  const [tokens, setTokens] = useState(() => NAMES.slice(0, 8).map((n) => makeToken(n)));
+  const [tokens, setTokens] = useState(() => {
+    const base = NAMES.slice(0, 8).map((n) => makeToken(n));
+    // ◆ the flagship — $VALO itself trades as a first-class chart token
+    const v = makeToken(["VALO", "VALO Terminal", "sol"]);
+    v.id = 424242; v.price = 0.0125; v.hue = 262; v.momentum = 74; v.isNew = false;
+    v.candles = seedCandles(0.0125, 74); v.traders = 4820; v.tvl = 1950000;
+    v.greenUsd = 240000; v.redUsd = 150000;
+    return [v, ...base];
+  });
   const [sel, setSel] = useState(null);
   const [chartMode, setChartMode] = useState("candles");
   const [trendOpen, setTrendOpen] = useState(false);     // "why it's trending" popup
@@ -5487,9 +6008,24 @@ export default function App() {
     if (r.pay === "SOL") setSolBalance((b) => b + proceeds); else setValoWallet((v) => v + proceeds);
     const pnlUsd = (proceeds - r.remaining) * (r.pay === "SOL" ? SOL_USD : 0.0125);
     setRealizedPnl((r2) => r2 + pnlUsd); // manual bot sell-outs land in realized too
+    TestLog.push("bot_exit", { pnlUsd: +pnlUsd.toFixed(4), manual: true });
     setBotRuns((R) => R.map((x) => x.id === runId ? { ...x, exits: [...x.exits, { ts: Date.now(), price: t.price, amt: x.remaining, pnlUsd, trail: null, kind: "MANUAL" }], remaining: 0, status: "sold" } : x));
     setPendingOrders((P) => P.filter((o) => o.runId !== runId)); // its exit bots die with it
     sayPrivate({ type: "note", text: `🤖 bot sold out of ${r.sym} @ $${fmtP(t.price)} · PnL ${pnlUsd >= 0 ? "+" : "−"}$${Math.abs(pnlUsd).toFixed(2)}` });
+  };
+  // sell a fraction of a live bot run — powers the % chips in MY POSITIONS
+  const sellRunPct = (runId, pctN) => {
+    const r = botRuns.find((x) => x.id === runId && x.status === "live"); if (!r) return;
+    if (pctN >= 100) { sellRun(runId); return; }
+    const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return;
+    const part = +(r.remaining * (pctN / 100)).toFixed(6); if (!(part > 0)) return;
+    const proceeds = part * (t.price / r.entry);
+    if (r.pay === "SOL") setSolBalance((b) => b + proceeds); else setValoWallet((v) => v + proceeds);
+    const pnlUsd = (proceeds - part) * (r.pay === "SOL" ? SOL_USD : 0.0125);
+    setRealizedPnl((r2) => r2 + pnlUsd);
+    TestLog.push("bot_exit", { pnlUsd: +pnlUsd.toFixed(4), manual: true, pct: pctN });
+    setBotRuns((R) => R.map((x) => x.id === runId ? { ...x, exits: [...x.exits, { ts: Date.now(), price: t.price, amt: part, pnlUsd, trail: null, kind: "MANUAL" }], remaining: +(x.remaining - part).toFixed(6) } : x));
+    sayPrivate({ type: "note", text: `🤖 sold ${pctN}% of the ${r.sym} bot @ $${fmtP(t.price)} · ${pnlUsd >= 0 ? "+" : "−"}$${Math.abs(pnlUsd).toFixed(2)}` });
   };
   // grab-and-drag any armed bot line on the chart: live re-price, frozen fills,
   // 1.5s re-arm grace on release so it can't trigger the instant you let go
@@ -5533,7 +6069,7 @@ export default function App() {
   // and as many as you like
   // wallet escrow: arming a BUY takes the funds instantly; cancelling refunds.
   // No phantom balances — you can never arm more than the wallet holds.
-  const refundEscrow = (amt, payK) => { if (amt > 0) { if (payK === "SOL") setSolBalance((b) => b + amt); else setValoWallet((v) => v + amt); } };
+  const refundEscrow = (amt, payK) => { if (amt > 0) { if (payK === "SOL") setSolBalance((b) => b + amt); else setValoWallet((v) => v + amt); TestLog.push("escrow_refund", { amt, pay: payK }); } };
   const takeEscrow = (amt, payK, extraCredit = 0) => {
     const bal = (payK === "SOL" ? solBalance : valoWallet) + extraCredit;
     if (bal < amt - 1e-9) {
@@ -5541,6 +6077,7 @@ export default function App() {
       return false;
     }
     if (payK === "SOL") setSolBalance((b) => Math.max(0, b - amt)); else setValoWallet((v) => Math.max(0, v - amt));
+    TestLog.push("escrow_take", { amt, pay: payK });
     return true;
   };
   const armAtLevel = (lvl) => {
@@ -5712,6 +6249,22 @@ export default function App() {
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
   // browser tab reads VALO, not the repo name
   useEffect(() => { try { document.title = "VALO"; } catch (e) {} }, []);
+  // mobile: stop the phone from zooming in when a keyboard input focuses —
+  // pin max-scale, and belt-and-braces re-pin on every blur so it snaps back
+  useEffect(() => {
+    if (!isMobile) return;
+    const pin = () => {
+      try {
+        let m = document.querySelector('meta[name="viewport"]');
+        if (!m) { m = document.createElement("meta"); m.name = "viewport"; document.head.appendChild(m); }
+        m.setAttribute("content", "width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover");
+      } catch (e) {}
+    };
+    pin();
+    const onBlur = () => setTimeout(pin, 60); // zooms back out after keyboard use
+    window.addEventListener("focusout", onBlur, true);
+    return () => window.removeEventListener("focusout", onBlur, true);
+  }, [isMobile]);
   // the popup clears itself when you tap anywhere that isn't the popup
   useEffect(() => {
     if (!armPop) return;
@@ -5729,8 +6282,9 @@ export default function App() {
   const tabTouchStart = (which, cur) => (e) => { tabDrag.current = { which, y0: e.touches[0].clientY, top0: cur, moved: false }; };
   // MOBILE chart gestures — top handle crunches the metrics above the chart,
   // bottom handle resizes chart height (content below follows in flow)
-  const [mobChartH, setMobChartH] = useState(300);
+  const [mobChartH, setMobChartH] = useState(348);
   const [metricsCrunch, setMetricsCrunch] = useState(0); // 0 = full metrics, 1 = hidden
+  const [priceMode, setPriceMode] = useState(0); // header price tap: 0 price · 1 market cap · 2 your tokens
   const chartDrag = useRef(null);
   const chartRaf = useRef(0);
   const chartDragStart = (which) => (e) => {
@@ -5744,7 +6298,7 @@ export default function App() {
       const dy = e.touches[0].clientY - d.y0;
       // stash the target and flush once per frame — per-event setState made the
       // heavy chart re-render mid-gesture and the drag felt rough/sticky
-      if (d.which === "bottom") d.nextH = Math.round(Math.min(560, Math.max(150, d.h0 + dy)) / 2) * 2;
+      if (d.which === "bottom") d.nextH = Math.round(Math.min(Math.max(560, window.innerHeight - 205), Math.max(150, d.h0 + dy)) / 2) * 2;
       else d.nextC = Math.round(Math.min(1, Math.max(0, d.c0 - dy / 110)) * 100) / 100; // pull up → crunch away
       if (!chartRaf.current) chartRaf.current = requestAnimationFrame(() => {
         chartRaf.current = 0;
@@ -5939,6 +6493,212 @@ export default function App() {
   const [myBurned, setMyBurned] = useState(0);
   const [burnOpen, setBurnOpen] = useState(false); // 🔥 burn tracker popup
   const [walletConnected, setWalletConnected] = useState(false);   // 👻 phantom gate — funds blurred until added
+  // 📋 WATCHLIST — loose bars + user-named subsections, drag-anything
+  const [watchLoose, setWatchLoose] = useState([]);
+  const [watchSections, setWatchSections] = useState([]);   // {id, name, ids[]}
+  const [watchExp, setWatchExp] = useState(null);           // expanded token id
+  const [watchTrash, setWatchTrash] = useState(null);       // {id, sec, x, y}
+  const [renamingSec, setRenamingSec] = useState(null);
+  const [secName, setSecName] = useState("");
+  const [scanOrder, setScanOrder] = useState(null);         // curated left-column slots
+  const wallAutoRef = useRef(false);                        // opened by a drag → close after drop
+  const [wallDragHot, setWallDragHot] = useState(false);    // closed tab lights up when a drag hovers it
+  const [ecoDim, setEcoDim] = useState(false);              // search fades while an HTML5 drag is live
+  const [watchMenu, setWatchMenu] = useState(null);         // hold/right-click a token → pick a list
+  useEffect(() => {
+    if (!watchMenu) return;
+    const off = (e) => { if (e.target && e.target.closest && e.target.closest("[data-wmenu]")) return; setWatchMenu(null); };
+    window.addEventListener("pointerdown", off, true);
+    return () => window.removeEventListener("pointerdown", off, true);
+  }, [watchMenu != null]);
+  const [mDrag, setMDrag] = useState(null);       // PC hold-drag ghost {id,sym,hue,from}
+  const mDragRef = useRef(null);
+  const ghostRef = useRef(null);                  // ghost follows the cursor via raw DOM — buttery
+  const posRef = useRef({ x: 0, y: 0 });
+  const [dragOverSlot, setDragOverSlot] = useState(null); // scanner slot about to be REPLACED
+  const [slotFlash, setSlotFlash] = useState(null);       // just-replaced slot pulses
+  const [dropFx, setDropFx] = useState(null);             // pill flying INTO its new home
+  const shownRef = useRef([]);
+  const reorderScanner = (dragId, targetId) => {
+    if (dragId === targetId) return;
+    const base = scanOrder || shownRef.current.map((x) => x.id);
+    if (!base.includes(dragId) || !base.includes(targetId)) return;
+    const n = base.filter((x) => x !== dragId);
+    const i = n.indexOf(targetId);
+    setScanOrder([...n.slice(0, i), dragId, ...n.slice(i)]);
+  };
+  const replaceSlot = (targetId, dragId) => {
+    const base = scanOrder || shownRef.current.map((x) => x.id);
+    const si = base.indexOf(targetId); if (si < 0 || targetId === dragId) return;
+    const n = [...base]; const already = n.indexOf(dragId);
+    if (already >= 0) { [n[si], n[already]] = [n[already], n[si]]; } else n[si] = dragId;
+    setScanOrder(n);
+  };
+  useEffect(() => {
+    const mm = (e) => {
+      const d = mDragRef.current; if (!d) return;
+      try {
+        posRef.current = { x: e.clientX, y: e.clientY };
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        if (!el || !el.closest) return;
+        if (d.zone === "scanner") {
+          const slot = el.closest("[data-slot]");
+          if (slot) {
+            const tid = +slot.dataset.slot;
+            if (tid !== d.id && tid !== d.lastT) { d.lastT = tid; reorderScanner(d.id, tid); }
+          }
+        } else if (d.zone === "wall") {
+          const wrow = el.closest("[data-wrow]");
+          if (wrow) {
+            const tid = +wrow.dataset.wrow;
+            if (tid !== d.id && tid !== d.lastT) { d.lastT = tid; reorderWatch(d.id, tid); }
+          }
+        }
+      } catch (err) { /* never freeze on a stray event */ }
+    };
+    const cancel = () => {
+      if (!mDragRef.current) return;
+      mDragRef.current = null; setMDrag(null);
+      document.body.classList.remove("valo-dragging");
+    };
+    const mu = () => cancel();
+    const esc = (e) => { if (e.key === "Escape") cancel(); };
+    window.addEventListener("mousemove", mm);
+    window.addEventListener("mouseup", mu);
+    window.addEventListener("dragstart", cancel);
+    window.addEventListener("blur", cancel);
+    window.addEventListener("keydown", esc);
+    return () => { window.removeEventListener("mousemove", mm); window.removeEventListener("mouseup", mu); window.removeEventListener("dragstart", cancel); window.removeEventListener("blur", cancel); window.removeEventListener("keydown", esc); };
+  }, [scanOrder]);
+  // hold a token (~600ms) on mobile, or right-click on PC → the add-to-list menu.
+  // On PC, hold the mouse ~280ms → a ghost lifts and you DRAG it: onto a scanner
+  // slot (replaces it), the watchlist wall, or any subsection.
+  const tdProps = (t) => ({
+    onMouseDown: (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault(); // no text-selection drags starting from a token
+      const n = e.currentTarget; n._mx = e.clientX; n._my = e.clientY;
+      const zone = n.closest && n.closest("[data-slot]") ? "scanner" : n.closest && n.closest("[data-wrow]") ? "wall" : null;
+      if (!zone) return; // reorder-drag lives only in the scanner & watchlist tabs
+      if (n._mt) clearTimeout(n._mt);
+      n._mt = setTimeout(() => {
+        n._mt = null; n._mfired = true;
+        posRef.current = { x: n._mx, y: n._my };
+        mDragRef.current = { id: t.id, zone, lastT: null };
+        setMDrag(mDragRef.current);
+        document.body.classList.add("valo-dragging");
+      }, 280);
+    },
+    onMouseMove: (e) => {
+      const n = e.currentTarget;
+      if (n._mt && (Math.abs(e.clientX - n._mx) > 8 || Math.abs(e.clientY - n._my) > 8)) { clearTimeout(n._mt); n._mt = null; }
+    },
+    onMouseUp: (e) => { const n = e.currentTarget; if (n._mt) { clearTimeout(n._mt); n._mt = null; } },
+    onMouseLeave: (e) => { const n = e.currentTarget; if (n._mt && !mDragRef.current) { clearTimeout(n._mt); n._mt = null; } },
+    onTouchStart: (e) => {
+      const t0 = e.touches && e.touches[0]; if (!t0) return;
+      const n = e.currentTarget; n._gx = t0.clientX; n._gy = t0.clientY;
+      if (n._gt) clearTimeout(n._gt);
+      n._gt = setTimeout(() => {
+        n._gt = null; n._gm = true;
+        if (navigator.vibrate) navigator.vibrate(12);
+        setWatchMenu({ id: t.id, sym: t.sym, x: Math.min(n._gx, window.innerWidth - 190), y: Math.min(n._gy, window.innerHeight - 200) });
+      }, 600);
+    },
+    onTouchMove: (e) => {
+      const t0 = e.touches && e.touches[0]; const n = e.currentTarget;
+      if (t0 && n._gt && (Math.abs(t0.clientX - n._gx) > 10 || Math.abs(t0.clientY - n._gy) > 10)) { clearTimeout(n._gt); n._gt = null; }
+    },
+    onTouchEnd: (e) => { const n = e.currentTarget; if (n._gt) { clearTimeout(n._gt); n._gt = null; } },
+    onClickCapture: (e) => { const n = e.currentTarget; if (n._gm || n._mfired) { n._gm = false; n._mfired = false; e.preventDefault(); e.stopPropagation(); } },
+    onContextMenu: (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const inSlot = !!(e.currentTarget.closest && e.currentTarget.closest("[data-slot]"));
+      setWatchMenu({ id: t.id, sym: t.sym, slot: inSlot, x: Math.min(e.clientX, window.innerWidth - 190), y: Math.min(e.clientY, window.innerHeight - 200) });
+    },
+  });
+  // PC: HTML5 drags from the ecosystem fade the search away too
+  useEffect(() => {
+    const ds = () => { const d = window.__valoDrag; if (d && d.from === "eco") setEcoDim(true); };
+    const de = () => setEcoDim(false);
+    window.addEventListener("dragstart", ds); window.addEventListener("dragend", de); window.addEventListener("drop", de);
+    return () => { window.removeEventListener("dragstart", ds); window.removeEventListener("dragend", de); window.removeEventListener("drop", de); };
+  }, []);
+  const [plusPop, setPlusPop] = useState(0);                // "+1" toast timestamp
+  const popPlus = () => { setPlusPop(Date.now()); setTimeout(() => setPlusPop(0), 1100); };
+  useEffect(() => { window.__valoWatchAdd = (id) => { watchAdd(id, null); popPlus(); }; return () => { window.__valoWatchAdd = null; }; });
+  useEffect(() => { window.__valoTdProps = tdProps; window.__valoEcoDim = ecoDim; });
+  const [mobWatch, setMobWatch] = useState(false);          // mobile: chat ⇄ watchlist
+  const [mobSwipe, setMobSwipe] = useState(null);           // watch row swiped open → 🗑
+  const [walletPop, setWalletPop] = useState(null);         // hold the stats bar → open-wallet popup
+  const [quickWatch, setQuickWatch] = useState(false);      // watchlist opened from the trader tabs
+  const [posDrawer, setPosDrawer] = useState(false);        // MY POSITIONS slide-over
+  const [posTab, setPosTab] = useState("both");             // bots | both | tickets
+  const [posUnit, setPosUnit] = useState("usd");            // usd → sol → valo
+  const [posArm, setPosArm] = useState(false);              // held wallet cell → MY POSITIONS button
+  useEffect(() => { if (tokens.length && !watchLoose.length && !watchSections.length) setWatchLoose(tokens.slice(4).map((t) => t.id)); }, [tokens.length]);
+  useEffect(() => {
+    if (!watchTrash) return;
+    const off = (e) => { if (e.target.closest && e.target.closest("[data-wtrash]")) return; setWatchTrash(null); };
+    window.addEventListener("pointerdown", off, true);
+    return () => window.removeEventListener("pointerdown", off, true);
+  }, [watchTrash != null]);
+  const dragIdOf = (e) => { const d = e.dataTransfer.getData("text/valo-token"); return d ? +d : (window.__valoDrag && window.__valoDrag.id); };
+  const watchRemove = (id, sec) => {
+    if (sec == null) setWatchLoose((L) => L.filter((x) => x !== id));
+    else setWatchSections((S) => S.map((s) => (s.id === sec ? { ...s, ids: s.ids.filter((x) => x !== id) } : s)));
+  };
+  const reorderWatch = (dragId, targetId) => {
+    if (dragId === targetId) return;
+    // find where the target lives, pull the dragged token out, insert before it
+    const inLoose = watchLoose.includes(targetId);
+    const secHit = watchSections.find((s) => s.ids.includes(targetId));
+    if (!inLoose && !secHit) return;
+    setWatchLoose((L) => {
+      let n = L.filter((x) => x !== dragId);
+      if (inLoose) { const i = n.indexOf(targetId); n = [...n.slice(0, i), dragId, ...n.slice(i)]; }
+      return n;
+    });
+    setWatchSections((S) => S.map((s) => {
+      let ids = s.ids.filter((x) => x !== dragId);
+      if (secHit && s.id === secHit.id) { const i = ids.indexOf(targetId); ids = [...ids.slice(0, i), dragId, ...ids.slice(i)]; }
+      return { ...s, ids };
+    }));
+  };
+  const watchAdd = (id, sec) => {
+    watchRemove(id, null); watchSections.forEach((s) => watchRemove(id, s.id)); // move, don't duplicate
+    if (sec == null) setWatchLoose((L) => (L.includes(id) ? L : [...L, id]));
+    else setWatchSections((S) => S.map((s) => (s.id === sec ? { ...s, ids: s.ids.includes(id) ? s.ids : [...s.ids, id] } : s)));
+  };
+  const [ecoFull, setEcoFull] = useState(false);  // 📱 fullscreen token ecosystem
+  const [ecoQ, setEcoQ] = useState("");
+  const [liveData, setLiveData] = useState(() => typeof window !== "undefined" && /[?&](live|test)=1/.test(window.location.search)); // 🛰 real tokens, simulated wallet
+  const liveArrRef = useRef([]);           // DexScreener top pump pairs → token overrides
+  const liveDataRef = useRef(false);
+  useEffect(() => {
+    liveDataRef.current = liveData;
+    TestLog.on = liveData || /[?&]test=1/.test(window.location.search);
+    if (!liveData) return;
+    let stop = false;
+    const load = async () => {
+      try {
+        const r = await fetch("https://api.dexscreener.com/latest/dex/search?q=pump");
+        const j = await r.json();
+        const pairs = (j.pairs || []).filter((p) => p.chainId === "solana" && p.priceUsd && +p.priceUsd > 0)
+          .sort((a, b) => ((b.volume && b.volume.h24) || 0) - ((a.volume && a.volume.h24) || 0)).slice(0, 8);
+        if (!stop) liveArrRef.current = pairs.map((p) => ({
+          sym: ((p.baseToken && p.baseToken.symbol) || "???").toUpperCase().slice(0, 8),
+          name: (p.baseToken && p.baseToken.name) || "live token",
+          price: +p.priceUsd,
+          mc: p.fdv || p.marketCap || 0,
+          tvl: (p.liquidity && p.liquidity.usd) || 0,
+        }));
+      } catch (e) { console.warn("[VALO LIVE] DexScreener fetch failed", e); }
+    };
+    load();
+    const iv = setInterval(load, 5000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [liveData]);
   const [isFs, setIsFs] = useState(false);                          // ⛶ fullscreen state (Esc exits natively)
   useEffect(() => {
     const on = () => setIsFs(!!document.fullscreenElement);
@@ -5992,7 +6752,22 @@ export default function App() {
   // live tick — API: websocket price stream
   useEffect(() => {
     const iv = setInterval(() => {
-      setTokens((Ts) => Ts.map((t) => {
+      setTokens((Ts) => Ts.map((t, ti) => {
+        // LIVE DATA: this token mirrors a real pump.fun pair — each tick glides
+        // the close toward the actual DexScreener price. Trading stays simulated.
+        const lv = liveDataRef.current && liveArrRef.current[ti];
+        if (lv) {
+          const prev = t.price;
+          const target = lv.price;
+          const c = prev + (target - prev) * 0.5;
+          const cd = { o: prev, h: Math.max(prev, c) * 1.0004, l: Math.min(prev, c) * 0.9996, c };
+          const candlesL = [...t.candles.slice(1), cd];
+          const driftL = (c - prev) / (prev || 1);
+          return { ...t, candles: candlesL, price: c, sym: lv.sym, name: lv.name,
+            mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
+            greenUsd: Math.max(0, t.greenUsd * (1 + driftL * 2)), redUsd: Math.max(1, t.redUsd * (1 - driftL * 1.2)),
+            ageMin: t.ageMin + 0.04 };
+        }
         const candles = tickCandles(t.candles, t.momentum, t.buyPressure);
         const price = candles[candles.length - 1].c;
         const drift = (price - t.price) / t.price;
@@ -6199,6 +6974,7 @@ export default function App() {
 
   // core execute — marker always lands on the live candle at fill price
   const execute = (t, o, spot) => {
+    TestLog.push("order", { sym: t && t.sym, side: o.side, mode: o.mode, amt: o.amt, pay: o.pay, px: t && t.price });
     // AUTO STRATEGY = a bot, full stop. It arms at the user's buy-in price and
     // fills only when the market reaches it — never an instant market buy.
     if (o.mode === "auto") {
@@ -6366,6 +7142,7 @@ export default function App() {
       if (o.side === "buy") {
         // fill → a RUNNING BOT with its own book, kept out of the Live P/L box
         // funds already escrowed at arm time — the fill just converts them
+        TestLog.push("bot_fill", { sym: t.sym, amt: o.amt, pay: o.pay, px: t.price });
         const runId = "run" + Date.now() + Math.random();
         setBotRuns((R) => [...R, { id: runId, tokenId: o.tokenId, sym: t.sym, hue: t.hue, entry: t.price, level: o.level, amt: o.amt, remaining: o.amt, pay: o.pay, legs: o.legs || [], stopLossPrice: o.stopLoss || null, filledTs: Date.now(), exits: [], status: "live" }]);
         sayPrivate({ type: "note", text: `🎯 bot filled — BOUGHT ${o.amt} ${o.pay} of ${t.sym} @ $${fmtP(t.price)} (armed @ $${fmtP(o.level)})` });
@@ -6391,6 +7168,7 @@ export default function App() {
         if (r.pay === "SOL") setSolBalance((b) => b + proceeds); else setValoWallet((v) => v + proceeds);
         const pnlUsd = (proceeds - portion) * (r.pay === "SOL" ? SOL_USD : 0.0125);
         setRealizedPnl((r2) => r2 + pnlUsd); // bot exits count in your realized, always
+        TestLog.push("bot_exit", { pnlUsd: +pnlUsd.toFixed(4) });
         const remaining = +(r.remaining - portion).toFixed(6);
         const done = remaining <= r.amt * 0.001;
         setBotRuns((R) => R.map((x) => x.id === r.id ? { ...x, exits: [...x.exits, { ts: Date.now(), price: t.price, amt: portion, pnlUsd, trail: o.trail || null, kind: o.exitKind || "TP" }], remaining, status: done ? "sold" : "live" } : x));
@@ -6404,9 +7182,14 @@ export default function App() {
     });
   }, [tokens]);
 
-  const shown = tokens.filter((t) =>
+  const shownBase = tokens.filter((t) =>
     filter === "all" ? true : filter === "new" ? t.isNew :
     filter === "safe" ? scoreToken(t) >= 66 : filter === "risky" ? scoreToken(t) < 40 : t.chain === filter);
+  // curated slots: a dropped token claims that exact position on the left rail
+  const shown = scanOrder
+    ? scanOrder.map((id) => tokens.find((t) => t.id === id)).filter(Boolean)
+    : shownBase;
+  shownRef.current = shown;
 
   const gTvl = tokens.reduce((a, t) => a + t.tvl, 0);
   const gNet = tokens.reduce((a, t) => a + t.greenUsd - t.redUsd, 0);
@@ -6428,6 +7211,21 @@ export default function App() {
     const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return a;
     return a + r.remaining * (t.price / r.entry) * (r.pay === "SOL" ? SOL_USD : 0.0125);
   }, 0) + pendingOrders.reduce((a, o) => (o.side === "buy" && !o.runId ? a + o.amt * (o.pay === "SOL" ? SOL_USD : 0.0125) : a), 0);
+  useEffect(() => {
+    if (!(liveData || TestLog.on)) return;
+    const iv = setInterval(() => {
+      const pendEsc = pendingOrders.reduce((a, o) => (o.side === "buy" && !o.runId ? a + o.amt * (o.pay === "SOL" ? SOL_USD : 0.0125) : a), 0);
+      if (solBalance < -1e-6 || valoWallet < -1e-6) TestLog.push("violation", { kind: "negative_balance", sol: solBalance, valo: valoWallet });
+      TestLog.push("snapshot", {
+        sol: +solBalance.toFixed(4), valo: Math.round(valoWallet),
+        realized: +realizedPnl.toFixed(2), unrealized: +unrealizedAll.toFixed(2),
+        escrowUsd: +pendEsc.toFixed(2), botsLive: botRuns.filter((r) => r.status === "live").length,
+        pendingBots: pendingOrders.filter((o) => !o.runId).length,
+      });
+      TestLog.flush();
+    }, 10000);
+    return () => clearInterval(iv);
+  }, [liveData, solBalance, valoWallet, realizedPnl, unrealizedAll, pendingOrders, botRuns]);
   const platformPnl = realizedPnl + unrealizedAll;
   const valoUsdPrice = 0.0125; // API: live $VALO price
   const walletUsd = solBalance * SOL_USD + valoWallet * valoUsdPrice;
@@ -6589,7 +7387,12 @@ export default function App() {
                   <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
                     <TokenAvatar sym={selected.sym} hue={selected.hue} img={selected.img} size={22} />
                     <span style={{ fontWeight: 800, fontSize: 16 }}>{selected.sym}<span style={{ color: T.faint, fontWeight: 400 }}>/SOL</span></span>
-                    <span style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>${fmtP(selected.price)}</span>
+                    <span onClick={() => setPriceMode((m) => (m + 1) % 3)} title="Tap: price → market cap → your tokens"
+                      style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 3 }}>
+                      {priceMode === 1 ? `MC ${fmt$(mcOf(selected))}`
+                        : priceMode === 2 ? `${positions[selected.id] && positions[selected.id].amt > 0 ? fmtQty(posTokenQty(selected, positions[selected.id])) : "0"} ${selected.sym}`
+                        : `$${fmtP(selected.price)}`}
+                    </span>
                     <span style={{ fontSize: 8.5, border: `1px solid ${ratingColor(scoreToken(selected))}66`, background: `${ratingColor(scoreToken(selected))}14`, color: ratingColor(scoreToken(selected)), padding: "2px 7px", borderRadius: 5, fontFamily: T.mono, fontWeight: 800 }}>
                       {scoreToken(selected)} {rating(scoreToken(selected))}
                     </span>
@@ -6719,8 +7522,13 @@ export default function App() {
                   </div>
                 )}
                 {isMobile && (
-                  <div onTouchStart={chartDragStart("top")} onClick={() => setMetricsCrunch((c) => (c > 0.5 ? 0 : 1))}
-                    aria-label="Tap to collapse/expand the metrics — or drag"
+                  <div onTouchStart={chartDragStart("top")}
+                    onClick={() => {
+                      const full = metricsCrunch > 0.5 && mobChartH > 400;
+                      if (full) { setMetricsCrunch(0); setMobChartH(348); }
+                      else { setMetricsCrunch(1); setMobChartH(Math.max(400, Math.round(window.innerHeight - 205))); }
+                    }}
+                    aria-label="Tap: chart covers the page up to the token name — tap again to restore"
                     style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "5px 0 8px", touchAction: "none", cursor: "pointer" }}>
                     <div style={{ width: 68, height: 5, borderRadius: 3, background: metricsCrunch > 0 ? VALO_PURPLE : T.border2, boxShadow: metricsCrunch > 0 ? `0 0 8px ${VALO_PURPLE}` : "none" }} />
                   </div>
@@ -6732,7 +7540,9 @@ export default function App() {
                     <div style={{ width: 76, height: 5, borderRadius: 3, background: pcCrunch > 0 ? VALO_PURPLE : T.border2, boxShadow: pcCrunch > 0 ? `0 0 8px ${VALO_PURPLE}` : "none" }} />
                   </div>
                 )}
-                <div style={{ position: "relative", paddingLeft: !isMobile && chartInsetL > 90 ? chartInsetL + 8 : 0 }}>
+                <div style={{ position: "relative", paddingLeft: !isMobile && chartInsetL > 90 ? chartInsetL + 8 : 0,
+                  zIndex: isMobile && mobChartH > 348 ? 7 : "auto",
+                  marginBottom: isMobile && mobChartH > 348 ? -(mobChartH - 348) : 0 }}>
                   {/* pull the chart in from the LEFT → a compact token strip fills the space */}
                   {!isMobile && chartInsetL > 90 && (
                     <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: chartInsetL, overflowY: "auto",
@@ -6791,7 +7601,7 @@ export default function App() {
                   {isMobile && (
                     <div onTouchStart={chartDragStart("bottom")} aria-label="Drag to resize chart height"
                       style={{ position: "absolute", left: 24, right: 24, bottom: -11, height: 30, zIndex: 8, display: "flex", alignItems: "center", justifyContent: "center", touchAction: "none" }}>
-                      <div style={{ width: 56, height: 5, borderRadius: 3, background: mobChartH !== 300 ? VALO_PURPLE : T.border2, boxShadow: mobChartH !== 300 ? `0 0 8px ${VALO_PURPLE}` : "none" }} />
+                      <div style={{ width: 56, height: 5, borderRadius: 3, background: mobChartH !== 348 ? VALO_PURPLE : T.border2, boxShadow: mobChartH !== 348 ? `0 0 8px ${VALO_PURPLE}` : "none" }} />
                     </div>
                   )}
                   {/* PC chart resize handles — sit right on the chart edges */}
@@ -6983,10 +7793,24 @@ export default function App() {
     return botRuns.reduce((s, r) => s + r.exits.reduce((a, e) => (e.ts >= cut ? a + e.pnlUsd : a), 0), 0);
   };
   const mobStatsBar = (
-    <div style={{ display: "flex", gap: 0, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, overflow: "hidden", marginBottom: 8, fontFamily: T.mono }}>
+    <div
+      onTouchStart={(e) => {
+        const n = e.currentTarget; const t0 = e.touches && e.touches[0]; if (!t0) return;
+        if (e.target && e.target.closest && e.target.closest("[data-poscell]")) return; // wallet cell has its own hold
+        n._wx = t0.clientX; n._wy = t0.clientY;
+        if (n._wt) clearTimeout(n._wt);
+        n._wt = setTimeout(() => { n._wt = null; if (navigator.vibrate) navigator.vibrate(10); setWalletPop({ x: Math.min(n._wx, window.innerWidth - 150), y: Math.max(40, n._wy - 54) }); }, 450);
+      }}
+      onTouchMove={(e) => { const n = e.currentTarget; const t0 = e.touches && e.touches[0]; if (t0 && n._wt && (Math.abs(t0.clientX - n._wx) > 10 || Math.abs(t0.clientY - n._wy) > 10)) { clearTimeout(n._wt); n._wt = null; } }}
+      onTouchEnd={(e) => { const n = e.currentTarget; if (n._wt) { clearTimeout(n._wt); n._wt = null; } }}
+      style={{ display: "flex", gap: 0, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, overflow: "hidden", marginBottom: 8, fontFamily: T.mono }}>
       {[
-        ["SOL", <b onClick={() => { setPay("SOL"); setAmount(String(feeSafe(solBalance, "SOL"))); }}
-          style={{ color: T.blue, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{solBalance.toFixed(2)}</b>],
+        [posArm ? "TAP TO OPEN" : "SOL", posArm
+          ? <b data-poscell="1" onClick={() => { setPosArm(false); setPosDrawer(true); }}
+              style={{ color: VALO_PURPLE, cursor: "pointer", textShadow: `0 0 8px ${VALO_PURPLE}` }}>📊 MY POSITIONS</b>
+          : <b data-poscell="1" onClick={() => { setPay("SOL"); setAmount(String(feeSafe(solBalance, "SOL"))); }}
+              {...chipEditProps(() => setPosArm(true))}
+              style={{ color: T.blue, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{solBalance.toFixed(2)}</b>],
         ["$VALO", <b onClick={() => { setPay("VALO"); setAmount(String(feeSafe(valoWallet, "VALO"))); }}
           style={{ color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(valoWallet)}</b>],
         [mobPnlMode === "live" ? "LIVE BOT PNL" : `BOT PNL · ${mobPnlMode}`, (() => {
@@ -7101,7 +7925,7 @@ export default function App() {
             {buyChipMode === "pct" ? buyPcts.map((p, ci) => {
               const on = pctSel && pctSel.side === "buy" && pctSel.p === p;
               return (
-                <button key={ci} onClick={() => { setPct(p, false); setPctSel({ side: "buy", p }); }}
+                <button className="qchip" key={ci} onClick={() => { setPct(p, false); setPctSel({ side: "buy", p }); }}
                   {...chipEditProps(() => { askPct(p, (nv) => setBuyPcts((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
                   style={{ flex: 1, ...chip(false), padding: "5px 0", fontSize: 8, textAlign: "center",
                     fontWeight: on ? 900 : 400,
@@ -7111,7 +7935,7 @@ export default function App() {
                     boxShadow: on ? "0 0 8px rgba(22,199,132,0.4)" : "none" }}>{p === 100 ? "MAX" : p}</button>
               );
             }) : buyFixed.map((v, ci) => (
-              <button key={"f" + ci} onClick={() => { setAmount(String(v)); setPctSel(null); }}
+              <button className="qchip" key={"f" + ci} onClick={() => { setAmount(String(v)); setPctSel(null); }}
                 {...chipEditProps(() => { askAmt(v, (nv) => setBuyFixed((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
                 style={{ flex: 1, ...chip(parseFloat(amount) === v), padding: "5px 0", fontSize: 8, textAlign: "center", fontWeight: 800, color: T.green }}>{v}</button>
             ))}
@@ -7130,7 +7954,7 @@ export default function App() {
             {sellPcts.map((p, ci) => {
               const on = pctSel && pctSel.side === "sell" && pctSel.p === p;
               return (
-                <button key={ci} onClick={() => { setPct(p, true); setPctSel({ side: "sell", p }); }} disabled={held <= 0}
+                <button className="qchip" key={ci} onClick={() => { setPct(p, true); setPctSel({ side: "sell", p }); }} disabled={held <= 0}
                   {...chipEditProps(() => { askPct(p, (nv) => setSellPcts((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
                   style={{ flex: 1, ...chip(false), padding: "5px 0", fontSize: 8, textAlign: "center",
                     fontWeight: on ? 900 : 400,
@@ -7359,7 +8183,7 @@ export default function App() {
                 ["24H PnL", <b style={{ color: platformPnl >= 0 ? T.green : T.red }}>{platformPnl >= 0 ? "+" : "−"}${Math.abs(platformPnl).toFixed(0)}</b>],
                 ["🔥 BURN", <b onClick={() => setBurnOpen(true)} style={{ color: "#f97316", cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(burned)}</b>],
               ].map(([k, v], i) => (
-                <div key={k} onClick={() => { if (k !== "🔥 BURN") setValoStatsOpen(true); }}
+                <div key={k} onClick={() => { if (k !== "🔥 BURN") { setSel(424242); setClickMode(null); } }}
                   style={{ flex: 1, textAlign: "center", padding: "6px 2px", borderLeft: i ? `1px solid ${T.border}` : "none", cursor: k !== "🔥 BURN" ? "pointer" : "default" }}>
                   <div style={{ color: T.faint, fontSize: 7.5, letterSpacing: 0.8, marginBottom: 2 }}>{k}</div>
                   {v}
@@ -7384,7 +8208,7 @@ export default function App() {
               ["NET FLOW", `${gNet >= 0 ? "+" : "−"}${fmt$(Math.abs(gNet))}`, gNet >= 0 ? T.green : T.red, null],
               ["24H PnL", `${platformPnl >= 0 ? "+" : "−"}$${Math.abs(platformPnl).toFixed(0)}`, platformPnl >= 0 ? T.green : T.red, "Your realized + unrealized PnL across all coins"],
             ].map(([k, v, col, tip]) => (
-              <div key={k} onClick={() => setValoStatsOpen(true)} title={(tip ? tip + " · " : "") + "Tap: full $VALO token stats"}
+              <div key={k} onClick={() => { setSel(424242); setClickMode(null); }} title={(tip ? tip + " · " : "") + "Tap: open the $VALO chart"}
                 style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${T.border}`, borderRadius: 9, padding: "6px 13px", minWidth: 78, cursor: "pointer" }}>
                 <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>{k}</div>
                 <div style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: col }}>{v}</div>
@@ -7486,39 +8310,37 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{ maxWidth: 1830, margin: "0 auto", padding: "14px 16px", paddingRight: isMobile ? 26 : 16, paddingLeft: isMobile ? 16 : (wallOpen ? 350 : 58), transition: "padding-left .28s" }}>
-        {!isMobile && <div style={{ height: 8 }} />}
-        <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
-          {[["all", "All"], ["new", "🆕 New"], ["pump", "Pump.fun"], ["robinhood", "Robinhood"], ["safe", "🟢 Safe"], ["risky", "🔴 Risky"]].map(([k, l]) => (
-            <button key={k} onClick={() => setFilter(k)} style={chip(filter === k)}>{l}</button>
-          ))}
-          <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
-            <span style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>CARD CHART</span>
-            <button onClick={() => setCardMini("line")} style={{ ...chip(cardMini === "line"), padding: "3px 8px" }}>∿</button>
-            <button onClick={() => setCardMini("bars")} style={{ ...chip(cardMini === "bars"), padding: "3px 8px" }}>▮</button>
-          </div>
-        </div>
+      <div style={{ maxWidth: 1830, margin: "0 auto", padding: "6px 16px 14px", paddingRight: isMobile ? 26 : 16, paddingLeft: isMobile ? 16 : (wallOpen ? 350 : 58), transition: "padding-left .28s" }}>
 
         {isMobile ? (
           /* MOBILE — tap a token to expand it full-screen; scroll up to exit */
           <>
             {/* search — tokens, CA & users. Follows down-screen under the banner. */}
             <StickySearch top={headerH}>
-              <SearchBar tokens={tokens} username={username} full onPickToken={(id) => { setSel(id); setClickMode(null); }} onPickUser={(u) => setProfileUser(u)} />
+              <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <SearchBar tokens={tokens} username={username} full eco isMobile onFullEco={() => setEcoFull(true)} onPickToken={(id) => { setSel(id); setClickMode(null); }} onPickUser={(u) => setProfileUser(u)} />
+                </div>
+                <button onClick={() => setCompactList((v) => !v)} title={compactList ? "Expand cards" : "Compact list"}
+                  style={{ flex: "0 0 auto", border: `1px solid ${compactList ? VALO_PURPLE : T.border2}`, background: T.panel, color: compactList ? VALO_PURPLE : T.dim,
+                    borderRadius: 9, padding: "0 13px", fontSize: 15, fontWeight: 900, cursor: "pointer" }}>{compactList ? "▦" : "▤"}</button>
+              </div>
             </StickySearch>
-            {/* collapse toggle — sits under the platform selector */}
-            <button onClick={() => setCompactList((v) => !v)}
-              style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 10, border: `1px solid ${T.border2}`, borderRadius: 9, padding: "8px", background: "rgba(255,255,255,0.02)", cursor: "pointer", fontFamily: T.mono, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, color: compactList ? VALO_PURPLE : T.dim }}>
-              {compactList ? "▤ COMPACT LIST · tap to expand cards" : "▦ EXPANDED CARDS · tap to collapse"}
-            </button>
 
             <div style={{ display: "grid", gap: compactList ? 6 : 10, paddingRight: 6 }}>
               {shown.map((t) => (
                 compactList
-                  ? <TokenRow key={t.id} t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} tf={tf}
-                      onOpen={() => { setSel(sel === t.id ? null : t.id); setClickMode(null); }} />
-                  : <TokenCard key={t.id} t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf}
-                      onOpen={() => { setSel(sel === t.id ? null : t.id); setClickMode(null); }} />
+                  ? <div key={t.id} {...tdProps(t)}><TokenRow t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} tf={tf}
+                      onOpen={() => { setSel(sel === t.id ? null : t.id); setClickMode(null); }} /></div>
+                  : <div key={t.id} data-slot={t.id} style={{ position: "relative", opacity: mDrag && mDrag.id === t.id ? 0.55 : 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => { e.preventDefault(); const id = dragIdOf(e); if (id == null || id === t.id) return;
+                        const base = (scanOrder || shown.map((x) => x.id));
+                        const si = base.indexOf(t.id); if (si < 0) return;
+                        const n = [...base]; const already = n.indexOf(id);
+                        if (already >= 0) { [n[si], n[already]] = [n[already], n[si]]; } else n[si] = id;
+                        setScanOrder(n); window.__valoDrag = null; }}>
+                    <TokenCard t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf}
+                      onOpen={() => { setSel(sel === t.id ? null : t.id); setClickMode(null); }} /></div>
               ))}
             </div>
 
@@ -7534,23 +8356,31 @@ export default function App() {
             )}
           </>
         ) : (
-        <div className="pt-grid" ref={gridRef} style={{ display: "grid", gridTemplateColumns: `300px minmax(320px,1fr) ${(layoutPro ? 330 : 304) + Math.round(chartInsetR * 0.5)}px ${walletCollapsed ? 40 : 322 + Math.round(chartInsetR * 0.5)}px`, gap: 14, alignItems: "start", marginRight: -pullR, zoom: 1.06 }}>
+        <div className="pt-grid" ref={gridRef} style={{ display: "grid", gridTemplateColumns: `300px minmax(320px,1fr) ${(layoutPro ? 330 : 304) + Math.round(chartInsetR * 0.5)}px ${walletCollapsed ? 40 : 322 + Math.round(chartInsetR * 0.5)}px`, gap: 14, alignItems: "start",
+          width: `calc(100%/1.13 + ${Math.round(pullR / 1.13)}px)`, "--stkTop": `${Math.round((headerH + 8) / 1.13)}px`, zoom: 1.13 }}>
           {/* scanner — slides left as the chart is pulled over, stays same width */}
           <div ref={scannerRef} style={{ transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s", display: "grid", gap: 10, maxHeight: "calc(100vh - 185px)", overflowY: "auto", padding: "2px 10px 2px 2px" }}>
             {shown.map((t) => (
-              <TokenCard key={t.id} t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf}
-                onOpen={() => { setSel(sel === t.id ? null : t.id); setClickMode(null); }} />
+              <div key={t.id} data-slot={t.id} style={{ position: "relative", opacity: mDrag && mDrag.id === t.id ? 0.55 : 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => { e.preventDefault(); const id = dragIdOf(e); if (id == null || id === t.id) return;
+                  const base = (scanOrder || shown.map((x) => x.id));
+                  const si = base.indexOf(t.id); if (si < 0) return;
+                  const n = [...base]; const already = n.indexOf(id);
+                  if (already >= 0) { [n[si], n[already]] = [n[already], n[si]]; } else n[si] = id;
+                  setScanOrder(n); window.__valoDrag = null; }}>
+              <TokenCard t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf}
+                onOpen={() => { setSel(sel === t.id ? null : t.id); setClickMode(null); }} /></div>
             ))}
           </div>
 
           {/* center: chart (resizable) + chat below */}
           <div style={{ display: "grid", gap: 12, position: "relative", marginLeft: -pullX, width: `calc(100% + ${pullX}px)`, transition: resizeRef.current ? "none" : "margin-left .2s, width .2s" }}>
             <div style={{ position: "relative" }}>
-              {!isMobile && selected && (
-                <StickySearch top={headerH}>
-                  <SearchBar tokens={tokens} username={username} full onPickToken={(id) => { setSel(id); setClickMode(null); }} onPickUser={(u) => setProfileUser(u)} />
-                </StickySearch>
-              )}
+              {/* search — the chart's exact width, glued under the callout
+                  banner, riding along as you scroll */}
+              <div style={{ position: "sticky", top: "calc(var(--stkTop, 8px) - 8px)", zIndex: 34, margin: "0 0 8px" }}>
+                <SearchBar tokens={tokens} username={username} full eco onPickToken={(id) => { setSel(id); setClickMode(null); }} onPickUser={(u) => setProfileUser(u)} />
+              </div>
               <div style={{ display: "flex", justifyContent: "flex-end", margin: "0 0 6px" }}>
                 <button onClick={() => setLayoutPro((v) => !v)}
                   title={layoutPro ? "Back to the side-panel layout" : "Pro layout — trading desk under the chart, feeds on the right"}
@@ -7589,7 +8419,7 @@ export default function App() {
                   setEditLineReq({ id, level: base ? (isExit ? base.vtSell : base.level) : null, n: Date.now() });
                 }} />
                     ) : ticketTab === "auto" ? (
-                      <AutoTraderPanel solBalance={solBalance} valoWallet={valoWallet} token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
+                      <AutoTraderPanel onOpenSearch={isMobile ? () => setEcoFull(true) : null} solBalance={solBalance} valoWallet={valoWallet} position={positions[selected.id]} token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
                         wide
                         dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
                         onStageSide={(m) => setBotSide(m)} onArmPair={armVisualPair}
@@ -7683,12 +8513,12 @@ export default function App() {
           ) : (
           <div style={{ position: "sticky", top: 70, maxHeight: "calc(100vh - 90px)", overflowY: "auto" }}>
             {selected && (
+              <div style={{ border: `1px solid ${T.border2}`, borderRadius: 13, background: T.panel, padding: "8px 8px 8px", marginBottom: 4 }}>
               <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
                 <button onClick={() => setTicketTab("ticket")} style={{ ...chip(ticketTab === "ticket"), flex: 1, textAlign: "center", padding: "8px", fontSize: 10.5, fontWeight: 800 }}>🧾 ORDER TICKET</button>
                 <button onClick={() => setTicketTab("auto")} style={{ ...chip(ticketTab === "auto"), flex: 1, textAlign: "center", padding: "8px", fontSize: 10, fontWeight: 800, color: ticketTab === "auto" ? T.amber : T.dim, borderColor: ticketTab === "auto" ? `${T.amber}66` : T.border }}>🤖 TRADER</button>
                 <button onClick={() => setTicketTab("bots")} style={{ ...chip(ticketTab === "bots"), flex: 1, textAlign: "center", padding: "8px", fontSize: 10, fontWeight: 800, color: ticketTab === "bots" ? T.amber : T.dim, borderColor: ticketTab === "bots" ? `${T.amber}66` : T.border }}>📊 MY BOTS · {pendingOrders.filter((o) => !o.runId).length + botRuns.filter((r) => r.status === "live").length}</button>
               </div>
-            )}
             {selected && ticketTab === "bots" ? (
               <AllBotsPanel tokens={tokens} curTokenId={selected && selected.id} pendingOrders={pendingOrders} botRuns={botRuns}
                 onEdit={(id, tid) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(id); }}
@@ -7701,7 +8531,7 @@ export default function App() {
                   setEditLineReq({ id, level: base ? (isExit ? base.vtSell : base.level) : null, n: Date.now() });
                 }} />
             ) : selected && ticketTab === "auto" ? (
-              <AutoTraderPanel solBalance={solBalance} valoWallet={valoWallet} token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
+              <AutoTraderPanel onOpenSearch={isMobile ? () => setEcoFull(true) : null} solBalance={solBalance} valoWallet={valoWallet} position={positions[selected.id]} token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
                 dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
                 onStageSide={(m) => setBotSide(m)} onArmPair={armVisualPair}
                 onSetDragSet={(v) => setBotDragSet(!!v)} onLinesChange={(l) => setVtLines(l)}
@@ -7733,6 +8563,8 @@ export default function App() {
             ) : (
               <div style={{ background: T.panel, border: `1px dashed ${T.border2}`, borderRadius: 12, padding: 24, textAlign: "center", color: T.faint, fontFamily: T.mono, fontSize: 11 }}>
                 Select a pair to trade
+              </div>
+            )}
               </div>
             )}
             {/* MY POSITIONS — bots + tickets, visible on every tab */}
@@ -7799,50 +8631,148 @@ export default function App() {
 
       {/* LEFT-WALL TOKEN PANEL — bordered, collapsible, spans down the screen */}
       {!isMobile && (
-        <div ref={wallRef} style={{ position: "fixed", left: 0, top: 158, bottom: 14, zIndex: 45, display: "flex", alignItems: "stretch" }}>
-          <div style={{
-            width: wallOpen ? 340 : 44, transition: "width .28s cubic-bezier(.22,.8,.3,1)",
+        <div ref={wallRef}
+          onDragEnter={() => { if (!wallOpen) setWallDragHot(true); }}
+          onDragLeave={(e) => { try { if (!wallOpen && wallRef.current && !(e.relatedTarget && wallRef.current.contains(e.relatedTarget))) setWallDragHot(false); } catch (err) { setWallDragHot(false); } }}
+          onDragOver={(e) => { if (!wallOpen) e.preventDefault(); }}
+          onDrop={(e) => {
+            if (wallOpen) return;
+            e.preventDefault(); setWallDragHot(false);
+            const id = dragIdOf(e); if (id != null) { watchAdd(id, null); popPlus(); }
+            window.__valoDrag = null;
+          }}
+          style={{ position: "fixed", left: 0, top: 158, bottom: 14, zIndex: wallOpen ? 45 : 18, display: "flex", alignItems: "stretch", pointerEvents: "none" }}>
+          <div data-wall="1" style={{ pointerEvents: "auto",
+            width: wallOpen ? 340 : wallDragHot ? 34 : 22, transition: "width .28s cubic-bezier(.22,.8,.3,1)",
+            outline: wallDragHot ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2,
             background: "rgba(14,18,26,0.96)", border: `1px solid ${T.border2}`, borderLeft: "none",
             borderRadius: "0 14px 14px 0", boxShadow: "4px 0 24px rgba(0,0,0,0.45)",
             display: "flex", flexDirection: "column", overflow: "hidden",
           }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: wallOpen ? "space-between" : "center", padding: wallOpen ? "8px 10px" : "8px 0", borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
-              {wallOpen && <span style={{ fontFamily: T.mono, fontSize: 9.5, letterSpacing: 1.5, color: T.faint }}>◂ LIVE TICKERS</span>}
+              {wallOpen && (
+                <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <span style={{ fontFamily: T.mono, fontSize: 9.5, letterSpacing: 1.5, color: T.faint }}>◂ WATCHLIST</span>
+                  <button onClick={() => { const id = Date.now(); setWatchSections((S) => [...S, { id, name: "NEW LIST", ids: [] }]); setRenamingSec(id); setSecName("NEW LIST"); }}
+                    title="Add a subsection — name it whatever you like"
+                    style={{ ...chip(false), padding: "2px 7px", fontSize: 10, fontWeight: 900, color: VALO_PURPLE, borderColor: `${VALO_PURPLE}55` }}>＋</button>
+                </span>
+              )}
               <button onClick={() => setWallOpen((v) => !v)}
-                style={{ ...chip(false), padding: "3px 8px", fontSize: 12 }}>{wallOpen ? "‹" : "›"}</button>
+                style={{ ...chip(false), padding: wallOpen ? "3px 8px" : "3px 3px", fontSize: 12 }}>{wallOpen ? "‹" : "›"}</button>
+            </div>
+            <div style={{ position: "relative" }}>
+              <div onClick={() => { const id = Date.now(); setWallOpen(true); setWatchSections((S) => [...S, { id, name: "NEW LIST", ids: [] }]); setRenamingSec(id); setSecName("NEW LIST"); }}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => { e.preventDefault(); const id = dragIdOf(e); if (id != null) { watchAdd(id, null); popPlus(); } window.__valoDrag = null; }}
+                title="Add a watchlist subsection — or drop a token here"
+                style={{ pointerEvents: "auto", position: "absolute", left: "100%", top: 4, display: "flex", alignItems: "center", cursor: "pointer", zIndex: 3 }}>
+                <span style={{ width: 12, height: 1.5, background: `${VALO_PURPLE}88` }} />
+                <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1, color: VALO_PURPLE,
+                  background: "rgba(125,92,240,0.13)", backdropFilter: "blur(3px)", border: `1px solid ${VALO_PURPLE}55`,
+                  borderRadius: "0 8px 8px 0", padding: "4px 8px", whiteSpace: "nowrap" }}>＋ LIST</span>
+              </div>
+              {plusPop > 0 && !isMobile && (
+                <div key={plusPop} style={{ pointerEvents: "none", position: "absolute", left: "calc(100% + 8px)", top: -18, zIndex: 4,
+                  fontFamily: T.mono, fontSize: 13, fontWeight: 900, color: T.green, textShadow: `0 0 10px ${T.green}`,
+                  animation: "plusFloat 1.05s ease forwards" }}>+1</div>
+              )}
             </div>
             <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: wallOpen ? "6px" : "6px 0" }}>
-              {tokens.slice(4).map((t, i) => {
-                const score = scoreToken(t);
-                const rc = ratingColor(score);
-                const ch = ((t.price - t.candles[Math.max(0, t.candles.length - 96)].c) / t.candles[Math.max(0, t.candles.length - 96)].c) * 100;
-                if (!wallOpen) {
-                  // collapsed: just a colored score dot per token
+              {(() => { try {
+                const tokOf = (id) => tokens.find((x) => x.id === id);
+                const allIds = [...watchLoose, ...watchSections.flatMap((s) => s.ids)];
+                if (!wallOpen) return allIds.map(tokOf).filter(Boolean).map((t) => {
+                  const score = scoreToken(t); const rc = ratingColor(score);
                   return (
-                    <button key={t.id} onClick={() => { setSel(t.id); setClickMode(null); }}
-                      className="wall-bar" title={`${t.sym} · ${score}`}
+                    <button key={t.id} onClick={() => { setSel(t.id); setClickMode(null); }} className="wall-bar" title={`${t.sym} · ${score}`}
                       style={{ pointerEvents: "auto", cursor: "pointer", border: "none", background: "transparent", width: "100%", display: "flex", justifyContent: "center", padding: "5px 0" }}>
-                      <span style={{ width: 20, height: 20, borderRadius: "50%", background: `${rc}22`, border: `1px solid ${rc}`, color: rc, fontFamily: T.mono, fontSize: 9, fontWeight: 800, display: "grid", placeItems: "center" }}>{score}</span>
+                      <span style={{ width: 18, height: 18, borderRadius: "50%", background: `${rc}22`, border: `1px solid ${rc}`, color: rc, fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, display: "grid", placeItems: "center" }}>{score}</span>
                     </button>
                   );
-                }
+                });
+                const row = (t, secId) => {
+                  const score = scoreToken(t); const rc = ratingColor(score);
+                  const base = t.candles[Math.max(0, t.candles.length - 96)].c;
+                  const ch = ((t.price - base) / base) * 100;
+                  const exp = watchExp === t.id;
+                  return (
+                    <div key={t.id}>
+                      <button data-wrow={t.id}
+                        onClick={() => { if (exp) { setSel(t.id); setClickMode(null); setWatchExp(null); } else setWatchExp(t.id); }}
+                        {...(() => { const { onContextMenu, ...dragOnly } = tdProps(t); return dragOnly; })()}
+                        onContextMenu={(e) => { e.preventDefault(); setWatchTrash({ id: t.id, sec: secId, x: e.clientX, y: e.clientY }); }}
+                        className="wall-bar" title={exp ? "Tap again: open the full chart" : "Tap: live stats · right-click: remove · drag: move"}
+                        style={{ pointerEvents: "auto", cursor: "pointer", border: `1px solid ${exp ? VALO_PURPLE : sel === t.id ? accent(t.hue, 45) : T.border}`, textAlign: "left", width: "100%",
+                          background: exp ? "rgba(125,92,240,0.07)" : "linear-gradient(90deg, rgba(22,27,37,0.9), rgba(17,21,29,0.8))",
+                          borderRadius: exp ? "8px 8px 0 0" : 8, padding: "7px 9px", marginBottom: exp ? 0 : 5,
+                          display: "flex", alignItems: "center", gap: 8 }}>
+                        <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={16} />
+                        <span style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 800, color: T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{t.sym}</span>
+                        <span style={{ fontFamily: T.mono, fontSize: 9, color: T.dim }}>{fmt$(mcOf(t))}</span>
+                        <span style={{ fontFamily: T.mono, fontSize: 9, color: ch >= 0 ? T.green : T.red, minWidth: 42, textAlign: "right" }}>{pct(ch)}</span>
+                        <span style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 800, color: rc, borderLeft: `1px solid ${T.border}`, paddingLeft: 7 }}>{score}</span>
+                      </button>
+                      {exp && (
+                        <div style={{ pointerEvents: "auto", border: `1px solid ${VALO_PURPLE}55`, borderTop: "none", borderRadius: "0 0 10px 10px", background: "rgba(12,15,22,0.92)", padding: "8px 9px", marginBottom: 6 }}>
+                          <TraceMini candles={t.candles} hue={t.hue} />
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 10px", fontFamily: T.mono, fontSize: 8, color: T.dim, margin: "7px 0" }}>
+                            <span>24H VOL <b style={{ color: T.text }}>{fmt$(t.greenUsd + t.redUsd)}</b></span>
+                            <span>24H Δ <b style={{ color: ch >= 0 ? T.green : T.red }}>{pct(ch)}</b></span>
+                            <span>PRICE <b style={{ color: T.text }}>${fmtP(t.price)}</b></span>
+                            <span>MC <b style={{ color: T.text }}>{fmt$(mcOf(t))}</b></span>
+                            <span>CIRC <b style={{ color: T.text }}>{fmtQty(1e9 * (0.35 + ((t.id * 13) % 50) / 100))}</b></span>
+                            <span>TOP 10 HOLD <b style={{ color: T.amber }}>{(16 + ((t.id * 7) % 26)).toFixed(1)}%</b></span>
+                            <span>MOM <b style={{ color: t.momentum > 60 ? T.green : T.dim }}>{Math.round(t.momentum)}</b></span>
+                            <span>HOLDERS <b style={{ color: T.text }}>{t.traders}</b></span>
+                          </div>
+                          <button onClick={() => { setSel(t.id); setClickMode(null); setWatchExp(null); }}
+                            style={{ width: "100%", border: `1px solid ${VALO_PURPLE}`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE, borderRadius: 8, padding: "6px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>
+                            OPEN FULL CHART ▸
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                };
                 return (
-                  <button key={t.id} onClick={() => { setSel(t.id); setClickMode(null); }}
-                    className="wall-bar"
-                    style={{
-                      pointerEvents: "auto", cursor: "pointer", border: `1px solid ${sel === t.id ? accent(t.hue, 45) : T.border}`, textAlign: "left", width: "100%",
-                      background: "linear-gradient(90deg, rgba(22,27,37,0.9), rgba(17,21,29,0.8))",
-                      borderRadius: 8, padding: "7px 9px", marginBottom: 5,
-                      display: "flex", alignItems: "center", gap: 8,
-                    }}>
-                    <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={16} />
-                    <span style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 800, color: T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{t.sym}</span>
-                    <span style={{ fontFamily: T.mono, fontSize: 9, color: T.dim }}>{fmt$(mcOf(t))}</span>
-                    <span style={{ fontFamily: T.mono, fontSize: 9, color: ch >= 0 ? T.green : T.red, minWidth: 42, textAlign: "right" }}>{pct(ch)}</span>
-                    <span style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 800, color: rc, borderLeft: `1px solid ${T.border}`, paddingLeft: 7 }}>{score}</span>
-                  </button>
+                  <div onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => { e.preventDefault(); const id = dragIdOf(e); if (id != null && !e.defaultPrevented2) { watchAdd(id, null); if (wallAutoRef.current) { setWallOpen(false); wallAutoRef.current = false; } } }}>
+                    {watchLoose.map(tokOf).filter(Boolean).map((t) => row(t, null))}
+                    {watchSections.map((s2) => (
+                      <div key={s2.id} data-wsec={s2.id}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const id = dragIdOf(e);
+                          const d = window.__valoDrag;
+                          if (d && d.sec != null && d.secMove) { // section reorder
+                            setWatchSections((S) => { const a = S.findIndex((x) => x.id === d.sec), b = S.findIndex((x) => x.id === s2.id); if (a < 0 || b < 0) return S; const n = [...S]; [n[a], n[b]] = [n[b], n[a]]; return n; });
+                          } else if (id != null) { watchAdd(id, s2.id); if (wallAutoRef.current) { setWallOpen(false); wallAutoRef.current = false; } }
+                          window.__valoDrag = null; }}>
+                        <div draggable={renamingSec !== s2.id} onDragStart={(e) => { if (renamingSec === s2.id) { e.preventDefault(); return; } window.__valoDrag = { sec: s2.id, secMove: true }; e.dataTransfer.setData("text/valo-sec", String(s2.id)); }}
+                          onDoubleClick={() => { setRenamingSec(s2.id); setSecName(s2.name); }}
+                          style={{ pointerEvents: "auto", display: "flex", alignItems: "center", gap: 6, margin: "8px 0 5px", cursor: "grab" }}>
+                          <span style={{ height: 1, flex: "0 0 8px", background: VALO_PURPLE }} />
+                          {renamingSec === s2.id ? (
+                            <input autoFocus value={secName} onChange={(e) => setSecName(e.target.value)}
+                              onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}
+                              onBlur={() => { setWatchSections((S) => S.map((x) => (x.id === s2.id ? { ...x, name: secName.trim() || x.name } : x))); setRenamingSec(null); }}
+                              onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                              style={{ ...inp, fontSize: 8.5, padding: "2px 6px", width: 120 }} />
+                          ) : (
+                            <span title="Double-click: rename · drag onto another header: swap places"
+                              style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1.5, color: VALO_PURPLE }}>{s2.name.toUpperCase()}</span>
+                          )}
+                          <span style={{ fontFamily: T.mono, fontSize: 7, color: T.faint }}>{s2.ids.length}</span>
+                          <span style={{ height: 1, flex: 1, background: T.border }} />
+                        </div>
+                        {s2.ids.map(tokOf).filter(Boolean).map((t) => row(t, s2.id))}
+                        {s2.ids.length === 0 && <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, padding: "4px 2px 8px" }}>drop tokens here</div>}
+                      </div>
+                    ))}
+                  </div>
                 );
-              })}
+              } catch (err) { console.error("[VALO] watchlist render", err); return <div style={{ fontFamily: T.mono, fontSize: 8, color: T.red, padding: 8 }}>watchlist hiccup — reopen the tab</div>; }
+              })()}
             </div>
           </div>
         </div>
@@ -7883,6 +8813,16 @@ export default function App() {
         </button>
       )}
       {!isMobile && (
+        <button onClick={() => setLiveData((v) => !v)}
+          title={liveData ? "LIVE DATA ON — real pump.fun pairs via DexScreener; wallet & fills stay simulated. Click to return to the demo feed." : "Pull REAL Solana pump tokens (DexScreener) into the terminal — paper trading on live prices"}
+          style={{ position: "fixed", top: 6, right: 138, zIndex: 55, display: "flex", alignItems: "center", gap: 6,
+            background: liveData ? "rgba(22,199,132,0.14)" : "rgba(15,19,28,0.72)", border: `1px solid ${liveData ? T.green : T.border}`, borderRadius: 8, padding: "4px 9px", cursor: "pointer",
+            boxShadow: liveData ? "0 0 10px rgba(22,199,132,0.35)" : "none" }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: liveData ? T.green : "#39414f", boxShadow: liveData ? `0 0 6px ${T.green}` : "none" }} />
+          <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: liveData ? T.green : "rgba(138,148,168,0.7)", fontWeight: 800 }}>{liveData ? "LIVE DATA · PAPER" : "LIVE DATA"}</span>
+        </button>
+      )}
+      {!isMobile && (
         <button onClick={() => { try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); } catch (e) {} }}
           title={isFs ? "Press Esc to exit fullscreen" : "Fullscreen — same proportions, stretched to fill your screen. Esc exits."}
           style={{ position: "fixed", top: 6, right: 12, zIndex: 55, display: "flex", alignItems: "center", gap: 6,
@@ -7892,6 +8832,206 @@ export default function App() {
           </svg>
           <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: "rgba(138,148,168,0.7)", fontWeight: 800 }}>{isFs ? "ESC TO EXIT" : "FULLSCREEN"}</span>
         </button>
+      )}
+      {ecoFull && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 88, background: T.bg, display: "flex", flexDirection: "column",
+          opacity: ecoDim ? 0.06 : 1, pointerEvents: ecoDim ? "none" : "auto", transition: "opacity .22s ease" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "max(10px, env(safe-area-inset-top)) 10px 8px", borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
+            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.04)", border: `1px solid ${VALO_PURPLE}`, borderRadius: 9, padding: "8px 10px" }}>
+              <span style={{ fontSize: 12, color: T.faint }}>🔍</span>
+              <input autoFocus value={ecoQ} onChange={(e) => setEcoQ(e.target.value)} placeholder="Search the whole ecosystem…"
+                style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: T.text, fontFamily: T.mono, fontSize: 13 }} />
+              {ecoQ && <button onClick={() => setEcoQ("")} style={{ background: "none", border: "none", color: T.faint, cursor: "pointer" }}>✕</button>}
+            </div>
+            <button onClick={() => { setEcoFull(false); setEcoQ(""); }} style={{ ...chip(false), padding: "8px 11px", fontSize: 11, fontWeight: 900 }}>✕</button>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "8px 10px 2px", padding: "7px 13px", borderRadius: 20,
+            border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)", fontFamily: T.mono, flexShrink: 0 }}>
+            <span style={{ fontSize: 8, color: T.faint }}>💼 <b style={{ color: T.text, fontSize: 10.5 }}>${(solBalance * SOL_USD + valoWallet * 0.0125).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b></span>
+            <span style={{ fontSize: 8, color: T.faint }}>🤖 <b style={{ color: botUnrealized >= 0 ? T.green : T.red, fontSize: 10.5 }}>{botUnrealized >= 0 ? "+" : "−"}${Math.abs(botUnrealized).toFixed(2)}</b></span>
+            <button onClick={() => setPosDrawer(true)}
+              style={{ marginLeft: "auto", border: `1px solid ${VALO_PURPLE}`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE,
+                borderRadius: 14, padding: "4px 12px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, cursor: "pointer" }}>📊 POSITIONS</button>
+          </div>
+          <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <TokenEcosystem tokens={tokens} q={ecoQ} isMobile maxH="100%" tdProps={tdProps}
+              onPick={(id) => { setSel(id); setClickMode(null); setEcoFull(false); setEcoQ(""); }}
+              onWatchAdd={(id) => { watchAdd(id, null); popPlus(); }}
+              onOpenUser={(u) => setProfileUser(u)} />
+          </div>
+        </div>
+      )}
+      {posDrawer && (() => {
+        const unit$ = (pu) => (pu === "SOL" ? SOL_USD : 0.0125);
+        const tix = Object.entries(positions).map(([id, p0]) => {
+          const t = tokens.find((x) => String(x.id) === String(id));
+          if (!t || !(p0.amt > 0)) return null;
+          return { t, p: p0, pnl: (p0.amt * (t.price / (p0.entry || t.price)) - p0.amt) * unit$(p0.pay || pay) };
+        }).filter(Boolean);
+        const runsL = botRuns.filter((r) => r.status === "live").map((r) => {
+          const t = tokens.find((x) => String(x.id) === String(r.tokenId));
+          return t ? { r, t, pnl: (r.remaining * (t.price / r.entry) - r.remaining) * unit$(r.pay) } : null;
+        }).filter(Boolean);
+        const botRealAll = botRuns.reduce((s, r) => s + r.exits.reduce((a, e) => a + e.pnlUsd, 0), 0);
+        const tickReal = realizedPnl - botRealAll;
+        const showBots = posTab !== "tickets", showTix = posTab !== "bots";
+        const unreal = (showTix ? tix.reduce((s, x) => s + x.pnl, 0) : 0) + (showBots ? runsL.reduce((s, x) => s + x.pnl, 0) : 0);
+        const real = (showTix ? tickReal : 0) + (showBots ? botRealAll : 0);
+        const scoped = unreal;
+        const walletUsd = solBalance * SOL_USD + valoWallet * 0.0125;
+        const walletTxt = posUnit === "sol" ? `${(walletUsd / SOL_USD).toFixed(2)} SOL` : posUnit === "valo" ? `${fmtQty(walletUsd / 0.0125)} $VALO` : `$${walletUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+        const sellScope = () => { if (showTix) closeAllTickets(); if (showBots) runsL.forEach((x) => sellRun(x.r.id)); };
+        const pctChips = (row, isBot) => (
+          <div style={{ display: "flex", gap: 4, marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
+            {[10, 25, 50, 75, 100].map((pc) => {
+              const held = isBot ? row.r.remaining : row.p.amt;
+              const pu = isBot ? row.r.pay : (row.p.pay || pay);
+              const amt = +(held * pc / 100).toFixed(4);
+              return (
+                <button key={pc} onClick={() => { if (isBot) sellRunPct(row.r.id, pc); else onPosTrade(row.t, "sell", amt); }}
+                  style={{ flex: 1, border: `1px solid ${T.red}66`, background: pc === 100 ? T.red : "rgba(234,57,67,0.08)", color: pc === 100 ? "#170808" : T.red,
+                    borderRadius: 7, padding: "4px 0", fontFamily: T.mono, fontWeight: 800, cursor: "pointer", lineHeight: 1.3 }}>
+                  <span style={{ display: "block", fontSize: 10.5 }}>{pc === 100 ? "ALL" : pc + "%"}</span>
+                  <span style={{ display: "block", fontSize: 7, opacity: 0.9 }}>{amt >= 1000 ? (amt / 1000).toFixed(1) + "K" : amt} {pu}</span>
+                </button>
+              );
+            })}
+          </div>
+        );
+        return (
+          <>
+            <div onClick={() => setPosDrawer(false)} style={{ position: "fixed", inset: 0, zIndex: 90, background: "rgba(4,6,10,0.55)" }} />
+            <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 91, width: "min(92vw, 380px)", background: "rgba(12,15,22,0.98)",
+              boxShadow: "-12px 0 40px rgba(0,0,0,0.6)", overflowY: "auto", padding: "max(10px, env(safe-area-inset-top)) 12px 16px",
+              animation: "posSlide .28s cubic-bezier(.22,.8,.3,1)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1.5, color: VALO_PURPLE }}>📊 MY POSITIONS</span>
+                <button onClick={() => setPosDrawer(false)} style={{ ...chip(false), padding: "5px 10px", fontSize: 12 }}>✕</button>
+              </div>
+              <div onClick={() => setPosUnit((u) => (u === "usd" ? "sol" : u === "sol" ? "valo" : "usd"))}
+                title="Tap: $ → SOL → $VALO"
+                style={{ border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 11, padding: "9px 12px", marginBottom: 8, cursor: "pointer" }}>
+                <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.2, color: T.faint }}>WALLET · tap to flip units</div>
+                <div style={{ fontFamily: T.mono, fontSize: 19, fontWeight: 900, color: T.text }}>{walletTxt}</div>
+                <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: scoped >= 0 ? T.green : T.red }}>
+                  OPEN PNL {scoped >= 0 ? "+" : "−"}${Math.abs(scoped).toFixed(2)}
+                </div>
+                <div style={{ fontFamily: T.mono, fontSize: 8, marginTop: 2 }}>
+                  <span style={{ color: unreal >= 0 ? T.green : T.red }}>UNREALIZED {unreal >= 0 ? "+" : "−"}${Math.abs(unreal).toFixed(2)}</span>
+                  <span style={{ color: T.faint }}> · </span>
+                  <span style={{ color: real >= 0 ? T.green : T.red }}>REALIZED {real >= 0 ? "+" : "−"}${Math.abs(real).toFixed(2)}</span>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+                {[["bots", "🤖 BOTS"], ["both", "BOTH"], ["tickets", "🧾 TICKETS"]].map(([k, l]) => (
+                  <button key={k} onClick={() => setPosTab(k)} style={{ ...chip(posTab === k), flex: 1, textAlign: "center", padding: "7px 0", fontSize: 9, fontWeight: 800 }}>{l}</button>
+                ))}
+              </div>
+              {(showTix ? tix.length : 0) + (showBots ? runsL.length : 0) > 0 && (
+                <button onClick={sellScope}
+                  style={{ width: "100%", border: "none", borderRadius: 10, padding: "10px", marginBottom: 9, fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
+                    background: scoped >= 0 ? T.green : T.red, color: scoped >= 0 ? "#07130d" : "#170808", cursor: "pointer" }}>
+                  ✕ SELL ALL {posTab === "bots" ? "BOTS" : posTab === "tickets" ? "TICKETS" : ""} · {scoped >= 0 ? "+" : "−"}${Math.abs(scoped).toFixed(2)}
+                </button>
+              )}
+              {showBots && runsL.map(({ r, t, pnl }) => (
+                <div key={"r" + r.id}
+                  onClick={() => { setSel(t.id); setClickMode(null); setMobPageTab("bots"); setPosDrawer(false); }}
+                  style={{ border: `1px solid ${pnl >= 0 ? "rgba(22,199,132,0.4)" : "rgba(234,57,67,0.4)"}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "8px 10px", marginBottom: 6, cursor: "pointer" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: T.mono }}>
+                    <span style={{ fontSize: 8, fontWeight: 900, color: pnl >= 0 ? T.green : T.red }}>🤖 LIVE</span>
+                    <span style={{ fontSize: 11.5, fontWeight: 800, color: accent(t.hue) }}>${t.sym}</span>
+                    <span style={{ fontSize: 9, color: T.dim }}>{r.remaining} {r.pay}</span>
+                    <span style={{ fontSize: 12, fontWeight: 900, color: pnl >= 0 ? T.green : T.red, marginLeft: "auto" }}>{pnl >= 0 ? "+" : "−"}${Math.abs(pnl).toFixed(2)}</span>
+                  </div>
+                  {pctChips({ r, t }, true)}
+                </div>
+              ))}
+              {showTix && tix.map(({ t, p: p2, pnl }) => (
+                <div key={"t" + t.id}
+                  onClick={() => { setSel(t.id); setClickMode(null); setPosDrawer(false); }}
+                  style={{ border: `1px solid ${pnl >= 0 ? "rgba(22,199,132,0.4)" : "rgba(234,57,67,0.4)"}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "8px 10px", marginBottom: 6, cursor: "pointer" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: T.mono }}>
+                    <span style={{ fontSize: 8, fontWeight: 900, color: T.blue }}>🧾</span>
+                    <span style={{ fontSize: 11.5, fontWeight: 800, color: accent(t.hue) }}>${t.sym}</span>
+                    <span style={{ fontSize: 9, color: T.dim }}>{fmtQty(posTokenQty(t, p2))} tokens</span>
+                    <span style={{ fontSize: 12, fontWeight: 900, color: pnl >= 0 ? T.green : T.red, marginLeft: "auto" }}>{pnl >= 0 ? "+" : "−"}${Math.abs(pnl).toFixed(2)}</span>
+                  </div>
+                  {pctChips({ t, p: p2 }, false)}
+                </div>
+              ))}
+              {(showTix ? tix.length : 0) + (showBots ? runsL.length : 0) === 0 && (
+                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center", padding: 18 }}>Nothing open in this tab.</div>
+              )}
+            </div>
+          </>
+        );
+      })()}
+      {walletPop && (
+        <>
+          <div onClick={() => setWalletPop(null)} style={{ position: "fixed", inset: 0, zIndex: 93 }} />
+          <button onClick={() => { setWalletPop(null); setPortfolioDrawer(true); }}
+            style={{ position: "fixed", left: walletPop.x, top: walletPop.y, zIndex: 94, border: `1.5px solid ${VALO_PURPLE}`,
+              background: T.panel, color: T.text, borderRadius: 11, padding: "10px 15px", fontFamily: T.mono, fontSize: 11.5, fontWeight: 900,
+              boxShadow: `0 12px 34px rgba(0,0,0,0.6), 0 0 14px ${VALO_PURPLE}55`, cursor: "pointer", animation: "coPop .14s ease" }}>
+            💼 OPEN WALLET
+          </button>
+        </>
+      )}
+      {watchMenu && (
+        <div data-wmenu="1" style={{ position: "fixed", left: watchMenu.x, top: watchMenu.y, zIndex: 96,
+          background: T.panel, border: `1px solid ${VALO_PURPLE}66`, borderRadius: 11, padding: 5, minWidth: 176,
+          boxShadow: "0 14px 40px rgba(0,0,0,0.6)", animation: "coPop .12s ease" }}>
+          <div style={{ fontFamily: T.mono, fontSize: 7, letterSpacing: 1.2, color: T.faint, padding: "3px 8px 5px" }}>ADD {watchMenu.sym} TO…</div>
+          <button onClick={() => { watchAdd(watchMenu.id, null); popPlus(); setWatchMenu(null); }}
+            style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "rgba(125,92,240,0.12)", color: VALO_PURPLE, borderRadius: 8, padding: "8px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, marginBottom: 3 }}>
+            📋 WATCHLIST
+          </button>
+          {watchSections.map((s2) => (
+            <button key={s2.id} onClick={() => { watchAdd(watchMenu.id, s2.id); popPlus(); setWatchMenu(null); }}
+              style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "rgba(255,255,255,0.03)", color: T.text, borderRadius: 8, padding: "7px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 9, fontWeight: 800, marginBottom: 3 }}>
+              ▸ {s2.name.toUpperCase()}
+            </button>
+          ))}
+          {!watchMenu.slot && (
+            <button onClick={() => { const base = scanOrder || shownRef.current.map((x) => x.id); if (!base.includes(watchMenu.id)) setScanOrder([watchMenu.id, ...base]); setWatchMenu(null); }}
+              style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "rgba(125,92,240,0.12)", color: VALO_PURPLE, borderRadius: 8, padding: "7px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 9, fontWeight: 900, marginBottom: 3 }}>
+              📡 ADD TO SCANNER
+            </button>
+          )}
+          {watchMenu.slot && (
+            <button onClick={() => { setScanOrder((scanOrder || shownRef.current.map((x) => x.id)).filter((x) => x !== watchMenu.id)); setWatchMenu(null); }}
+              style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "rgba(234,57,67,0.12)", color: T.red, borderRadius: 8, padding: "7px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 9, fontWeight: 900 }}>
+              ✕ REMOVE FROM SCANNER
+            </button>
+          )}
+        </div>
+      )}
+      {isMobile && plusPop > 0 && (
+        <div key={"m" + plusPop} style={{ pointerEvents: "none", position: "fixed", right: 12, top: `calc(${chatTabTop}% - 24px)`, zIndex: 92,
+          fontFamily: T.mono, fontSize: 15, fontWeight: 900, color: T.green, textShadow: `0 0 12px ${T.green}`,
+          animation: "plusFloat 1.05s ease forwards" }}>+1</div>
+      )}
+      {watchTrash && (
+        <div data-wtrash="1" style={{ position: "fixed", left: Math.min(watchTrash.x, (typeof window !== "undefined" ? window.innerWidth : 999) - 130), top: watchTrash.y, zIndex: 96,
+          background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 10, padding: 4, boxShadow: "0 14px 40px rgba(0,0,0,0.6)", animation: "coPop .12s ease" }}>
+          {watchSections.filter((s2) => s2.id !== watchTrash.sec).slice(0, 4).map((s2) => (
+            <button key={s2.id} onClick={() => { watchAdd(watchTrash.id, s2.id); setWatchTrash(null); }}
+              style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "rgba(125,92,240,0.10)", color: VALO_PURPLE, borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontFamily: T.mono, fontSize: 9, fontWeight: 900, marginBottom: 3 }}>
+              ▸ MOVE TO {s2.name.toUpperCase()}
+            </button>
+          ))}
+          {watchTrash.sec != null && (
+            <button onClick={() => { watchAdd(watchTrash.id, null); setWatchTrash(null); }}
+              style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "rgba(125,92,240,0.10)", color: VALO_PURPLE, borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontFamily: T.mono, fontSize: 9, fontWeight: 900, marginBottom: 3 }}>
+              ▸ MOVE TO MAIN LIST
+            </button>
+          )}
+          <button onClick={() => { watchRemove(watchTrash.id, watchTrash.sec); setWatchTrash(null); }}
+            style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "rgba(234,57,67,0.12)", color: T.red, borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900 }}>
+            🗑 REMOVE FROM WATCHLIST
+          </button>
+        </div>
       )}
       {pnlDrop && (
         <div data-pnldrop="1" style={{ position: "fixed", left: pnlDrop.x, top: pnlDrop.y, zIndex: 96,
@@ -7934,7 +9074,7 @@ export default function App() {
       )}
       {valoStatsOpen && <ValoStatsModal onClose={() => setValoStatsOpen(false)} isMobile={isMobile}
         valoUsd={valoUsdPrice} tvl={gTvl} burned={burned} valoWallet={valoWallet} />}
-      {burnOpen && <BurnModal onClose={() => setBurnOpen(false)} isMobile={isMobile} myBurned={myBurned} siteBurned={burned} />}
+      {burnOpen && <BurnModal valoUsd={valoUsdPrice} onClose={() => setBurnOpen(false)} isMobile={isMobile} myBurned={myBurned} siteBurned={burned} />}
       {ranksOpen && <RanksModal onClose={() => setRanksOpen(null)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens}
         myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)}
         focusUser={ranksOpen.focus || null} onOpenUser={(u) => { setRanksOpen(null); setProfileUser(u); }} />}
@@ -8000,11 +9140,13 @@ export default function App() {
             onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
             onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop(at); }} />
           {/* drag-set toggle + page tabs — chart above stays in view for both */}
-          <div style={{ display: "flex", gap: 5, padding: "7px 10px 0" }}>
+          <div style={{ display: "flex", gap: 5, padding: "7px 10px 0", overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}>
             <button onClick={() => setBotDragSet((v) => !v)} style={{ ...chip(botDragSet), flex: 1.2, textAlign: "center", padding: "7px 2px", fontFamily: T.mono, fontSize: 8, fontWeight: 800, color: botDragSet ? T.amber : T.dim, borderColor: botDragSet ? `${T.amber}66` : T.border }}>✋ DRAG-SET {botDragSet ? "ON" : "OFF"}</button>
             <button onClick={() => setMobPageTab("trader")} style={{ ...chip(mobPageTab === "trader"), flex: 1, textAlign: "center", padding: "7px 2px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 800 }}>🤖 TRADER</button>
             <button onClick={() => setMobPageTab("visual")} style={{ ...chip(mobPageTab === "visual"), flex: 1, textAlign: "center", padding: "7px 2px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, color: mobPageTab === "visual" ? T.amber : T.dim, borderColor: mobPageTab === "visual" ? `${T.amber}66` : T.border }}>👁 VISUAL</button>
             <button onClick={() => setMobPageTab("bots")} style={{ ...chip(mobPageTab === "bots"), flex: 1, textAlign: "center", padding: "7px 2px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 800 }}>📊 ALL BOTS</button>
+            <button onClick={() => { setMobWatch(true); setDrawerOpen(true); setQuickWatch(true); }}
+              style={{ ...chip(false), flex: "0 0 auto", textAlign: "center", padding: "7px 12px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: VALO_PURPLE, borderColor: `${VALO_PURPLE}66`, background: "rgba(125,92,240,0.1)" }}>📋 WATCHLIST</button>
           </div>
           <div style={{ flex: 1, overflowY: "auto", padding: 10 }}>
             {mobPageTab === "bots" ? (
@@ -8360,7 +9502,20 @@ export default function App() {
       {/* MOBILE CHAT DRAWER — tab handle on the right edge, wheels out on tap */}
       {isMobile && (
         <>
-          <button onClick={() => { if (tabJustDragged.current) return; setDrawerOpen((v) => !v); }} aria-label="Open chat — drag to reposition"
+          <button onClick={() => { if (tabJustDragged.current) return; setDrawerOpen((v) => !v); }} aria-label="Open chat — drag to reposition; hold to swap to watchlist"
+            onContextMenu={(e) => { e.preventDefault(); setMobWatch((v) => !v); if (navigator.vibrate) navigator.vibrate(12); }}
+            onTouchStartCapture={(e) => {
+              const t0 = e.touches && e.touches[0]; if (!t0) return;
+              const n = e.currentTarget; n._wx = t0.clientX; n._wy = t0.clientY;
+              if (n._wt) clearTimeout(n._wt);
+              n._wt = setTimeout(() => { n._wt = null; n._wfired = true; setMobWatch((v) => !v); if (navigator.vibrate) navigator.vibrate(14); }, 480);
+            }}
+            onTouchMoveCapture={(e) => {
+              const t0 = e.touches && e.touches[0]; const n = e.currentTarget;
+              if (t0 && n._wt && (Math.abs(t0.clientX - n._wx) > 10 || Math.abs(t0.clientY - n._wy) > 10)) { clearTimeout(n._wt); n._wt = null; }
+            }}
+            onTouchEndCapture={(e) => { const n = e.currentTarget; if (n._wt) { clearTimeout(n._wt); n._wt = null; } }}
+            onClickCapture={(e) => { const n = e.currentTarget; if (n._wfired) { n._wfired = false; e.preventDefault(); e.stopPropagation(); } }}
             onTouchStart={tabTouchStart("chat", chatTabTop)}
             style={{
               position: "fixed", right: 0, top: `${chatTabTop}%`, zIndex: 52, touchAction: "none",
@@ -8370,7 +9525,7 @@ export default function App() {
               writingMode: "vertical-rl", fontFamily: T.mono, fontSize: 10, letterSpacing: 2,
               boxShadow: "-4px 0 18px rgba(0,0,0,0.45)",
             }}>
-            {drawerOpen ? "CLOSE ›" : "‹ CHAT"}
+            {drawerOpen ? "CLOSE ›" : mobWatch ? "‹ WATCHLIST" : "‹ CHAT"}
           </button>
 
           <div onClick={() => setDrawerOpen(false)}
@@ -8390,10 +9545,94 @@ export default function App() {
             overflowY: "auto", padding: 12,
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <span style={{ fontFamily: T.mono, fontSize: 11, letterSpacing: 2, color: T.dim }}>CHAT ROOMS</span>
-              <button onClick={() => setDrawerOpen(false)} style={{ ...chip(false), padding: "3px 9px" }}>✕</button>
+              <span style={{ fontFamily: T.mono, fontSize: 11, letterSpacing: 2, color: mobWatch ? VALO_PURPLE : T.dim }}>{mobWatch ? "📋 WATCHLIST" : "CHAT ROOMS"}</span>
+              {mobWatch && (
+                <button onClick={() => { const id = Date.now(); setWatchSections((S) => [...S, { id, name: "NEW LIST", ids: [] }]); }}
+                  style={{ ...chip(false), padding: "3px 8px", fontSize: 9, fontWeight: 900, color: VALO_PURPLE, borderColor: `${VALO_PURPLE}55` }}>＋ LIST</button>
+              )}
+              <span style={{ display: "flex", gap: 6 }}>
+                <button onClick={() => setMobWatch((v) => !v)} title="Swap chat ⇄ watchlist (or hold the edge tab)"
+                  style={{ ...chip(mobWatch), padding: "3px 9px", fontSize: 9, fontWeight: 900, color: mobWatch ? VALO_PURPLE : T.dim }}>{mobWatch ? "💬" : "📋"}</button>
+                <button onClick={() => setDrawerOpen(false)} style={{ ...chip(false), padding: "3px 9px" }}>✕</button>
+              </span>
             </div>
-            {chatBlock}
+            {mobWatch ? (() => {
+              const tokOf = (id) => tokens.find((x) => x.id === id);
+              const row = (t, secId) => {
+                const score = scoreToken(t); const rc = ratingColor(score);
+                const base = t.candles[Math.max(0, t.candles.length - 96)].c;
+                const ch = ((t.price - base) / base) * 100;
+                const exp = watchExp === t.id;
+                return (
+                  <div key={t.id} style={{ position: "relative", overflow: "hidden", borderRadius: 8 }}
+                    onTouchStart={(e) => { const t0 = e.touches[0]; if (t0) { e.currentTarget._sx = t0.clientX; e.currentTarget._sy = t0.clientY; } }}
+                    onTouchMove={(e) => {
+                      if (watchExp === t.id) return; // open stats: no slide-to-delete
+                      const t0 = e.touches[0]; const n = e.currentTarget; if (!t0) return;
+                      const dx = t0.clientX - n._sx, dy = Math.abs(t0.clientY - n._sy);
+                      if (dy < 26 && dx < -42) setMobSwipe(t.id);
+                      else if (dx > 28) setMobSwipe((s3) => (s3 === t.id ? null : s3));
+                    }}>
+                    <button onClick={() => { const n2 = mobSwipe === t.id; if (n2) { setMobSwipe(null); return; } if (exp) { setSel(t.id); setClickMode(null); setWatchExp(null); setDrawerOpen(false); } else setWatchExp(t.id); }}
+                      onContextMenu={(e) => { e.preventDefault(); setWatchTrash({ id: t.id, sec: secId, x: e.clientX, y: e.clientY }); }}
+                      {...chipEditProps(() => setWatchTrash({ id: t.id, sec: secId, x: 60, y: 220 }))}
+                      style={{ width: "100%", textAlign: "left", border: `1px solid ${exp ? VALO_PURPLE : T.border}`, background: exp ? "rgba(125,92,240,0.07)" : "#141a26",
+                        borderRadius: exp ? "8px 8px 0 0" : 8, padding: "8px 9px", marginBottom: exp ? 0 : 5, display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+                        transform: mobSwipe === t.id ? "translateX(-64px)" : "translateX(0)", transition: "transform .18s ease", position: "relative", zIndex: 2 }}>
+                      <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={16} />
+                      <span style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 800, color: T.text, flex: 1 }}>{t.sym}</span>
+                      <span style={{ fontFamily: T.mono, fontSize: 9, color: ch >= 0 ? T.green : T.red }}>{pct(ch)}</span>
+                      <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: rc }}>{score}</span>
+                    </button>
+                    {!exp && <button onClick={() => { watchRemove(t.id, secId); setMobSwipe(null); }}
+                      style={{ position: "absolute", right: 0, top: 0, bottom: 5, width: 58, zIndex: 1,
+                        border: "none", background: T.red, color: "#fff", fontSize: 15, borderRadius: "0 8px 8px 0", cursor: "pointer",
+                        display: "grid", placeItems: "center" }}>🗑</button>}
+                    {exp && (
+                      <div style={{ border: `1px solid ${VALO_PURPLE}55`, borderTop: "none", borderRadius: "0 0 10px 10px", background: "rgba(12,15,22,0.92)", padding: "8px 9px", marginBottom: 6, position: "relative", zIndex: 2, transform: mobSwipe === t.id ? "translateX(-64px)" : "translateX(0)", transition: "transform .18s ease" }}>
+                        <TraceMini candles={t.candles} hue={t.hue} h={76} />
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 10px", fontFamily: T.mono, fontSize: 8, color: T.dim, margin: "7px 0" }}>
+                          <span>24H VOL <b style={{ color: T.text }}>{fmt$(t.greenUsd + t.redUsd)}</b></span>
+                          <span>24H Δ <b style={{ color: ch >= 0 ? T.green : T.red }}>{pct(ch)}</b></span>
+                          <span>PRICE <b style={{ color: T.text }}>${fmtP(t.price)}</b></span>
+                          <span>TOP 10 <b style={{ color: T.amber }}>{(16 + ((t.id * 7) % 26)).toFixed(1)}%</b></span>
+                        </div>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button onClick={() => { setSel(t.id); setClickMode(null); setWatchExp(null); setDrawerOpen(false); }}
+                            style={{ flex: 1, border: `1px solid ${VALO_PURPLE}`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE, borderRadius: 8, padding: "7px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, cursor: "pointer" }}>OPEN CHART ▸</button>
+                          <button onClick={() => setWatchExp(null)}
+                            style={{ ...chip(false), padding: "7px 12px", fontSize: 9, fontWeight: 900 }}>EXIT</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              };
+              return (
+                <>
+                  {watchLoose.map(tokOf).filter(Boolean).map((t) => row(t, null))}
+                  {watchSections.map((s2) => (
+                    <div key={s2.id}>
+                      {renamingSec === s2.id ? (
+                        <input autoFocus value={secName} onChange={(e) => setSecName(e.target.value)}
+                          onBlur={() => { setWatchSections((S) => S.map((x) => (x.id === s2.id ? { ...x, name: secName.trim() || x.name } : x))); setRenamingSec(null); }}
+                          onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                          style={{ ...inp, fontSize: 9, padding: "3px 7px", width: 140, margin: "9px 0 5px" }} />
+                      ) : (
+                        <div onClick={() => { setRenamingSec(s2.id); setSecName(s2.name); }} title="Tap: rename this list"
+                          style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1.5, color: VALO_PURPLE, margin: "9px 0 5px", cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
+                          {s2.name.toUpperCase()} <span style={{ color: T.faint, fontWeight: 700 }}>{s2.ids.length}</span> ✎
+                        </div>
+                      )}
+                      {s2.ids.map(tokOf).filter(Boolean).map((t) => row(t, s2.id))}
+                    </div>
+                  ))}
+                  {watchLoose.length + watchSections.reduce((a, s2) => a + s2.ids.length, 0) === 0 && (
+                    <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, textAlign: "center", padding: 20 }}>Your watchlist is empty — add tokens from search on PC, synced here.</div>
+                  )}
+                </>
+              );
+            })() : chatBlock}
           </div>
         </>
       )}
@@ -8506,6 +9745,42 @@ export default function App() {
         /* no double-tap / focus zoom surprises on touch — taps act instantly */
         input, textarea, select, button{ touch-action: manipulation; }
         @media(max-width:1150px){ .pt-grid{grid-template-columns:1fr !important;} }
+        /* right-hand columns follow you down the page */
+        .pt-grid > :nth-child(1), .pt-grid > :nth-child(3), .pt-grid > :nth-child(4){ position: sticky; top: var(--stkTop, 8px); align-self: start; max-height: calc(100vh/1.13 - var(--stkTop, 8px) - 8px); overflow-y: auto; scrollbar-width: thin; }
+        /* sticky dies inside any overflow:hidden ancestor — keep the page chain clean */
+        html, body, #root { overflow-x: clip; }
+        .goldb{ animation: goldPulse 2.6s ease-in-out infinite; }
+        @keyframes goldPulse{
+          0%,100% { box-shadow: 0 0 8px rgba(240,185,11,0.2); }
+          50%     { box-shadow: 0 0 15px rgba(240,185,11,0.42); }
+        }
+        .goldglare{ position:absolute; top:-45%; bottom:-45%; left:-55%; width:32%; z-index:1; pointer-events:none;
+          background: linear-gradient(105deg, transparent 0%, rgba(255,238,180,0.10) 38%, rgba(255,252,235,0.42) 50%, rgba(255,238,180,0.10) 62%, transparent 100%);
+          transform: skewX(-18deg);
+          animation: glareSweep 3.1s cubic-bezier(.45,.05,.4,1) infinite; }
+        @keyframes glareSweep{ 0%{ left:-55%; } 62%{ left:130%; } 100%{ left:130%; } }
+        [data-ecozone], [data-ecozone] *, [data-slot], [data-slot] *, [data-wall], [data-wall] *, .wall-bar, .wall-bar * {
+          -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+        }
+        button, [role="button"], a, input[type="range"] { touch-action: manipulation; }
+        button { -webkit-tap-highlight-color: transparent; }
+        body.valo-dragging, body.valo-dragging *{ cursor: grabbing !important; user-select: none !important; }
+        .dragGhost{ transform: translate(-50%,-50%) rotate(-3deg); animation: ghostPop .16s ease, ghostBreathe 1.1s ease-in-out .16s infinite; }
+        @keyframes ghostPop{ 0%{ transform: translate(-50%,-50%) scale(.6) rotate(0deg); opacity:.4; } 100%{ transform: translate(-50%,-50%) scale(1) rotate(-3deg); opacity:1; } }
+        @keyframes ghostBreathe{ 0%,100%{ box-shadow: 0 10px 30px rgba(0,0,0,0.65), 0 0 14px rgba(125,92,240,0.5); } 50%{ box-shadow: 0 10px 30px rgba(0,0,0,0.65), 0 0 26px rgba(125,92,240,0.9); } }
+        .slotHover{ animation: slotBreathe .9s ease-in-out infinite; }
+        @keyframes slotBreathe{ 0%,100%{ box-shadow: 0 0 14px rgba(125,92,240,0.4), inset 0 0 16px rgba(125,92,240,0.2); } 50%{ box-shadow: 0 0 26px rgba(125,92,240,0.75), inset 0 0 30px rgba(125,92,240,0.38); } }
+        .slotAbsorb{ animation: slotAbsorb .5s ease forwards; }
+        @keyframes slotAbsorb{
+          0%   { box-shadow: inset 0 0 0 3px rgba(125,92,240,0.9), inset 0 0 40px rgba(125,92,240,0.55); background: rgba(125,92,240,0.28); }
+          60%  { box-shadow: inset 0 0 0 2px rgba(125,92,240,0.5), inset 0 0 18px rgba(125,92,240,0.25); background: rgba(125,92,240,0.10); }
+          100% { box-shadow: none; background: transparent; }
+        }
+        @keyframes posSlide{ from{ transform: translateX(102%); } to{ transform: translateX(0); } }
+        @keyframes apexSpin{ 0%{ transform: scaleX(1); } 25%{ transform: scaleX(0.12); } 50%{ transform: scaleX(-1); } 75%{ transform: scaleX(-0.12); } 100%{ transform: scaleX(1); } }
+        @keyframes plusFloat { 0%{ opacity:0; transform: translateY(6px);} 20%{opacity:1;} 100%{ opacity:0; transform: translateY(-16px);} }
+        .qchip{ transition: box-shadow .55s ease, border-color .55s ease, background .55s ease; }
+        .qchip:active{ transition: none; box-shadow: 0 0 14px rgba(125,92,240,0.7) !important; border-color: #7D5CF0 !important; background: rgba(125,92,240,0.22) !important; }
         button:focus-visible{outline:2px solid ${T.blue};outline-offset:2px}
         .tape-item{ position:absolute; bottom:0; font-family:${T.mono}; font-size:11px; font-weight:800; animation: floatUp 3.3s ease-out forwards; }
         @keyframes floatUp{
