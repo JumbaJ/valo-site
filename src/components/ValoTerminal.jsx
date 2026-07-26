@@ -3034,7 +3034,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
       return t && { t, isBuy: r2() < 0.55, sol: +(0.1 + r2() * 14).toFixed(2), ts: now - Math.floor(r2() * 30 * 86400e3) };
     }).filter(Boolean).sort((a, b) => b.ts - a.ts);
     return { holds, txAll };
-  }, [name, tokens]);
+  }, [name, tokens, cloudProfile]); // cloudProfile lands async — without it here, real holdings load and get ignored
   const txShown = txShowAll ? txAll : txAll.filter((x) => {
     const a = txFrom ? new Date(txFrom + "T00:00:00").getTime() : -Infinity;
     const b = txTo ? new Date(txTo + "T23:59:59").getTime() : Infinity;
@@ -7064,13 +7064,18 @@ export default function App() {
         if (stop) return;
         const holds = (pos || []).map((r) => {
           if (!(+r.qty > 0)) return null;
+          // qty column = pay-unit amount spent (SOL or $VALO) → convert to
+          // token quantity at the entry price so $ values read true
+          const usdIn = +r.qty * (r.pay_unit === "VALO" ? 0.0125 : SOL_USD);
           const t = tokensRef.current.find((x) => String(x.pool || x.id) === String(r.token_key));
-          if (t) return { t, qty: +r.qty, entry: +r.entry_price || t.price, since: new Date(r.opened_at || Date.now()).getTime() };
+          const entry = +r.entry_price || (t ? t.price : 0) || 1e-9;
+          const tokQty = usdIn / entry;
+          if (t) return { t, qty: tokQty, entry, since: new Date(r.opened_at || Date.now()).getTime() };
           // pool not on this device's trending list right now — render from the row itself
           const sym2 = r.sym || String(r.token_key).slice(0, 4).toUpperCase();
           return {
-            t: { id: r.token_key, pool: r.token_key, sym: sym2, name: sym2, hue: symbolHue(sym2), img: null, price: +r.entry_price || 0, candles: [] },
-            qty: +r.qty, entry: +r.entry_price || 0, since: new Date(r.opened_at || Date.now()).getTime(), offMarket: true,
+            t: { id: r.token_key, pool: r.token_key, sym: sym2, name: sym2, hue: symbolHue(sym2), img: null, price: entry, candles: [] },
+            qty: tokQty, entry, since: new Date(r.opened_at || Date.now()).getTime(), offMarket: true,
           };
         }).filter(Boolean);
         setProfileCloud({ id: prof.id, handle: prof.handle, icon: prof.icon, holds,
