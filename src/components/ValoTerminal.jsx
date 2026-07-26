@@ -7933,9 +7933,12 @@ export default function App() {
 
   // SOCIAL — plain user chat, coin refs yellow & clickable
   const renderSocial = (m) => (
-    <div key={m.id} style={{ margin: "6px 0", fontFamily: T.mono, fontSize: 11, lineHeight: 1.55 }}>
+    <div key={m.id} style={{ margin: "6px 0", fontFamily: T.mono, fontSize: 11, lineHeight: 1.55,
+      background: m.cloud ? "rgba(125,92,240,0.07)" : "none", borderLeft: m.cloud ? `2px solid ${VALO_PURPLE}` : "none",
+      borderRadius: m.cloud ? 6 : 0, padding: m.cloud ? "3px 7px" : 0 }}>
       <span style={{ color: T.faint, fontSize: 9.5 }}>{m.ts} </span>
-      <span style={{ color: m.me ? accent(258, 68) : T.blue }}>@{m.user}</span>
+      {m.cloud && <span title="Real user — live message" style={{ fontSize: 9, marginRight: 3 }}>☁</span>}
+      <span style={{ color: m.cloud ? VALO_PURPLE : m.me ? accent(258, 68) : T.blue, fontWeight: m.cloud ? 800 : 400 }}>@{m.user}</span>
       <span style={{ color: T.text }}> {m.text} </span>
       {m.sym && <CoinLink sym={m.sym} tokenId={m.tokenId} />}
     </div>
