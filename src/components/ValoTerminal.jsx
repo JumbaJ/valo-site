@@ -2486,7 +2486,7 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
                 return (
                   <div key={bi} className="lb-pod" onClick={() => !r.you && onOpenUser && onOpenUser(r.user)}
                     style={{ position: "relative", border: `1.5px solid ${tabCol}`, background: `linear-gradient(120deg, ${tabCol}1e, ${tr.color}0a 60%)`,
-                      borderRadius: 12, display: "flex", alignItems: "center", gap: 10, padding: rk === 1 ? "13px 12px" : "10px 12px",
+                      borderRadius: 12, display: "flex", alignItems: "center", gap: 10, padding: rk === 1 ? "19px 12px 13px" : "17px 12px 10px",
                       cursor: "pointer", boxShadow: rk === 1 ? `0 0 24px ${tabCol}44` : `0 0 10px ${tabCol}22` }}>
                     <span style={{ position: "absolute", top: -1, right: 10, background: tabCol, color: "#0a0d14", fontFamily: T.mono,
                       fontSize: 7.5, fontWeight: 900, letterSpacing: 1.5, borderRadius: "0 0 7px 7px", padding: "2px 10px" }}>{medal} #{rk} {tabTxt}</span>
@@ -9881,9 +9881,9 @@ export default function App() {
                         <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 800, color: rc, borderLeft: `1px solid ${T.border}`, paddingLeft: 7 }}>{score}</span>
                       </button>
                       {exp && (
-                        <div style={{ pointerEvents: "auto", border: `1px solid ${VALO_PURPLE}55`, borderTop: "none", borderRadius: "0 0 10px 10px", background: "rgba(12,15,22,0.92)", padding: "8px 9px", marginBottom: 6 }}>
-                          <TraceMini candles={t.candles} hue={t.hue} />
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 10px", fontFamily: T.mono, fontSize: 8, color: T.dim, margin: "7px 0" }}>
+                        <div style={{ pointerEvents: "auto", border: `1px solid ${VALO_PURPLE}55`, borderTop: "none", borderRadius: "0 0 10px 10px", background: "rgba(12,15,22,0.92)", padding: "12px 12px 11px", marginBottom: 6 }}>
+                          <TraceMini candles={t.candles} hue={t.hue} h={112} />
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "7px 14px", fontFamily: T.mono, fontSize: 10.5, color: T.dim, margin: "11px 0", lineHeight: 1.35 }}>
                             <span>24H VOL <b style={{ color: T.text }}>{fmt$(t.greenUsd + t.redUsd)}</b></span>
                             <span>24H Δ <b style={{ color: ch >= 0 ? T.green : T.red }}>{pct(ch)}</b></span>
                             <span>PRICE <b style={{ color: T.text }}>${fmtP(t.price)}</b></span>
@@ -9894,7 +9894,7 @@ export default function App() {
                             <span>HOLDERS <b style={{ color: T.text }}>{t.traders}</b></span>
                           </div>
                           <button onClick={() => { setSel(t.id); setClickMode(null); setWatchExp(null); }}
-                            style={{ width: "100%", border: `1px solid ${VALO_PURPLE}`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE, borderRadius: 8, padding: "6px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>
+                            style={{ width: "100%", border: `1px solid ${VALO_PURPLE}`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE, borderRadius: 9, padding: "9px", fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1.2, cursor: "pointer" }}>
                             OPEN FULL CHART ▸
                           </button>
                         </div>
@@ -11138,9 +11138,10 @@ export default function App() {
         @keyframes posSlide{ from{ transform: translateX(102%); } to{ transform: translateX(0); } }
         @keyframes apexSpin{ 0%{ transform: scaleX(1); } 25%{ transform: scaleX(0.12); } 50%{ transform: scaleX(-1); } 75%{ transform: scaleX(-0.12); } 100%{ transform: scaleX(1); } }
         @media (min-width: 820px) {
-          [style*="font-size: 6px"], [style*="font-size: 6.5px"] { font-size: 8px !important; }
-          [style*="font-size: 7px"], [style*="font-size: 7.5px"] { font-size: 9px !important; }
-          [style*="font-size: 8px"], [style*="font-size: 8.5px"] { font-size: 9.5px !important; }
+          [style*="font-size: 6px"], [style*="font-size: 6.5px"] { font-size: 9px !important; }
+          [style*="font-size: 7px"], [style*="font-size: 7.5px"] { font-size: 9.5px !important; }
+          [style*="font-size: 8px"], [style*="font-size: 8.5px"] { font-size: 10px !important; }
+          [style*="font-size: 9px"], [style*="font-size: 9.5px"] { font-size: 10.5px !important; }
         }
         @keyframes uSweep{ 0%,100%{ transform: translateX(0) rotate(0deg); opacity: 0.65; } 30%{ transform: translateX(-2px) rotate(-14deg); opacity: 1; } 65%{ transform: translateX(2px) rotate(12deg); opacity: 1; } }
         @keyframes sellPop{ 0%{ transform: scale(1); } 40%{ transform: scale(1.08); } 100%{ transform: scale(1); } }
