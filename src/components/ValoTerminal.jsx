@@ -7022,7 +7022,7 @@ export default function App() {
         const posRows = Object.entries(positions).filter(([, p]) => p && p.amt > 0).map(([k, p]) => {
           const tk = tokensRef.current.find((t) => String(t.id) === String(k)) || tokensRef.current.find((t) => String(t.pool || "") === String(k));
           return {
-            user_id: uid, token_key: String(p.pool || (tk && tk.pool) || k), sym: (tk && tk.sym) || null,
+            user_id: uid, token_key: String(p.pool || k), sym: (tk && tk.sym) || null,
             qty: p.amt, entry_price: p.entry || 0, pay_unit: p.pay || "SOL", updated_at: new Date().toISOString(),
           };
         });
@@ -7031,7 +7031,7 @@ export default function App() {
         const botRows = botRuns.filter((r) => r.status === "live").map((r) => {
           const tk = tokensRef.current.find((t) => String(t.id) === String(r.tokenId));
           return {
-          user_id: uid, token_key: String((tk && tk.pool) || r.tokenId), sym: r.sym || null, side: r.side || "buy",
+          user_id: uid, token_key: String(r.pool || r.tokenId), sym: r.sym || null, side: r.side || "buy",
           level: r.level || 0, remaining: r.remaining || 0, entry: r.entry || 0, pay: r.pay || "SOL", status: "live",
         }; });
         if (botRows.length) await sb.from("bot_runs").insert(botRows);
@@ -7050,11 +7050,9 @@ export default function App() {
   useEffect(() => {
     if (!sb || !profileUser) { setProfileCloud(null); return; }
     let stop = false;
-    (async () => {
+    let ch = null, rt = null;
+    const load = async (prof) => {
       try {
-        const { data: profs } = await sb.from("profiles").select("id, handle, icon").ilike("handle", profileUser).limit(1);
-        const prof = profs && profs[0];
-        if (stop || !prof) { if (!stop) setProfileCloud(null); return; }
         const [{ data: w }, { data: pos }, { data: act }, { data: cos }] = await Promise.all([
           sb.from("wallets").select("*").eq("user_id", prof.id).maybeSingle(),
           sb.from("positions").select("*").eq("user_id", prof.id),
@@ -7088,8 +7086,23 @@ export default function App() {
           callouts: (cos || []).map((r) => ({ sym: r.sym, mcAt: +r.mc_at || 0, ts: new Date(r.ts).getTime() })),
           solBalance: w ? +w.sol_balance : null, valoBalance: w ? +w.valo_balance : null });
       } catch (e) { if (!stop) setProfileCloud(null); }
+    };
+    (async () => {
+      try {
+        const { data: profs } = await sb.from("profiles").select("id, handle, icon").ilike("handle", profileUser).limit(1);
+        const prof = profs && profs[0];
+        if (stop || !prof) { if (!stop) setProfileCloud(null); return; }
+        await load(prof);
+        // 🔴 LIVE: their trades/callouts refresh this profile the moment they land
+        const bump = () => { clearTimeout(rt); rt = setTimeout(() => { if (!stop) load(prof); }, 700); };
+        ch = sb.channel("valo-watch-" + prof.id)
+          .on("postgres_changes", { event: "*", schema: "public", table: "positions", filter: `user_id=eq.${prof.id}` }, bump)
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "activity", filter: `user_id=eq.${prof.id}` }, bump)
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "callouts", filter: `user_id=eq.${prof.id}` }, bump)
+          .subscribe();
+      } catch (e) { if (!stop) setProfileCloud(null); }
     })();
-    return () => { stop = true; };
+    return () => { stop = true; clearTimeout(rt); if (ch) { try { sb.removeChannel(ch); } catch (e) {} } };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileUser, cloudUser && cloudUser.id]);
   const lookupProfile = async (handle) => {
@@ -8045,7 +8058,7 @@ export default function App() {
         // funds already escrowed at arm time — the fill just converts them
         TestLog.push("bot_fill", { sym: t.sym, amt: o.amt, pay: o.pay, px: t.price });
         const runId = "run" + Date.now() + Math.random();
-        setBotRuns((R) => [...R, { id: runId, tokenId: o.tokenId, sym: t.sym, hue: t.hue, entry: t.price, level: o.level, amt: o.amt, remaining: o.amt, pay: o.pay, legs: o.legs || [], stopLossPrice: o.stopLoss || null, filledTs: Date.now(), exits: [], status: "live" }]);
+        setBotRuns((R) => [...R, { id: runId, tokenId: o.tokenId, pool: t.pool || null, sym: t.sym, hue: t.hue, entry: t.price, level: o.level, amt: o.amt, remaining: o.amt, pay: o.pay, legs: o.legs || [], stopLossPrice: o.stopLoss || null, filledTs: Date.now(), exits: [], status: "live" }]);
         sayPrivate({ type: "note", text: `🎯 bot filled — BOUGHT ${o.amt} ${o.pay} of ${t.sym} @ $${fmtP(t.price)} (armed @ $${fmtP(o.level)})` });
         const follow = [];
         if (o.vtSell > 0) {
