@@ -3208,9 +3208,9 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     </div>
   );
 }
-function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], onOpenToken, onOpenUser, onAccept, onDecline, notifSetting, setNotifSetting }) {
+function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], onOpenToken, onOpenUser, onAccept, onDecline, onCloudReq, notifSetting, setNotifSetting }) {
   const [tab, setTab] = useState("all"); // all | callout | follower | friend
-  const shown = notifs.filter((n) => tab === "all" || n.type === tab);
+  const shown = notifs.filter((n) => tab === "all" || n.type === tab || (tab === "friend" && n.type === "friendreq"));
   const icon = (t) => (t === "callout" ? "📣" : t === "follower" ? "👥" : "🤝");
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 62, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
@@ -3258,6 +3258,19 @@ function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], o
                 )}
                 {body}
               </span>
+              {n.type === "friendreq" && n.reqId && !n.reqDone && (
+                <span style={{ display: "flex", gap: 4, flex: "0 0 auto" }}>
+                  <button onClick={(e) => { e.stopPropagation(); onCloudReq && onCloudReq(n, true); }}
+                    style={{ border: "none", background: "rgba(22,199,132,0.16)", color: T.green, borderRadius: 7, padding: "4px 8px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, cursor: "pointer" }}>✓ ACCEPT</button>
+                  <button onClick={(e) => { e.stopPropagation(); onCloudReq && onCloudReq(n, false); }}
+                    style={{ border: "none", background: "rgba(234,57,67,0.14)", color: T.red, borderRadius: 7, padding: "4px 8px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, cursor: "pointer" }}>✕</button>
+                </span>
+              )}
+              {n.type === "friendreq" && n.reqDone && (
+                <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, color: n.reqDone === "accepted" ? T.green : T.faint, flex: "0 0 auto" }}>
+                  {n.reqDone === "accepted" ? "✓ FRIENDS" : "DECLINED"}
+                </span>
+              )}
               <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, flex: "0 0 auto" }}>{timeAgo(n.ts)}</span>
             </div>
           ); })}
@@ -7008,6 +7021,62 @@ export default function App() {
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [solBalance, valoWallet, positions, watchSections, watchLoose, botRuns, cloudUser && cloudUser.id]);
+  // ☁ SOCIAL GRAPH — real follows & friend requests. Acting on a profile that
+  // belongs to a REAL account writes the cloud row; the other user's client
+  // hears the INSERT/UPDATE live and drops it into their notification feed.
+  const lookupProfile = async (handle) => {
+    if (!sb || !handle) return null;
+    try { const { data } = await sb.from("profiles").select("id, handle").ilike("handle", handle).limit(1); return (data && data[0]) || null; }
+    catch (e) { return null; }
+  };
+  const cloudFollow = async (handle, on) => {
+    if (!sb || !cloudUser) return;
+    const t = await lookupProfile(handle); if (!t || t.id === cloudUser.id) return;
+    try {
+      if (on) await sb.from("follows").insert({ follower_id: cloudUser.id, follower_handle: username, followed_id: t.id });
+      else await sb.from("follows").delete().eq("follower_id", cloudUser.id).eq("followed_id", t.id);
+    } catch (e) {}
+  };
+  const cloudFriendReq = async (handle) => {
+    if (!sb || !cloudUser) return;
+    const t = await lookupProfile(handle); if (!t || t.id === cloudUser.id) return;
+    try { await sb.from("friend_requests").insert({ from_id: cloudUser.id, from_handle: username, to_id: t.id, status: "pending" }); } catch (e) {}
+  };
+  const cloudFriendAnswer = async (reqId, accept) => {
+    if (!sb || !cloudUser) return;
+    try { await sb.from("friend_requests").update({ status: accept ? "accepted" : "declined" }).eq("id", reqId).eq("to_id", cloudUser.id); } catch (e) {}
+  };
+  useEffect(() => {
+    if (!sb || !cloudUser) return;
+    const uid = cloudUser.id;
+    const ch = sb.channel("valo-social-" + uid)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "follows", filter: `followed_id=eq.${uid}` }, (payload) => {
+        const r = payload.new; if (!r) return;
+        pushNotif({ type: "follower", user: r.follower_handle || "someone", tokenId: null,
+          text: `@${r.follower_handle || "someone"} followed you` });
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "friend_requests", filter: `to_id=eq.${uid}` }, (payload) => {
+        const r = payload.new; if (!r || r.status !== "pending") return;
+        pushNotif({ type: "friendreq", user: r.from_handle || "someone", tokenId: null, reqId: r.id,
+          text: `@${r.from_handle || "someone"} sent you a friend request` });
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "friend_requests", filter: `from_id=eq.${uid}` }, (payload) => {
+        const r = payload.new; if (!r || r.status === "pending") return;
+        pushNotif({ type: r.status === "accepted" ? "friend" : "declined", user: r.to_handle || "they", tokenId: null,
+          text: r.status === "accepted" ? `🤝 your friend request was accepted` : `your friend request was declined` });
+      })
+      .subscribe();
+    // missed-while-offline: pending requests + follows from the last week land in the feed on login
+    (async () => {
+      try {
+        const { data } = await sb.from("friend_requests").select("*").eq("to_id", uid).eq("status", "pending");
+        (data || []).forEach((r) => pushNotif({ type: "friendreq", user: r.from_handle || "someone", tokenId: null, reqId: r.id,
+          text: `@${r.from_handle || "someone"} sent you a friend request` }));
+      } catch (e) {}
+    })();
+    return () => { try { sb.removeChannel(ch); } catch (e) {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudUser && cloudUser.id]);
   // 🪪 keep the public handle in lockstep with the portfolio username
   useEffect(() => {
     if (!sb || !cloudUser || !cloudLoaded.current || !username) return;
@@ -10105,6 +10174,11 @@ export default function App() {
         myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)} />}
       {myCalloutsOpen && <MyCalloutsModal onClose={() => setMyCalloutsOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username} onOpenToken={navigateToToken} />}
       {notifOpen && <NotificationsModal onClose={() => setNotifOpen(false)} isMobile={isMobile} notifs={notifs} friendReqs={friendReqs}
+        onCloudReq={(n, accept) => {
+          cloudFriendAnswer(n.reqId, accept);
+          if (accept) setFriendsList((F) => (F.includes(n.user) ? F : [...F, n.user]));
+          setNotifs((N) => N.map((x) => (x.id === n.id ? { ...x, reqDone: accept ? "accepted" : "declined" } : x)));
+        }}
         onOpenToken={navigateToToken} onOpenUser={(u) => setProfileUser(u)}
         onAccept={(u) => { setFriendReqs((L) => L.filter((x) => x !== u)); setFriendsList((L) => [...L, u]); }}
         onDecline={(u) => setFriendReqs((L) => L.filter((x) => x !== u))}
@@ -10113,10 +10187,11 @@ export default function App() {
         onClose={() => setFollowListOpen(null)} isMobile={isMobile} onOpenUser={(u) => setProfileUser(u)} />}
       {profileUser && <UserProfileModal name={profileUser} onClose={() => setProfileUser(null)} isMobile={isMobile} tokens={tokens}
         isFollowing={followingList.includes(profileUser)}
-        onToggleFollow={() => setFollowingList((L) => (L.includes(profileUser) ? L.filter((x) => x !== profileUser) : [...L, profileUser]))}
+        onToggleFollow={() => { cloudFollow(profileUser, !followingList.includes(profileUser)); setFollowingList((L) => (L.includes(profileUser) ? L.filter((x) => x !== profileUser) : [...L, profileUser])); }}
         friendStatus={friendsList.includes(profileUser) ? "friends" : sentFriendReqs.includes(profileUser) ? "requested" : "none"}
         onFriendAction={() => {
           if (friendsList.includes(profileUser)) return;
+          if (!sentFriendReqs.includes(profileUser)) cloudFriendReq(profileUser);
           setSentFriendReqs((L) => (L.includes(profileUser) ? L.filter((x) => x !== profileUser) : [...L, profileUser])); // tap again cancels
         }}
         onOpenTierList={() => setRanksOpen({ focus: profileUser })} onOpenLeaderboard={() => setRanksOpen({ focus: profileUser })}
