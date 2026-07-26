@@ -6138,6 +6138,7 @@ export default function App() {
   const [showDevTrades, setShowDevTrades] = useState(false); // overlay dev buys/sells on chart
   const [createdOpen, setCreatedOpen] = useState(false);     // dev "created tokens" sub-section
   const [tf, setTf] = useState(15);
+  const tokensRef = useRef([]); tokensRef.current = tokens; // live mirror for effects that must not re-run on every tick
   const [alerts, setAlerts] = useState([]);     // MARKET ALERTS — rising/falling coins only
   const [socialMsgs, setSocialMsgs] = useState([]); // PUBLIC user chat
   const [username, setUsername] = useState(() => {
@@ -7062,7 +7063,11 @@ export default function App() {
   };
   const [ecoFull, setEcoFull] = useState(false);  // 📱 fullscreen token ecosystem
   const [ecoQ, setEcoQ] = useState("");
-  const [liveData, setLiveData] = useState(() => typeof window !== "undefined" && /[?&](live|test)=1/.test(window.location.search)); // 🛰 real tokens, simulated wallet
+  const [liveData, setLiveData] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const url = /[?&](live|test)=1/.test(window.location.search);
+    return url || window.__VALO_LIVE__ === true; // env bridge set by main.jsx (VITE_LIVE_DATA=1)
+  }); // 🛰 real tokens, simulated wallet
   const liveArrRef = useRef([]);           // DexScreener top pump pairs → token overrides
   const liveDataRef = useRef(false);
   useEffect(() => {
@@ -7071,6 +7076,24 @@ export default function App() {
     if (!liveData) return;
     let stop = false;
     const load = async () => {
+      // primary: our own cached serverless API (GeckoTerminal upstream, keyless)
+      try {
+        const r = await fetch("/api/tokens");
+        if (r.ok) {
+          const arr = await r.json();
+          if (!stop && Array.isArray(arr) && arr.length) {
+            liveArrRef.current = arr.slice(0, 14).map((x) => ({
+              sym: (x.sym || "???").toUpperCase().slice(0, 10), name: x.name || "live token",
+              price: +x.price || 0, mc: +x.mc || 0, tvl: +x.tvl || 0,
+              img: x.img || null, pool: x.id, mint: x.mint || null,
+              greenUsd: +x.greenUsd || 0, redUsd: +x.redUsd || 0,
+              traders: +x.traders || 0, ch24: +x.ch24 || 0,
+            }));
+            return;
+          }
+        }
+      } catch (e) { /* fall through to DexScreener */ }
+      // fallback: direct DexScreener (local dev without serverless functions)
       try {
         const r = await fetch("https://api.dexscreener.com/latest/dex/search?q=pump");
         const j = await r.json();
@@ -7083,12 +7106,32 @@ export default function App() {
           mc: p.fdv || p.marketCap || 0,
           tvl: (p.liquidity && p.liquidity.usd) || 0,
         }));
-      } catch (e) { console.warn("[VALO LIVE] DexScreener fetch failed", e); }
+      } catch (e) { console.warn("[VALO LIVE] live fetch failed", e); }
     };
     load();
-    const iv = setInterval(load, 5000);
+    const iv = setInterval(load, 15000); // matches the API's edge cache window
     return () => { stop = true; clearInterval(iv); };
   }, [liveData]);
+  // 🛰 real candles for the selected live token — history from /api/candles,
+  // then the 2.2s glide tick keeps extending it toward the live price
+  useEffect(() => {
+    if (!liveData || sel == null) return;
+    let stale = false;
+    const t0 = tokensRef.current ? tokensRef.current.find((x) => x.id === sel) : null;
+    const pool = t0 && t0.pool;
+    if (!pool) return;
+    (async () => {
+      try {
+        const r = await fetch(`/api/candles?pool=${encodeURIComponent(pool)}&tf=${tf}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (stale || !Array.isArray(j) || j.length < 10) return;
+        const mapped = j.slice(-260).map((c) => ({ o: +c.o, h: +c.h, l: +c.l, c: +c.c }));
+        setTokens((Ts) => Ts.map((x) => (x.id === sel ? { ...x, candles: mapped, price: mapped[mapped.length - 1].c } : x)));
+      } catch (e) { /* keep synthetic candles */ }
+    })();
+    return () => { stale = true; };
+  }, [liveData, sel, tf]);
   const [isFs, setIsFs] = useState(false);                          // ⛶ fullscreen state (Esc exits natively)
   useEffect(() => {
     const on = () => setIsFs(!!document.fullscreenElement);
@@ -7155,7 +7198,10 @@ export default function App() {
           const driftL = (c - prev) / (prev || 1);
           return { ...t, candles: candlesL, price: c, sym: lv.sym, name: lv.name,
             mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
-            greenUsd: Math.max(0, t.greenUsd * (1 + driftL * 2)), redUsd: Math.max(1, t.redUsd * (1 - driftL * 1.2)),
+            img: lv.img || t.img, pool: lv.pool || t.pool, liveMint: lv.mint || t.liveMint,
+            traders: lv.traders || t.traders,
+            greenUsd: lv.greenUsd > 0 ? lv.greenUsd : Math.max(0, t.greenUsd * (1 + driftL * 2)),
+            redUsd: lv.redUsd > 0 ? lv.redUsd : Math.max(1, t.redUsd * (1 - driftL * 1.2)),
             ageMin: t.ageMin + 0.04 };
         }
         const candles = tickCandles(t.candles, t.momentum, t.buyPressure);
