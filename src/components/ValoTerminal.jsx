@@ -10141,14 +10141,14 @@ export default function App() {
       {/* rail tabs — one row so they can never overlap each other, parked
           clear of the FULLSCREEN button that owns the corner */}
       {!isMobile && (
-        <div style={{ position: "fixed", top: 0, right: 138, zIndex: 56, display: "flex", alignItems: "flex-start", gap: 8 }}>
+        <div style={{ position: "fixed", top: 0, right: 172, zIndex: 56, display: "flex", alignItems: "flex-start", gap: 8 }}>
       {sb && !isMobile && (
         <button onClick={() => setCloudOpen(true)}
           title={cloudUser ? `Signed in as ${cloudUser.email} — portfolio syncs to the cloud` : "Sign in — your paper portfolio, watchlist and bots follow you across devices"}
-          style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto",
+          style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto", width: 152, height: 26, boxSizing: "border-box", justifyContent: "center", 
             borderTop: "none", borderRadius: "0 0 9px 9px",
             background: cloudUser ? "rgba(125,92,240,0.16)" : "rgba(59,130,246,0.16)",
-            border: `1px solid ${cloudUser ? VALO_PURPLE : T.blue}`, padding: "4px 10px", cursor: "pointer",
+            border: `1px solid ${cloudUser ? VALO_PURPLE : T.blue}`, padding: "0 8px", cursor: "pointer",
             boxShadow: cloudUser ? `0 0 10px ${VALO_PURPLE}55` : `0 0 12px ${T.blue}66`,
             animation: cloudUser ? "none" : "claimPulse 2.6s ease-in-out infinite" }}>
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: cloudUser ? (cloudSynced ? T.green : T.amber) : T.blue, boxShadow: `0 0 6px ${cloudUser ? (cloudSynced ? T.green : T.amber) : T.blue}` }} />
@@ -10198,8 +10198,8 @@ export default function App() {
       {!isMobile && (
         <button onClick={() => setLiveData((v) => !v)}
           title={liveData ? "LIVE DATA ON — real pump.fun pairs via DexScreener; wallet & fills stay simulated. Click to return to the demo feed." : "Pull REAL Solana pump tokens (DexScreener) into the terminal — paper trading on live prices"}
-          style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto",
-            background: liveData ? "rgba(22,199,132,0.14)" : "rgba(15,19,28,0.72)", border: `1px solid ${liveData ? T.green : T.border}`, borderTop: "none", borderRadius: "0 0 9px 9px", padding: "4px 9px", cursor: "pointer",
+          style={{ display: "flex", alignItems: "center", gap: 6, width: 152, height: 26, boxSizing: "border-box", justifyContent: "center",  flex: "0 0 auto",
+            background: liveData ? "rgba(22,199,132,0.14)" : "rgba(15,19,28,0.72)", border: `1px solid ${liveData ? T.green : T.border}`, borderTop: "none", borderRadius: "0 0 9px 9px", padding: "0 8px", cursor: "pointer",
             boxShadow: liveData ? "0 0 10px rgba(22,199,132,0.35)" : "none" }}>
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: liveData ? T.green : "#39414f", boxShadow: liveData ? `0 0 6px ${T.green}` : "none" }} />
           <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: liveData ? T.green : "rgba(138,148,168,0.7)", fontWeight: 800 }}>{liveData ? "LIVE DATA · PAPER" : "LIVE DATA"}</span>
@@ -10210,9 +10210,9 @@ export default function App() {
       {!isMobile && (
         <button onClick={() => { try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); } catch (e) {} }}
           title={isFs ? "Press Esc to exit fullscreen" : "Fullscreen — same proportions, stretched to fill your screen. Esc exits."}
-          style={{ position: "fixed", top: 0, right: 12, zIndex: 56, display: "flex", alignItems: "center", gap: 6,
+          style={{ position: "fixed", top: 0, right: 12, zIndex: 56, display: "flex", alignItems: "center", gap: 6, width: 152, height: 26, boxSizing: "border-box", justifyContent: "center", 
             background: "rgba(15,19,28,0.72)", border: `1px solid ${T.border}`, borderTop: "none",
-            borderRadius: "0 0 9px 9px", padding: "4px 9px", cursor: "pointer" }}>
+            borderRadius: "0 0 9px 9px", padding: "0 8px", cursor: "pointer" }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={isFs ? VALO_PURPLE : "#8a94a8"} strokeWidth="2.4" strokeLinecap="round">
             <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
           </svg>
