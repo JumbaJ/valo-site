@@ -6966,8 +6966,17 @@ export default function App() {
   // how far right the grid may extend before the wallet column would leave the screen
   const computeMaxRight = () => {
     const g = gridRef.current; if (!g) return 0;
+    const Z = 1.13; // grid renders inside zoom:1.13 — rects are visual px, pullR is pre-zoom units
     const r = g.getBoundingClientRect();
-    return Math.max(0, Math.round(window.innerWidth - (r.right + pullR) - 8));
+    return Math.max(0, Math.round((window.innerWidth - r.right - 8) / Z));
+  };
+  // if the grid's right edge ever pokes past the window (resize, fullscreen
+  // exit, mid-animation misread), shave the overshoot off pullR — signed, so
+  // it corrects INWARD too, unlike a min() clamp that can't see overflow
+  const fixRightOverflow = () => {
+    const g = gridRef.current; if (!g) return;
+    const over = g.getBoundingClientRect().right + 8 - window.innerWidth; // visual px past the edge
+    if (over > 1) setPullR((p) => Math.max(0, Math.round(p - over / 1.13)));
   };
   const [extraH, setExtraH] = useState(70); // px extra chart height (starts a touch taller)
   const resizeRef = useRef(null);
@@ -6992,13 +7001,13 @@ export default function App() {
   // never ratcheting, so a mid-animation misread can't stick.
   useEffect(() => {
     if (typeof window !== "undefined" && window.innerWidth < 900) return;
-    const settle = () => setPullX(computeMaxPull());
+    const settle = () => { setPullX(computeMaxPull()); fixRightOverflow(); };
     const ids = [420, 720].map((ms) => setTimeout(settle, ms));
     return () => ids.forEach(clearTimeout);
   }, [wallOpen]);
   // window resizes re-clamp too, so nothing ever slides under the wall
   useEffect(() => {
-    const onRz = () => { const mp = computeMaxPull(); setPullX((p) => Math.min(p, mp)); };
+    const onRz = () => { const mp = computeMaxPull(); setPullX((p) => Math.min(p, mp)); fixRightOverflow(); };
     window.addEventListener("resize", onRz);
     return () => window.removeEventListener("resize", onRz);
   }, [wallOpen]);
@@ -7015,6 +7024,8 @@ export default function App() {
         if (mp > 0) setPullX(mp);   // hug the left wall
         if (mr > 0) setPullR(mr);   // and park the right tabs against the right wall
         didInitPull.current = true;
+        setTimeout(fixRightOverflow, 500);  // converge after the slide animation
+        setTimeout(fixRightOverflow, 1200); // and once more after fonts/layout settle
       }
     }, 260);
     return () => clearTimeout(id);
@@ -9218,20 +9229,32 @@ export default function App() {
                 style={letterVars}>VALO</span>
             </span>
           </button>
-          {/* simple rounded diamond (matches the icon) with a glow */}
-          <div style={{ position: "relative", width: 64, height: 64, pointerEvents: "none" }}>
+          {/* the brand diamond — 3D-spinning, star traffic, random twinkles */}
+          <div style={{ position: "relative", width: 64, height: 64, pointerEvents: "none", marginLeft: 6, marginTop: 12 }}>
             <div style={{ position: "absolute", inset: -14, borderRadius: 24, background: "radial-gradient(circle, rgba(125,92,240,0.45), rgba(91,147,236,0.12) 60%, transparent 75%)" }} />
-            <div style={{ position: "absolute", inset: 0, transform: "rotate(45deg)", borderRadius: 18,
-              background: "linear-gradient(135deg, #a07ff2, #5b93ec)", boxShadow: "0 0 22px rgba(125,92,240,0.6)" }} />
-            <div style={{ position: "absolute", left: 0, right: 0, top: 0, height: "46%", transform: "rotate(45deg)", transformOrigin: "center", borderRadius: 18, background: "rgba(255,255,255,0.18)" }} />
-            {/* gleam sweep on theme change — the diamond's own colours never change */}
-            {themeWave && (
-              <div key={themeWave.k} style={{ position: "absolute", inset: 0, borderRadius: 18, overflow: "hidden", transform: "rotate(45deg)" }}>
-                <div style={{ position: "absolute", top: 0, bottom: 0, width: "45%",
-                  background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.92), transparent)",
-                  animation: "diamondGleam .85s ease-out forwards" }} />
+            {/* stars flying past, behind and in front */}
+            <span style={{ position: "absolute", left: "50%", top: "50%", width: 3, height: 3, borderRadius: "50%", background: "#fff", animation: "starFly1 5.5s linear infinite" }} />
+            <span style={{ position: "absolute", left: "50%", top: "50%", width: 2, height: 2, borderRadius: "50%", background: "#cfa8ff", animation: "starFly2 8.2s linear infinite", animationDelay: "2.1s" }} />
+            <span style={{ position: "absolute", left: "50%", top: "50%", width: 2.5, height: 2.5, borderRadius: "50%", background: "#9fc3ff", animation: "starFly3 6.8s linear infinite", animationDelay: "3.8s" }} />
+            <div style={{ position: "absolute", inset: 0, perspective: 320 }}>
+              <div key={themeWave ? "burst" + themeWave.k : "idle"}
+                style={{ position: "absolute", inset: 0, transformStyle: "preserve-3d",
+                  animation: themeWave ? "diamond3dBurst .95s cubic-bezier(.3,.7,.25,1) forwards" : "diamond3d 11s linear infinite" }}>
+                <div style={{ position: "absolute", inset: 0, transform: "rotate(45deg)", borderRadius: 18,
+                  background: "linear-gradient(135deg, #a07ff2, #5b93ec)", boxShadow: "0 0 22px rgba(125,92,240,0.6)" }} />
+                <div style={{ position: "absolute", left: 0, right: 0, top: 0, height: "46%", transform: "rotate(45deg)", transformOrigin: "center", borderRadius: 18, background: "rgba(255,255,255,0.18)" }} />
+                {themeWave && (
+                  <div style={{ position: "absolute", inset: 0, borderRadius: 18, overflow: "hidden", transform: "rotate(45deg)" }}>
+                    <div style={{ position: "absolute", top: 0, bottom: 0, width: "45%",
+                      background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.92), transparent)",
+                      animation: "diamondGleam .85s ease-out forwards" }} />
+                  </div>
+                )}
               </div>
-            )}
+            </div>
+            {/* twinkles — long cycles with brief flashes read as random */}
+            <span style={{ position: "absolute", right: -4, top: 2, fontSize: 13, color: "#fff", opacity: 0, animation: "twinkle1 7.3s ease-in-out infinite" }}>✦</span>
+            <span style={{ position: "absolute", left: -6, bottom: 6, fontSize: 9, color: "#d9c6ff", opacity: 0, animation: "twinkle2 11.7s ease-in-out infinite", animationDelay: "3.4s" }}>✦</span>
           </div>
         </div>
       )}
@@ -9276,15 +9299,21 @@ export default function App() {
                     className={`valo-letters${themeWave ? " vl-sweep" : ""}`}
                     style={{ ...letterVars, fontFamily: T.sans, fontWeight: 900, fontSize: 30, lineHeight: 1, letterSpacing: -1 }}>VALO</span>
                 </span>
-                <span style={{ position: "relative", width: 20, height: 20, display: "inline-block" }}>
-                  <span style={{ position: "absolute", inset: 0, borderRadius: 4, background: "linear-gradient(135deg, hsla(258,90%,72%,0.95), hsla(200,90%,65%,0.9))", transform: "rotate(45deg)", boxShadow: "0 0 10px hsla(258,90%,65%,0.7)", animation: "diamondPulse 3s ease-in-out infinite" }} />
-                  {themeWave && (
-                    <span key={themeWave.k} style={{ position: "absolute", inset: 0, borderRadius: 4, overflow: "hidden", transform: "rotate(45deg)" }}>
-                      <span style={{ position: "absolute", top: 0, bottom: 0, width: "45%", display: "block",
-                        background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.95), transparent)",
-                        animation: "diamondGleam .85s ease-out forwards" }} />
-                    </span>
-                  )}
+                <span style={{ position: "relative", width: 20, height: 20, display: "inline-block", marginLeft: 2, perspective: 140 }}>
+                  <span style={{ position: "absolute", left: "50%", top: "50%", width: 2, height: 2, borderRadius: "50%", background: "#fff", animation: "starFly1 6.5s linear infinite", animationDelay: "1.2s" }} />
+                  <span key={themeWave ? "mb" + themeWave.k : "mi"}
+                    style={{ position: "absolute", inset: 0, display: "block", transformStyle: "preserve-3d",
+                      animation: themeWave ? "diamond3dBurst .95s cubic-bezier(.3,.7,.25,1) forwards" : "diamond3d 11s linear infinite" }}>
+                    <span style={{ position: "absolute", inset: 0, borderRadius: 4, background: "linear-gradient(135deg, hsla(258,90%,72%,0.95), hsla(200,90%,65%,0.9))", transform: "rotate(45deg)", boxShadow: "0 0 10px hsla(258,90%,65%,0.7)" }} />
+                    {themeWave && (
+                      <span style={{ position: "absolute", inset: 0, borderRadius: 4, overflow: "hidden", transform: "rotate(45deg)", display: "block" }}>
+                        <span style={{ position: "absolute", top: 0, bottom: 0, width: "45%", display: "block",
+                          background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.95), transparent)",
+                          animation: "diamondGleam .85s ease-out forwards" }} />
+                      </span>
+                    )}
+                  </span>
+                  <span style={{ position: "absolute", right: -5, top: -4, fontSize: 8, color: "#fff", opacity: 0, animation: "twinkle1 8.9s ease-in-out infinite", animationDelay: "2s" }}>✦</span>
                 </span>
               </button>
               {/* whitepaper + claim */}
@@ -11144,6 +11173,13 @@ export default function App() {
           [style*="font-size: 9px"], [style*="font-size: 9.5px"] { font-size: 10.5px !important; }
         }
         @keyframes uSweep{ 0%,100%{ transform: translateX(0) rotate(0deg); opacity: 0.65; } 30%{ transform: translateX(-2px) rotate(-14deg); opacity: 1; } 65%{ transform: translateX(2px) rotate(12deg); opacity: 1; } }
+        @keyframes diamond3d { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
+        @keyframes diamond3dBurst { 0% { transform: rotateY(0deg) scale(1); } 55% { transform: rotateY(540deg) scale(1.22); } 100% { transform: rotateY(720deg) scale(1); } }
+        @keyframes starFly1 { 0% { transform: translate(-42px, 16px) scale(0.4); opacity: 0; } 12% { opacity: 0.95; } 88% { opacity: 0.8; } 100% { transform: translate(44px, -20px) scale(1.05); opacity: 0; } }
+        @keyframes starFly2 { 0% { transform: translate(38px, 22px) scale(0.5); opacity: 0; } 14% { opacity: 0.85; } 100% { transform: translate(-46px, -12px) scale(0.9); opacity: 0; } }
+        @keyframes starFly3 { 0% { transform: translate(-30px, -26px) scale(0.4); opacity: 0; } 15% { opacity: 0.8; } 100% { transform: translate(36px, 30px) scale(1); opacity: 0; } }
+        @keyframes twinkle1 { 0%, 86%, 100% { opacity: 0; transform: scale(0.3) rotate(0deg); } 90% { opacity: 1; transform: scale(1.2) rotate(25deg); } 95% { opacity: 0.35; transform: scale(0.7) rotate(45deg); } }
+        @keyframes twinkle2 { 0%, 91%, 100% { opacity: 0; transform: scale(0.3) rotate(0deg); } 94% { opacity: 0.95; transform: scale(1.1) rotate(-20deg); } 97% { opacity: 0.3; transform: scale(0.6) rotate(-40deg); } }
         @keyframes sellPop{ 0%{ transform: scale(1); } 40%{ transform: scale(1.08); } 100%{ transform: scale(1); } }
         @keyframes apexHue{ from{ filter: drop-shadow(0 0 5px #9ceaff) hue-rotate(0deg); } to{ filter: drop-shadow(0 0 5px #9ceaff) hue-rotate(360deg); } }
         @keyframes apexRay{ from{ transform: rotate(0deg) scale(1); } 50%{ transform: rotate(180deg) scale(1.12); } to{ transform: rotate(360deg) scale(1); } }
