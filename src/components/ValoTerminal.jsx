@@ -2987,7 +2987,7 @@ function FollowListModal({ kind, list, onClose, isMobile, onOpenUser }) {
     </div>
   );
 }
-function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, onToggleFollow, friendStatus, onFriendAction, onOpenToken, onSendFunds, dmLog = [], onSendDm, solBalance = 0, valoWallet = 0 , incomingReq = false, onAcceptReq, onDeclineReq, onOpenTierList, onOpenLeaderboard }) {
+function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, onToggleFollow, friendStatus, onFriendAction, onOpenToken, onSendFunds, dmLog = [], onSendDm, solBalance = 0, valoWallet = 0 , incomingReq = false, onAcceptReq, onDeclineReq, onOpenTierList, onOpenLeaderboard, cloudProfile = null }) {
   const [badgeTab, setBadgeTab] = useState(false); // insignia tapped → tier/leaderboard tab
   // API: replace with a real user-profile endpoint — all stats below are seeded fakes
   const rand = seededRand(hashStr("user-" + name));
@@ -3011,6 +3011,15 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   const [txShowAll, setTxShowAll] = useState(true);
   const { holds, txAll } = useMemo(() => {
     const r2 = seededRand(hashStr("acts-" + name));
+    if (cloudProfile && cloudProfile.holds) {
+      // ☁ REAL ACCOUNT — actual cloud positions replace the simulated book
+      const now0 = Date.now();
+      const txAll0 = Array.from({ length: 8 }, () => {
+        const t = tokens[Math.floor(r2() * tokens.length)];
+        return { t, side: r2() > 0.5 ? "buy" : "sell", usd: 20 + r2() * 400, at: now0 - Math.floor(r2() * 86400e3 * 7) };
+      }).sort((a, b) => b.at - a.at);
+      return { holds: cloudProfile.holds, txAll: txAll0 };
+    }
     const seen = new Set();
     const holds = [];
     const nH = Math.min(2 + Math.floor(r2() * 3), tokens.length);
@@ -3040,7 +3049,12 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ width: 40, height: 40, borderRadius: "50%", background: `linear-gradient(135deg, ${accent(symbolHue(name))}, ${T.blue})`, display: "grid", placeItems: "center", fontFamily: T.mono, fontWeight: 900, fontSize: 17, color: "#0a0713" }}>{name[0].toUpperCase()}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 800 }}>@{name}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+                <span style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{name}</span>
+                {cloudProfile && <span title="Verified VALO account — real holdings shown"
+                  style={{ fontFamily: T.mono, fontSize: 7, fontWeight: 900, letterSpacing: 1, color: T.blue, flexShrink: 0,
+                    border: `1px solid ${T.blue}66`, background: "rgba(59,130,246,0.12)", borderRadius: 6, padding: "2px 6px" }}>☁ REAL</span>}
+              </div>
               <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{fols} followers · {folg} following</div>
             </div>
             <div onClick={() => onOpenTierList && onOpenTierList()} title="Tap: tiers & leaderboards — if they're on the board, we jump straight to their name"
@@ -7024,6 +7038,34 @@ export default function App() {
   // ☁ SOCIAL GRAPH — real follows & friend requests. Acting on a profile that
   // belongs to a REAL account writes the cloud row; the other user's client
   // hears the INSERT/UPDATE live and drops it into their notification feed.
+  // ☁ real portfolios: opening a real account's profile loads their ACTUAL
+  // wallet + positions (paper money — public by design, like the sim always was)
+  const [profileCloud, setProfileCloud] = useState(null);
+  useEffect(() => {
+    if (!sb || !profileUser) { setProfileCloud(null); return; }
+    let stop = false;
+    (async () => {
+      try {
+        const { data: profs } = await sb.from("profiles").select("id, handle, icon").ilike("handle", profileUser).limit(1);
+        const prof = profs && profs[0];
+        if (stop || !prof) { if (!stop) setProfileCloud(null); return; }
+        const [{ data: w }, { data: pos }] = await Promise.all([
+          sb.from("wallets").select("*").eq("user_id", prof.id).maybeSingle(),
+          sb.from("positions").select("*").eq("user_id", prof.id),
+        ]);
+        if (stop) return;
+        const holds = (pos || []).map((r) => {
+          const t = tokensRef.current.find((x) => String(x.pool || x.id) === String(r.token_key));
+          if (!t || !(+r.qty > 0)) return null;
+          return { t, qty: +r.qty, entry: +r.entry_price || t.price, since: new Date(r.opened_at || Date.now()).getTime() };
+        }).filter(Boolean);
+        setProfileCloud({ id: prof.id, handle: prof.handle, icon: prof.icon, holds,
+          solBalance: w ? +w.sol_balance : null, valoBalance: w ? +w.valo_balance : null });
+      } catch (e) { if (!stop) setProfileCloud(null); }
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileUser, cloudUser && cloudUser.id]);
   const lookupProfile = async (handle) => {
     if (!sb || !handle) return null;
     try { const { data } = await sb.from("profiles").select("id, handle").ilike("handle", handle).limit(1); return (data && data[0]) || null; }
@@ -10185,7 +10227,8 @@ export default function App() {
         notifSetting={notifSetting} setNotifSetting={setNotifSetting} />}
       {followListOpen && <FollowListModal kind={followListOpen} list={followListOpen === "followers" ? followersList : followingList}
         onClose={() => setFollowListOpen(null)} isMobile={isMobile} onOpenUser={(u) => setProfileUser(u)} />}
-      {profileUser && <UserProfileModal name={profileUser} onClose={() => setProfileUser(null)} isMobile={isMobile} tokens={tokens}
+      {profileUser && <UserProfileModal name={profileUser} onClose={() => { setProfileUser(null); setProfileCloud(null); }} isMobile={isMobile} tokens={tokens}
+        cloudProfile={profileCloud}
         isFollowing={followingList.includes(profileUser)}
         onToggleFollow={() => { cloudFollow(profileUser, !followingList.includes(profileUser)); setFollowingList((L) => (L.includes(profileUser) ? L.filter((x) => x !== profileUser) : [...L, profileUser])); }}
         friendStatus={friendsList.includes(profileUser) ? "friends" : sentFriendReqs.includes(profileUser) ? "requested" : "none"}
