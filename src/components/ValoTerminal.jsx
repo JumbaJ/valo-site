@@ -2444,7 +2444,7 @@ function TierListModal({ onClose, isMobile, myBest = 0, embed = false }) {
 
 // compact leaderboard — the tier-list's sibling: same frame, top-10 badges per
 // duration, your rank, and the epoch bonus each placement pays
-function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser, embed = false, focusUser = null }) {
+function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser, embed = false, focusUser = null, username = "you" }) {
   const [period, setPeriod] = useState("1D");
   const [hl, setHl] = useState(!!focusUser); // the jumped-to name glows, then fades
   const focusRef = useRef(null);
@@ -2462,6 +2462,17 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
   const listEnd = 250; // full top 250 on every duration
   const youRef = useRef(null);
   const myEntry = board.find((e) => e.you);
+  // is your own row currently on screen? the bottom bar only offers the jump
+  // when it isn't
+  const [youVisible, setYouVisible] = useState(false);
+  useEffect(() => {
+    setYouVisible(false);
+    const el = youRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((ents) => setYouVisible(!!(ents[0] && ents[0].isIntersecting)), { threshold: 0.6 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [period, myRank, board.length]);
   useEffect(() => {
     if (focusRank > 0 && focusRef.current) focusRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [focusRank, period]);
@@ -2545,7 +2556,7 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
                 boxShadow: isFocus && hl ? `0 0 18px ${VALO_PURPLE}66` : "none",
                 transition: "background 1.2s ease, border-color 1.2s ease, box-shadow 1.2s ease" }}>
                 <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: rk <= 3 ? tr.color : T.faint, width: 26 }}>#{rk}</span>
-                <CalloutRing mult={r.mult} size={rk <= 3 ? 26 : 19} />
+                {rk <= 100 && <CalloutRing mult={r.mult} size={19} />}
                 <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, color: r.you ? T.green : isFocus && hl ? VALO_PURPLE : T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{r.user}</span>
                 <span style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>${r.sym}</span>
                 <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: tr.color }}>×{r.mult.toFixed(1)}</span>
@@ -2558,6 +2569,32 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
           <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 7, lineHeight: 1.6 }}>
             Top 100 of ANY duration earns an epoch bonus: #1 +0.50× · #2 +0.42× · #3 +0.36× … #10 +0.14× · #11–100 +0.10×. Bonuses stack across every board — up to +4.0× total.
           </div>
+          {/* 🪪 YOUR STANDING — sticks to the bottom of every duration; tap to
+              jump to your row when it's ranked and off-screen */}
+          {myRank > 0 && (() => {
+            const inTop = myRank <= 250;
+            const canJump = inTop && !youVisible;
+            const mine = myEntry ? calloutTier(myEntry.mult).tier : null;
+            return (
+              <div onClick={() => { if (!canJump) return;
+                  if (myRank <= 3) { const sc = youRef.current ? youRef.current.closest("[data-lbscroll]") : null; (sc || window).scrollTo({ top: 0, behavior: "smooth" }); }
+                  else if (youRef.current) youRef.current.scrollIntoView({ block: "center", behavior: "smooth" }); }}
+                title={canJump ? "Tap: jump to your spot on this board" : inTop ? "You're right there ↑" : "Climb into the top 250 to appear on the board"}
+                style={{ position: "sticky", bottom: -1, zIndex: 5, marginTop: 8, cursor: canJump ? "pointer" : "default",
+                  display: "flex", alignItems: "center", gap: 9, padding: "9px 11px", borderRadius: 11,
+                  border: `1.5px solid ${canJump ? VALO_PURPLE : T.green}`,
+                  background: canJump ? "rgba(125,92,240,0.16)" : "rgba(22,199,132,0.12)",
+                  backdropFilter: "blur(6px)", boxShadow: "0 -6px 22px rgba(0,0,0,0.55)" }}>
+                <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: canJump ? VALO_PURPLE : T.green }}>#{myRank}</span>
+                {myEntry && <CalloutRing mult={myEntry.mult} size={22} />}
+                <span style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{username}</span>
+                {myEntry && <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, color: mine ? mine.color : T.text }}>×{myEntry.mult.toFixed(1)}</span>}
+                <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, color: canJump ? VALO_PURPLE : T.faint, letterSpacing: 1 }}>
+                  {canJump ? "JUMP ↓" : inTop ? "● HERE" : "UNRANKED"}
+                </span>
+              </div>
+            );
+          })()}
         </div>
     </>
   );
@@ -2565,7 +2602,7 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 94, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 620, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "82vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
+      <div data-lbscroll="1" onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 620, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "82vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         {body}
       </div>
     </div>
@@ -2616,7 +2653,7 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0 }, valoUsd 
 }
 
 // badge page — tiers & leaderboards side by side; jumped-to names glow & fade
-function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 0, focusUser = null, onOpenUser }) {
+function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 0, focusUser = null, onOpenUser, username = "you" }) {
   const inTop250 = useMemo(() => {
     if (!focusUser) return false;
     const rk = genLeaderboard("1D").sort((a, b) => b.mult - a.mult).findIndex((e) => e.user === focusUser) + 1;
@@ -2640,7 +2677,7 @@ function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 
         <div style={{ padding: "4px 11px 12px" }}>
           {tab === "tiers"
             ? <TierListModal embed isMobile={isMobile} myBest={myBest} />
-            : <LeaderboardModal embed isMobile={isMobile} myCallouts={myCallouts} tokens={tokens} onOpenUser={onOpenUser} focusUser={inTop250 ? focusUser : null} />}
+            : <LeaderboardModal embed isMobile={isMobile} myCallouts={myCallouts} tokens={tokens} onOpenUser={onOpenUser} username={username} focusUser={inTop250 ? focusUser : null} />}
         </div>
       </div>
     </div>
@@ -2824,7 +2861,7 @@ function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned =
   );
 }
 
-function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser }) {
+function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser, username = "you" }) {
   const [tab, setTab] = useState("tiers");   // tiers | board
   const [period, setPeriod] = useState("1D");
   useEffect(() => {
@@ -2884,7 +2921,7 @@ function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOp
             </div>
           ) : (
             <>
-              <LeaderboardModal embed isMobile={isMobile} myCallouts={myCallouts} tokens={tokens} onOpenUser={onOpenUser} />
+              <LeaderboardModal embed isMobile={isMobile} myCallouts={myCallouts} tokens={tokens} onOpenUser={onOpenUser} username={username} />
             </>
           )}
         </div>
@@ -8430,10 +8467,11 @@ export default function App() {
     <button onClick={() => { setDevView(false); setTrendOpen(true); }} title="Why it's trending"
       style={{ display: "flex", alignItems: "center", gap: 4, border: "1px solid rgba(240,185,11,0.4)", background: "rgba(240,185,11,0.10)", color: T.amber, borderRadius: 7, padding: "4px 9px", fontFamily: T.mono, fontSize: 10, fontWeight: 800, cursor: "pointer" }}>🔥 Trending</button>
   );
-  const calloutWidget = (noBox, ringSize = 34, horizontal = false) => {
+  const calloutWidget = (noBox, ringSize = 34, horizontal = false, only = null) => {
     if (!selected) return null;
     const co = myMcCallouts[selected.id];
     if (!co) {
+      if (only === "badge") return null;
       const cdLeft = 4 * 3600e3 - (Date.now() - lastCalloutTs);
       if (cdLeft > 0) {
         const h = Math.floor(cdLeft / 3600e3), m = Math.ceil((cdLeft % 3600e3) / 60000);
@@ -8447,35 +8485,36 @@ export default function App() {
       return (
       <button onClick={() => { setMyMcCallouts((M) => ({ ...M, [selected.id]: { mcAt: mcOf(selected), peak: 1, ts: Date.now() } })); setLastCalloutTs(Date.now()); pushCloudCallout(selected, mcOf(selected)); }}
         title="Call this coin out at the current market cap — one callout every 4 hours, so make it count"
-        style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap", border: `1px solid ${VALO_PURPLE}66`, background: "rgba(125,92,240,0.10)", color: VALO_PURPLE, borderRadius: 7, padding: "4px 9px", fontFamily: T.mono, fontSize: 10, fontWeight: 800, cursor: "pointer" }}>
-        📣 CALLOUT · {fmt$(mcOf(selected))}
+        style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap", height: isMobile ? 26 : "auto", boxSizing: "border-box",
+          border: `1px solid ${VALO_PURPLE}66`, background: "rgba(125,92,240,0.10)", color: VALO_PURPLE, borderRadius: 7,
+          padding: isMobile ? "0 9px" : "4px 9px", fontFamily: T.mono, fontSize: 10, fontWeight: 800, cursor: "pointer" }}>
+        📣 CALLOUT{isMobile ? "" : ` · ${fmt$(mcOf(selected))}`}
       </button>
       );
     }
+    if (only === "arm") return null;
     const { tier } = calloutTier(co.peak);
     if (horizontal) {
       // compact row form — same height as the buttons beside it, so opening
       // a callout changes nothing around it
       return (
-        <div onClick={() => setCalloutHubOpen(true)} title={`${tier.label} · called @ ${fmt$(co.mcAt)} — open the tier list & leaderboards`}
+        <span onClick={() => setCalloutHubOpen(true)} title={`${tier.label} · called @ ${fmt$(co.mcAt)} — open the tier list & leaderboards`}
           className="co-open"
-          style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1, cursor: "pointer", transformOrigin: "70% 50%",
-            animation: tierPop ? `tierPop${tierPop.fx} .9s cubic-bezier(.3,.7,.25,1)` : "none" }}>
-          <CalloutRing mult={co.peak} size={Math.round(ringSize * 1.7)} />
-          <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: tier.color, textShadow: `0 0 8px ${tier.color}66` }}>×{co.peak.toFixed(1)}</span>
-        </div>
+          style={{ cursor: "pointer", fontFamily: T.mono, fontSize: 19, fontWeight: 900, letterSpacing: -0.5, lineHeight: 1,
+            color: tier.color, textShadow: `0 0 ${6 + (tier.fx || 1) * 3}px ${tier.color}${(tier.fx || 1) > 2 ? "cc" : "88"}`,
+            display: "inline-block", transformOrigin: "50% 50%",
+            animation: tierPop ? `tierPop${tierPop.fx} .9s cubic-bezier(.3,.7,.25,1)` : "none" }}>×{co.peak.toFixed(1)}</span>
       );
     }
     // desktop: a larger insignia framed to match the header bar's own chips —
     // neutral border, subtle tier-tinted inner glow, no loud colored box
     return (
-      <div onClick={() => setCalloutHubOpen(true)} title={`${tier.label} · called @ ${fmt$(co.mcAt)} — open the tier list & leaderboards`}
+      <span onClick={() => setCalloutHubOpen(true)} title={`${tier.label} · called @ ${fmt$(co.mcAt)} — open the tier list & leaderboards`}
         className="co-open"
-        style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, cursor: "pointer", transformOrigin: "50% 50%", marginLeft: 6,
-          animation: tierPop ? `tierPop${tierPop.fx} .9s cubic-bezier(.3,.7,.25,1)` : "none" }}>
-        <CalloutRing mult={co.peak} size={88} />
-        <span style={{ fontFamily: T.mono, fontSize: 15, fontWeight: 900, color: tier.color, textShadow: `0 0 10px ${tier.color}77`, lineHeight: 1 }}>×{co.peak.toFixed(1)}</span>
-      </div>
+        style={{ cursor: "pointer", fontFamily: T.mono, fontSize: 26, fontWeight: 900, letterSpacing: -0.5, lineHeight: 1,
+          color: tier.color, textShadow: `0 0 ${8 + (tier.fx || 1) * 4}px ${tier.color}${(tier.fx || 1) > 2 ? "cc" : "88"}`,
+          display: "inline-block", transformOrigin: "50% 50%",
+          animation: tierPop ? `tierPop${tierPop.fx} .9s cubic-bezier(.3,.7,.25,1)` : "none" }}>×{co.peak.toFixed(1)}</span>
     );
   };
 
@@ -8539,7 +8578,13 @@ export default function App() {
                 Select a pair to open its chart
               </div>
             ) : (
-              <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14 }}>
+              <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14, position: "relative" }}>
+
+                {!isMobile && myMcCallouts[selected.id] && (
+                  <div style={{ position: "absolute", top: 10, right: 14, zIndex: 12, pointerEvents: "auto", overflow: "visible" }}>
+                    {calloutWidget(true, 38, false, "badge")}
+                  </div>
+                )}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
                     <span {...headWatchProps} title="Hold (right-click on PC): add to watchlist — or remove if viewing from the open subsection"
@@ -8563,7 +8608,8 @@ export default function App() {
                       {scoreToken(selected)} {rating(scoreToken(selected))}
                     </span>
                   </div>
-                  <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap",
+                    paddingRight: !isMobile && myMcCallouts[selected.id] ? 64 : 0 }}>
                     {/* socials */}
                     {/* CA — tap to copy the contract address */}
                     <button onClick={() => { try { navigator.clipboard.writeText(selected.ca); } catch (e) {} setCaCopied(selected.id); setTimeout(() => setCaCopied(null), 1400); }}
@@ -8575,6 +8621,11 @@ export default function App() {
                       <a key={i} href={url} target="_blank" rel="noopener noreferrer" title="Open social"
                         style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 7, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)", color: col, fontSize: 12, textDecoration: "none", cursor: "pointer" }}>{ic}</a>
                     ))}
+                    {isMobile && (
+                      <span style={{ display: "inline-flex", alignItems: "center", height: 26, overflow: "visible" }}>
+                        {calloutWidget(true, 30, true)}
+                      </span>
+                    )}
                     {/* why it's trending — desktop; on mobile it moves to the chart-tools row */}
                     {!isMobile && trendingBtn}
                     {!isMobile && (
@@ -8589,7 +8640,7 @@ export default function App() {
                         <button onClick={() => setChartMode("candles")} style={chip(chartMode === "candles")}>▮ Candles</button>
                         <button onClick={() => setChartMode("line")} style={chip(chartMode === "line")}>∿ Line</button>
                         <div style={{ width: 1, height: 18, background: T.border, margin: "0 2px" }} />
-                        {calloutWidget(true, 38, true)}
+                        {calloutWidget(true, 38, true, "arm")}
                       </>
                     )}
                   </div>
@@ -8607,14 +8658,14 @@ export default function App() {
                       {metricsCrunch > 0.5 ? "▸" : "▾"} STATS
                     </button>
                     <button onClick={() => setShowDevTrades((v) => !v)} title="Show developer buys & sells on the chart"
-                      style={{ ...chip(showDevTrades), padding: "4px 7px", fontSize: 9.5, fontWeight: 800, color: showDevTrades ? accent(selected.hue) : T.dim, borderColor: showDevTrades ? accent(selected.hue) : T.border }}>👨‍💻 DEV</button>
+                      style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
+                        border: `1px solid ${showDevTrades ? accent(selected.hue) : T.border2}`,
+                        background: showDevTrades ? `${accent(selected.hue)}22` : "rgba(255,255,255,0.03)",
+                        color: showDevTrades ? accent(selected.hue) : T.dim, borderRadius: 7, padding: "4px 9px",
+                        fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, cursor: "pointer" }}>👨‍💻 Dev buys</button>
                   </div>
                 )}
-                {isMobile && (
-                  <div style={{ position: "absolute", right: 4, top: "46%", transform: "translateY(-50%)", zIndex: 9, pointerEvents: "auto" }}>
-                    {calloutWidget(true, 34, true)}
-                  </div>
-                )}
+
                 {/* metrics under price — on mobile this whole block crunches away
                     as the chart is pulled up; durations below always stay */}
                 <div style={isMobile
@@ -10063,7 +10114,7 @@ export default function App() {
 
       {/* WHITEPAPER MODAL — interactive reader with expandable TOC sidebar */}
       {wpOpen && <WhitepaperModal onClose={() => setWpOpen(false)} isMobile={isMobile} />}
-      {calloutHubOpen && <CalloutHubModal onClose={() => setCalloutHubOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens}
+      {calloutHubOpen && <CalloutHubModal onClose={() => setCalloutHubOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
         onOpenUser={(u) => { setCalloutHubOpen(false); setProfileUser(u); }} />}
       {!isMobile && quickArmOn && armPop && (
         <button data-armpop="1" onClick={() => { const fn = quickArmRef.current; fn && fn(); setArmPop(null); }}
@@ -10472,10 +10523,10 @@ export default function App() {
       {valoStatsOpen && <ValoStatsModal onClose={() => setValoStatsOpen(false)} isMobile={isMobile}
         valoUsd={valoUsdPrice} tvl={gTvl} burned={burned} valoWallet={valoWallet} />}
       {burnOpen && <BurnModal valoUsd={valoUsdPrice} onClose={() => setBurnOpen(false)} isMobile={isMobile} myBurned={myBurned} siteBurned={burned} />}
-      {ranksOpen && <RanksModal onClose={() => setRanksOpen(null)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens}
+      {ranksOpen && <RanksModal onClose={() => setRanksOpen(null)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
         myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)}
         focusUser={ranksOpen.focus || null} onOpenUser={(u) => { setRanksOpen(null); setProfileUser(u); }} />}
-      {lbOpen && <LeaderboardModal onClose={() => setLbOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens}
+      {lbOpen && <LeaderboardModal onClose={() => setLbOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
         onOpenUser={(u) => setProfileUser(u)} />}
       {tierListOpen && <TierListModal onClose={() => setTierListOpen(false)} isMobile={isMobile}
         myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)} />}
