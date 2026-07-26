@@ -6846,6 +6846,7 @@ export default function App() {
   // preview, local dev without env vars). All tables are RLS-locked per user.
   const sb = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
   const [cloudUser, setCloudUser] = useState(null);     // supabase auth user
+  const [mobHeadPill, setMobHeadPill] = useState("cloud"); // mobile header slot: "cloud" sign-in pill ⇄ "epoch" reward pill (hold to swap)
   const [cloudOpen, setCloudOpen] = useState(false);    // sign-in modal
   const [cloudEmail, setCloudEmail] = useState("");
   const [cloudMsg, setCloudMsg] = useState("");
@@ -9011,13 +9012,16 @@ export default function App() {
               </span>
             </button>
 
-            {/* CLAIM REWARDS */}
-            <button onClick={() => setClaimOpen(true)} title="Claim your rolling hourly airdrop"
+            {/* CLAIM REWARDS ⇄ (mobile) SIGN UP/IN — hold either to swap */}
+            {!(isMobile && sb && mobHeadPill === "cloud") && (
+            <button onClick={() => setClaimOpen(true)} title="Claim your rolling hourly airdrop · hold to swap with sign-in"
+              {...(isMobile && sb ? chipEditProps(() => setMobHeadPill("cloud")) : {})}
               style={{
                 display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
                 border: `1px solid ${claimable > 0 ? "rgba(22,199,132,0.5)" : T.border}`,
                 background: claimable > 0 ? "rgba(22,199,132,0.10)" : "rgba(255,255,255,0.02)",
                 borderRadius: 9, padding: "6px 12px", lineHeight: 1.2,
+                userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent",
                 animation: claimable > 0 ? "claimPulse 2.4s ease-in-out infinite" : "none",
               }}>
               <span style={{ fontSize: 15 }}>🎁</span>
@@ -9030,6 +9034,30 @@ export default function App() {
                 </span>
               </span>
             </button>
+            )}
+            {isMobile && sb && mobHeadPill === "cloud" && (
+            <button onClick={() => setCloudOpen(true)}
+              title={cloudUser ? "Account & sign out · hold to swap with epoch rewards" : "Sign up / sign in · hold to swap with epoch rewards"}
+              {...chipEditProps(() => setMobHeadPill("epoch"))}
+              style={{
+                display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+                border: `1.5px solid ${T.blue}`, background: "rgba(59,130,246,0.14)",
+                borderRadius: 9, padding: "6px 14px", lineHeight: 1.2,
+                userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent",
+                boxShadow: `0 0 14px ${T.blue}55`,
+                animation: cloudUser ? "none" : "claimPulse 2.6s ease-in-out infinite",
+              }}>
+              <span style={{ fontSize: 14 }}>☁</span>
+              <span style={{ textAlign: "left" }}>
+                <span style={{ display: "block", fontFamily: T.mono, fontSize: 12, fontWeight: 900, letterSpacing: 1, color: T.blue }}>
+                  {cloudUser ? "SIGNED IN" : "SIGN UP"}
+                </span>
+                <span style={{ display: "block", fontFamily: T.mono, fontSize: 8, color: cloudUser ? (cloudSynced ? T.green : T.amber) : "rgba(138,168,248,0.8)", letterSpacing: 0.3 }}>
+                  {cloudUser ? (cloudSynced ? "● SYNCED · TAP TO SIGN OUT" : "● SYNCING…") : "or sign in · free"}
+                </span>
+              </span>
+            </button>
+            )}
           </div>
         </div>
         )}
@@ -9593,20 +9621,16 @@ export default function App() {
       {sb && !isMobile && (
         <button onClick={() => setCloudOpen(true)}
           title={cloudUser ? `Signed in as ${cloudUser.email} — portfolio syncs to the cloud` : "Sign in — your paper portfolio, watchlist and bots follow you across devices"}
-          style={{ position: "fixed", top: 6, right: 262, zIndex: 55, display: "flex", alignItems: "center", gap: 6,
-            background: cloudUser ? "rgba(125,92,240,0.16)" : "rgba(15,19,28,0.72)", border: `1px solid ${cloudUser ? VALO_PURPLE : T.border}`, borderRadius: 8, padding: "4px 9px", cursor: "pointer",
-            boxShadow: cloudUser ? `0 0 10px ${VALO_PURPLE}55` : "none" }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: cloudUser ? (cloudSynced ? T.green : T.amber) : "#39414f", boxShadow: cloudUser ? `0 0 6px ${cloudSynced ? T.green : T.amber}` : "none" }} />
-          <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: cloudUser ? VALO_PURPLE : "rgba(138,148,168,0.7)", fontWeight: 800 }}>{cloudUser ? "☁ SYNCED" : "☁ SIGN IN"}</span>
+          style={{ position: "fixed", top: 6, right: 300, zIndex: 55, display: "flex", alignItems: "center", gap: 6,
+            background: cloudUser ? "rgba(125,92,240,0.16)" : "rgba(59,130,246,0.16)",
+            border: `1px solid ${cloudUser ? VALO_PURPLE : T.blue}`, borderRadius: 8, padding: "4px 10px", cursor: "pointer",
+            boxShadow: cloudUser ? `0 0 10px ${VALO_PURPLE}55` : `0 0 12px ${T.blue}66`,
+            animation: cloudUser ? "none" : "claimPulse 2.6s ease-in-out infinite" }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: cloudUser ? (cloudSynced ? T.green : T.amber) : T.blue, boxShadow: `0 0 6px ${cloudUser ? (cloudSynced ? T.green : T.amber) : T.blue}` }} />
+          <span style={{ fontFamily: T.mono, fontSize: 8.5, letterSpacing: 1.2, color: cloudUser ? VALO_PURPLE : T.blue, fontWeight: 900 }}>{cloudUser ? "☁ SYNCED" : "☁ SIGN IN"}</span>
         </button>
       )}
-      {sb && isMobile && (
-        <button onClick={() => setCloudOpen(true)}
-          style={{ position: "fixed", top: "max(8px, env(safe-area-inset-top))", right: 52, zIndex: 55,
-            background: cloudUser ? "rgba(125,92,240,0.16)" : "rgba(15,19,28,0.72)", border: `1px solid ${cloudUser ? VALO_PURPLE : T.border}`, borderRadius: 8, padding: "4px 7px", cursor: "pointer" }}>
-          <span style={{ fontFamily: T.mono, fontSize: 9, color: cloudUser ? VALO_PURPLE : T.dim, fontWeight: 900 }}>☁{cloudUser ? "✓" : ""}</span>
-        </button>
-      )}
+
       {cloudOpen && (
         <>
           <div onClick={() => setCloudOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 96, background: "rgba(4,6,10,0.7)", backdropFilter: "blur(3px)" }} />
