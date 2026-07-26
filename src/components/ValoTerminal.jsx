@@ -5712,10 +5712,14 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
               {hot && <span className="goldglare" />}
               <div style={{ position: "relative", padding: isMobile ? "8px 9px 7px" : "10px 11px 8px" }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 5 }}>
-                  <div style={{ width: isMobile ? 34 : 42, height: isMobile ? 34 : 42, borderRadius: 9, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                  <div style={{ width: isMobile ? 34 : 42, height: isMobile ? 34 : 42, borderRadius: 9, flexShrink: 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center",
                     background: `linear-gradient(135deg, hsl(${t.hue},70%,22%), hsl(${t.hue},80%,42%))`,
                     border: `1px solid hsl(${t.hue},70%,55%)`, fontFamily: T.mono, fontWeight: 900, fontSize: isMobile ? 11 : 13, color: "#fff" }}>
-                    {t.sym.slice(0, 2)}
+                    {t.img
+                      ? <img src={t.img} alt="" loading="lazy"
+                          onError={(e) => { e.currentTarget.style.display = "none"; }}
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      : t.sym.slice(0, 2)}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
