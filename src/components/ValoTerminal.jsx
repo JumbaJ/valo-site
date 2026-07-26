@@ -6982,7 +6982,10 @@ export default function App() {
         if (w.data) { setSolBalance(+w.data.sol_balance || 0); setValoWallet(+w.data.valo_balance || 0); }
         if (pos.data) {
           const P = {};
-          for (const r of pos.data) if (+r.qty > 0) P[r.token_key] = { amt: +r.qty, entry: +r.entry_price, pay: r.pay_unit || "SOL" };
+          for (const r of pos.data) if (+r.qty > 0) {
+            const tk = tokensRef.current.find((t) => String(t.pool || t.id) === String(r.token_key));
+            P[tk ? tk.id : r.token_key] = { amt: +r.qty, entry: +r.entry_price, pay: r.pay_unit || "SOL" };
+          }
           setPositions(P);
         }
         if (wl.data) {
@@ -7018,16 +7021,21 @@ export default function App() {
         await sb.from("wallets").upsert({ user_id: uid, sol_balance: solBalance, valo_balance: valoWallet, updated_at: new Date().toISOString() });
         await sb.from("watchlists").upsert({ user_id: uid, sections: watchSections, loose: watchLoose, updated_at: new Date().toISOString() });
         await sb.from("positions").delete().eq("user_id", uid);
-        const posRows = Object.entries(positions).filter(([, p]) => p && p.amt > 0).map(([k, p]) => ({
-          user_id: uid, token_key: String(k), sym: (tokensRef.current.find((t) => String(t.id) === String(k)) || {}).sym || null,
-          qty: p.amt, entry_price: p.entry || 0, pay_unit: p.pay || "SOL", updated_at: new Date().toISOString(),
-        }));
+        const posRows = Object.entries(positions).filter(([, p]) => p && p.amt > 0).map(([k, p]) => {
+          const tk = tokensRef.current.find((t) => String(t.id) === String(k));
+          return {
+            user_id: uid, token_key: String((tk && tk.pool) || k), sym: (tk && tk.sym) || null,
+            qty: p.amt, entry_price: p.entry || 0, pay_unit: p.pay || "SOL", updated_at: new Date().toISOString(),
+          };
+        });
         if (posRows.length) await sb.from("positions").insert(posRows);
         await sb.from("bot_runs").delete().eq("user_id", uid);
-        const botRows = botRuns.filter((r) => r.status === "live").map((r) => ({
-          user_id: uid, token_key: String(r.tokenId), sym: r.sym || null, side: r.side || "buy",
+        const botRows = botRuns.filter((r) => r.status === "live").map((r) => {
+          const tk = tokensRef.current.find((t) => String(t.id) === String(r.tokenId));
+          return {
+          user_id: uid, token_key: String((tk && tk.pool) || r.tokenId), sym: r.sym || null, side: r.side || "buy",
           level: r.level || 0, remaining: r.remaining || 0, entry: r.entry || 0, pay: r.pay || "SOL", status: "live",
-        }));
+        }; });
         if (botRows.length) await sb.from("bot_runs").insert(botRows);
         setCloudSynced(true);
       } catch (e) { console.warn("[VALO ☁] sync failed", e); }
