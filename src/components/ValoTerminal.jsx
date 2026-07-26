@@ -2392,7 +2392,7 @@ function TierListModal({ onClose, isMobile, myBest = 0, embed = false }) {
     </div>
   );
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 76, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 94, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 540, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "80vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 13px", borderBottom: `1px solid ${T.border}` }}>
@@ -2474,29 +2474,48 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
               <span style={{ color: VALO_PURPLE }}>{lbBonus(myRank) > 0 ? `+${lbBonus(myRank).toFixed(2)}×/epoch` : "top 100 pays"}{myRank <= 250 ? " · TAP ↓" : ""}</span>
             </div>
           )}
-          {!isMobile && !embed && board.length >= 3 && (
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 10, margin: "4px 0 14px" }}>
-              {[1, 0, 2].map((bi) => {
+          {board.length >= 3 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, margin: "4px 0 14px" }}>
+              {[0, 1, 2].map((bi) => {
                 const r = board[bi]; const rk = bi + 1; const tr = calloutTier(r.mult);
-                const hgt = rk === 1 ? 148 : rk === 2 ? 120 : 104;
                 const medal = rk === 1 ? "🥇" : rk === 2 ? "🥈" : "🥉";
+                const tabTxt = rk === 1 ? "GOLD" : rk === 2 ? "SILVER" : "BRONZE";
+                const tabCol = rk === 1 ? "#ffd54a" : rk === 2 ? "#cfd6e4" : "#d0844a";
+                const curMult = Math.max(1, r.mult * (0.55 + (hashStr(r.user + "cur") % 41) / 100)); // live mult right now
+                const peakMc = r.mcAt * r.mult;
                 return (
                   <div key={bi} className="lb-pod" onClick={() => !r.you && onOpenUser && onOpenUser(r.user)}
-                    style={{ flex: 1, height: hgt, border: `1.5px solid ${tr.color}`, background: `linear-gradient(180deg, ${tr.color}22, ${tr.color}08)`,
-                      borderRadius: 12, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 4, padding: "10px 8px",
-                      cursor: "pointer", boxShadow: rk === 1 ? `0 0 22px ${tr.color}55` : `0 0 10px ${tr.color}22` }}>
-                    <span style={{ fontSize: rk === 1 ? 20 : 15 }}>{medal}</span>
-                    <CalloutRing mult={r.mult} size={rk === 1 ? 44 : 34} />
-                    <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: r.you ? T.green : T.text, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{r.user}</span>
-                    <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, color: tr.color }}>×{r.mult.toFixed(1)}</span>
-                    <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 800, color: VALO_PURPLE }}>+{(rk === 1 ? 0.5 : rk === 2 ? 0.42 : 0.36).toFixed(2)}×/epoch</span>
+                    style={{ position: "relative", border: `1.5px solid ${tabCol}`, background: `linear-gradient(120deg, ${tabCol}1e, ${tr.color}0a 60%)`,
+                      borderRadius: 12, display: "flex", alignItems: "center", gap: 10, padding: rk === 1 ? "13px 12px" : "10px 12px",
+                      cursor: "pointer", boxShadow: rk === 1 ? `0 0 24px ${tabCol}44` : `0 0 10px ${tabCol}22` }}>
+                    <span style={{ position: "absolute", top: -1, right: 10, background: tabCol, color: "#0a0d14", fontFamily: T.mono,
+                      fontSize: 7.5, fontWeight: 900, letterSpacing: 1.5, borderRadius: "0 0 7px 7px", padding: "2px 10px" }}>{medal} #{rk} {tabTxt}</span>
+                    <CalloutRing mult={r.mult} size={rk === 1 ? 46 : 36} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontFamily: T.mono, fontSize: rk === 1 ? 12 : 10.5, fontWeight: 900, color: r.you ? T.green : T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{r.user}</div>
+                      <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 2 }}>
+                        best: <b style={{ color: accent(r.hue) }}>${r.sym}</b> <span style={{ color: T.faint }}>called @</span> <b style={{ color: T.text }}>{fmt$(r.mcAt)}</b>
+                      </div>
+                      <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 1 }}>
+                        <span style={{ color: T.faint }}>peak MC</span> <b style={{ color: tr.color }}>{fmt$(peakMc)}</b>
+                        <span style={{ color: T.faint }}> · now</span> <b style={{ color: T.text }}>×{curMult.toFixed(1)}</b>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right", lineHeight: 1.25, flex: "0 0 auto" }}>
+                      <div style={{ fontFamily: T.mono, fontSize: rk === 1 ? 16 : 13, fontWeight: 900, color: tr.color }}>×{r.mult.toFixed(1)}</div>
+                      <div style={{ fontFamily: T.mono, fontSize: 6.5, fontWeight: 800, color: T.faint, letterSpacing: 1 }}>HIGHEST</div>
+                      <div style={{ fontFamily: T.mono, fontSize: rk === 1 ? 11 : 9.5, fontWeight: 900, letterSpacing: 0.5,
+                        background: "linear-gradient(92deg, #ffe27a, #ffb02e 55%, #ff7a1a)", WebkitBackgroundClip: "text", backgroundClip: "text",
+                        WebkitTextFillColor: "transparent", filter: `drop-shadow(0 0 ${rk === 1 ? 7 : 4}px rgba(255,176,46,0.65))` }}>
+                        +{(rk === 1 ? 0.5 : rk === 2 ? 0.42 : 0.36).toFixed(2)}×/EPOCH</div>
+                    </div>
                   </div>
                 );
               })}
             </div>
           )}
-          {board.slice(0, listEnd).map((r, i) => {
-            const rk = i + 1;
+          {board.slice(3, listEnd).map((r, i) => {
+            const rk = i + 4;
             const tr = calloutTier(r.mult);
             const isFocus = focusRank === rk && !r.you;
             return (
@@ -2508,11 +2527,13 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
                 boxShadow: isFocus && hl ? `0 0 18px ${VALO_PURPLE}66` : "none",
                 transition: "background 1.2s ease, border-color 1.2s ease, box-shadow 1.2s ease" }}>
                 <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: rk <= 3 ? tr.color : T.faint, width: 26 }}>#{rk}</span>
-                {rk <= 10 && <CalloutRing mult={r.mult} size={rk <= 3 ? 26 : 21} />}
+                <CalloutRing mult={r.mult} size={rk <= 3 ? 26 : 19} />
                 <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, color: r.you ? T.green : isFocus && hl ? VALO_PURPLE : T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{r.user}</span>
                 <span style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>${r.sym}</span>
                 <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: tr.color }}>×{r.mult.toFixed(1)}</span>
-                {lbBonus(rk) > 0 && <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 800, color: VALO_PURPLE }}>+{lbBonus(rk).toFixed(2)}×</span>}
+                {lbBonus(rk) > 0 && <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, color: "#ffd54a",
+                  background: "rgba(255,213,74,0.1)", border: "1px solid rgba(255,213,74,0.35)", borderRadius: 5, padding: "1px 5px",
+                  textShadow: "0 0 6px rgba(255,213,74,0.5)" }}>+{lbBonus(rk).toFixed(2)}×</span>}
               </div>
             );
           })}
@@ -2524,7 +2545,7 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
   );
   if (embed) return body;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 76, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 94, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 620, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "82vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         {body}
@@ -2546,7 +2567,7 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0 }, valoUsd 
     </div>
   );
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 76, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 94, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 390, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "80vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 13px", borderBottom: `1px solid ${T.border}` }}>
@@ -2585,7 +2606,7 @@ function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 
   }, [focusUser]);
   const [tab, setTab] = useState(inTop250 ? "board" : "tiers");
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 82, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 94, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 560, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "82vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 3, padding: "11px 13px 0", borderBottom: `1px solid ${T.border}` }}>
@@ -2987,7 +3008,7 @@ function FollowListModal({ kind, list, onClose, isMobile, onOpenUser }) {
     </div>
   );
 }
-function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, onToggleFollow, friendStatus, onFriendAction, onOpenToken, onSendFunds, dmLog = [], onSendDm, solBalance = 0, valoWallet = 0 , incomingReq = false, onAcceptReq, onDeclineReq, onOpenTierList, onOpenLeaderboard, cloudProfile = null }) {
+function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, onToggleFollow, friendStatus, onFriendAction, onOpenToken, onSendFunds, dmLog = [], onSendDm, solBalance = 0, valoWallet = 0 , incomingReq = false, onAcceptReq, onDeclineReq, onOpenTierList, onOpenLeaderboard, cloudProfile = null, onOpenTrade = null }) {
   const [badgeTab, setBadgeTab] = useState(false); // insignia tapped → tier/leaderboard tab
   // API: replace with a real user-profile endpoint — all stats below are seeded fakes
   const rand = seededRand(hashStr("user-" + name));
@@ -3013,6 +3034,18 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   const [fundAmt, setFundAmt] = useState("");
   const [holdsOpen, setHoldsOpen] = useState(false); // 💼 all-holdings dropdown
   const [holdsTab, setHoldsTab] = useState("open");  // open ⇄ closed positions
+  const [cpFilter, setCpFilter] = useState(null);    // closed tab: view one token only
+  const [txFilter, setTxFilter] = useState(null);    // activity: view one token's txs only
+  // held-for durations: 15-minute steps → hours → days → months → lifetime
+  const durTxt = (ms) => {
+    const m = Math.max(0, ms) / 60000;
+    if (m < 15) return "<15m";
+    if (m < 60) return `${Math.round(m / 15) * 15}m`;
+    const h = m / 60; if (h < 24) return `${h < 10 ? h.toFixed(1) : Math.round(h)}h`;
+    const d = h / 24; if (d < 30) return `${d < 10 ? d.toFixed(1) : Math.round(d)}d`;
+    const mo = d / 30.44; if (mo < 12) return `${mo.toFixed(1)}mo`;
+    const y = d / 365.25; return y >= 3 ? "lifetime" : `${y.toFixed(1)}y`;
+  };
 
   const friends = friendStatus === "friends";
   // ---- current holdings + full tx history (seeded; API: on-chain wallet scan) ----
@@ -3061,7 +3094,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     return x.ts >= a && x.ts <= b;                            // inclusive range, e.g. 7/3–7/9
   });
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 78, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 92, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "88vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14 }}>
         {/* profile head */}
@@ -3079,7 +3112,10 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
             </div>
             <div onClick={() => onOpenTierList && onOpenTierList()} title="Tap: tiers & leaderboards — if they're on the board, we jump straight to their name"
               style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-              <CalloutRing mult={shownPeak || 1} size={38} />
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+                <CalloutRing mult={shownPeak || 1} size={38} />
+                <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: calloutTier(shownPeak || 1).tier.color }}>×{(shownPeak || 1).toFixed(1)}</span>
+              </div>
               <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 800, color: tier.color }}>{tier.label}</span>
             </div>
             <button onClick={onClose} style={{ ...chip(false), padding: "5px 9px", fontSize: 12 }}>✕</button>
@@ -3140,27 +3176,40 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                     </div>
                   )}
                 </div>
-                <button onClick={() => { if (holdsOpen && holdsTab === "closed") { setHoldsOpen(false); } else { setHoldsTab("closed"); setHoldsOpen(true); } }}
-                  style={{ width: "100%", border: "none", borderTop: `1px solid ${T.border}`,
-                    background: holdsOpen && holdsTab === "closed" ? "rgba(234,57,67,0.08)" : "rgba(255,255,255,0.02)",
-                    color: holdsOpen && holdsTab === "closed" ? T.red : T.dim, padding: "7px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.5, cursor: "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                  <span>{holdsOpen && holdsTab === "closed" ? "▴" : "▾"} 🔒 CLOSED POSITIONS · {closedRows.length}</span>
-                  {closedRows.length > 0 && (
-                    <span style={{ color: closedTotal >= 0 ? T.green : T.red }}>
-                      {closedTotal >= 0 ? "+" : "−"}${Math.abs(closedTotal).toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                    </span>
-                  )}
-                </button>
-                <button onClick={() => { if (holdsOpen && holdsTab === "open") { setHoldsOpen(false); } else { setHoldsTab("open"); setHoldsOpen(true); } }}
-                  style={{ width: "100%", border: "none", borderTop: `1px solid ${T.border}`, background: holdsOpen && holdsTab === "open" ? "rgba(125,92,240,0.1)" : "rgba(255,255,255,0.02)",
-                    color: holdsOpen && holdsTab === "open" ? VALO_PURPLE : T.dim, padding: "7px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.5, cursor: "pointer" }}>
-                  {holdsOpen && holdsTab === "open" ? "▴ HIDE" : "▾ ALL HOLDINGS"} · {rows.length} TOKENS
-                </button>
+                <div style={{ display: "flex", borderTop: `1px solid ${T.border}` }}>
+                  <button onClick={() => { if (holdsOpen && holdsTab === "closed") { setHoldsOpen(false); } else { setHoldsTab("closed"); setHoldsOpen(true); } }}
+                    style={{ flex: 1, border: "none", borderRight: `1px solid ${T.border}`,
+                      background: holdsOpen && holdsTab === "closed" ? "rgba(234,57,67,0.08)" : "rgba(255,255,255,0.02)",
+                      color: holdsOpen && holdsTab === "closed" ? T.red : T.dim, padding: "7px 2px", fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1, cursor: "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 6, minWidth: 0 }}>
+                    <span style={{ whiteSpace: "nowrap" }}>🔒 CLOSED · {closedRows.length}</span>
+                    {closedRows.length > 0 && (
+                      <span style={{ color: closedTotal >= 0 ? T.green : T.red, whiteSpace: "nowrap" }}>
+                        {closedTotal >= 0 ? "+" : "−"}${Math.abs(closedTotal).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </span>
+                    )}
+                  </button>
+                  <button onClick={() => { if (holdsOpen && holdsTab === "open") { setHoldsOpen(false); } else { setHoldsTab("open"); setHoldsOpen(true); } }}
+                    style={{ flex: 1, border: "none",
+                      background: holdsOpen && holdsTab === "open" ? "rgba(125,92,240,0.1)" : "rgba(255,255,255,0.02)",
+                      color: holdsOpen && holdsTab === "open" ? VALO_PURPLE : T.dim, padding: "7px 2px", fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1, cursor: "pointer", whiteSpace: "nowrap", minWidth: 0 }}>
+                    {holdsOpen && holdsTab === "open" ? "▴" : "▾"} ALL HOLDINGS · {rows.length}
+                  </button>
+                </div>
                 {holdsOpen && holdsTab === "closed" && (
                   <div style={{ padding: "4px 8px 8px" }}>
+                    {(() => { const syms = [...new Set(closedRows.map((c) => c.t.sym))].slice(0, 10);
+                      return syms.length > 1 && (
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", padding: "4px 2px 2px" }}>
+                        <button onClick={() => setCpFilter(null)} style={{ border: `1px solid ${!cpFilter ? T.red + "88" : T.border}`, background: !cpFilter ? "rgba(234,57,67,0.1)" : "transparent", color: !cpFilter ? T.red : T.faint, borderRadius: 999, padding: "2px 8px", fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, cursor: "pointer" }}>ALL</button>
+                        {syms.map((s3) => (
+                          <button key={s3} onClick={() => setCpFilter(cpFilter === s3 ? null : s3)}
+                            style={{ border: `1px solid ${cpFilter === s3 ? T.red + "88" : T.border}`, background: cpFilter === s3 ? "rgba(234,57,67,0.1)" : "transparent", color: cpFilter === s3 ? T.red : T.dim, borderRadius: 999, padding: "2px 8px", fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, cursor: "pointer" }}>${s3}</button>
+                        ))}
+                      </div>
+                    ); })()}
                     {closedRows.length === 0 && <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, padding: "8px 4px" }}>No closed positions yet.</div>}
-                    {closedRows.map((c, i) => {
+                    {closedRows.filter((c) => !cpFilter || c.t.sym === cpFilter).map((c, i) => {
                       const up = c.pnlUsd >= 0;
                       return (
                         <div key={"c" + i} onClick={() => c.t && c.t.id != null && onOpenToken(c.t.id)}
@@ -3169,9 +3218,14 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                           <TokenAvatar sym={c.t.sym} hue={c.t.hue} img={c.t.img} size={18} />
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: accent(c.t.hue) }}>${c.t.sym}
-                              <span style={{ color: T.faint, fontSize: 8, fontWeight: 700, marginLeft: 6 }}>bought {new Date(c.boughtTs).toLocaleDateString([], { month: "short", day: "numeric" })}</span></div>
+                              <span style={{ color: T.faint, fontSize: 8, fontWeight: 700, marginLeft: 6 }}>
+                                {new Date(c.boughtTs).toLocaleDateString([], { month: "short", day: "numeric" })} → {new Date(c.soldTs).toLocaleDateString([], { month: "short", day: "numeric" })}
+                                <b style={{ color: T.dim }}> · held {durTxt(c.soldTs - c.boughtTs)}</b>
+                              </span></div>
                             <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim }}>
-                              ▲ IN ${c.inUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })} → CLOSED {new Date(c.soldTs).toLocaleDateString([], { month: "short", day: "numeric" })}
+                              <span style={{ color: T.faint }}>IN</span> ${c.inUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                              <span style={{ color: T.faint }}> → OUT</span> <b style={{ color: up ? T.green : T.red }}>${c.outUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}</b>
+                              <span style={{ color: T.faint }}> · closed {new Date(c.soldTs).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
                             </div>
                           </div>
                           <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: up ? T.green : T.red }}>
@@ -3180,10 +3234,16 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                         </div>
                       );
                     })}
-                    <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, padding: "8px 4px 2px" }}>
-                      <span style={{ color: T.faint, letterSpacing: 1.5 }}>TOTAL EARNINGS</span>
-                      <span style={{ color: closedTotal >= 0 ? T.green : T.red }}>{closedTotal >= 0 ? "+" : "−"}${Math.abs(closedTotal).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
-                    </div>
+                    {(() => { const fRows = closedRows.filter((c) => !cpFilter || c.t.sym === cpFilter);
+                      const inT = fRows.reduce((s2, r) => s2 + r.inUsd, 0);
+                      const outT = fRows.reduce((s2, r) => s2 + r.outUsd, 0);
+                      const fTotal = fRows.reduce((s2, r) => s2 + r.pnlUsd, 0);
+                      return fRows.length > 0 && (
+                        <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, padding: "8px 4px 2px", flexWrap: "wrap", gap: 4 }}>
+                          <span style={{ color: T.faint, letterSpacing: 1 }}>{cpFilter ? "$" + cpFilter + " · " : ""}IN ${inT.toLocaleString(undefined, { maximumFractionDigits: 0 })} → OUT ${outT.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                          <span style={{ color: fTotal >= 0 ? T.green : T.red }}>TOTAL {fTotal >= 0 ? "+" : "−"}${Math.abs(fTotal).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                        </div>
+                      ); })()}
                   </div>
                 )}
                 {holdsOpen && holdsTab === "open" && (
@@ -3198,7 +3258,11 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: accent(h.t.hue) }}>${h.t.sym}
                               <span style={{ color: T.text, marginLeft: 6 }}>${h.val.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
-                            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim }}>{fmtQty(h.qty)} tokens · held {h.held}</div>
+                            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim }}>
+                              <span style={{ color: T.faint }}>IN</span> ${(h.qty * h.entry).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                              <span style={{ color: T.faint }}> → NOW</span> <b style={{ color: up ? T.green : T.red }}>${h.val.toLocaleString(undefined, { maximumFractionDigits: 0 })}</b>
+                              <span style={{ color: T.faint }}> · {fmtQty(h.qty)} tok · {h.held}</span>
+                            </div>
                           </div>
                           <div style={{ textAlign: "right", lineHeight: 1.3 }}>
                             <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: up ? T.green : T.red }}>{up ? "+" : "−"}${Math.abs(h.pnl).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
@@ -3207,6 +3271,14 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                         </div>
                       );
                     })}
+                    {(() => { const inTot = rows.reduce((s2, h) => s2 + h.qty * h.entry, 0);
+                      const nowTot = rows.reduce((s2, h) => s2 + h.val, 0); const up2 = nowTot >= inTot;
+                      return rows.length > 0 && (
+                        <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, padding: "8px 4px 2px" }}>
+                          <span style={{ color: T.faint, letterSpacing: 1.5 }}>TOTAL · IN ${inTot.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                          <span style={{ color: up2 ? T.green : T.red }}>NOW ${nowTot.toLocaleString(undefined, { maximumFractionDigits: 0 })} ({up2 ? "+" : "−"}${Math.abs(nowTot - inTot).toLocaleString(undefined, { maximumFractionDigits: 0 })})</span>
+                        </div>
+                      ); })()}
                   </div>
                 )}
               </div>
@@ -3255,15 +3327,29 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
           </div>
           <div style={{ maxHeight: 180, overflowY: "auto" }}>
             {txShown.length === 0 && <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center", padding: 14 }}>No transactions in that range.</div>}
-            {txShown.map((x, i) => (
-              <div key={i} onClick={() => onOpenToken(x.t.id)} title={`Open the $${x.t.sym} chart`}
+            {(() => { const syms = [...new Set(txShown.map((x) => x.t.sym))].slice(0, 10);
+              return syms.length > 1 && (
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 5 }}>
+                <button onClick={() => setTxFilter(null)} style={{ border: `1px solid ${!txFilter ? VALO_PURPLE + "88" : T.border}`, background: !txFilter ? "rgba(125,92,240,0.1)" : "transparent", color: !txFilter ? VALO_PURPLE : T.faint, borderRadius: 999, padding: "2px 8px", fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, cursor: "pointer" }}>ALL</button>
+                {syms.map((s3) => (
+                  <button key={s3} onClick={() => setTxFilter(txFilter === s3 ? null : s3)}
+                    style={{ border: `1px solid ${txFilter === s3 ? VALO_PURPLE + "88" : T.border}`, background: txFilter === s3 ? "rgba(125,92,240,0.1)" : "transparent", color: txFilter === s3 ? VALO_PURPLE : T.dim, borderRadius: 999, padding: "2px 8px", fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, cursor: "pointer" }}>${s3}</button>
+                ))}
+              </div>
+            ); })()}
+            {txShown.filter((x) => !txFilter || x.t.sym === txFilter).map((x, i) => {
+              const qty = x.tokQty != null ? x.tokQty : (x.sol * SOL_USD) / ((x.priceAt || x.t.price) || 1);
+              const qtyTxt = qty >= 1e6 ? (qty / 1e6).toFixed(1) + "M" : qty >= 1e3 ? (qty / 1e3).toFixed(1) + "K" : qty.toFixed(qty >= 10 ? 0 : 2);
+              return (
+              <div key={i} onClick={() => (onOpenTrade ? onOpenTrade(x) : onOpenToken(x.t.id))} title={`Open the $${x.t.sym} chart at this ${x.isBuy ? "buy" : "sell"}`}
                 style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 8, marginBottom: 2, cursor: "pointer", background: i % 2 ? "rgba(255,255,255,0.015)" : "transparent" }}>
                 <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: x.isBuy ? T.green : T.red, width: 30, flex: "0 0 auto" }}>{x.isBuy ? "BUY" : "SELL"}</span>
-                <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: accent(x.t.hue), flex: 1 }}>${x.t.sym}</span>
-                <span style={{ fontFamily: T.mono, fontSize: 9, color: T.text }}>{x.sol} SOL <span style={{ color: T.faint }}>· ${(x.sol * SOL_USD).toFixed(0)}</span></span>
+                <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: accent(x.t.hue), flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>${x.t.sym}
+                  <span style={{ color: T.dim, fontSize: 8, fontWeight: 700, marginLeft: 5 }}>{qtyTxt} tok</span></span>
+                <span style={{ fontFamily: T.mono, fontSize: 9, color: T.text, whiteSpace: "nowrap" }}>{(+x.sol).toFixed(2)} SOL <span style={{ color: T.faint }}>· ${(x.sol * SOL_USD).toFixed(0)}</span></span>
                 <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, flex: "0 0 auto" }}>{new Date(x.ts).toLocaleDateString(undefined, { month: "numeric", day: "numeric" })} {new Date(x.ts).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</span>
               </div>
-            ))}
+            ); })}
           </div>
         </div>
         {/* recent callouts */}
@@ -7150,7 +7236,8 @@ export default function App() {
             { id: r.token_key, sym: r.sym || "?", hue: symbolHue(r.sym || "?"), img: null, price: +r.price || 0 };
           const usd = r.val_usd != null ? +r.val_usd : (+r.amt || 0) * (r.unit === "VALO" ? 0.0125 : SOL_USD);
           const pnlUsd = r.pnl_money != null ? +r.pnl_money * (r.unit === "VALO" ? 0.0125 : SOL_USD) : null;
-          return { t: t2, isBuy: r.side === "buy", sol: usd / SOL_USD, valUsd: usd, pnlUsd, key: String(r.token_key), ts: new Date(r.ts).getTime() };
+          return { t: t2, isBuy: r.side === "buy", sol: usd / SOL_USD, valUsd: usd, pnlUsd, key: String(r.token_key), ts: new Date(r.ts).getTime(),
+            tokQty: r.tok_qty != null ? +r.tok_qty : null, priceAt: +r.price || t2.price || 0 };
         });
         setProfileCloud({ id: prof.id, handle: prof.handle, icon: prof.icon, holds, activity,
           callouts: (cos || []).map((r) => ({ sym: r.sym, mcAt: +r.mc_at || 0, ts: new Date(r.ts).getTime() })),
@@ -10347,6 +10434,20 @@ export default function App() {
         onClose={() => setFollowListOpen(null)} isMobile={isMobile} onOpenUser={(u) => setProfileUser(u)} />}
       {profileUser && <UserProfileModal name={profileUser} onClose={() => { setProfileUser(null); setProfileCloud(null); }} isMobile={isMobile} tokens={tokens}
         cloudProfile={profileCloud}
+        onOpenTrade={(x) => {
+          const tk = tokens.find((t3) => x.key && String(t3.pool || t3.id) === String(x.key)) ||
+            tokens.find((t3) => t3.id === x.t.id) || tokens.find((t3) => t3.sym === x.t.sym);
+          if (!tk) return; // their token isn't on this device's market right now
+          const handle = profileUser;
+          setProfileUser(null); setProfileCloud(null);
+          setDrawerOpen(false); setPortfolioDrawer(false); setEcoFull(false);
+          setSel(tk.id); setClickMode(null);
+          const px = x.priceAt || tk.price;
+          const tx2 = "spec" + x.ts;
+          setHistMarker({ t: x.ts, side: x.isBuy ? "buy" : "sell", p: px, price: px, amt: +(+x.sol).toFixed(3), unit: "SOL",
+            mc: mcOf(tk), pnlPct: null, pnlMoney: x.pnlUsd != null ? x.pnlUsd / SOL_USD : null, sym: tk.sym, tx: tx2, trader: "@" + handle });
+          setHighlightTx(tx2);
+        }}
         isFollowing={followingList.includes(profileUser)}
         onToggleFollow={() => { cloudFollow(profileUser, !followingList.includes(profileUser)); setFollowingList((L) => (L.includes(profileUser) ? L.filter((x) => x !== profileUser) : [...L, profileUser])); }}
         friendStatus={friendsList.includes(profileUser) ? "friends" : sentFriendReqs.includes(profileUser) ? "requested" : "none"}
