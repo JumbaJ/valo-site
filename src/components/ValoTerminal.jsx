@@ -7939,7 +7939,9 @@ export default function App() {
       borderRadius: m.cloud ? 6 : 0, padding: m.cloud ? "3px 7px" : 0 }}>
       <span style={{ color: T.faint, fontSize: 9.5 }}>{m.ts} </span>
       {m.cloud && <span title="Real user — live message" style={{ fontSize: 9, marginRight: 3 }}>☁</span>}
-      <span style={{ color: m.cloud ? VALO_PURPLE : m.me ? accent(258, 68) : T.blue, fontWeight: m.cloud ? 800 : 400 }}>@{m.user}</span>
+      <span onClick={(e) => { e.stopPropagation(); if (!m.me) setProfileUser(m.user); }} title={m.me ? undefined : "Open their portfolio"}
+        style={{ color: m.cloud ? VALO_PURPLE : m.me ? accent(258, 68) : T.blue, fontWeight: m.cloud ? 800 : 400,
+          cursor: m.me ? "default" : "pointer", textDecoration: m.me ? "none" : "underline dotted", textUnderlineOffset: 2 }}>@{m.user}</span>
       <span style={{ color: T.text }}> {m.text} </span>
       {m.sym && <CoinLink sym={m.sym} tokenId={m.tokenId} />}
     </div>
@@ -8138,6 +8140,11 @@ export default function App() {
                         : `$${fmtP(selected.price)}`}
                     </span>
                     </span>
+                    {isMobile && (
+                      <span style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, whiteSpace: "nowrap" }}>
+                        MC <b style={{ color: T.text, fontWeight: 800 }}>{fmt$(mcOf(selected))}</b>
+                      </span>
+                    )}
                     <span style={{ fontSize: 8.5, border: `1px solid ${ratingColor(scoreToken(selected))}66`, background: `${ratingColor(scoreToken(selected))}14`, color: ratingColor(scoreToken(selected)), padding: "2px 7px", borderRadius: 5, fontFamily: T.mono, fontWeight: 800 }}>
                       {scoreToken(selected)} {rating(scoreToken(selected))}
                     </span>
@@ -9872,6 +9879,7 @@ export default function App() {
         <>
           <div onClick={() => setWalletPop(null)} style={{ position: "fixed", inset: 0, zIndex: 93 }} />
           <button onClick={() => { setWalletPop(null); setPortfolioDrawer(true); }}
+            onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); setWalletPop(null); setPortfolioDrawer(true); }}
             style={{ position: "fixed", left: walletPop.x, top: walletPop.y, zIndex: 94, border: `1.5px solid ${VALO_PURPLE}`,
               background: T.panel, color: T.text, borderRadius: 11, padding: "10px 15px", fontFamily: T.mono, fontSize: 11.5, fontWeight: 900,
               boxShadow: `0 12px 34px rgba(0,0,0,0.6), 0 0 14px ${VALO_PURPLE}55`, cursor: "pointer", animation: "coPop .14s ease" }}>
@@ -10610,11 +10618,11 @@ export default function App() {
           </button>
 
           <div onClick={() => setPortfolioDrawer(false)}
-            style={{ position: "fixed", inset: 0, zIndex: 84, background: "rgba(4,6,10,0.55)", backdropFilter: "blur(2px)",
+            style={{ position: "fixed", inset: 0, zIndex: 88, background: "rgba(4,6,10,0.55)", backdropFilter: "blur(2px)",
               opacity: portfolioDrawer ? 1 : 0, pointerEvents: portfolioDrawer ? "auto" : "none", transition: "opacity .28s ease" }} />
 
           <div style={{
-            position: "fixed", top: 0, right: 0, bottom: 0, left: 0, zIndex: 85,
+            position: "fixed", top: 0, right: 0, bottom: 0, left: 0, zIndex: 89,
             width: "100vw", background: "rgba(12,15,22,0.98)",
             boxShadow: "-12px 0 40px rgba(0,0,0,0.6)",
             transform: portfolioDrawer ? "translateX(0)" : "translateX(102%)",
