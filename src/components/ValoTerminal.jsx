@@ -10140,7 +10140,7 @@ export default function App() {
       {sb && !isMobile && (
         <button onClick={() => setCloudOpen(true)}
           title={cloudUser ? `Signed in as ${cloudUser.email} — portfolio syncs to the cloud` : "Sign in — your paper portfolio, watchlist and bots follow you across devices"}
-          style={{ position: "fixed", top: 26, left: "calc(50% - 250px)", zIndex: 55, display: "flex", alignItems: "center", gap: 6,
+          style={{ position: "fixed", top: 26, right: 152, zIndex: 55, display: "flex", alignItems: "center", gap: 6,
             borderTop: "none", borderRadius: "0 0 9px 9px",
             background: cloudUser ? "rgba(125,92,240,0.16)" : "rgba(59,130,246,0.16)",
             border: `1px solid ${cloudUser ? VALO_PURPLE : T.blue}`, padding: "4px 10px", cursor: "pointer",
@@ -10193,7 +10193,7 @@ export default function App() {
       {!isMobile && (
         <button onClick={() => setLiveData((v) => !v)}
           title={liveData ? "LIVE DATA ON — real pump.fun pairs via DexScreener; wallet & fills stay simulated. Click to return to the demo feed." : "Pull REAL Solana pump tokens (DexScreener) into the terminal — paper trading on live prices"}
-          style={{ position: "fixed", top: 26, left: "calc(50% - 118px)", zIndex: 55, display: "flex", alignItems: "center", gap: 6,
+          style={{ position: "fixed", top: 26, right: 14, zIndex: 55, display: "flex", alignItems: "center", gap: 6,
             background: liveData ? "rgba(22,199,132,0.14)" : "rgba(15,19,28,0.72)", border: `1px solid ${liveData ? T.green : T.border}`, borderTop: "none", borderRadius: "0 0 9px 9px", padding: "4px 9px", cursor: "pointer",
             boxShadow: liveData ? "0 0 10px rgba(22,199,132,0.35)" : "none" }}>
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: liveData ? T.green : "#39414f", boxShadow: liveData ? `0 0 6px ${T.green}` : "none" }} />
