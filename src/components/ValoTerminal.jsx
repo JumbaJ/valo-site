@@ -3173,15 +3173,23 @@ function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], o
           {shown.length === 0 && friendReqs.length === 0 && (
             <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center", padding: 26 }}>All quiet for now.</div>
           )}
-          {shown.map((n) => (
-            <div key={n.id} onClick={() => { if (n.tokenId) onOpenToken(n.tokenId); else onOpenUser(n.user); }}
+          {shown.map((n) => {
+            const body = n.user && n.text && n.text.startsWith("@" + n.user) ? n.text.slice(("@" + n.user).length).replace(/^\s*/, " ") : n.text;
+            return (
+            <div key={n.id} onClick={() => { if (n.tokenId) onOpenToken(n.tokenId); else if (n.user) onOpenUser(n.user); }}
               title={n.tokenId ? "Open the chart" : "Open profile"}
               style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 9, marginBottom: 3, cursor: "pointer", border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.015)" }}>
               <span style={{ fontSize: 13 }}>{icon(n.type)}</span>
-              <span style={{ flex: 1, fontFamily: T.mono, fontSize: 10.5, color: T.text, lineHeight: 1.35 }}>{n.text}</span>
+              <span style={{ flex: 1, fontFamily: T.mono, fontSize: 10.5, color: T.text, lineHeight: 1.35 }}>
+                {n.user && (
+                  <b onClick={(e) => { e.stopPropagation(); onOpenUser(n.user); }} title="Open their portfolio"
+                    style={{ color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>@{n.user}</b>
+                )}
+                {body}
+              </span>
               <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, flex: "0 0 auto" }}>{timeAgo(n.ts)}</span>
             </div>
-          ))}
+          ); })}
         </div>
       </div>
     </div>
@@ -5087,6 +5095,11 @@ const WP_SECTIONS = [
     { t: "b", x: "Equity, all-time PnL, SOL / $VALO breakdown, privacy mask." },
     { t: "b", x: "Deposit / withdraw with percentage presets and confirm-to-execute." },
     { t: "b", x: "Tax-free SOL ⇄ $VALO swap, traceable PnL chart, held-positions close-all." },
+    { t: "h", x: "What's new in v2.0.2" },
+    { t: "p", x: "The current release focuses on feel and transparency. The scanner now drags like the file system you already know: pick a token up and it shrinks in your grip, a ghost pill rides your pointer, and slots flip the instant you clip into a neighbor — identically on PC and mobile. Watchlist subsections are now live workspaces: one click loads a subsection straight into the scanner, and removals sync back. Holding any chart's name or price manages its watchlist state in place." },
+    { t: "b", x: "Radical transparency on every trade: activity and performance receipts show exact token quantities in and out, dollar value, per-sell Δ, and remaining balance — and any holder or live transaction opens a full trader dossier: profile, current holdings, chart, and their complete trade history on that token." },
+    { t: "b", x: "Every profile carries a Portfolio Holdings box — total balance, top holding, and a full per-token breakdown with PnL since holding and hold time." },
+    { t: "b", x: "The tier ladder escalates visually with every single rank, crowned by the one-of-one DIAMOND APEX insignia. Full details for every release live in the PATCH NOTES tab above." },
   ]},
   { id: "community", icon: "🫂", n: "8", title: "Community", accent: "#16C784", body: [
     { t: "p", x: "VALO is not a terminal with a community bolted on — the community IS the product. Nearly every feature in this build exists because someone asked for it, and that is the permanent development model: the people trading here decide what gets built next." },
@@ -5153,6 +5166,20 @@ function WpFeeTable() {
 }
 
 const PATCH_NOTES = [
+  { v: "2.0.2", name: "PATCH V 2.0.2", date: "July 2026", accent: "#16C784", items: [
+    "🖐 FILE-STYLE SCANNER DRAG (PC + mobile) — hold a token and it SHRINKS in your grip, a ⠿ $TICKER ghost pill rides your cursor/finger, the tile under you scales up with a dashed glow, and slots flip the moment you clip ~15% into the neighbor. 320ms pickup, half-way jitter killed, and the PC down-drag dead-zone bug is gone — one-slot drags land instantly in both directions",
+    "📑 SUBSECTIONS GO LIVE — single-click (tap on mobile) any watchlist subsection header and its tokens BECOME the scanner: everything else clears, the header lights up ● IN SCANNER, click again to restore. Removing a token while its subsection is loaded clears it from the watchlist too — the two stay in sync",
+    "⛓ HOLD THE NAME/PRICE — hold the token name or price on any chart (right-click on PC) to add it to the watchlist, any subsection, or the scanner. Viewing it THROUGH the open subsection? The menu flips into REMOVE & CLOSE CHART — confirm and it leaves the subsection, leaves the scanner, and the chart goes blank",
+    "👥 HOLDERS = TRADER DOSSIERS — tapping any holder (or live-trade tx) opens the full trader receipt: profile picture + @name straight into their portfolio, CURRENT HOLDINGS beside it, the mini price chart under that, and every trade they've made on this token with time · $ size · per-trade PnL",
+    "💼 PORTFOLIO HOLDINGS BOX on every profile — TOTAL BALANCE, TOP HOLDING with its dollar amount, and an ALL HOLDINGS dropdown listing each token's $ value, token count, PnL since holding and hold time — replaces the old Current Holdings grid",
+    "🧾 FULL TX ACCOUNTING (PC + mobile) — every buy/sell in Activity and Performance now shows the exact tokens moved, their $ value, the Δ on each sell, and the remaining balance if you're still carrying (or 'closed' when you're out)",
+    "✦ DIAMOND APEX ONE-OF-ONE — brand-new prismatic star-cut stone cycling the whole spectrum, spinning ray-burst, heartbeat core, twin orbiting sparks, spectrum aura and a comet screaming around the ring. And every tier past PLEB now stamps another glowing tick on the dial — sparkles, breathing arc, counter-halo — escalating all the way up",
+    "🤖 AUTO-TRADER PILL BAR (mobile) — one skinny line under the chart: ✋ DRAG · 🤖 TRADER · 👁 VISUAL · 📊 BOTS · 📋 WATCHLIST, hold the watchlist pill to swap it into 📊 POSITIONS and back",
+    "📱 MOBILE LAYERING FIXED — wallet and watchlist now open ON TOP of the auto-trader page, the wallet popup fires only from holding your TOTAL amount, and the whole-screen highlight while holding is dead",
+    "📈 CHART PULLS, DISCIPLINED — the mobile top-pull rides your finger then SNAPS fully up to the name + price (never rests half-covering), the bottom drag hard-caps right above LIVE TRADES / HOLDERS, and the PC right/corner pulls slide the trade + wallet tabs to the right wall at full size — that wall is the cap, nothing shrinks, nothing leaves the screen",
+    "📋 WATCHLIST READABILITY — bigger subsection titles and taller one-line token bars with larger tickers, %-moves and scores on PC and mobile; scanner hold-menu adds or removes in BOTH card and column modes, and adds land in the column and card row together",
+    "📣 PC CALLOUT = MOBILE CALLOUT — the opened callout on desktop drops its frame for the clean compact ring + tier design mobile uses",
+  ]},
   { v: "1.0.2", name: "PATCH V 1.0.2", date: "July 2026", accent: "#7D5CF0", items: [
     "📋 WATCHLIST WALL — left pull-tab on PC with a loose list + your own named SUBSECTIONS: ＋ LIST to create, double-click to rename, drag section headers to reorder, right-click any row to move/remove",
     "📊 MY POSITIONS slide-over — every open bot & ticket in one tab: BOTS | BOTH | TICKETS scoping, live scoped PnL with unrealized + realized, per-asset 10–100% sell chips showing exact SOL/$VALO, scoped SELL ALL",
@@ -5717,11 +5744,7 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
                   style={{ border: "none", background: "none", padding: 0, marginTop: 4, fontFamily: T.mono, fontSize: 7.5, color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
                   DEV @{dev.name} · {dev.short}
                 </button>
-                {onWatchAdd && isMobile && (
-                  <button onClick={(e) => { e.stopPropagation(); onWatchAdd(t.id); }}
-                    title="Add to your watchlist"
-                    style={{ position: "absolute", top: 6, right: 6, border: `1px solid ${VALO_PURPLE}55`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE, borderRadius: 7, padding: "2px 6px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, cursor: "pointer" }}>☆+</button>
-                )}
+
               </div>
             </div>
           );
@@ -6544,7 +6567,15 @@ export default function App() {
       // (name + price only) or fully back down
       if (d && d.which === "top" && d.nextC != null) {
         const fullH = Math.max(400, Math.round(window.innerHeight - 205));
-        if (d.nextC > 0.33) { setMetricsCrunch(1); setMobChartH(fullH); }
+        if (d.nextC > 0.33) {
+          setMetricsCrunch(1); setMobChartH(fullH);
+          setTimeout(() => {
+            const lth = document.querySelector("[data-lth]"); const mc = document.querySelector("[data-mchart]");
+            if (!lth || !mc) return;
+            const over = mc.getBoundingClientRect().bottom - (lth.getBoundingClientRect().top - 8);
+            if (over > 4) setMobChartH((h) => Math.max(400, Math.round(h - over)));
+          }, 340);
+        }
         else { setMetricsCrunch(0); setMobChartH(348); }
       }
     };
@@ -6591,7 +6622,7 @@ export default function App() {
     [trader]: { following: false, color: pickTraderColor(trader), icon: null, ...(M[trader] || {}), ...patch },
   }));
   const [histMarker, setHistMarker] = useState(null); // a trade opened from history, shown as marker
-  const [wallOpen, setWallOpen] = useState(true); // left ticker panel expand/collapse
+  const [wallOpen, setWallOpen] = useState(() => typeof window !== "undefined" && window.innerWidth < 900); // PC opens with the watchlist rail closed
   // background mode easter egg — tapping the VALO wordmark cycles the palette.
   // T is mutated in place so every component (and the canvas) picks it up.
   const [themeIdx, setThemeIdx] = useState(0);
@@ -6670,16 +6701,31 @@ export default function App() {
   // how far the chart may pull = distance from the cards' base-left to the wall's
   // right edge, minus a gap so they never rub. Measured live, so it's correct for
   // both wall-open (wide wall → less room) and wall-closed (thin rail → more room).
+  const pullXRef = useRef(0); pullXRef.current = pullX; // live value — closures in timeouts/listeners must never use a stale pullX
   const computeMaxPull = () => {
     const sc = scannerRef.current; if (!sc) return wallOpen ? 90 : 400;
-    const baseLeft = sc.getBoundingClientRect().left + pullX; // undo current translate
+    const Z = 1.13; // grid renders inside zoom:1.13 — rects are VISUAL px, pullX is pre-zoom units (1 unit = 1.13px on screen)
+    const baseLeft = sc.getBoundingClientRect().left + pullXRef.current * Z; // undo the CURRENT translate, in visual px
     const wlRight = wallRef.current ? wallRef.current.getBoundingClientRect().right : 0;
-    return Math.max(0, Math.round(baseLeft - wlRight - 16)); // 16px breathing gap
+    return Math.max(0, Math.round((baseLeft - wlRight - 16) / Z)); // visual gap → pull units, 16px breathing room
   };
-  // opening the wall shrinks available room — re-clamp so cards clear the wall
+  // scanner ⇄ watchlist, never interfering: wait out the wall's + padding's
+  // .28s animations, then SET the pull to the exact max for the new state.
+  // OPEN → chart sits at the widest it can be WITH the watchlist open.
+  // CLOSED → chart + scanner flow over to fill the freed space, capped 16px
+  // clear of the rail. The late pass re-measures and converges — assignment,
+  // never ratcheting, so a mid-animation misread can't stick.
   useEffect(() => {
-    const id = setTimeout(() => { const mp = computeMaxPull(); setPullX((p) => Math.min(p, mp)); }, 60);
-    return () => clearTimeout(id);
+    if (typeof window !== "undefined" && window.innerWidth < 900) return;
+    const settle = () => setPullX(computeMaxPull());
+    const ids = [420, 720].map((ms) => setTimeout(settle, ms));
+    return () => ids.forEach(clearTimeout);
+  }, [wallOpen]);
+  // window resizes re-clamp too, so nothing ever slides under the wall
+  useEffect(() => {
+    const onRz = () => { const mp = computeMaxPull(); setPullX((p) => Math.min(p, mp)); };
+    window.addEventListener("resize", onRz);
+    return () => window.removeEventListener("resize", onRz);
   }, [wallOpen]);
   // On desktop, open with the chart already pulled as far left as it will go, so
   // the first thing you see is a wide chart rather than an empty gutter.
@@ -6689,9 +6735,11 @@ export default function App() {
     if (typeof window !== "undefined" && window.innerWidth < 900) return;
     const id = setTimeout(() => {
       const mp = computeMaxPull();
-      if (mp > 0) {
-        setPullX(mp);               // hug the left wall — the RIGHT slack stays
-        didInitPull.current = true; // free so pulling right has real travel
+      const mr = computeMaxRight();
+      if (mp > 0 || mr > 0) {
+        if (mp > 0) setPullX(mp);   // hug the left wall
+        if (mr > 0) setPullR(mr);   // and park the right tabs against the right wall
+        didInitPull.current = true;
       }
     }, 260);
     return () => clearTimeout(id);
@@ -6736,6 +6784,7 @@ export default function App() {
   const [watchSections, setWatchSections] = useState([]);   // {id, name, ids[]}
   const [watchExp, setWatchExp] = useState(null);           // expanded token id
   const [watchTrash, setWatchTrash] = useState(null);       // {id, sec, x, y}
+  const [secDelete, setSecDelete] = useState(null);         // {id, name, count, x, y} — delete a whole subsection
   const [renamingSec, setRenamingSec] = useState(null);
   const [secName, setSecName] = useState("");
   const [scanOrder, setScanOrder] = useState(null);         // curated left-column slots
@@ -6842,6 +6891,7 @@ export default function App() {
   // On PC, hold the mouse ~280ms → a ghost lifts and you DRAG it: onto a scanner
   // slot (replaces it), the watchlist wall, or any subsection.
   const mobReorder = useRef(null); // {id} — finger-drag reorder on the mobile scanner
+  const mobArmRef = useRef(false); // true from hold-arm (vibration) → screen scroll locked
   const moveScan = (dragId, overId) => setScanOrder((prev) => {
     const base = prev || shownRef.current.map((x) => x.id);
     const from = base.indexOf(dragId), to = base.indexOf(overId);
@@ -6850,9 +6900,13 @@ export default function App() {
   });
   useEffect(() => {
     const mv = (e) => {
+      if (mobArmRef.current && !mobReorder.current) { e.preventDefault(); return; } // armed but not dragging yet — screen stays put
       const d = mobReorder.current; if (!d) return;
       e.preventDefault(); // page never scrolls while re-slotting a token
       const t0 = e.touches && e.touches[0]; if (!t0) return;
+      // long list? near the edges the LIST scrolls — controlled, never the screen flinging
+      if (t0.clientY < 150) window.scrollBy(0, -9);
+      else if (t0.clientY > window.innerHeight - 130) window.scrollBy(0, 9);
       ghostMove(t0.clientX, t0.clientY);
       const el = document.elementFromPoint(t0.clientX, t0.clientY);
       const slot = el && el.closest && el.closest("[data-mslot]");
@@ -6872,7 +6926,7 @@ export default function App() {
         } else markOver(null);
       } else markOver(null);
     };
-    const end = () => { if (mobReorder.current) { mobReorder.current = null; setMDrag(null); markOver(null); ghostHide(); document.body.classList.remove("valo-dragging"); } };
+    const end = () => { mobArmRef.current = false; if (mobReorder.current) { mobReorder.current = null; setMDrag(null); markOver(null); ghostHide(); document.body.classList.remove("valo-dragging"); } };
     window.addEventListener("touchmove", mv, { passive: false });
     window.addEventListener("touchend", end); window.addEventListener("touchcancel", end);
     return () => { window.removeEventListener("touchmove", mv); window.removeEventListener("touchend", end); window.removeEventListener("touchcancel", end); };
@@ -6906,6 +6960,7 @@ export default function App() {
       if (n._gt) clearTimeout(n._gt);
       n._gt = setTimeout(() => {
         n._gt = null; n._gm = true; n._garmed = true;
+        mobArmRef.current = true; // lock the screen from the vibration onward
         if (navigator.vibrate) navigator.vibrate(12);
       }, 320);
     },
@@ -6924,6 +6979,7 @@ export default function App() {
     },
     onTouchEnd: (e) => {
       const n = e.currentTarget; if (n._gt) { clearTimeout(n._gt); n._gt = null; }
+      mobArmRef.current = false;
       // held and lifted without dragging → open the add/remove menu
       if (n._garmed) { n._garmed = false;
         setWatchMenu({ id: t.id, sym: t.sym, x: Math.min(n._gx, window.innerWidth - 190), y: Math.min(n._gy, window.innerHeight - 200) }); }
@@ -6951,7 +7007,23 @@ export default function App() {
   const [walletPop, setWalletPop] = useState(null);         // hold the stats bar → open-wallet popup
   const [quickWatch, setQuickWatch] = useState(false);      // watchlist opened from the trader tabs
   const [posDrawer, setPosDrawer] = useState(false);        // MY POSITIONS slide-over
-  const [posTab, setPosTab] = useState("both");             // bots | both | tickets
+  const [posTab, setPosTab] = useState("both");
+  const [sellArm2, setSellArm2] = useState(null);   // mobile: sell button awaiting its confirm tap
+  const [sellFlash2, setSellFlash2] = useState(null); // just-confirmed pop
+  const sellArmT = useRef(null);
+  const confirmSell = (key, fn) => {
+    if (!isMobile) { fn(); return; }             // PC sells stay single-click
+    if (sellArm2 === key) {
+      clearTimeout(sellArmT.current); setSellArm2(null);
+      setSellFlash2(key); setTimeout(() => setSellFlash2(null), 850);
+      if (navigator.vibrate) navigator.vibrate(14);
+      fn();
+    } else {
+      setSellArm2(key);
+      clearTimeout(sellArmT.current);
+      sellArmT.current = setTimeout(() => setSellArm2(null), 2600); // un-arms itself
+    }
+  };             // bots | both | tickets
   const [posUnit, setPosUnit] = useState("usd");            // usd → sol → valo
   const [posArm, setPosArm] = useState(false);              // held wallet cell → MY POSITIONS button
   useEffect(() => { if (tokens.length && !watchLoose.length && !watchSections.length) setWatchLoose(tokens.slice(4).map((t) => t.id)); }, [tokens.length]);
@@ -7742,6 +7814,19 @@ export default function App() {
         pnlPct: row.pnlPct != null ? row.pnlPct : null, pnlMoney: null, tx: row.tx });
     }
   };
+  // ———— SUBSECTION ———— banner: crowns the scanner while a subsection is loaded
+  const secBanner = (() => {
+    if (scanSec == null) return null;
+    const s2 = watchSections.find((x) => x.id === scanSec);
+    if (!s2) return null;
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "1px 2px 3px" }}>
+        <span style={{ height: 1.5, flex: 1, borderRadius: 1, background: `linear-gradient(90deg, transparent, ${VALO_PURPLE})`, boxShadow: `0 0 6px ${VALO_PURPLE}55` }} />
+        <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 2.5, color: VALO_PURPLE, textShadow: `0 0 9px ${VALO_PURPLE}77`, whiteSpace: "nowrap" }}>{s2.name.toUpperCase()}</span>
+        <span style={{ height: 1.5, flex: 1, borderRadius: 1, background: `linear-gradient(90deg, ${VALO_PURPLE}, transparent)`, boxShadow: `0 0 6px ${VALO_PURPLE}55` }} />
+      </div>
+    );
+  })();
   const chartBlock = (
             !selected ? (
               <div style={{ border: `1px dashed ${T.border2}`, borderRadius: 12, padding: 70, textAlign: "center", color: T.faint, fontFamily: T.mono, fontSize: 12 }}>
@@ -7894,9 +7979,18 @@ export default function App() {
                 {isMobile && (
                   <div onTouchStart={chartDragStart("top")}
                     onClick={() => {
-                      const full = metricsCrunch > 0.5 && mobChartH > 400;
+                      const full = metricsCrunch > 0.05 || mobChartH > 360;
                       if (full) { setMetricsCrunch(0); setMobChartH(348); }
-                      else { setMetricsCrunch(1); setMobChartH(Math.max(400, Math.round(window.innerHeight - 205))); }
+                      else {
+                        setMetricsCrunch(1); setMobChartH(Math.max(400, Math.round(window.innerHeight - 205)));
+                        // settle, then shave any overlap with LIVE TRADES / HOLDERS
+                        setTimeout(() => {
+                          const lth = document.querySelector("[data-lth]"); const mc = document.querySelector("[data-mchart]");
+                          if (!lth || !mc) return;
+                          const over = mc.getBoundingClientRect().bottom - (lth.getBoundingClientRect().top - 8);
+                          if (over > 4) setMobChartH((h) => Math.max(400, Math.round(h - over)));
+                        }, 340);
+                      }
                     }}
                     aria-label="Tap: chart covers the page up to the token name — tap again to restore"
                     style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "5px 0 8px", touchAction: "none", cursor: "pointer" }}>
@@ -7910,7 +8004,7 @@ export default function App() {
                     <div style={{ width: 76, height: 5, borderRadius: 3, background: pcCrunch > 0 ? VALO_PURPLE : T.border2, boxShadow: pcCrunch > 0 ? `0 0 8px ${VALO_PURPLE}` : "none" }} />
                   </div>
                 )}
-                <div style={{ position: "relative", paddingLeft: !isMobile && chartInsetL > 90 ? chartInsetL + 8 : 0,
+                <div data-mchart={isMobile ? "1" : undefined} style={{ position: "relative", paddingLeft: !isMobile && chartInsetL > 90 ? chartInsetL + 8 : 0,
                   zIndex: isMobile && mobChartH > 348 ? 7 : "auto",
                   marginBottom: isMobile && mobChartH > 348 ? -(mobChartH - 348) : 0 }}>
                   {/* pull the chart in from the LEFT → a compact token strip fills the space */}
@@ -7969,8 +8063,20 @@ export default function App() {
                   {/* MOBILE bottom handle — pull up for a skinnier chart, down for taller;
                       everything below follows in flow so it stays right under the chart */}
                   {isMobile && (
-                    <div onTouchStart={chartDragStart("bottom")} aria-label="Drag to resize chart height"
-                      style={{ position: "absolute", left: 24, right: 24, bottom: -11, height: 30, zIndex: 8, display: "flex", alignItems: "center", justifyContent: "center", touchAction: "none" }}>
+                    <div onTouchStart={chartDragStart("bottom")}
+                      onClick={(e) => {
+                        if (mobChartH > 360 || metricsCrunch > 0.05) { setMetricsCrunch(0); setMobChartH(348); return; } // back to the first size
+                        // grow down to just above LIVE TRADES / HOLDERS
+                        let cap = Math.max(560, Math.round(window.innerHeight - 205));
+                        try {
+                          const hb = e.currentTarget.getBoundingClientRect();
+                          const lth = document.querySelector("[data-lth]");
+                          if (lth) cap = mobChartH + Math.max(0, Math.round(lth.getBoundingClientRect().top - hb.bottom - 8));
+                        } catch (err) {}
+                        setMobChartH(Math.max(348, Math.round(cap / 2) * 2));
+                      }}
+                      aria-label="Drag to resize chart height · tap: expand ⇄ reset"
+                      style={{ position: "absolute", left: 24, right: 24, bottom: -11, height: 30, zIndex: 8, display: "flex", alignItems: "center", justifyContent: "center", touchAction: "none", cursor: "pointer" }}>
                       <div style={{ width: 56, height: 5, borderRadius: 3, background: mobChartH !== 348 ? VALO_PURPLE : T.border2, boxShadow: mobChartH !== 348 ? `0 0 8px ${VALO_PURPLE}` : "none" }} />
                     </div>
                   )}
@@ -8700,6 +8806,7 @@ export default function App() {
             </StickySearch>
 
             <div style={{ display: "grid", gap: compactList ? 6 : 10, paddingRight: 6 }}>
+              {secBanner}
               {shown.map((t) => (
                 compactList
                   ? <div key={t.id} data-mslot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 10, transition: "opacity .12s, transform .12s" }} {...tdProps(t)}><TokenRow t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} tf={tf}
@@ -8732,6 +8839,7 @@ export default function App() {
           width: `calc(100%/1.13 + ${Math.round(pullR / 1.13)}px)`, "--stkTop": `${Math.round((headerH + 8) / 1.13)}px`, zoom: 1.13 }}>
           {/* scanner — slides left as the chart is pulled over, stays same width */}
           <div ref={scannerRef} style={{ transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s", display: "grid", gap: 10, maxHeight: "calc(100vh - 185px)", overflowY: "auto", padding: "2px 10px 2px 2px" }}>
+            {secBanner}
             {shown.map((t) => (
               <div key={t.id} data-slot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ position: "relative", opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s, transform .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => { e.preventDefault(); const id = dragIdOf(e); if (id == null || id === t.id) return;
@@ -9067,7 +9175,7 @@ export default function App() {
                   return (
                     <div key={t.id}>
                       <button data-wrow={t.id}
-                        onClick={() => { if (exp) { setSel(t.id); setClickMode(null); setWatchExp(null); } else setWatchExp(t.id); }}
+                        onClick={() => setWatchExp(exp ? null : t.id)}
                         {...(() => { const { onContextMenu, ...dragOnly } = tdProps(t); return dragOnly; })()}
                         onContextMenu={(e) => { e.preventDefault(); setWatchTrash({ id: t.id, sec: secId, x: e.clientX, y: e.clientY }); }}
                         className="wall-bar" title={exp ? "Tap again: open the full chart" : "Tap: live stats · right-click: remove · drag: move"}
@@ -9118,6 +9226,7 @@ export default function App() {
                           window.__valoDrag = null; }}>
                         <div draggable={renamingSec !== s2.id} onDragStart={(e) => { if (renamingSec === s2.id) { e.preventDefault(); return; } window.__valoDrag = { sec: s2.id, secMove: true }; e.dataTransfer.setData("text/valo-sec", String(s2.id)); }}
                           onClick={() => { if (renamingSec !== s2.id) loadSecToScanner(s2); }}
+                          onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setSecDelete({ id: s2.id, name: s2.name, count: s2.ids.length, x: e.clientX, y: e.clientY }); }}
                           onDoubleClick={() => { setRenamingSec(s2.id); setSecName(s2.name); }}
                           style={{ pointerEvents: "auto", display: "flex", alignItems: "center", gap: 6, margin: "8px 0 5px", cursor: "grab",
                             background: scanSec === s2.id ? "rgba(125,92,240,0.12)" : "none", borderRadius: 7, padding: scanSec === s2.id ? "3px 5px" : 0,
@@ -9259,12 +9368,19 @@ export default function App() {
               const held = isBot ? row.r.remaining : row.p.amt;
               const pu = isBot ? row.r.pay : (row.p.pay || pay);
               const amt = +(held * pc / 100).toFixed(4);
+              const sKey = (isBot ? "r" + row.r.id : "t" + row.t.id) + "-" + pc;
+              const armed2 = sellArm2 === sKey, flash2 = sellFlash2 === sKey;
               return (
-                <button key={pc} onClick={() => { if (isBot) sellRunPct(row.r.id, pc); else onPosTrade(row.t, "sell", amt); }}
-                  style={{ flex: 1, border: `1px solid ${T.red}66`, background: pc === 100 ? T.red : "rgba(234,57,67,0.08)", color: pc === 100 ? "#170808" : T.red,
-                    borderRadius: 7, padding: "4px 0", fontFamily: T.mono, fontWeight: 800, cursor: "pointer", lineHeight: 1.3 }}>
+                <button key={pc} onClick={() => confirmSell(sKey, () => { if (isBot) sellRunPct(row.r.id, pc); else onPosTrade(row.t, "sell", amt); })}
+                  style={{ flex: 1, border: `1px solid ${T.red}${armed2 ? "" : "66"}`, background: flash2 ? T.green : armed2 || pc === 100 ? T.red : "rgba(234,57,67,0.08)",
+                    color: flash2 ? "#07130d" : armed2 || pc === 100 ? "#170808" : T.red,
+                    borderRadius: 7, padding: "4px 0", fontFamily: T.mono, fontWeight: 800, cursor: "pointer", lineHeight: 1.3,
+                    boxShadow: armed2 ? `0 0 12px ${T.red}` : flash2 ? `0 0 14px ${T.green}` : "none",
+                    animation: flash2 ? "sellPop .4s ease" : "none", transition: "background .12s, box-shadow .12s" }}>
+                  {flash2 ? <span style={{ display: "block", fontSize: 9.5, padding: "4px 0" }}>✓ CONFIRMED</span> : armed2 ? <span style={{ display: "block", fontSize: 8.5, padding: "4px 0" }}>✓ CONFIRM?</span> : <>
                   <span style={{ display: "block", fontSize: 10.5 }}>{pc === 100 ? "ALL" : pc + "%"}</span>
                   <span style={{ display: "block", fontSize: 7, opacity: 0.9 }}>{amt >= 1000 ? (amt / 1000).toFixed(1) + "K" : amt} {pu}</span>
+                  </>}
                 </button>
               );
             })}
@@ -9300,19 +9416,25 @@ export default function App() {
                 ))}
               </div>
               {(showTix ? tix.length : 0) + (showBots ? runsL.length : 0) > 0 && (
-                <button onClick={sellScope}
+                <button onClick={() => confirmSell("sellscope", sellScope)}
                   style={{ width: "100%", border: "none", borderRadius: 10, padding: "10px", marginBottom: 9, fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
-                    background: scoped >= 0 ? T.green : T.red, color: scoped >= 0 ? "#07130d" : "#170808", cursor: "pointer" }}>
-                  ✕ SELL ALL {posTab === "bots" ? "BOTS" : posTab === "tickets" ? "TICKETS" : ""} · {scoped >= 0 ? "+" : "−"}${Math.abs(scoped).toFixed(2)}
+                    background: sellFlash2 === "sellscope" ? T.green : sellArm2 === "sellscope" ? "#fff" : scoped >= 0 ? T.green : T.red,
+                    color: sellFlash2 === "sellscope" ? "#07130d" : sellArm2 === "sellscope" ? T.red : scoped >= 0 ? "#07130d" : "#170808", cursor: "pointer",
+                    boxShadow: sellArm2 === "sellscope" ? `0 0 16px ${T.red}` : "none", animation: sellFlash2 === "sellscope" ? "sellPop .4s ease" : "none", transition: "background .12s" }}>
+                  {sellFlash2 === "sellscope" ? "✓ CONFIRMED" : sellArm2 === "sellscope" ? "✓ TAP AGAIN TO CONFIRM" : `✕ SELL ALL ${posTab === "bots" ? "BOTS" : posTab === "tickets" ? "TICKETS" : ""} · ${scoped >= 0 ? "+" : "−"}$${Math.abs(scoped).toFixed(2)}`}
                 </button>
               )}
               {showBots && runsL.map(({ r, t, pnl }) => (
                 <div key={"r" + r.id}
                   onClick={() => { setSel(t.id); setClickMode(null); setMobPageTab("bots"); setPosDrawer(false); }}
+                  data-posrow="1"
                   style={{ border: `1px solid ${pnl >= 0 ? "rgba(22,199,132,0.4)" : "rgba(234,57,67,0.4)"}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "8px 10px", marginBottom: 6, cursor: "pointer" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: T.mono }}>
                     <span style={{ fontSize: 8, fontWeight: 900, color: pnl >= 0 ? T.green : T.red }}>🤖 LIVE</span>
-                    <span style={{ fontSize: 11.5, fontWeight: 800, color: accent(t.hue) }}>${t.sym}</span>
+                    <span onClick={(e) => { e.stopPropagation(); setSel(t.id); setClickMode(null);
+                        setPosDrawer(false); setPortfolioDrawer(false); setDrawerOpen(false); setEcoFull(false); }}
+                      title="Jump to this token — right where you are"
+                      style={{ fontSize: 11.5, fontWeight: 800, color: accent(t.hue), textDecoration: "underline dotted", textUnderlineOffset: 2 }}>${t.sym}</span>
                     <span style={{ fontSize: 9, color: T.dim }}>{r.remaining} {r.pay}</span>
                     <span style={{ fontSize: 12, fontWeight: 900, color: pnl >= 0 ? T.green : T.red, marginLeft: "auto" }}>{pnl >= 0 ? "+" : "−"}${Math.abs(pnl).toFixed(2)}</span>
                   </div>
@@ -9325,7 +9447,10 @@ export default function App() {
                   style={{ border: `1px solid ${pnl >= 0 ? "rgba(22,199,132,0.4)" : "rgba(234,57,67,0.4)"}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "8px 10px", marginBottom: 6, cursor: "pointer" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: T.mono }}>
                     <span style={{ fontSize: 8, fontWeight: 900, color: T.blue }}>🧾</span>
-                    <span style={{ fontSize: 11.5, fontWeight: 800, color: accent(t.hue) }}>${t.sym}</span>
+                    <span onClick={(e) => { e.stopPropagation(); setSel(t.id); setClickMode(null);
+                        setPosDrawer(false); setPortfolioDrawer(false); setDrawerOpen(false); setEcoFull(false); }}
+                      title="Jump to this token — order ticket + chart"
+                      style={{ fontSize: 11.5, fontWeight: 800, color: accent(t.hue), textDecoration: "underline dotted", textUnderlineOffset: 2 }}>${t.sym}</span>
                     <span style={{ fontSize: 9, color: T.dim }}>{fmtQty(posTokenQty(t, p2))} tokens</span>
                     <span style={{ fontSize: 12, fontWeight: 900, color: pnl >= 0 ? T.green : T.red, marginLeft: "auto" }}>{pnl >= 0 ? "+" : "−"}${Math.abs(pnl).toFixed(2)}</span>
                   </div>
@@ -9339,6 +9464,31 @@ export default function App() {
           </>
         );
       })()}
+      {secDelete && (
+        <>
+          <div onClick={() => setSecDelete(null)} style={{ position: "fixed", inset: 0, zIndex: 96 }} />
+          <div style={{ position: "fixed", left: Math.min(secDelete.x, (typeof window !== "undefined" ? window.innerWidth : 999) - 230), top: Math.min(secDelete.y, (typeof window !== "undefined" ? window.innerHeight : 999) - 150), zIndex: 97,
+            background: T.panel, border: `1px solid ${T.red}66`, borderRadius: 11, padding: 6, minWidth: 200,
+            boxShadow: "0 14px 40px rgba(0,0,0,0.6)", animation: "coPop .12s ease" }}>
+            <div style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, color: T.text, padding: "4px 8px 7px", lineHeight: 1.5 }}>
+              Delete <span style={{ color: VALO_PURPLE }}>{(secDelete.name || "").toUpperCase()}</span>?<br />
+              <span style={{ color: T.faint, fontWeight: 700 }}>Its {secDelete.count} token{secDelete.count === 1 ? "" : "s"} leave the watchlist with it.</span>
+            </div>
+            <button onClick={() => {
+                setWatchSections((S) => S.filter((x) => x.id !== secDelete.id));
+                if (scanSec === secDelete.id) { setScanSec(null); setScanOrder(null); } // scanner back to the full list
+                setSecDelete(null);
+              }}
+              style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "rgba(234,57,67,0.14)", color: T.red, borderRadius: 8, padding: "8px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, marginBottom: 3 }}>
+              🗑 DELETE SUBSECTION
+            </button>
+            <button onClick={() => setSecDelete(null)}
+              style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", border: "none", background: "rgba(255,255,255,0.03)", color: T.dim, borderRadius: 8, padding: "7px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 9, fontWeight: 800 }}>
+              ✕ CANCEL
+            </button>
+          </div>
+        </>
+      )}
       {/* file-drag ghost — follows the pointer during any scanner drag */}
       <div ref={dragGhostRef} style={{ display: "none", position: "fixed", left: 0, top: 0, zIndex: 120, pointerEvents: "none",
         alignItems: "center", gap: 5, background: "rgba(17,21,29,0.96)", border: `1.5px solid ${VALO_PURPLE}`, borderRadius: 999,
@@ -9995,7 +10145,7 @@ export default function App() {
                       if (dy < 26 && dx < -42) setMobSwipe(t.id);
                       else if (dx > 28) setMobSwipe((s3) => (s3 === t.id ? null : s3));
                     }}>
-                    <button onClick={() => { const n2 = mobSwipe === t.id; if (n2) { setMobSwipe(null); return; } if (exp) { setSel(t.id); setClickMode(null); setWatchExp(null); setDrawerOpen(false); } else setWatchExp(t.id); }}
+                    <button onClick={() => { const n2 = mobSwipe === t.id; if (n2) { setMobSwipe(null); return; } setWatchExp(exp ? null : t.id); }}
                       onContextMenu={(e) => { e.preventDefault(); setWatchTrash({ id: t.id, sec: secId, x: e.clientX, y: e.clientY }); }}
                       {...chipEditProps(() => setWatchTrash({ id: t.id, sec: secId, x: 60, y: 220 }))}
                       style={{ width: "100%", textAlign: "left", border: `1px solid ${exp ? VALO_PURPLE : T.border}`, background: exp ? "rgba(125,92,240,0.07)" : "#141a26",
@@ -10021,9 +10171,7 @@ export default function App() {
                         </div>
                         <div style={{ display: "flex", gap: 6 }}>
                           <button onClick={() => { setSel(t.id); setClickMode(null); setWatchExp(null); setDrawerOpen(false); }}
-                            style={{ flex: 1, border: `1px solid ${VALO_PURPLE}`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE, borderRadius: 8, padding: "7px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, cursor: "pointer" }}>OPEN CHART ▸</button>
-                          <button onClick={() => setWatchExp(null)}
-                            style={{ ...chip(false), padding: "7px 12px", fontSize: 9, fontWeight: 900 }}>EXIT</button>
+                            style={{ flex: 1, border: `1px solid ${VALO_PURPLE}`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE, borderRadius: 8, padding: "8px", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>OPEN CHART ▸</button>
                         </div>
                       </div>
                     )}
@@ -10046,12 +10194,15 @@ export default function App() {
                             background: scanSec === s2.id ? "rgba(125,92,240,0.12)" : "none", borderRadius: 7, padding: scanSec === s2.id ? "4px 6px" : 0,
                             outline: scanSec === s2.id ? `1px solid ${VALO_PURPLE}66` : "none" }}>
                           <span onClick={() => { loadSecToScanner(s2); if (navigator.vibrate) navigator.vibrate(8); }}
-                            style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 1.5, color: VALO_PURPLE, cursor: "pointer", whiteSpace: "nowrap" }}>
+                            {...chipEditProps(() => setSecDelete({ id: s2.id, name: s2.name, count: s2.ids.length, x: 40, y: Math.round((typeof window !== "undefined" ? window.innerHeight : 600) * 0.3) }))}
+                            title="Tap: load into the scanner · hold: delete this subsection"
+                            style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 1.5, color: VALO_PURPLE, cursor: "pointer", whiteSpace: "nowrap",
+                              userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" }}>
                             {s2.name.toUpperCase()} <span style={{ color: T.faint, fontWeight: 700 }}>{s2.ids.length}</span>
                           </span>
+                          <span onClick={() => { setRenamingSec(s2.id); setSecName(s2.name); }} title="Rename"
+                            style={{ fontFamily: T.mono, fontSize: 14, color: T.dim, cursor: "pointer", padding: "0 4px", lineHeight: 1 }}>✎</span>
                           {scanSec === s2.id && <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, color: T.green, textShadow: `0 0 7px ${T.green}` }}>● IN SCANNER</span>}
-                          <span onClick={() => { setRenamingSec(s2.id); setSecName(s2.name); }}
-                            style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 10, color: T.dim, cursor: "pointer", padding: "0 3px" }}>✎</span>
                         </div>
                       )}
                       {s2.ids.map(tokOf).filter(Boolean).map((t) => row(t, s2.id))}
@@ -10212,6 +10363,7 @@ export default function App() {
         }
         @keyframes posSlide{ from{ transform: translateX(102%); } to{ transform: translateX(0); } }
         @keyframes apexSpin{ 0%{ transform: scaleX(1); } 25%{ transform: scaleX(0.12); } 50%{ transform: scaleX(-1); } 75%{ transform: scaleX(-0.12); } 100%{ transform: scaleX(1); } }
+        @keyframes sellPop{ 0%{ transform: scale(1); } 40%{ transform: scale(1.08); } 100%{ transform: scale(1); } }
         @keyframes apexHue{ from{ filter: drop-shadow(0 0 5px #9ceaff) hue-rotate(0deg); } to{ filter: drop-shadow(0 0 5px #9ceaff) hue-rotate(360deg); } }
         @keyframes apexRay{ from{ transform: rotate(0deg) scale(1); } 50%{ transform: rotate(180deg) scale(1.12); } to{ transform: rotate(360deg) scale(1); } }
         @keyframes plusFloat { 0%{ opacity:0; transform: translateY(6px);} 20%{opacity:1;} 100%{ opacity:0; transform: translateY(-16px);} }
