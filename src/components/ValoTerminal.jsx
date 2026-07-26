@@ -3012,6 +3012,22 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   const [dmDraft, setDmDraft] = useState("");
   const [fundAmt, setFundAmt] = useState("");
   const [holdsOpen, setHoldsOpen] = useState(false); // 💼 all-holdings dropdown
+  const [holdsTab, setHoldsTab] = useState("open");  // open ⇄ closed positions
+  // 🔒 closed positions: every sell, paired with its buy-in date and PnL
+  const closedRows = useMemo(() => {
+    const src2 = cloudProfile ? (cloudProfile.activity || []) : txAll;
+    const sells = src2.filter((x) => !x.isBuy);
+    return sells.map((s, i) => {
+      const key = s.key || (s.t && s.t.id);
+      const priorBuy = src2.find((b) => b.isBuy && (b.key || (b.t && b.t.id)) === key && b.ts <= s.ts);
+      const outUsd = s.valUsd != null ? s.valUsd : s.sol * SOL_USD;
+      const pnlUsd = s.pnlUsd != null ? s.pnlUsd
+        : +((outUsd) * ((hashStr(name + "cp" + i) % 61) - 30) / 100).toFixed(2); // sim profiles: seeded
+      return { t: s.t, soldTs: s.ts, boughtTs: priorBuy ? priorBuy.ts : s.ts,
+        inUsd: Math.max(0, outUsd - pnlUsd), outUsd, pnlUsd };
+    });
+  }, [cloudProfile, txAll, name]);
+  const closedTotal = closedRows.reduce((s2, r) => s2 + r.pnlUsd, 0);
   const friends = friendStatus === "friends";
   // ---- current holdings + full tx history (seeded; API: on-chain wallet scan) ----
   const [txFrom, setTxFrom] = useState("");
@@ -3106,6 +3122,11 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.5, color: T.faint }}>TOTAL BALANCE</div>
                     <div style={{ fontFamily: T.mono, fontSize: 17, fontWeight: 900, color: T.text }}>${totalBal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                    {(() => { const livePnl = rows.reduce((s2, h) => s2 + h.pnl, 0); return (
+                      <div style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: livePnl >= 0 ? T.green : T.red }}>
+                        {livePnl >= 0 ? "▲ +" : "▼ −"}${Math.abs(livePnl).toLocaleString(undefined, { maximumFractionDigits: 2 })} <span style={{ color: T.faint, fontWeight: 700 }}>LIVE PNL</span>
+                      </div>
+                    ); })()}
                   </div>
                   {top && (
                     <div onClick={() => onOpenToken(top.t.id)} title={`Open the $${top.t.sym} chart`}
@@ -3118,12 +3139,53 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                     </div>
                   )}
                 </div>
-                <button onClick={() => setHoldsOpen((v) => !v)}
-                  style={{ width: "100%", border: "none", borderTop: `1px solid ${T.border}`, background: holdsOpen ? "rgba(125,92,240,0.1)" : "rgba(255,255,255,0.02)",
-                    color: holdsOpen ? VALO_PURPLE : T.dim, padding: "7px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.5, cursor: "pointer" }}>
-                  {holdsOpen ? "▴ HIDE" : "▾ ALL HOLDINGS"} · {rows.length} TOKENS
+                <button onClick={() => { if (holdsOpen && holdsTab === "closed") { setHoldsOpen(false); } else { setHoldsTab("closed"); setHoldsOpen(true); } }}
+                  style={{ width: "100%", border: "none", borderTop: `1px solid ${T.border}`,
+                    background: holdsOpen && holdsTab === "closed" ? "rgba(234,57,67,0.08)" : "rgba(255,255,255,0.02)",
+                    color: holdsOpen && holdsTab === "closed" ? T.red : T.dim, padding: "7px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.5, cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  <span>{holdsOpen && holdsTab === "closed" ? "▴" : "▾"} 🔒 CLOSED POSITIONS · {closedRows.length}</span>
+                  {closedRows.length > 0 && (
+                    <span style={{ color: closedTotal >= 0 ? T.green : T.red }}>
+                      {closedTotal >= 0 ? "+" : "−"}${Math.abs(closedTotal).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </span>
+                  )}
                 </button>
-                {holdsOpen && (
+                <button onClick={() => { if (holdsOpen && holdsTab === "open") { setHoldsOpen(false); } else { setHoldsTab("open"); setHoldsOpen(true); } }}
+                  style={{ width: "100%", border: "none", borderTop: `1px solid ${T.border}`, background: holdsOpen && holdsTab === "open" ? "rgba(125,92,240,0.1)" : "rgba(255,255,255,0.02)",
+                    color: holdsOpen && holdsTab === "open" ? VALO_PURPLE : T.dim, padding: "7px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.5, cursor: "pointer" }}>
+                  {holdsOpen && holdsTab === "open" ? "▴ HIDE" : "▾ ALL HOLDINGS"} · {rows.length} TOKENS
+                </button>
+                {holdsOpen && holdsTab === "closed" && (
+                  <div style={{ padding: "4px 8px 8px" }}>
+                    {closedRows.length === 0 && <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, padding: "8px 4px" }}>No closed positions yet.</div>}
+                    {closedRows.map((c, i) => {
+                      const up = c.pnlUsd >= 0;
+                      return (
+                        <div key={"c" + i} onClick={() => c.t && c.t.id != null && onOpenToken(c.t.id)}
+                          style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", border: `1px solid ${T.border}`, borderLeft: `2px solid ${up ? T.green : T.red}`,
+                            background: "#0c0f16", borderRadius: 9, padding: "7px 9px", marginTop: 4 }}>
+                          <TokenAvatar sym={c.t.sym} hue={c.t.hue} img={c.t.img} size={18} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: accent(c.t.hue) }}>${c.t.sym}
+                              <span style={{ color: T.faint, fontSize: 8, fontWeight: 700, marginLeft: 6 }}>bought {new Date(c.boughtTs).toLocaleDateString([], { month: "short", day: "numeric" })}</span></div>
+                            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim }}>
+                              ▲ IN ${c.inUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })} → CLOSED {new Date(c.soldTs).toLocaleDateString([], { month: "short", day: "numeric" })}
+                            </div>
+                          </div>
+                          <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: up ? T.green : T.red }}>
+                            {up ? "+" : "−"}${Math.abs(c.pnlUsd).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, padding: "8px 4px 2px" }}>
+                      <span style={{ color: T.faint, letterSpacing: 1.5 }}>TOTAL EARNINGS</span>
+                      <span style={{ color: closedTotal >= 0 ? T.green : T.red }}>{closedTotal >= 0 ? "+" : "−"}${Math.abs(closedTotal).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                    </div>
+                  </div>
+                )}
+                {holdsOpen && holdsTab === "open" && (
                   <div style={{ padding: "4px 8px 8px" }}>
                     {rows.map((h, i) => {
                       const up = h.pnl >= 0;
@@ -7086,7 +7148,8 @@ export default function App() {
           const t2 = tokensRef.current.find((x) => String(x.pool || x.id) === String(r.token_key)) ||
             { id: r.token_key, sym: r.sym || "?", hue: symbolHue(r.sym || "?"), img: null, price: +r.price || 0 };
           const usd = r.val_usd != null ? +r.val_usd : (+r.amt || 0) * (r.unit === "VALO" ? 0.0125 : SOL_USD);
-          return { t: t2, isBuy: r.side === "buy", sol: usd / SOL_USD, ts: new Date(r.ts).getTime() };
+          const pnlUsd = r.pnl_money != null ? +r.pnl_money * (r.unit === "VALO" ? 0.0125 : SOL_USD) : null;
+          return { t: t2, isBuy: r.side === "buy", sol: usd / SOL_USD, valUsd: usd, pnlUsd, key: String(r.token_key), ts: new Date(r.ts).getTime() };
         });
         setProfileCloud({ id: prof.id, handle: prof.handle, icon: prof.icon, holds, activity,
           callouts: (cos || []).map((r) => ({ sym: r.sym, mcAt: +r.mc_at || 0, ts: new Date(r.ts).getTime() })),
