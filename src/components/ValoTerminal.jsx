@@ -7340,6 +7340,38 @@ export default function App() {
       [tokenId]: [...(C[tokenId] || []), { ...m, ts: new Date().toLocaleTimeString(), id: Math.random() }].slice(-120),
     })), []);
 
+  // ☁ PHASE 4 — real multi-user PUBLIC chat. Signed-in sends insert into the
+  // messages table; everyone (signed in or not) receives INSERTs live via
+  // Realtime. Sim chatter keeps flowing underneath so the feed never feels dead.
+  const seenCloudMsg = useRef(new Set());
+  useEffect(() => {
+    if (!sb) return;
+    let stop = false;
+    (async () => {
+      try {
+        const { data } = await sb.from("messages").select("*").order("ts", { ascending: false }).limit(40);
+        if (stop || !data) return;
+        data.reverse().forEach((r) => {
+          if (seenCloudMsg.current.has(r.id)) return;
+          seenCloudMsg.current.add(r.id);
+          setSocialMsgs((C) => [...C, { user: r.handle || "anon", text: r.text, sym: null, tokenId: null,
+            me: cloudUser && r.user_id === cloudUser.id, cloud: true,
+            ts: new Date(r.ts).toLocaleTimeString(), id: "cm" + r.id }].slice(-120));
+        });
+      } catch (e) { console.warn("[VALO ☁] chat load failed", e); }
+    })();
+    const ch = sb.channel("valo-public-chat")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, (payload) => {
+        const r = payload.new; if (!r || seenCloudMsg.current.has(r.id)) return;
+        seenCloudMsg.current.add(r.id);
+        setSocialMsgs((C) => [...C, { user: r.handle || "anon", text: r.text, sym: null, tokenId: null,
+          me: cloudUser && r.user_id === cloudUser.id, cloud: true,
+          ts: new Date(r.ts).toLocaleTimeString(), id: "cm" + r.id }].slice(-120));
+      })
+      .subscribe();
+    return () => { stop = true; try { sb.removeChannel(ch); } catch (e) {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudUser && cloudUser.id]);
   const sayPrivate = useCallback((m) =>
     setPrivLog((C) => [...C, { ...m, ts: new Date().toLocaleTimeString(), id: Math.random() }].slice(-80)), []);
   useEffect(() => { socialRef.current?.scrollTo({ top: 1e9, behavior: "smooth" }); }, [socialMsgs, chatTab]);
@@ -7897,6 +7929,10 @@ export default function App() {
     const text = draft.trim();
     if (!text || !chatOn) return;
     if (chatTab === "coin" && selected) sayCoin(selected.id, { user: username, text, me: true });
+    else if (sb && cloudUser) {
+      sb.from("messages").insert({ user_id: cloudUser.id, handle: username, text })
+        .then(({ error }) => { if (error) saySocial({ user: username, text, sym: null, tokenId: null, me: true }); });
+    }
     else saySocial({ user: username, text, sym: null, tokenId: null, me: true });
     setDraft("");
   };
@@ -9506,6 +9542,14 @@ export default function App() {
             ≈ ${((parseFloat(amount) || 0) * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })} buy-in
           </span>
         </button>
+      )}
+      {liveData && (
+        <div style={{ position: "fixed", bottom: 8, left: "50%", transform: "translateX(-50%)", zIndex: 54, pointerEvents: "none",
+          background: "rgba(15,19,28,0.85)", border: `1px solid ${T.amber}55`, borderRadius: 999, padding: "4px 14px",
+          fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.5, color: T.amber,
+          boxShadow: "0 6px 20px rgba(0,0,0,0.5)" }}>
+          📄 PAPER TRADING — LIVE PRICES · NO REAL FUNDS
+        </div>
       )}
       {sb && !isMobile && (
         <button onClick={() => setCloudOpen(true)}
