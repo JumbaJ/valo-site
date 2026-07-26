@@ -7340,6 +7340,29 @@ export default function App() {
       [tokenId]: [...(C[tokenId] || []), { ...m, ts: new Date().toLocaleTimeString(), id: Math.random() }].slice(-120),
     })), []);
 
+  // ☁ PHASE 4b — real callouts. Arming broadcasts; everyone online gets the
+  // 📣 notification. Your own echo is filtered out.
+  const seenCloudCo = useRef(new Set());
+  const pushCloudCallout = (t, mcAt) => {
+    if (!sb || !cloudUser) return;
+    sb.from("callouts").insert({ user_id: cloudUser.id, handle: username, token_key: String(t.pool || t.id), sym: t.sym, mc_at: mcAt, price_at: t.price })
+      .then(({ error }) => { if (error) console.warn("[VALO ☁] callout push failed", error.message); });
+  };
+  useEffect(() => {
+    if (!sb) return;
+    const ch = sb.channel("valo-callouts")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "callouts" }, (payload) => {
+        const r = payload.new; if (!r || seenCloudCo.current.has(r.id)) return;
+        seenCloudCo.current.add(r.id);
+        if (cloudUser && r.user_id === cloudUser.id) return; // don't notify yourself
+        const local = tokensRef.current.find((t) => String(t.pool || t.id) === String(r.token_key));
+        pushNotif({ type: "callout", user: r.handle || "anon", tokenId: local ? local.id : null,
+          text: `@${r.handle || "anon"} called out $${r.sym} @ ${fmt$(+r.mc_at || 0)} MC` });
+      })
+      .subscribe();
+    return () => { try { sb.removeChannel(ch); } catch (e) {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudUser && cloudUser.id]);
   // ☁ PHASE 4 — real multi-user PUBLIC chat. Signed-in sends insert into the
   // messages table; everyone (signed in or not) receives INSERTs live via
   // Realtime. Sim chatter keeps flowing underneath so the feed never feels dead.
@@ -7349,14 +7372,18 @@ export default function App() {
     let stop = false;
     (async () => {
       try {
-        const { data } = await sb.from("messages").select("*").order("ts", { ascending: false }).limit(40);
+        const { data } = await sb.from("messages").select("*").order("ts", { ascending: false }).limit(80);
         if (stop || !data) return;
         data.reverse().forEach((r) => {
           if (seenCloudMsg.current.has(r.id)) return;
           seenCloudMsg.current.add(r.id);
-          setSocialMsgs((C) => [...C, { user: r.handle || "anon", text: r.text, sym: null, tokenId: null,
+          const row = { user: r.handle || "anon", text: r.text, sym: null, tokenId: null,
             me: cloudUser && r.user_id === cloudUser.id, cloud: true,
-            ts: new Date(r.ts).toLocaleTimeString(), id: "cm" + r.id }].slice(-120));
+            ts: new Date(r.ts).toLocaleTimeString(), id: "cm" + r.id };
+          if (r.token_key) {
+            const local = tokensRef.current.find((t) => String(t.pool || t.id) === String(r.token_key));
+            if (local) setCoinChats((C) => ({ ...C, [local.id]: [...(C[local.id] || []), row].slice(-120) }));
+          } else setSocialMsgs((C) => [...C, row].slice(-120));
         });
       } catch (e) { console.warn("[VALO ☁] chat load failed", e); }
     })();
@@ -7364,9 +7391,13 @@ export default function App() {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, (payload) => {
         const r = payload.new; if (!r || seenCloudMsg.current.has(r.id)) return;
         seenCloudMsg.current.add(r.id);
-        setSocialMsgs((C) => [...C, { user: r.handle || "anon", text: r.text, sym: null, tokenId: null,
+        const row = { user: r.handle || "anon", text: r.text, sym: null, tokenId: null,
           me: cloudUser && r.user_id === cloudUser.id, cloud: true,
-          ts: new Date(r.ts).toLocaleTimeString(), id: "cm" + r.id }].slice(-120));
+          ts: new Date(r.ts).toLocaleTimeString(), id: "cm" + r.id };
+        if (r.token_key) {
+          const local = tokensRef.current.find((t) => String(t.pool || t.id) === String(r.token_key));
+          if (local) setCoinChats((C) => ({ ...C, [local.id]: [...(C[local.id] || []), row].slice(-120) }));
+        } else setSocialMsgs((C) => [...C, row].slice(-120));
       })
       .subscribe();
     return () => { stop = true; try { sb.removeChannel(ch); } catch (e) {} };
@@ -7928,7 +7959,12 @@ export default function App() {
   const sendDraft = () => {
     const text = draft.trim();
     if (!text || !chatOn) return;
-    if (chatTab === "coin" && selected) sayCoin(selected.id, { user: username, text, me: true });
+    if (chatTab === "coin" && selected) {
+      if (sb && cloudUser) {
+        sb.from("messages").insert({ user_id: cloudUser.id, handle: username, text, token_key: String(selected.pool || selected.id) })
+          .then(({ error }) => { if (error) sayCoin(selected.id, { user: username, text, me: true }); });
+      } else sayCoin(selected.id, { user: username, text, me: true });
+    }
     else if (sb && cloudUser) {
       sb.from("messages").insert({ user_id: cloudUser.id, handle: username, text })
         .then(({ error }) => { if (error) saySocial({ user: username, text, sym: null, tokenId: null, me: true }); });
@@ -7983,7 +8019,7 @@ export default function App() {
         );
       }
       return (
-      <button onClick={() => { setMyMcCallouts((M) => ({ ...M, [selected.id]: { mcAt: mcOf(selected), peak: 1, ts: Date.now() } })); setLastCalloutTs(Date.now()); }}
+      <button onClick={() => { setMyMcCallouts((M) => ({ ...M, [selected.id]: { mcAt: mcOf(selected), peak: 1, ts: Date.now() } })); setLastCalloutTs(Date.now()); pushCloudCallout(selected, mcOf(selected)); }}
         title="Call this coin out at the current market cap — one callout every 4 hours, so make it count"
         style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap", border: `1px solid ${VALO_PURPLE}66`, background: "rgba(125,92,240,0.10)", color: VALO_PURPLE, borderRadius: 7, padding: "4px 9px", fontFamily: T.mono, fontSize: 10, fontWeight: 800, cursor: "pointer" }}>
         📣 CALLOUT · {fmt$(mcOf(selected))}
