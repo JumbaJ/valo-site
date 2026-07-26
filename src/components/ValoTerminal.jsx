@@ -8511,7 +8511,7 @@ export default function App() {
     return (
       <span onClick={() => setCalloutHubOpen(true)} title={`${tier.label} · called @ ${fmt$(co.mcAt)} — open the tier list & leaderboards`}
         className="co-open"
-        style={{ cursor: "pointer", fontFamily: T.mono, fontSize: 26, fontWeight: 900, letterSpacing: -0.5, lineHeight: 1,
+        style={{ cursor: "pointer", fontFamily: T.mono, fontSize: co.peak >= 100 ? 20 : co.peak >= 10 ? 23 : 26, fontWeight: 900, letterSpacing: -0.5, lineHeight: 1,
           color: tier.color, textShadow: `0 0 ${8 + (tier.fx || 1) * 4}px ${tier.color}${(tier.fx || 1) > 2 ? "cc" : "88"}`,
           display: "inline-block", transformOrigin: "50% 50%",
           animation: tierPop ? `tierPop${tierPop.fx} .9s cubic-bezier(.3,.7,.25,1)` : "none" }}>×{co.peak.toFixed(1)}</span>
@@ -8609,7 +8609,8 @@ export default function App() {
                     </span>
                   </div>
                   <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap",
-                    paddingRight: !isMobile && myMcCallouts[selected.id] ? 64 : 0 }}>
+                    paddingRight: !isMobile && myMcCallouts[selected.id]
+                      ? Math.max(64, ("×" + myMcCallouts[selected.id].peak.toFixed(1)).length * 15 + 26) : 0 }}>
                     {/* socials */}
                     {/* CA — tap to copy the contract address */}
                     <button onClick={() => { try { navigator.clipboard.writeText(selected.ca); } catch (e) {} setCaCopied(selected.id); setTimeout(() => setCaCopied(null), 1400); }}
@@ -10137,10 +10138,14 @@ export default function App() {
           📄 PAPER TRADING — LIVE PRICES · NO REAL FUNDS
         </div>
       )}
+      {/* rail tabs — one row so they can never overlap each other, parked
+          clear of the FULLSCREEN button that owns the corner */}
+      {!isMobile && (
+        <div style={{ position: "fixed", top: 26, right: 150, zIndex: 55, display: "flex", alignItems: "flex-start", gap: 8 }}>
       {sb && !isMobile && (
         <button onClick={() => setCloudOpen(true)}
           title={cloudUser ? `Signed in as ${cloudUser.email} — portfolio syncs to the cloud` : "Sign in — your paper portfolio, watchlist and bots follow you across devices"}
-          style={{ position: "fixed", top: 26, right: 152, zIndex: 55, display: "flex", alignItems: "center", gap: 6,
+          style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto",
             borderTop: "none", borderRadius: "0 0 9px 9px",
             background: cloudUser ? "rgba(125,92,240,0.16)" : "rgba(59,130,246,0.16)",
             border: `1px solid ${cloudUser ? VALO_PURPLE : T.blue}`, padding: "4px 10px", cursor: "pointer",
@@ -10193,12 +10198,14 @@ export default function App() {
       {!isMobile && (
         <button onClick={() => setLiveData((v) => !v)}
           title={liveData ? "LIVE DATA ON — real pump.fun pairs via DexScreener; wallet & fills stay simulated. Click to return to the demo feed." : "Pull REAL Solana pump tokens (DexScreener) into the terminal — paper trading on live prices"}
-          style={{ position: "fixed", top: 26, right: 14, zIndex: 55, display: "flex", alignItems: "center", gap: 6,
+          style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto",
             background: liveData ? "rgba(22,199,132,0.14)" : "rgba(15,19,28,0.72)", border: `1px solid ${liveData ? T.green : T.border}`, borderTop: "none", borderRadius: "0 0 9px 9px", padding: "4px 9px", cursor: "pointer",
             boxShadow: liveData ? "0 0 10px rgba(22,199,132,0.35)" : "none" }}>
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: liveData ? T.green : "#39414f", boxShadow: liveData ? `0 0 6px ${T.green}` : "none" }} />
           <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: liveData ? T.green : "rgba(138,148,168,0.7)", fontWeight: 800 }}>{liveData ? "LIVE DATA · PAPER" : "LIVE DATA"}</span>
         </button>
+      )}
+        </div>
       )}
       {!isMobile && (
         <button onClick={() => { try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); } catch (e) {} }}
