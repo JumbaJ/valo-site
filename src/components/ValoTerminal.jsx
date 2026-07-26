@@ -6937,7 +6937,8 @@ export default function App() {
     (async () => {
       try {
         const uid = cloudUser.id;
-        const [w, pos, wl, act, bots] = await Promise.all([
+        const [prof, w, pos, wl, act, bots] = await Promise.all([
+          sb.from("profiles").select("handle, icon").eq("id", uid).maybeSingle(),
           sb.from("wallets").select("*").eq("user_id", uid).maybeSingle(),
           sb.from("positions").select("*").eq("user_id", uid),
           sb.from("watchlists").select("*").eq("user_id", uid).maybeSingle(),
@@ -6945,6 +6946,12 @@ export default function App() {
           sb.from("bot_runs").select("*").eq("user_id", uid).eq("status", "live"),
         ]);
         if (stop) return;
+        // 🪪 one identity everywhere: portfolio name = chat name = search handle
+        const emailDefault = ((cloudUser.email || "").split("@")[0] || "").toLowerCase();
+        const ph = prof.data && prof.data.handle;
+        if (ph && ph.toLowerCase() !== emailDefault) setUsername(ph); // your name follows you to this device
+        else if (username) sb.from("profiles").update({ handle: username }).eq("id", uid)
+          .then(({ error }) => { if (error) console.warn("[VALO ☁] handle claim failed", error.message); });
         if (w.data) { setSolBalance(+w.data.sol_balance || 0); setValoWallet(+w.data.valo_balance || 0); }
         if (pos.data) {
           const P = {};
@@ -7001,6 +7008,16 @@ export default function App() {
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [solBalance, valoWallet, positions, watchSections, watchLoose, botRuns, cloudUser && cloudUser.id]);
+  // 🪪 keep the public handle in lockstep with the portfolio username
+  useEffect(() => {
+    if (!sb || !cloudUser || !cloudLoaded.current || !username) return;
+    const id = setTimeout(() => {
+      sb.from("profiles").update({ handle: username }).eq("id", cloudUser.id)
+        .then(({ error }) => { if (error) console.warn("[VALO ☁] handle sync failed", error.message); });
+    }, 1500);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [username, cloudUser && cloudUser.id]);
   // activity rows: INSERT-only, one per new fill
   const cloudActQueue = useRef([]);
   const pushCloudActivity = (a) => { if (sb && cloudUser) cloudActQueue.current.push(a); };
