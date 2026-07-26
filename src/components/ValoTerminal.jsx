@@ -1259,6 +1259,77 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
 
 // ---------------- UI atoms ----------------
 // double-tap (mobile), hold ~500ms, double-click or right-click (PC) → edit the chip
+function UserSearchFly({ onOpenUser }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [rows, setRows] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const sb2 = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
+  useEffect(() => {
+    if (!open || !sb2) return;
+    const ql = q.trim();
+    setBusy(true);
+    const id = setTimeout(async () => {
+      try {
+        let req = sb2.from("profiles").select("handle, icon").order("created_at", { ascending: false }).limit(12);
+        if (ql) req = sb2.from("profiles").select("handle, icon").ilike("handle", `%${ql}%`).limit(12);
+        const { data } = await req;
+        setRows((data || []).filter((r) => r.handle));
+      } catch (e) { setRows([]); }
+      setBusy(false);
+    }, 220); // refine as you type
+    return () => clearTimeout(id);
+  }, [q, open]);
+  return (
+    <>
+      {/* divider + sweeping search glyph, inside the bar's right edge */}
+      <span onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }} title="Search users"
+        style={{ display: "flex", alignItems: "center", gap: 0, cursor: "pointer", marginLeft: 4,
+          borderLeft: `1px solid ${T.border2}`, paddingLeft: 9, alignSelf: "stretch" }}>
+        <span style={{ fontSize: 13, display: "inline-block", animation: open ? "none" : "uSweep 2.6s ease-in-out infinite",
+          filter: open ? `drop-shadow(0 0 5px ${VALO_PURPLE})` : "none" }}>{open ? "👤" : "🔎"}</span>
+      </span>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 44 }} />
+          <div style={{ position: "absolute", top: "calc(100% + 5px)", right: 0, zIndex: 45, width: "min(300px, 86vw)",
+            background: T.panel, border: `1px solid ${VALO_PURPLE}55`, borderRadius: 12, overflow: "hidden",
+            boxShadow: "0 22px 60px rgba(0,0,0,0.7)", animation: "coPop .12s ease" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 11px", borderBottom: `1px solid ${T.border}` }}>
+              <span style={{ fontSize: 12 }}>👤</span>
+              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search usernames…"
+                style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: T.text, fontFamily: T.mono, fontSize: 11.5 }} />
+              {q && <span onClick={() => setQ("")} style={{ color: T.faint, cursor: "pointer", fontSize: 11 }}>✕</span>}
+            </div>
+            <div style={{ maxHeight: 280, overflowY: "auto", padding: 5 }}>
+              {!sb2 && <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, padding: "10px 8px" }}>Accounts are offline in this build.</div>}
+              {sb2 && busy && <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, padding: "10px 8px" }}>Searching…</div>}
+              {sb2 && !busy && rows.length === 0 && (
+                <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, padding: "10px 8px" }}>
+                  {q.trim() ? `No users matching "${q.trim()}"` : "Newest members show here — type to refine."}
+                </div>
+              )}
+              {sb2 && !busy && rows.map((r, i) => (
+                <div key={i} onClick={() => { setOpen(false); setQ(""); onOpenUser && onOpenUser(r.handle); }}
+                  style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 9px", borderRadius: 9, cursor: "pointer", border: `1px solid transparent` }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(125,92,240,0.1)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}>
+                  <span style={{ width: 24, height: 24, borderRadius: "50%", overflow: "hidden", flex: "0 0 auto",
+                    background: `linear-gradient(135deg, hsl(${(r.handle.charCodeAt(0) * 37) % 360},70%,26%), hsl(${(r.handle.charCodeAt(0) * 37) % 360},80%,46%))`,
+                    display: "grid", placeItems: "center", fontFamily: T.mono, fontWeight: 900, fontSize: 11, color: "#fff" }}>
+                    {r.icon ? <img src={r.icon} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : r.handle[0].toUpperCase()}
+                  </span>
+                  <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: T.text }}>@{r.handle}</span>
+                  <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 7.5, color: VALO_PURPLE }}>VIEW ▸</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
 const chipEditProps = (fn) => ({
   // HOLD (~450ms) to edit — mobile-first. PC: double-click or right-click.
   onTouchStart: (e) => {
@@ -5838,6 +5909,7 @@ function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, ec
           placeholder="Search tokens, CA, or users…"
           style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: T.text, fontFamily: T.mono, fontSize: 12 }} />
         {q && <button onClick={() => { setQ(""); setOpen(false); }} style={{ background: "none", border: "none", color: T.faint, cursor: "pointer", fontSize: 12 }}>✕</button>}
+        <UserSearchFly onOpenUser={(u) => { setOpen(false); onPickUser && onPickUser(u); }} />
       </div>
       {eco && open && !isMobile && (
         <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 40, background: T.panel, border: `1px solid ${VALO_PURPLE}55`, borderRadius: 12, boxShadow: "0 26px 70px rgba(0,0,0,0.7)", overflow: "hidden",
@@ -10745,6 +10817,7 @@ export default function App() {
         }
         @keyframes posSlide{ from{ transform: translateX(102%); } to{ transform: translateX(0); } }
         @keyframes apexSpin{ 0%{ transform: scaleX(1); } 25%{ transform: scaleX(0.12); } 50%{ transform: scaleX(-1); } 75%{ transform: scaleX(-0.12); } 100%{ transform: scaleX(1); } }
+        @keyframes uSweep{ 0%,100%{ transform: translateX(0) rotate(0deg); opacity: 0.65; } 30%{ transform: translateX(-2px) rotate(-14deg); opacity: 1; } 65%{ transform: translateX(2px) rotate(12deg); opacity: 1; } }
         @keyframes sellPop{ 0%{ transform: scale(1); } 40%{ transform: scale(1.08); } 100%{ transform: scale(1); } }
         @keyframes apexHue{ from{ filter: drop-shadow(0 0 5px #9ceaff) hue-rotate(0deg); } to{ filter: drop-shadow(0 0 5px #9ceaff) hue-rotate(360deg); } }
         @keyframes apexRay{ from{ transform: rotate(0deg) scale(1); } 50%{ transform: rotate(180deg) scale(1.12); } to{ transform: rotate(360deg) scale(1); } }
