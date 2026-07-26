@@ -3000,7 +3000,9 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     const live = +(pk * (0.3 + rand() * 0.9)).toFixed(2);
     return { t, mcAt, pk, live, ago: `${Math.floor(1 + rand() * 72)}h ago` };
   }).filter((c) => c.t);
-  const { tier } = calloutTier(peak);
+  const realPeak = cloudProfile ? (cloudProfile.callouts && cloudProfile.callouts.length ? 1.0 : 0) : null;
+  const shownPeak = cloudProfile ? realPeak : peak;
+  const { tier } = calloutTier(shownPeak || 1);
   const [dmDraft, setDmDraft] = useState("");
   const [fundAmt, setFundAmt] = useState("");
   const [holdsOpen, setHoldsOpen] = useState(false); // 💼 all-holdings dropdown
@@ -3012,13 +3014,8 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   const { holds, txAll } = useMemo(() => {
     const r2 = seededRand(hashStr("acts-" + name));
     if (cloudProfile && cloudProfile.holds) {
-      // ☁ REAL ACCOUNT — actual cloud positions replace the simulated book
-      const now0 = Date.now();
-      const txAll0 = Array.from({ length: 8 }, () => {
-        const t = tokens[Math.floor(r2() * tokens.length)];
-        return { t, side: r2() > 0.5 ? "buy" : "sell", usd: 20 + r2() * 400, at: now0 - Math.floor(r2() * 86400e3 * 7) };
-      }).sort((a, b) => b.at - a.at);
-      return { holds: cloudProfile.holds, txAll: txAll0 };
+      // ☁ REAL ACCOUNT — real positions AND their real trade log; zero fakes
+      return { holds: cloudProfile.holds, txAll: cloudProfile.activity || [] };
     }
     const seen = new Set();
     const holds = [];
@@ -3059,7 +3056,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
             </div>
             <div onClick={() => onOpenTierList && onOpenTierList()} title="Tap: tiers & leaderboards — if they're on the board, we jump straight to their name"
               style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-              <CalloutRing mult={peak} size={38} />
+              <CalloutRing mult={shownPeak || 1} size={38} />
               <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 800, color: tier.color }}>{tier.label}</span>
             </div>
             <button onClick={onClose} style={{ ...chip(false), padding: "5px 9px", fontSize: 12 }}>✕</button>
@@ -6984,7 +6981,8 @@ export default function App() {
           const P = {};
           for (const r of pos.data) if (+r.qty > 0) {
             const tk = tokensRef.current.find((t) => String(t.pool || t.id) === String(r.token_key));
-            P[tk ? tk.id : r.token_key] = { amt: +r.qty, entry: +r.entry_price, pay: r.pay_unit || "SOL" };
+            P[tk ? tk.id : r.token_key] = { amt: +r.qty, entry: +r.entry_price, pay: r.pay_unit || "SOL",
+              pool: (tk && tk.pool) || (String(r.token_key).length > 20 ? String(r.token_key) : null) };
           }
           setPositions(P);
         }
@@ -7024,7 +7022,7 @@ export default function App() {
         const posRows = Object.entries(positions).filter(([, p]) => p && p.amt > 0).map(([k, p]) => {
           const tk = tokensRef.current.find((t) => String(t.id) === String(k)) || tokensRef.current.find((t) => String(t.pool || "") === String(k));
           return {
-            user_id: uid, token_key: String((tk && tk.pool) || k), sym: (tk && tk.sym) || null,
+            user_id: uid, token_key: String(p.pool || (tk && tk.pool) || k), sym: (tk && tk.sym) || null,
             qty: p.amt, entry_price: p.entry || 0, pay_unit: p.pay || "SOL", updated_at: new Date().toISOString(),
           };
         });
@@ -7057,9 +7055,11 @@ export default function App() {
         const { data: profs } = await sb.from("profiles").select("id, handle, icon").ilike("handle", profileUser).limit(1);
         const prof = profs && profs[0];
         if (stop || !prof) { if (!stop) setProfileCloud(null); return; }
-        const [{ data: w }, { data: pos }] = await Promise.all([
+        const [{ data: w }, { data: pos }, { data: act }, { data: cos }] = await Promise.all([
           sb.from("wallets").select("*").eq("user_id", prof.id).maybeSingle(),
           sb.from("positions").select("*").eq("user_id", prof.id),
+          sb.from("activity").select("*").eq("user_id", prof.id).order("ts", { ascending: false }).limit(26),
+          sb.from("callouts").select("*").eq("user_id", prof.id).order("ts", { ascending: false }).limit(30),
         ]);
         if (stop) return;
         const holds = (pos || []).map((r) => {
@@ -7078,7 +7078,14 @@ export default function App() {
             qty: tokQty, entry, since: new Date(r.opened_at || Date.now()).getTime(), offMarket: true,
           };
         }).filter(Boolean);
-        setProfileCloud({ id: prof.id, handle: prof.handle, icon: prof.icon, holds,
+        const activity = (act || []).map((r) => {
+          const t2 = tokensRef.current.find((x) => String(x.pool || x.id) === String(r.token_key)) ||
+            { id: r.token_key, sym: r.sym || "?", hue: symbolHue(r.sym || "?"), img: null, price: +r.price || 0 };
+          const usd = r.val_usd != null ? +r.val_usd : (+r.amt || 0) * (r.unit === "VALO" ? 0.0125 : SOL_USD);
+          return { t: t2, isBuy: r.side === "buy", sol: usd / SOL_USD, ts: new Date(r.ts).getTime() };
+        });
+        setProfileCloud({ id: prof.id, handle: prof.handle, icon: prof.icon, holds, activity,
+          callouts: (cos || []).map((r) => ({ sym: r.sym, mcAt: +r.mc_at || 0, ts: new Date(r.ts).getTime() })),
           solBalance: w ? +w.sol_balance : null, valoBalance: w ? +w.valo_balance : null });
       } catch (e) { if (!stop) setProfileCloud(null); }
     })();
@@ -7955,7 +7962,7 @@ export default function App() {
         const p = P[t.id];
         const totalAmt = (p?.amt || 0) + o.amt;
         const entry = p ? (p.entry * p.amt + t.price * o.amt) / totalAmt : t.price;
-        return { ...P, [t.id]: { entry, amt: totalAmt, pay: o.pay } };
+        return { ...P, [t.id]: { entry, amt: totalAmt, pay: o.pay, pool: t.pool || (p && p.pool) || null } };
       });
       sayPrivate({ type: "fill", side: "buy", text: `⚡ BOUGHT ${t.sym} — ${o.amt} ${unit} @ ${fmtP(t.price)}${spot ? " · chart-click" : ""} · 🔥 ${o.burn.toFixed(5)} burned (${o.tax}%)` });
     } else {
