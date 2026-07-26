@@ -1,0 +1,5 @@
+{
+  "crons": [
+    { "path": "/api/callout-tick", "schedule": "0 * * * *" }
+  ]
+}
