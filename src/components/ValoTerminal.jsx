@@ -2993,7 +2993,13 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   const rand = seededRand(hashStr("user-" + name));
   const peak = +(1 + rand() * (rand() < 0.12 ? 120 : 24)).toFixed(2);
   const fols = Math.floor(20 + rand() * 900), folg = Math.floor(5 + rand() * 300);
-  const calls = Array.from({ length: Math.min(4, tokens.length) }, () => {
+  const calls = cloudProfile
+    ? (cloudProfile.callouts || []).slice(0, 8).map((c) => {
+        const t = tokens.find((x) => x.sym === c.sym) || { sym: c.sym || "?", hue: symbolHue(c.sym || "?"), img: null, id: null };
+        const mins = Math.max(1, Math.floor((Date.now() - c.ts) / 60000));
+        return { t, mcAt: c.mcAt, pk: 1, live: 1, ago: mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago` };
+      })
+    : Array.from({ length: Math.min(4, tokens.length) }, () => {
     const t = tokens[Math.floor(rand() * tokens.length)];
     const mcAt = 4000 * Math.pow(10, rand() * 2.4);
     const pk = +(1 + rand() * Math.max(1, peak - 1)).toFixed(2);
@@ -7474,6 +7480,7 @@ export default function App() {
     return url || window.__VALO_LIVE__ === true; // env bridge set by main.jsx (VITE_LIVE_DATA=1)
   }); // 🛰 real tokens, simulated wallet
   const liveArrRef = useRef([]);           // DexScreener top pump pairs → token overrides
+  const liveBindRef = useRef({ byPool: {}, byTok: {} }); // 🔒 pool ⇄ card bindings — stable all session
   const liveDataRef = useRef(false);
   useEffect(() => {
     liveDataRef.current = liveData;
@@ -7487,13 +7494,21 @@ export default function App() {
         if (r.ok) {
           const arr = await r.json();
           if (!stop && Array.isArray(arr) && arr.length) {
-            liveArrRef.current = arr.slice(0, 14).map((x) => ({
+            const mapped = arr.slice(0, 14).map((x) => ({
               sym: (x.sym || "???").toUpperCase().slice(0, 10), name: x.name || "live token",
               price: +x.price || 0, mc: +x.mc || 0, tvl: +x.tvl || 0,
               img: x.img || null, pool: x.id, mint: x.mint || null,
               greenUsd: +x.greenUsd || 0, redUsd: +x.redUsd || 0,
               traders: +x.traders || 0, ch24: +x.ch24 || 0,
             }));
+            liveArrRef.current = mapped;
+            // 🔒 bind each pool to ONE card, permanently for this session
+            const B = liveBindRef.current;
+            for (const lv of mapped) {
+              if (B.byPool[lv.pool] != null) { B.byTok[B.byPool[lv.pool]] = lv; continue; } // refresh bound data
+              const free = (tokensRef.current || []).find((t3) => t3.sym !== "VALO" && !t3.pool && B.byTok[t3.id] == null && !Object.values(B.byPool).includes(t3.id));
+              if (free) { B.byPool[lv.pool] = free.id; B.byTok[free.id] = lv; }
+            }
             return;
           }
         }
@@ -7656,7 +7671,7 @@ export default function App() {
       setTokens((Ts) => Ts.map((t, ti) => {
         // LIVE DATA: this token mirrors a real pump.fun pair — each tick glides
         // the close toward the actual DexScreener price. Trading stays simulated.
-        const lv = liveDataRef.current && liveArrRef.current[ti];
+        const lv = liveDataRef.current && (liveBindRef.current.byTok[t.id] || liveArrRef.current[ti]);
         if (lv) {
           const prev = t.price;
           const target = lv.price;
