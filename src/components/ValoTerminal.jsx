@@ -1587,7 +1587,10 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
 
       </div>
       <div style={sideM ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 12, alignItems: "start", marginTop: 8 } : { display: "contents" }}>
-      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1.1 1 230px", minWidth: 220 } : sideM ? { gridColumn: 1, gridRow: "1 / span 2", minWidth: 0 } : undefined}>
+      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1.1 1 230px", minWidth: 220 }
+        : sideM ? { gridColumn: 1, gridRow: "1 / span 2", minWidth: 0 }
+        : { border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", background: "rgba(255,255,255,0.015)", marginTop: 9 }}>
+      {!wide && !sideM && <div style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 1.5, color: T.faint, marginBottom: 7 }}>① ENTRY</div>}
       {/* buy-in price slider — tracks live price, drag to set a higher/lower entry */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 7 }}>
         {onDraftLevel && (
@@ -1618,24 +1621,39 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       </div>
 
       </div>
-      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1.3 1 260px", minWidth: 250 } : sideM ? { display: "contents" } : undefined}>
-      <label style={{ ...lbl, marginTop: wide || sideM ? 0 : 12, ...(sideM ? { gridColumn: 2, gridRow: 1 } : {}) }}>Stop loss — {stopLoss}% below entry</label>
+      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1.3 1 260px", minWidth: 250 }
+        : sideM ? { display: "contents" }
+        : { border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", background: "rgba(255,255,255,0.015)", marginTop: 8 }}>
+      {!wide && !sideM && <div style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 1.5, color: T.faint, marginBottom: 7 }}>② RISK</div>}
+      <label style={{ ...lbl, marginTop: wide || sideM ? 0 : 0, ...(sideM ? { gridColumn: 2, gridRow: 1 } : {}) }}>Stop loss — {stopLoss}% below entry</label>
       <input type="range" min={1} max={100} value={stopLoss} onChange={(e) => setStopLoss(+e.target.value)} style={{ width: "100%", accentColor: T.red, ...(sideM ? { gridColumn: 2, gridRow: 2, alignSelf: "start" } : {}) }} />
 
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: sideM ? 6 : 10, marginBottom: 6, ...(sideM ? { gridColumn: "1 / -1", borderTop: `1px solid ${T.border}`, paddingTop: 7 } : {}) }}>
-        <span style={{ ...lbl, marginBottom: 0 }}>Trailing take-profit legs</span>
-        <span style={{ fontFamily: T.mono, fontSize: 10, color: allocTotal === 100 ? T.green : T.red }}>Σ {allocTotal}% {allocTotal === 100 ? "✓" : "must=100"}</span>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: sideM ? 6 : 12, marginBottom: 7,
+        borderTop: `1px solid ${T.border}`, paddingTop: 9, ...(sideM ? { gridColumn: "1 / -1" } : {}) }}>
+        <span style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 1.5, color: T.faint }}>③ TAKE-PROFIT LEGS</span>
+        <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: allocTotal === 100 ? T.green : T.red,
+          border: `1px solid ${allocTotal === 100 ? T.green : T.red}55`, background: allocTotal === 100 ? "rgba(22,199,132,0.1)" : "rgba(234,57,67,0.1)",
+          borderRadius: 6, padding: "2px 7px" }}>Σ {allocTotal}% {allocTotal === 100 ? "✓" : "≠100"}</span>
       </div>
       {legs.map((l, i) => (
-        <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 28px", gap: wide ? 4 : 6, marginBottom: wide ? 3 : 6, ...(sideM ? { gridColumn: "1 / -1" } : {}) }}>
-          <div>
-            <span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>at ×</span><input value={l.mult} onChange={(e) => setLeg(i, "mult", e.target.value)} style={inpS} />
-            {(() => { const m = parseFloat(l.mult) || 0, al = Number(l.alloc || 0); const est = amt * (al / 100) * (m - 1) * (pay === "SOL" ? SOL_USD : 0.0125);
-              return m > 1 && al > 0 ? <span style={{ display: "block", fontFamily: T.mono, fontSize: 7.5, fontWeight: 800, color: T.green, marginTop: 2 }}>≈ +${est.toFixed(0)} · ×{m}</span> : null; })()}
+        <div key={i} style={{ border: `1px solid ${T.border}`, borderRadius: 9, padding: "7px 8px", marginBottom: 6,
+          background: "rgba(255,255,255,0.02)", ...(sideM ? { gridColumn: "1 / -1" } : {}) }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+            <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1, color: T.dim }}>LEG {i + 1}</span>
+            <button onClick={() => setLegs((L) => L.filter((_, j) => j !== i))} title="Remove this leg"
+              style={{ border: `1px solid ${T.border2}`, background: "transparent", color: T.faint, borderRadius: 6, width: 22, height: 20, cursor: "pointer", fontSize: 12, lineHeight: 1 }}>−</button>
           </div>
-          <div><span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>trail%</span><input value={l.trail} onChange={(e) => setLeg(i, "trail", e.target.value)} style={inpS} /></div>
-          <div><span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>sell%</span><input value={l.alloc} onChange={(e) => setLeg(i, "alloc", +e.target.value)} style={inpS} /></div>
-          <button onClick={() => setLegs((L) => L.filter((_, j) => j !== i))} style={{ ...chip(false), alignSelf: "end", padding: "5px 0", textAlign: "center" }}>−</button>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+            <div><span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>AT ×</span><input value={l.mult} onChange={(e) => setLeg(i, "mult", e.target.value)} style={inpS} /></div>
+            <div><span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>TRAIL %</span><input value={l.trail} onChange={(e) => setLeg(i, "trail", e.target.value)} style={inpS} /></div>
+            <div><span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>SELL %</span><input value={l.alloc} onChange={(e) => setLeg(i, "alloc", +e.target.value)} style={inpS} /></div>
+          </div>
+          {(() => { const m = parseFloat(l.mult) || 0, al = Number(l.alloc || 0); const est = amt * (al / 100) * (m - 1) * (pay === "SOL" ? SOL_USD : 0.0125);
+            return m > 1 && al > 0 ? (
+              <div style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 800, color: T.green, marginTop: 6, textAlign: "right" }}>
+                sells {al}% at ×{m} · ≈ +${est.toFixed(0)}
+              </div>
+            ) : null; })()}
         </div>
       ))}
       <button onClick={() => setLegs((L) => [...L, { mult: 3, trail: 12, alloc: 0 }])} style={{ ...chip(false), width: "100%", textAlign: "center", ...(sideM ? { gridColumn: "1 / -1" } : {}) }}>+ add leg</button>
@@ -4081,7 +4099,9 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
           ))}
         </div>
         <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, marginTop: 5 }}>≈ ${(amt * unit$).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD buy</div>
-        <div style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.blue,
+        <div onClick={() => setAmount && setAmount(String(feeSafe(bal, pay)))}
+          title="Tap: load your whole balance as the buy-in amount (fees covered)"
+          style={{ cursor: "pointer", fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.blue,
           background: "rgba(76,154,255,0.10)", border: `1px solid ${T.blue}55`, borderRadius: 8,
           padding: "6px 10px", marginTop: 5, display: "flex", justifyContent: "space-between", alignItems: "baseline",
           boxShadow: "0 0 12px rgba(76,154,255,0.18)" }}>
@@ -6685,6 +6705,24 @@ export default function App() {
   // ---- MY MC CALLOUTS — "📣 CALLOUT" on the chart stamps the current market
   // cap; the ring then tracks your best multiplier since. Peak only ratchets UP.
   const [myMcCallouts, setMyMcCallouts] = useState({}); // { [tokenId]: { mcAt, peak } }
+  const [tierPop, setTierPop] = useState(null);        // { fx } — new-tier celebration
+  const lastTierRef = useRef({});
+  useEffect(() => {
+    let best = null;
+    for (const [id, c] of Object.entries(myMcCallouts)) {
+      const tr = calloutTier(c.peak || 1).tier;
+      const prev = lastTierRef.current[id];
+      if (prev && tr.label !== prev && (c.peak || 1) > 1) best = tr;
+      lastTierRef.current[id] = tr.label;
+    }
+    if (best) {
+      const fx = Math.min(5, Math.max(1, best.fx || 1));
+      setTierPop({ fx, k: Date.now() });
+      if (navigator.vibrate) navigator.vibrate(fx > 3 ? [14, 40, 22] : 14);
+      const id = setTimeout(() => setTierPop(null), 950);
+      return () => clearTimeout(id);
+    }
+  }, [myMcCallouts]);
   const [lastCalloutTs, setLastCalloutTs] = useState(0);   // one callout every 3h — no spamming every token
   const [calloutHubOpen, setCalloutHubOpen] = useState(false); // tier list + leaderboards popup
   const [myCalloutsOpen, setMyCalloutsOpen] = useState(false); // your callout history popup
@@ -6952,6 +6990,7 @@ export default function App() {
   const [pullX, setPullX] = useState(0);   // px chart extends left over the scanner
   const [pullR, setPullR] = useState(0);   // px the grid extends right (ticket+wallet slide right, keep their size)
   const [walletCollapsed, setWalletCollapsed] = useState(false); // PC: fold wallet into a side rail
+  const [scanCollapsed, setScanCollapsed] = useState(false);     // PC: fold the scanner into a slim rail beside the watchlist
   const gridRef = useRef(null);
   // sticky header height — the search bar docks right under the callout banner
   const headerRef = useRef(null);
@@ -7004,7 +7043,7 @@ export default function App() {
     const settle = () => { setPullX(computeMaxPull()); fixRightOverflow(); };
     const ids = [420, 720].map((ms) => setTimeout(settle, ms));
     return () => ids.forEach(clearTimeout);
-  }, [wallOpen]);
+  }, [wallOpen, scanCollapsed]);
   // window resizes re-clamp too, so nothing ever slides under the wall
   useEffect(() => {
     const onRz = () => { const mp = computeMaxPull(); setPullX((p) => Math.min(p, mp)); fixRightOverflow(); };
@@ -8418,30 +8457,24 @@ export default function App() {
       // compact row form — same height as the buttons beside it, so opening
       // a callout changes nothing around it
       return (
-        <div onClick={() => setCalloutHubOpen(true)} title="Open the tier list & callout leaderboards"
+        <div onClick={() => setCalloutHubOpen(true)} title={`${tier.label} · called @ ${fmt$(co.mcAt)} — open the tier list & leaderboards`}
           className="co-open"
-          style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", transformOrigin: "70% 50%" }}>
-          <CalloutRing mult={co.peak} size={ringSize} />
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.25 }}>
-            <span style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 800, color: tier.color, letterSpacing: 1 }}>{tier.label}</span>
-            <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, whiteSpace: "nowrap" }}>OUT @ {fmt$(co.mcAt)}</span>
-          </div>
+          style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1, cursor: "pointer", transformOrigin: "70% 50%",
+            animation: tierPop ? `tierPop${tierPop.fx} .9s cubic-bezier(.3,.7,.25,1)` : "none" }}>
+          <CalloutRing mult={co.peak} size={Math.round(ringSize * 1.7)} />
+          <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: tier.color, textShadow: `0 0 8px ${tier.color}66` }}>×{co.peak.toFixed(1)}</span>
         </div>
       );
     }
     // desktop: a larger insignia framed to match the header bar's own chips —
     // neutral border, subtle tier-tinted inner glow, no loud colored box
     return (
-      <div onClick={() => setCalloutHubOpen(true)} title="Open the tier list & callout leaderboards"
+      <div onClick={() => setCalloutHubOpen(true)} title={`${tier.label} · called @ ${fmt$(co.mcAt)} — open the tier list & leaderboards`}
         className="co-open"
-        style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", transformOrigin: "50% 50%", marginLeft: 4,
-          border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)", borderRadius: 9, padding: "4px 12px 4px 6px",
-          boxShadow: `inset 0 0 18px ${tier.color}0f` }}>
-        <CalloutRing mult={co.peak} size={46} />
-        <span style={{ textAlign: "left", lineHeight: 1.35 }}>
-          <span style={{ display: "block", fontFamily: T.mono, fontSize: 7, letterSpacing: 1.5, color: T.faint }}>CALLOUT · OUT @ {fmt$(co.mcAt)}</span>
-          <span style={{ display: "block", fontFamily: T.mono, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, color: tier.color, textShadow: `0 0 8px ${tier.color}44` }}>{tier.label}</span>
-        </span>
+        style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, cursor: "pointer", transformOrigin: "50% 50%", marginLeft: 6,
+          animation: tierPop ? `tierPop${tierPop.fx} .9s cubic-bezier(.3,.7,.25,1)` : "none" }}>
+        <CalloutRing mult={co.peak} size={88} />
+        <span style={{ fontFamily: T.mono, fontSize: 15, fontWeight: 900, color: tier.color, textShadow: `0 0 10px ${tier.color}77`, lineHeight: 1 }}>×{co.peak.toFixed(1)}</span>
       </div>
     );
   };
@@ -8544,8 +8577,10 @@ export default function App() {
                     ))}
                     {/* why it's trending — desktop; on mobile it moves to the chart-tools row */}
                     {!isMobile && trendingBtn}
+                    {!isMobile && (
                     <button onClick={() => setShowDevTrades((v) => !v)} title="Show developer buys & sells on the chart"
                       style={{ display: "flex", alignItems: "center", gap: 4, border: `1px solid ${showDevTrades ? accent(selected.hue) : T.border2}`, background: showDevTrades ? `${accent(selected.hue)}22` : "rgba(255,255,255,0.03)", color: showDevTrades ? accent(selected.hue) : T.dim, borderRadius: 7, padding: "4px 9px", fontFamily: T.mono, fontSize: 10, fontWeight: 800, cursor: "pointer" }}>👨‍💻 Dev trades</button>
+                    )}
                     {/* chart mode + MC callout — desktop keeps them in this row;
                         mobile gets a dedicated chart-tools row above the metrics */}
                     {!isMobile && (
@@ -8571,7 +8606,13 @@ export default function App() {
                       style={{ ...chip(metricsCrunch > 0.5), padding: "4px 7px", fontSize: 9.5, fontWeight: 900, color: metricsCrunch > 0.5 ? VALO_PURPLE : T.dim, borderColor: metricsCrunch > 0.5 ? `${VALO_PURPLE}66` : T.border }}>
                       {metricsCrunch > 0.5 ? "▸" : "▾"} STATS
                     </button>
-                    <div style={{ marginLeft: "auto", flex: "0 0 auto", minWidth: 0, display: "flex", justifyContent: "flex-end" }}>{calloutWidget(true, 34, true)}</div>
+                    <button onClick={() => setShowDevTrades((v) => !v)} title="Show developer buys & sells on the chart"
+                      style={{ ...chip(showDevTrades), padding: "4px 7px", fontSize: 9.5, fontWeight: 800, color: showDevTrades ? accent(selected.hue) : T.dim, borderColor: showDevTrades ? accent(selected.hue) : T.border }}>👨‍💻 DEV</button>
+                  </div>
+                )}
+                {isMobile && (
+                  <div style={{ position: "absolute", right: 4, top: "46%", transform: "translateY(-50%)", zIndex: 9, pointerEvents: "auto" }}>
+                    {calloutWidget(true, 34, true)}
                   </div>
                 )}
                 {/* metrics under price — on mobile this whole block crunches away
@@ -9442,6 +9483,16 @@ export default function App() {
               </span>
             </button>
 
+            {!isMobile && (
+            <button onClick={() => setLayoutPro((v) => !v)}
+              title={layoutPro ? "Back to the side-panel layout" : "Pro layout — trading desk under the chart, feeds on the right"}
+              style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginRight: 8,
+                border: `1px solid ${T.amber}`, background: "rgba(240,185,11,0.12)", color: T.amber,
+                borderRadius: 9, padding: "7px 13px", fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 1,
+                boxShadow: `0 0 12px ${T.amber}44` }}>
+              {layoutPro ? "◧ SIDE LAYOUT" : "⿲ PRO LAYOUT"}
+            </button>
+            )}
             {/* CLAIM REWARDS */}
             <button onClick={() => setClaimOpen(true)} title="Claim your rolling hourly airdrop"
               style={{
@@ -9555,10 +9606,28 @@ export default function App() {
             )}
           </>
         ) : (
-        <div className="pt-grid" ref={gridRef} style={{ display: "grid", gridTemplateColumns: `300px minmax(320px,1fr) ${(layoutPro ? 330 : 304) + Math.round(chartInsetR * 0.5)}px ${walletCollapsed ? 40 : 322 + Math.round(chartInsetR * 0.5)}px`, gap: 14, alignItems: "start",
+        <div className="pt-grid" ref={gridRef} style={{ display: "grid", gridTemplateColumns: `${scanCollapsed ? 40 : 300}px minmax(320px,1fr) ${(layoutPro ? 330 : 304) + Math.round(chartInsetR * 0.5)}px ${walletCollapsed ? 40 : 322 + Math.round(chartInsetR * 0.5)}px`, gap: 14, alignItems: "start",
           width: `calc(100%/1.13 + ${Math.round(pullR / 1.13)}px)`, "--stkTop": `${Math.round((headerH + 8) / 1.13)}px`, zoom: 1.13 }}>
           {/* scanner — slides left as the chart is pulled over, stays same width */}
-          <div ref={scannerRef} style={{ transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s", display: "grid", gap: 10, maxHeight: "calc(100vh - 185px)", overflowY: "auto", padding: "2px 10px 2px 2px" }}>
+          {scanCollapsed ? (
+          <div ref={scannerRef} style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start", transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s" }}>
+            <button onClick={() => setScanCollapsed(false)} title="Expand the scanner"
+              style={{ width: 40, height: 250, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10,
+                background: T.panel, border: `1px solid ${VALO_PURPLE}44`, borderRadius: 12, cursor: "pointer", color: T.dim, padding: 0,
+                boxShadow: `0 0 12px ${VALO_PURPLE}22` }}>
+              <span style={{ fontSize: 14 }}>›</span>
+              <span style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 2.5,
+                color: VALO_PURPLE, background: "rgba(125,92,240,0.12)", borderRadius: 6, padding: "10px 3px", textShadow: `0 0 8px ${VALO_PURPLE}88` }}>SCANNER</span>
+              <span style={{ fontSize: 13 }}>📡</span>
+            </button>
+          </div>
+          ) : (
+          <div ref={scannerRef} style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start",
+            transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s", display: "grid", gap: 10,
+            maxHeight: "calc((100vh - 30px) / 1.13 - var(--stkTop))", overflowY: "auto", padding: "2px 10px 2px 2px" }}>
+            <button onClick={() => setScanCollapsed(true)} title="Fold the scanner into a rail"
+              style={{ position: "sticky", top: 0, zIndex: 3, justifySelf: "end", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center",
+                background: "rgba(15,19,28,0.9)", border: `1px solid ${T.border2}`, borderRadius: 7, cursor: "pointer", color: T.dim, fontSize: 12, marginBottom: -34 }}>‹</button>
             {secBanner}
             {shown.map((t) => (
               <div key={t.id} data-slot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ position: "relative", opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s, transform .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
@@ -9572,6 +9641,7 @@ export default function App() {
                 onOpen={() => { setSel(sel === t.id ? null : t.id); setClickMode(null); }} /></div>
             ))}
           </div>
+          )}
 
           {/* center: chart (resizable) + chat below */}
           <div style={{ display: "grid", gap: 12, position: "relative", marginLeft: -pullX, width: `calc(100% + ${pullX}px)`, transition: resizeRef.current ? "none" : "margin-left .2s, width .2s" }}>
@@ -9581,13 +9651,7 @@ export default function App() {
               <div style={{ position: "sticky", top: "calc(var(--stkTop, 8px) - 8px)", zIndex: 34, margin: "0 0 8px" }}>
                 <SearchBar tokens={tokens} username={username} full eco onPickToken={(id) => { setSel(id); setClickMode(null); }} onPickUser={(u) => setProfileUser(u)} />
               </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", margin: "0 0 6px" }}>
-                <button onClick={() => setLayoutPro((v) => !v)}
-                  title={layoutPro ? "Back to the side-panel layout" : "Pro layout — trading desk under the chart, feeds on the right"}
-                  style={{ ...chip(layoutPro), padding: "4px 11px", fontSize: 9.5, fontWeight: 900, letterSpacing: 1, color: layoutPro ? T.blue : T.dim, borderColor: layoutPro ? `${T.blue}66` : T.border }}>
-                  {layoutPro ? "◧ SIDE LAYOUT" : "⿲ PRO LAYOUT"}
-                </button>
-              </div>
+
               {chartBlock}
             </div>
             {/* PRO LAYOUT: the full trading desk sits under the chart */}
@@ -9678,7 +9742,7 @@ export default function App() {
           {/* trade options — ORDER TICKET ⇄ AUTO TRADER · pro layout swaps this
               column for the LIVE TRADES + CHAT rail, both collapsible */}
           {layoutPro ? (
-          <div style={{ position: "sticky", top: 70, maxHeight: "calc(100vh - 90px)", overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start", maxHeight: "calc((100vh - 24px) / 1.13 - var(--stkTop))", overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, overflow: "hidden" }}>
               <button onClick={() => setLtMin((v) => !v)}
                 style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", border: "none", background: "rgba(255,255,255,0.02)", padding: "10px 13px", cursor: "pointer", fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, color: T.dim }}>
@@ -9707,7 +9771,7 @@ export default function App() {
             </div>
           </div>
           ) : (
-          <div style={{ position: "sticky", top: 70, maxHeight: "calc(100vh - 90px)", overflowY: "auto" }}>
+          <div style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start", maxHeight: "calc((100vh - 24px) / 1.13 - var(--stkTop))", overflowY: "auto" }}>
             {selected && (
               <div style={{ border: `1px solid ${T.border2}`, borderRadius: 13, background: T.panel, padding: "8px 8px 8px", marginBottom: 4 }}>
               <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
@@ -9785,7 +9849,7 @@ export default function App() {
               </button>
             </div>
           ) : (
-          <div style={{ position: "sticky", top: 70, maxHeight: "calc(100vh - 90px)", overflowY: "auto" }}>
+          <div style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start", maxHeight: "calc((100vh - 24px) / 1.13 - var(--stkTop))", overflowY: "auto" }}>
             <button onClick={() => setWalletCollapsed(true)} title="Collapse wallet to free chart space"
               style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 8,
                 border: `1px solid ${T.border2}`, borderRadius: 9, padding: "6px", background: "rgba(255,255,255,0.02)", cursor: "pointer",
@@ -10025,9 +10089,10 @@ export default function App() {
       {sb && !isMobile && (
         <button onClick={() => setCloudOpen(true)}
           title={cloudUser ? `Signed in as ${cloudUser.email} — portfolio syncs to the cloud` : "Sign in — your paper portfolio, watchlist and bots follow you across devices"}
-          style={{ position: "fixed", top: 6, right: 300, zIndex: 55, display: "flex", alignItems: "center", gap: 6,
+          style={{ position: "fixed", top: 26, left: "calc(50% - 250px)", zIndex: 55, display: "flex", alignItems: "center", gap: 6,
+            borderTop: "none", borderRadius: "0 0 9px 9px",
             background: cloudUser ? "rgba(125,92,240,0.16)" : "rgba(59,130,246,0.16)",
-            border: `1px solid ${cloudUser ? VALO_PURPLE : T.blue}`, borderRadius: 8, padding: "4px 10px", cursor: "pointer",
+            border: `1px solid ${cloudUser ? VALO_PURPLE : T.blue}`, padding: "4px 10px", cursor: "pointer",
             boxShadow: cloudUser ? `0 0 10px ${VALO_PURPLE}55` : `0 0 12px ${T.blue}66`,
             animation: cloudUser ? "none" : "claimPulse 2.6s ease-in-out infinite" }}>
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: cloudUser ? (cloudSynced ? T.green : T.amber) : T.blue, boxShadow: `0 0 6px ${cloudUser ? (cloudSynced ? T.green : T.amber) : T.blue}` }} />
@@ -10077,8 +10142,8 @@ export default function App() {
       {!isMobile && (
         <button onClick={() => setLiveData((v) => !v)}
           title={liveData ? "LIVE DATA ON — real pump.fun pairs via DexScreener; wallet & fills stay simulated. Click to return to the demo feed." : "Pull REAL Solana pump tokens (DexScreener) into the terminal — paper trading on live prices"}
-          style={{ position: "fixed", top: 6, right: 138, zIndex: 55, display: "flex", alignItems: "center", gap: 6,
-            background: liveData ? "rgba(22,199,132,0.14)" : "rgba(15,19,28,0.72)", border: `1px solid ${liveData ? T.green : T.border}`, borderRadius: 8, padding: "4px 9px", cursor: "pointer",
+          style={{ position: "fixed", top: 26, left: "calc(50% - 118px)", zIndex: 55, display: "flex", alignItems: "center", gap: 6,
+            background: liveData ? "rgba(22,199,132,0.14)" : "rgba(15,19,28,0.72)", border: `1px solid ${liveData ? T.green : T.border}`, borderTop: "none", borderRadius: "0 0 9px 9px", padding: "4px 9px", cursor: "pointer",
             boxShadow: liveData ? "0 0 10px rgba(22,199,132,0.35)" : "none" }}>
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: liveData ? T.green : "#39414f", boxShadow: liveData ? `0 0 6px ${T.green}` : "none" }} />
           <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: liveData ? T.green : "rgba(138,148,168,0.7)", fontWeight: 800 }}>{liveData ? "LIVE DATA · PAPER" : "LIVE DATA"}</span>
@@ -11173,6 +11238,11 @@ export default function App() {
           [style*="font-size: 9px"], [style*="font-size: 9.5px"] { font-size: 10.5px !important; }
         }
         @keyframes uSweep{ 0%,100%{ transform: translateX(0) rotate(0deg); opacity: 0.65; } 30%{ transform: translateX(-2px) rotate(-14deg); opacity: 1; } 65%{ transform: translateX(2px) rotate(12deg); opacity: 1; } }
+        @keyframes tierPop1 { 0%{ transform: scale(1); } 45%{ transform: scale(1.14); } 100%{ transform: scale(1); } }
+        @keyframes tierPop2 { 0%{ transform: scale(1) rotate(0); } 35%{ transform: scale(1.2) rotate(-4deg); } 70%{ transform: scale(1.06) rotate(3deg); } 100%{ transform: scale(1) rotate(0); } }
+        @keyframes tierPop3 { 0%{ transform: scale(1) rotate(0); filter: brightness(1); } 30%{ transform: scale(1.3) rotate(-6deg); filter: brightness(1.5); } 60%{ transform: scale(1.1) rotate(5deg); filter: brightness(1.2); } 100%{ transform: scale(1) rotate(0); filter: brightness(1); } }
+        @keyframes tierPop4 { 0%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1); } 22%{ transform: scale(1.42) rotate(-9deg); filter: brightness(1.9) saturate(1.5); } 48%{ transform: scale(1.12) rotate(7deg); filter: brightness(1.3) saturate(1.2); } 74%{ transform: scale(1.22) rotate(-3deg); filter: brightness(1.5); } 100%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1); } }
+        @keyframes tierPop5 { 0%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1) hue-rotate(0); } 18%{ transform: scale(1.55) rotate(-12deg); filter: brightness(2.2) saturate(1.8) hue-rotate(18deg); } 40%{ transform: scale(1.15) rotate(9deg); filter: brightness(1.4) saturate(1.4) hue-rotate(-12deg); } 62%{ transform: scale(1.35) rotate(-5deg); filter: brightness(1.9) saturate(1.6) hue-rotate(10deg); } 82%{ transform: scale(1.08) rotate(3deg); filter: brightness(1.2); } 100%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1) hue-rotate(0); } }
         @keyframes diamond3d { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
         @keyframes diamond3dBurst { 0% { transform: rotateY(0deg) scale(1); } 55% { transform: rotateY(540deg) scale(1.22); } 100% { transform: rotateY(720deg) scale(1); } }
         @keyframes starFly1 { 0% { transform: translate(-42px, 16px) scale(0.4); opacity: 0; } 12% { opacity: 0.95; } 88% { opacity: 0.8; } 100% { transform: translate(44px, -20px) scale(1.05); opacity: 0; } }
