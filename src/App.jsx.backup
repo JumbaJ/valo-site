@@ -1,5 +1,0 @@
-import ValoTerminal from "./components/ValoTerminal";
-
-export default function App() {
-  return <ValoTerminal />;
-}
