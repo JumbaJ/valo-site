@@ -8923,12 +8923,15 @@ export default function App() {
                     border: `1px solid ${T.border2}`, background: "rgba(76,154,255,0.08)", borderRadius: 9, padding: "7px 9px" }}>
                   <span style={{ fontSize: 15 }}>📄</span>
                 </button>
-                {/* claim pill */}
+                {/* claim pill ⇄ SIGN UP/IN — hold either to swap slots */}
+                {!(sb && mobHeadPill === "cloud") && (
                 <button onClick={() => setClaimOpen(true)}
+                  {...(sb ? chipEditProps(() => setMobHeadPill("cloud")) : {})}
                   style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
                     border: `1px solid ${claimable > 0 ? "rgba(22,199,132,0.5)" : T.border}`,
                     background: claimable > 0 ? "rgba(22,199,132,0.10)" : "rgba(255,255,255,0.02)",
                     borderRadius: 9, padding: "5px 10px", lineHeight: 1.1,
+                    userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent",
                     animation: claimable > 0 ? "claimPulse 2.4s ease-in-out infinite" : "none" }}>
                 <span style={{ fontSize: 13 }}>🎁</span>
                 <span style={{ textAlign: "left" }}>
@@ -8940,6 +8943,27 @@ export default function App() {
                   </span>
                 </span>
               </button>
+                )}
+                {sb && mobHeadPill === "cloud" && (
+                <button onClick={() => setCloudOpen(true)}
+                  {...chipEditProps(() => setMobHeadPill("epoch"))}
+                  style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                    border: `1.5px solid ${T.blue}`, background: "rgba(59,130,246,0.14)",
+                    borderRadius: 9, padding: "5px 12px", lineHeight: 1.1,
+                    userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent",
+                    boxShadow: `0 0 14px ${T.blue}55`,
+                    animation: cloudUser ? "none" : "claimPulse 2.6s ease-in-out infinite" }}>
+                <span style={{ fontSize: 13 }}>☁</span>
+                <span style={{ textAlign: "left" }}>
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1, color: T.blue }}>
+                    {cloudUser ? "SIGNED IN" : "SIGN UP"}
+                  </span>
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 7.5, color: cloudUser ? (cloudSynced ? T.green : T.amber) : "rgba(138,168,248,0.85)", letterSpacing: 0.5 }}>
+                    {cloudUser ? (cloudSynced ? "● SYNCED · SIGN OUT" : "● SYNCING…") : "or sign in · free"}
+                  </span>
+                </span>
+              </button>
+                )}
               </div>
             </div>
             {/* tidy stats strip */}
@@ -9012,16 +9036,13 @@ export default function App() {
               </span>
             </button>
 
-            {/* CLAIM REWARDS ⇄ (mobile) SIGN UP/IN — hold either to swap */}
-            {!(isMobile && sb && mobHeadPill === "cloud") && (
-            <button onClick={() => setClaimOpen(true)} title="Claim your rolling hourly airdrop · hold to swap with sign-in"
-              {...(isMobile && sb ? chipEditProps(() => setMobHeadPill("cloud")) : {})}
+            {/* CLAIM REWARDS */}
+            <button onClick={() => setClaimOpen(true)} title="Claim your rolling hourly airdrop"
               style={{
                 display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
                 border: `1px solid ${claimable > 0 ? "rgba(22,199,132,0.5)" : T.border}`,
                 background: claimable > 0 ? "rgba(22,199,132,0.10)" : "rgba(255,255,255,0.02)",
                 borderRadius: 9, padding: "6px 12px", lineHeight: 1.2,
-                userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent",
                 animation: claimable > 0 ? "claimPulse 2.4s ease-in-out infinite" : "none",
               }}>
               <span style={{ fontSize: 15 }}>🎁</span>
@@ -9034,30 +9055,6 @@ export default function App() {
                 </span>
               </span>
             </button>
-            )}
-            {isMobile && sb && mobHeadPill === "cloud" && (
-            <button onClick={() => setCloudOpen(true)}
-              title={cloudUser ? "Account & sign out · hold to swap with epoch rewards" : "Sign up / sign in · hold to swap with epoch rewards"}
-              {...chipEditProps(() => setMobHeadPill("epoch"))}
-              style={{
-                display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
-                border: `1.5px solid ${T.blue}`, background: "rgba(59,130,246,0.14)",
-                borderRadius: 9, padding: "6px 14px", lineHeight: 1.2,
-                userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent",
-                boxShadow: `0 0 14px ${T.blue}55`,
-                animation: cloudUser ? "none" : "claimPulse 2.6s ease-in-out infinite",
-              }}>
-              <span style={{ fontSize: 14 }}>☁</span>
-              <span style={{ textAlign: "left" }}>
-                <span style={{ display: "block", fontFamily: T.mono, fontSize: 12, fontWeight: 900, letterSpacing: 1, color: T.blue }}>
-                  {cloudUser ? "SIGNED IN" : "SIGN UP"}
-                </span>
-                <span style={{ display: "block", fontFamily: T.mono, fontSize: 8, color: cloudUser ? (cloudSynced ? T.green : T.amber) : "rgba(138,168,248,0.8)", letterSpacing: 0.3 }}>
-                  {cloudUser ? (cloudSynced ? "● SYNCED · TAP TO SIGN OUT" : "● SYNCING…") : "or sign in · free"}
-                </span>
-              </span>
-            </button>
-            )}
           </div>
         </div>
         )}
