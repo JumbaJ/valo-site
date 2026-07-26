@@ -7022,7 +7022,7 @@ export default function App() {
         await sb.from("watchlists").upsert({ user_id: uid, sections: watchSections, loose: watchLoose, updated_at: new Date().toISOString() });
         await sb.from("positions").delete().eq("user_id", uid);
         const posRows = Object.entries(positions).filter(([, p]) => p && p.amt > 0).map(([k, p]) => {
-          const tk = tokensRef.current.find((t) => String(t.id) === String(k));
+          const tk = tokensRef.current.find((t) => String(t.id) === String(k)) || tokensRef.current.find((t) => String(t.pool || "") === String(k));
           return {
             user_id: uid, token_key: String((tk && tk.pool) || k), sym: (tk && tk.sym) || null,
             qty: p.amt, entry_price: p.entry || 0, pay_unit: p.pay || "SOL", updated_at: new Date().toISOString(),
@@ -7063,9 +7063,15 @@ export default function App() {
         ]);
         if (stop) return;
         const holds = (pos || []).map((r) => {
+          if (!(+r.qty > 0)) return null;
           const t = tokensRef.current.find((x) => String(x.pool || x.id) === String(r.token_key));
-          if (!t || !(+r.qty > 0)) return null;
-          return { t, qty: +r.qty, entry: +r.entry_price || t.price, since: new Date(r.opened_at || Date.now()).getTime() };
+          if (t) return { t, qty: +r.qty, entry: +r.entry_price || t.price, since: new Date(r.opened_at || Date.now()).getTime() };
+          // pool not on this device's trending list right now — render from the row itself
+          const sym2 = r.sym || String(r.token_key).slice(0, 4).toUpperCase();
+          return {
+            t: { id: r.token_key, pool: r.token_key, sym: sym2, name: sym2, hue: symbolHue(sym2), img: null, price: +r.entry_price || 0, candles: [] },
+            qty: +r.qty, entry: +r.entry_price || 0, since: new Date(r.opened_at || Date.now()).getTime(), offMarket: true,
+          };
         }).filter(Boolean);
         setProfileCloud({ id: prof.id, handle: prof.handle, icon: prof.icon, holds,
           solBalance: w ? +w.sol_balance : null, valoBalance: w ? +w.valo_balance : null });
