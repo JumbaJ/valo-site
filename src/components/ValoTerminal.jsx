@@ -5406,11 +5406,39 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
     const s = (n) => Array.from({ length: n }, () => c[Math.floor(Math.random() * c.length)]).join("");
     return s(4) + "..." + s(4);
   };
-  // seed + stream new trades (API: on-chain trade stream for this mint)
+  // seed + stream new trades — REAL on-chain trades when the token has a live
+  // pool, simulated stream otherwise
   useEffect(() => {
+    setHolders(token.traders);
+    if (token.pool) {
+      let stop = false;
+      const load = async () => {
+        try {
+          const r = await fetch(`/api/trades?pool=${encodeURIComponent(token.pool)}`);
+          if (!r.ok) return;
+          const j = await r.json();
+          if (stop || !Array.isArray(j)) return;
+          const mapped = j.map((x) => ({
+            id: x.tx || String(x.at), at: x.at, isBuy: !!x.isBuy,
+            usd: +x.usd || 0, sol: (+x.usd || 0) / SOL_USD, mc: mcOf(token),
+            trader: x.trader || "unknown", wallet: x.wallet || null, pnlPct: null,
+            tx: (x.tx || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || Math.random().toString(16).slice(2, 10),
+            live: true,
+          }));
+          setRows((R) => {
+            const cur = R.filter((r0) => r0.live);
+            const fresh = mapped.filter((m) => !cur.some((c0) => c0.id === m.id));
+            return [...fresh, ...cur].sort((a, b) => b.at - a.at).slice(0, 40);
+          });
+        } catch (e) { /* keep whatever is shown */ }
+      };
+      setRows([]);
+      load();
+      const iv = setInterval(load, 8000);
+      return () => { stop = true; clearInterval(iv); };
+    }
     const seed = Array.from({ length: 14 }, (_, i) => mkRow(token, i * 1400));
     setRows(seed);
-    setHolders(token.traders);
     const iv = setInterval(() => {
       const isBuy = Math.random() > 0.46;
       setRows((R) => [mkRow(token, 0, isBuy), ...R].slice(0, 40));
@@ -5418,7 +5446,7 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
     }, 1600 + Math.random() * 1400);
     return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token.id]);
+  }, [token.id, token.pool]);
 
   function mkRow(t, agoMs = 0, forceBuy) {
     const isBuy = forceBuy !== undefined ? forceBuy : Math.random() > 0.46;
