@@ -2444,8 +2444,29 @@ function TierListModal({ onClose, isMobile, myBest = 0, embed = false }) {
 
 // compact leaderboard — the tier-list's sibling: same frame, top-10 badges per
 // duration, your rank, and the epoch bonus each placement pays
+const LB_MS = { "1H": 3600e3, "12H": 12 * 3600e3, "1D": 86400e3, "7D": 7 * 86400e3, "30D": 30 * 86400e3, "180D": 180 * 86400e3, "365D": 365 * 86400e3 };
 function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser, embed = false, focusUser = null, username = "you" }) {
+  // ☁ REAL entries — actual callouts ranked by the peak the market gave them
+  const [realBoard, setRealBoard] = useState([]);
   const [period, setPeriod] = useState("1D");
+  useEffect(() => {
+    const sb2 = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
+    if (!sb2) { setRealBoard([]); return; }
+    let stop = false;
+    (async () => {
+      try {
+        let q = sb2.from("callouts").select("handle, sym, mc_at, peak_mult, peak_mc, ts").order("peak_mult", { ascending: false }).limit(250);
+        if (LB_MS[period]) q = q.gte("ts", new Date(Date.now() - LB_MS[period]).toISOString());
+        const { data } = await q;
+        if (stop || !data) return;
+        setRealBoard(data.filter((r) => r.handle).map((r) => ({
+          user: r.handle, sym: r.sym || "?", hue: symbolHue(r.sym || "?"),
+          mcAt: +r.mc_at || 0, mult: Math.max(1, +r.peak_mult || 1), peakMc: +r.peak_mc || 0, real: true,
+        })));
+      } catch (e) { setRealBoard([]); }
+    })();
+    return () => { stop = true; };
+  }, [period]);
   const [hl, setHl] = useState(!!focusUser); // the jumped-to name glows, then fades
   const focusRef = useRef(null);
   useEffect(() => { if (!focusUser) return; const t = setTimeout(() => setHl(false), 5000); return () => clearTimeout(t); }, [focusUser]);
@@ -2455,8 +2476,8 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
       const tk = tokens.find((t) => String(t.id) === String(id));
       return tk ? { user: "you", you: true, sym: tk.sym, hue: tk.hue, mcAt: c.mcAt, mult: c.peak } : null;
     }).filter(Boolean);
-    return [...genLeaderboard(period), ...mine].sort((a, b) => b.mult - a.mult);
-  }, [period, myCallouts, tokens]);
+    return [...genLeaderboard(period), ...realBoard, ...mine].sort((a, b) => b.mult - a.mult);
+  }, [period, myCallouts, tokens, realBoard]);
   const myRank = board.findIndex((e) => e.you) + 1;
   const focusRank = focusUser ? board.findIndex((e) => !e.you && e.user === focusUser) + 1 : 0;
   const listEnd = 250; // full top 250 on every duration
@@ -2511,7 +2532,7 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
                 const tabTxt = rk === 1 ? "GOLD" : rk === 2 ? "SILVER" : "BRONZE";
                 const tabCol = rk === 1 ? "#ffd54a" : rk === 2 ? "#cfd6e4" : "#d0844a";
                 const curMult = Math.max(1, r.mult * (0.55 + (hashStr(r.user + "cur") % 41) / 100)); // live mult right now
-                const peakMc = r.mcAt * r.mult;
+                const peakMc = r.peakMc || r.mcAt * r.mult;
                 return (
                   <div key={bi} className="lb-pod" onClick={() => !r.you && onOpenUser && onOpenUser(r.user)}
                     style={{ position: "relative", border: `1.5px solid ${tabCol}`, background: `linear-gradient(120deg, ${tabCol}1e, ${tr.color}0a 60%)`,
@@ -2521,7 +2542,8 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
                       fontSize: 7.5, fontWeight: 900, letterSpacing: 1.5, borderRadius: "0 0 7px 7px", padding: "2px 10px" }}>{medal} #{rk} {tabTxt}</span>
                     <CalloutRing mult={r.mult} size={rk === 1 ? 46 : 36} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontFamily: T.mono, fontSize: rk === 1 ? 12 : 10.5, fontWeight: 900, color: r.you ? T.green : T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{r.user}</div>
+                      <div style={{ fontFamily: T.mono, fontSize: rk === 1 ? 12 : 10.5, fontWeight: 900, color: r.you ? T.green : T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {r.real && <span title="Real VALO account" style={{ color: T.blue, marginRight: 3 }}>☁</span>}@{r.user}</div>
                       <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 2 }}>
                         best: <b style={{ color: accent(r.hue) }}>${r.sym}</b> <span style={{ color: T.faint }}>called @</span> <b style={{ color: T.text }}>{fmt$(r.mcAt)}</b>
                       </div>
@@ -2557,7 +2579,8 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
                 transition: "background 1.2s ease, border-color 1.2s ease, box-shadow 1.2s ease" }}>
                 <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: rk <= 3 ? tr.color : T.faint, width: 26 }}>#{rk}</span>
                 {rk <= 100 && <CalloutRing mult={r.mult} size={19} />}
-                <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, color: r.you ? T.green : isFocus && hl ? VALO_PURPLE : T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{r.user}</span>
+                <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, color: r.you ? T.green : isFocus && hl ? VALO_PURPLE : T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {r.real && <span title="Real VALO account" style={{ color: T.blue, marginRight: 3 }}>☁</span>}@{r.user}</span>
                 <span style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>${r.sym}</span>
                 <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: tr.color }}>×{r.mult.toFixed(1)}</span>
                 {lbBonus(rk) > 0 && <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, color: "#ffd54a",
@@ -3038,7 +3061,8 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     ? (cloudProfile.callouts || []).slice(0, 8).map((c) => {
         const t = tokens.find((x) => x.sym === c.sym) || { sym: c.sym || "?", hue: symbolHue(c.sym || "?"), img: null, id: null };
         const mins = Math.max(1, Math.floor((Date.now() - c.ts) / 60000));
-        return { t, mcAt: c.mcAt, pk: 1, live: 1, ago: mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago` };
+        const liveMult = t && t.price && c.mcAt ? Math.max(0.01, mcOf(t) / c.mcAt) : c.peak || 1;
+        return { t, mcAt: c.mcAt, pk: c.peak || 1, live: +liveMult.toFixed(2), ago: mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago` };
       })
     : Array.from({ length: Math.min(4, tokens.length) }, () => {
     const t = tokens[Math.floor(rand() * tokens.length)];
@@ -3047,7 +3071,9 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     const live = +(pk * (0.3 + rand() * 0.9)).toFixed(2);
     return { t, mcAt, pk, live, ago: `${Math.floor(1 + rand() * 72)}h ago` };
   }).filter((c) => c.t);
-  const realPeak = cloudProfile ? (cloudProfile.callouts && cloudProfile.callouts.length ? 1.0 : 0) : null;
+  const realPeak = cloudProfile
+    ? (cloudProfile.callouts || []).reduce((m, c) => Math.max(m, c.peak || 1), 0) || 0
+    : null;
   const shownPeak = cloudProfile ? realPeak : peak;
   const { tier } = calloutTier(shownPeak || 1);
   const [dmDraft, setDmDraft] = useState("");
@@ -7292,7 +7318,8 @@ export default function App() {
             tokQty: r.tok_qty != null ? +r.tok_qty : null, priceAt: +r.price || t2.price || 0 };
         });
         setProfileCloud({ id: prof.id, handle: prof.handle, icon: prof.icon, holds, activity,
-          callouts: (cos || []).map((r) => ({ sym: r.sym, mcAt: +r.mc_at || 0, ts: new Date(r.ts).getTime() })),
+          callouts: (cos || []).map((r) => ({ sym: r.sym, mcAt: +r.mc_at || 0, ts: new Date(r.ts).getTime(),
+            peak: Math.max(1, +r.peak_mult || 1), peakMc: +r.peak_mc || 0 })),
           solBalance: w ? +w.sol_balance : null, valoBalance: w ? +w.valo_balance : null });
       } catch (e) { if (!stop) setProfileCloud(null); }
     };
@@ -7798,13 +7825,76 @@ export default function App() {
       [tokenId]: [...(C[tokenId] || []), { ...m, ts: new Date().toLocaleTimeString(), id: Math.random() }].slice(-120),
     })), []);
 
+  // 📈 REAL MULTIPLIER TRACKING — each of your open callouts is scored against
+  // the live market; every new peak is persisted so ranks stop being fiction.
+  const coRowRef = useRef({});   // token_key -> { id, peak }
+  useEffect(() => {
+    if (!sb || !cloudUser) { coRowRef.current = {}; return; }
+    let stop = false;
+    (async () => {
+      try {
+        const { data } = await sb.from("callouts").select("id, token_key, mc_at, peak_mult").eq("user_id", cloudUser.id);
+        if (stop || !data) return;
+        const M = {};
+        for (const r of data) M[String(r.token_key)] = { id: r.id, peak: +r.peak_mult || 1, mcAt: +r.mc_at || 0 };
+        coRowRef.current = M;
+        // adopt cloud peaks locally so your rings survive a refresh
+        setMyMcCallouts((C) => {
+          const N = { ...C }; let changed = false;
+          for (const [k, v] of Object.entries(C)) {
+            const tk = tokensRef.current.find((t) => String(t.id) === String(k));
+            const row = M[String((tk && tk.pool) || k)];
+            if (row && row.peak > (v.peak || 1)) { N[k] = { ...v, peak: row.peak }; changed = true; }
+          }
+          return changed ? N : C;
+        });
+      } catch (e) {}
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudUser && cloudUser.id]);
+  // score open callouts against the live market (throttled — one pass / 12s)
+  const coTickRef = useRef(0);
+  useEffect(() => {
+    const now = Date.now();
+    if (now - coTickRef.current < 12000) return;
+    coTickRef.current = now;
+    const entries = Object.entries(myMcCallouts);
+    if (!entries.length) return;
+    const ups = [];
+    setMyMcCallouts((C) => {
+      const N = { ...C }; let changed = false;
+      for (const [k, v] of entries) {
+        const tk = tokensRef.current.find((t) => String(t.id) === String(k));
+        if (!tk || !v.mcAt) continue;
+        const mult = mcOf(tk) / v.mcAt;
+        if (mult > (v.peak || 1) + 0.001) {
+          N[k] = { ...v, peak: +mult.toFixed(3), peakMc: mcOf(tk) };
+          changed = true;
+          const row = coRowRef.current[String(tk.pool || k)];
+          if (row && sb && cloudUser) ups.push({ id: row.id, peak: +mult.toFixed(3), peakMc: mcOf(tk) });
+        }
+      }
+      return changed ? N : C;
+    });
+    for (const u of ups) {
+      coRowRef.current && Object.values(coRowRef.current).forEach((r) => { if (r.id === u.id) r.peak = u.peak; });
+      sb.from("callouts").update({ peak_mult: u.peak, peak_mc: u.peakMc, updated_at: new Date().toISOString() })
+        .eq("id", u.id).then(({ error }) => { if (error) console.warn("[VALO 📈] peak sync failed", error.message); });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tokens]);
   // ☁ PHASE 4b — real callouts. Arming broadcasts; everyone online gets the
   // 📣 notification. Your own echo is filtered out.
   const seenCloudCo = useRef(new Set());
   const pushCloudCallout = (t, mcAt) => {
     if (!sb || !cloudUser) return;
-    sb.from("callouts").insert({ user_id: cloudUser.id, handle: username, token_key: String(t.pool || t.id), sym: t.sym, mc_at: mcAt, price_at: t.price })
-      .then(({ error }) => { if (error) console.warn("[VALO ☁] callout push failed", error.message); });
+    sb.from("callouts").insert({ user_id: cloudUser.id, handle: username, token_key: String(t.pool || t.id), sym: t.sym, mc_at: mcAt, price_at: t.price, peak_mult: 1, peak_mc: mcAt })
+      .select("id, token_key, mc_at, peak_mult").maybeSingle()
+      .then(({ data, error }) => {
+        if (error) { console.warn("[VALO ☁] callout push failed", error.message); return; }
+        if (data) coRowRef.current[String(data.token_key)] = { id: data.id, peak: +data.peak_mult || 1, mcAt: +data.mc_at || 0 };
+      });
   };
   useEffect(() => {
     if (!sb) return;
