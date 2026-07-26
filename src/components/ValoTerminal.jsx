@@ -2806,7 +2806,7 @@ function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned =
   );
 }
 
-function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [] }) {
+function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser }) {
   const [tab, setTab] = useState("tiers");   // tiers | board
   const [period, setPeriod] = useState("1D");
   useEffect(() => {
@@ -2866,42 +2866,7 @@ function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [] }) {
             </div>
           ) : (
             <>
-              {/* period picker */}
-              <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 10 }}>
-                {LB_PERIODS.map((p) => (
-                  <button key={p} onClick={() => setPeriod(p)}
-                    style={{ ...chip(period === p), padding: "5px 10px", fontSize: 9.5, fontWeight: 800, color: period === p ? (p === "LIFETIME" ? T.amber : T.text) : T.dim }}>{p}</button>
-                ))}
-              </div>
-              <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, marginBottom: 8 }}>
-                TOP 250 · HIGHEST CALLOUT MULTIPLIERS {period === "LIFETIME" ? "OF ALL TIME" : `IN THE LAST ${period}`}
-              </div>
-              {board.map((r, i) => {
-                const { tier } = calloutTier(r.mult);
-                return (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 8, marginBottom: 2,
-                    background: r.you ? "rgba(125,92,240,0.12)" : i < 3 ? `${rankCol(i)}0d` : i % 2 ? "rgba(255,255,255,0.015)" : "transparent",
-                    border: r.you ? `1px solid ${VALO_PURPLE}55` : i < 3 ? `1px solid ${rankCol(i)}33` : "1px solid transparent" }}>
-                    <span style={{ fontFamily: T.mono, fontSize: i < 3 ? 12 : 9.5, fontWeight: 900, color: rankCol(i), width: 30, flex: "0 0 auto" }}>
-                      {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `#${i + 1}`}
-                    </span>
-                    {i < 10 && <CalloutRing mult={r.mult} size={i < 3 ? 30 : 24} />}
-                    <span style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: r.you ? 900 : 700, color: r.you ? VALO_PURPLE : T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {r.you ? "YOU" : "@" + r.user}
-                    </span>
-                    <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: accent(r.hue), flex: "0 0 auto" }}>${r.sym}</span>
-                    {!isMobile && (
-                      <span style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, flex: "0 0 auto" }}>
-                        OUT @ {fmt$(r.mcAt)} → {fmt$(r.mcAt * r.mult)}
-                      </span>
-                    )}
-                    <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 800, color: tier.color, flex: "0 0 auto", opacity: 0.9 }}>{tier.label}</span>
-                    <span style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: tier.color, width: 52, textAlign: "right", flex: "0 0 auto", textShadow: `0 0 6px ${tier.color}55` }}>
-                      {r.mult >= 10 ? Math.floor(r.mult) : r.mult.toFixed(1)}×
-                    </span>
-                  </div>
-                );
-              })}
+              <LeaderboardModal embed isMobile={isMobile} myCallouts={myCallouts} tokens={tokens} onOpenUser={onOpenUser} />
             </>
           )}
         </div>
@@ -10005,7 +9970,8 @@ export default function App() {
 
       {/* WHITEPAPER MODAL — interactive reader with expandable TOC sidebar */}
       {wpOpen && <WhitepaperModal onClose={() => setWpOpen(false)} isMobile={isMobile} />}
-      {calloutHubOpen && <CalloutHubModal onClose={() => setCalloutHubOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} />}
+      {calloutHubOpen && <CalloutHubModal onClose={() => setCalloutHubOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens}
+        onOpenUser={(u) => { setCalloutHubOpen(false); setProfileUser(u); }} />}
       {!isMobile && quickArmOn && armPop && (
         <button data-armpop="1" onClick={() => { const fn = quickArmRef.current; fn && fn(); setArmPop(null); }}
           title="Arm this strategy at the line you just set"
@@ -11171,6 +11137,11 @@ export default function App() {
         }
         @keyframes posSlide{ from{ transform: translateX(102%); } to{ transform: translateX(0); } }
         @keyframes apexSpin{ 0%{ transform: scaleX(1); } 25%{ transform: scaleX(0.12); } 50%{ transform: scaleX(-1); } 75%{ transform: scaleX(-0.12); } 100%{ transform: scaleX(1); } }
+        @media (min-width: 820px) {
+          [style*="font-size: 6px"], [style*="font-size: 6.5px"] { font-size: 8px !important; }
+          [style*="font-size: 7px"], [style*="font-size: 7.5px"] { font-size: 9px !important; }
+          [style*="font-size: 8px"], [style*="font-size: 8.5px"] { font-size: 9.5px !important; }
+        }
         @keyframes uSweep{ 0%,100%{ transform: translateX(0) rotate(0deg); opacity: 0.65; } 30%{ transform: translateX(-2px) rotate(-14deg); opacity: 1; } 65%{ transform: translateX(2px) rotate(12deg); opacity: 1; } }
         @keyframes sellPop{ 0%{ transform: scale(1); } 40%{ transform: scale(1.08); } 100%{ transform: scale(1); } }
         @keyframes apexHue{ from{ filter: drop-shadow(0 0 5px #9ceaff) hue-rotate(0deg); } to{ filter: drop-shadow(0 0 5px #9ceaff) hue-rotate(360deg); } }
