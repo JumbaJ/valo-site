@@ -5463,7 +5463,33 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
   const ago = (ms) => { const s = Math.floor((Date.now() - ms) / 1000); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m`; };
 
   // deterministic top-holder book, biggest first — refreshed live off the price
+  const [liveHolders, setLiveHolders] = useState(null); // real top-20 book when the mint is live
+  useEffect(() => {
+    setLiveHolders(null);
+    if (!token.liveMint) return;
+    let stop = false;
+    const load = async () => {
+      try {
+        const r = await fetch(`/api/holders?mint=${encodeURIComponent(token.liveMint)}&price=${token.price || 0}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (stop || !j || !Array.isArray(j.holders) || !j.holders.length) return;
+        let x2 = 7; const rnd3 = () => { x2 = (x2 * 9301 + 49297) % 233280; return x2 / 233280; };
+        setLiveHolders(j.holders.map((h) => {
+          const avgIn = token.price * (0.5 + rnd3() * 0.9); // entry unknown on-chain — estimated
+          return { ...h, name: null,
+            boughtUsd: h.usd * (1 + rnd3() * 0.3), soldUsd: h.usd * rnd3() * 0.3,
+            pnlUsd: h.qty * (token.price - avgIn), holdMin: 60 + Math.floor(rnd3() * 60 * 24 * 12), live: true };
+        }));
+      } catch (e) { /* sim book stays */ }
+    };
+    load();
+    const iv = setInterval(load, 60000);
+    return () => { stop = true; clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token.id, token.liveMint]);
   const topHolders = useMemo(() => {
+    if (liveHolders) return liveHolders;
     const supply = 1e9 * (0.35 + ((token.id * 13) % 50) / 100);
     let x = token.id * 77 + 13; const rnd2 = () => { x = (x * 9301 + 49297) % 233280; return x / 233280; };
     const N = 25;
@@ -5481,7 +5507,7 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
         qty, usd: qty * token.price, supPct: (qty / supply) * 100, boughtUsd, soldUsd,
         pnlUsd: qty * (token.price - avgIn), holdMin };
     });
-  }, [token.id, Math.round(token.price * 1e7)]);
+  }, [token.id, Math.round(token.price * 1e7), liveHolders]);
   const holdTxt = (m) => (m < 60 ? `${m}m` : m < 1440 ? `${(m / 60).toFixed(1)}h` : `${(m / 1440).toFixed(1)}d`);
   return (
     <div data-lth={isMobile ? "1" : undefined} style={{ marginTop: 10, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden" }}>
