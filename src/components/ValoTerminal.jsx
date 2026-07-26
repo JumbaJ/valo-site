@@ -3013,21 +3013,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   const [fundAmt, setFundAmt] = useState("");
   const [holdsOpen, setHoldsOpen] = useState(false); // 💼 all-holdings dropdown
   const [holdsTab, setHoldsTab] = useState("open");  // open ⇄ closed positions
-  // 🔒 closed positions: every sell, paired with its buy-in date and PnL
-  const closedRows = useMemo(() => {
-    const src2 = cloudProfile ? (cloudProfile.activity || []) : txAll;
-    const sells = src2.filter((x) => !x.isBuy);
-    return sells.map((s, i) => {
-      const key = s.key || (s.t && s.t.id);
-      const priorBuy = src2.find((b) => b.isBuy && (b.key || (b.t && b.t.id)) === key && b.ts <= s.ts);
-      const outUsd = s.valUsd != null ? s.valUsd : s.sol * SOL_USD;
-      const pnlUsd = s.pnlUsd != null ? s.pnlUsd
-        : +((outUsd) * ((hashStr(name + "cp" + i) % 61) - 30) / 100).toFixed(2); // sim profiles: seeded
-      return { t: s.t, soldTs: s.ts, boughtTs: priorBuy ? priorBuy.ts : s.ts,
-        inUsd: Math.max(0, outUsd - pnlUsd), outUsd, pnlUsd };
-    });
-  }, [cloudProfile, txAll, name]);
-  const closedTotal = closedRows.reduce((s2, r) => s2 + r.pnlUsd, 0);
+
   const friends = friendStatus === "friends";
   // ---- current holdings + full tx history (seeded; API: on-chain wallet scan) ----
   const [txFrom, setTxFrom] = useState("");
@@ -3054,6 +3040,21 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     }).filter(Boolean).sort((a, b) => b.ts - a.ts);
     return { holds, txAll };
   }, [name, tokens, cloudProfile]); // cloudProfile lands async — without it here, real holdings load and get ignored
+  // 🔒 closed positions: every sell, paired with its buy-in date and PnL
+  const closedRows = useMemo(() => {
+    const src2 = cloudProfile ? (cloudProfile.activity || []) : txAll;
+    const sells = src2.filter((x) => !x.isBuy);
+    return sells.map((s, i) => {
+      const key = s.key || (s.t && s.t.id);
+      const priorBuy = src2.find((b) => b.isBuy && (b.key || (b.t && b.t.id)) === key && b.ts <= s.ts);
+      const outUsd = s.valUsd != null ? s.valUsd : s.sol * SOL_USD;
+      const pnlUsd = s.pnlUsd != null ? s.pnlUsd
+        : +((outUsd) * ((hashStr(name + "cp" + i) % 61) - 30) / 100).toFixed(2); // sim profiles: seeded
+      return { t: s.t, soldTs: s.ts, boughtTs: priorBuy ? priorBuy.ts : s.ts,
+        inUsd: Math.max(0, outUsd - pnlUsd), outUsd, pnlUsd };
+    });
+  }, [cloudProfile, txAll, name]);
+  const closedTotal = closedRows.reduce((s2, r) => s2 + r.pnlUsd, 0);
   const txShown = txShowAll ? txAll : txAll.filter((x) => {
     const a = txFrom ? new Date(txFrom + "T00:00:00").getTime() : -Infinity;
     const b = txTo ? new Date(txTo + "T23:59:59").getTime() : Infinity;
