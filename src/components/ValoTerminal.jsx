@@ -10141,7 +10141,7 @@ export default function App() {
       {/* rail tabs — one row so they can never overlap each other, parked
           clear of the FULLSCREEN button that owns the corner */}
       {!isMobile && (
-        <div style={{ position: "fixed", top: 26, right: 150, zIndex: 55, display: "flex", alignItems: "flex-start", gap: 8 }}>
+        <div style={{ position: "fixed", top: 0, right: 138, zIndex: 56, display: "flex", alignItems: "flex-start", gap: 8 }}>
       {sb && !isMobile && (
         <button onClick={() => setCloudOpen(true)}
           title={cloudUser ? `Signed in as ${cloudUser.email} — portfolio syncs to the cloud` : "Sign in — your paper portfolio, watchlist and bots follow you across devices"}
@@ -10210,8 +10210,9 @@ export default function App() {
       {!isMobile && (
         <button onClick={() => { try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); } catch (e) {} }}
           title={isFs ? "Press Esc to exit fullscreen" : "Fullscreen — same proportions, stretched to fill your screen. Esc exits."}
-          style={{ position: "fixed", top: 6, right: 12, zIndex: 55, display: "flex", alignItems: "center", gap: 6,
-            background: "rgba(15,19,28,0.72)", border: `1px solid ${T.border}`, borderRadius: 8, padding: "4px 9px", cursor: "pointer" }}>
+          style={{ position: "fixed", top: 0, right: 12, zIndex: 56, display: "flex", alignItems: "center", gap: 6,
+            background: "rgba(15,19,28,0.72)", border: `1px solid ${T.border}`, borderTop: "none",
+            borderRadius: "0 0 9px 9px", padding: "4px 9px", cursor: "pointer" }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={isFs ? VALO_PURPLE : "#8a94a8"} strokeWidth="2.4" strokeLinecap="round">
             <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
           </svg>
