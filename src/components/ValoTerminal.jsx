@@ -6841,6 +6841,113 @@ export default function App() {
   // 📋 WATCHLIST — loose bars + user-named subsections, drag-anything
   const [watchLoose, setWatchLoose] = useState([]);
   const [watchSections, setWatchSections] = useState([]);   // {id, name, ids[]}
+  // ☁ PHASE 3 — Supabase cloud accounts. The client is created in main.jsx
+  // (window.__VALO_SB_CLIENT__); absent = cloud features simply off (artifact
+  // preview, local dev without env vars). All tables are RLS-locked per user.
+  const sb = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
+  const [cloudUser, setCloudUser] = useState(null);     // supabase auth user
+  const [cloudOpen, setCloudOpen] = useState(false);    // sign-in modal
+  const [cloudEmail, setCloudEmail] = useState("");
+  const [cloudMsg, setCloudMsg] = useState("");
+  const [cloudSynced, setCloudSynced] = useState(false);
+  const cloudLoaded = useRef(false);                    // guard: never sync UP before load DOWN
+  useEffect(() => {
+    if (!sb) return;
+    sb.auth.getSession().then(({ data }) => setCloudUser(data?.session?.user || null));
+    const { data: sub } = sb.auth.onAuthStateChange((_e, session) => setCloudUser(session?.user || null));
+    return () => { try { sub.subscription.unsubscribe(); } catch (e) {} };
+  }, []);
+  // load-on-login: pull the whole account into existing state
+  useEffect(() => {
+    if (!sb || !cloudUser) { cloudLoaded.current = false; setCloudSynced(false); return; }
+    let stop = false;
+    (async () => {
+      try {
+        const uid = cloudUser.id;
+        const [w, pos, wl, act, bots] = await Promise.all([
+          sb.from("wallets").select("*").eq("user_id", uid).maybeSingle(),
+          sb.from("positions").select("*").eq("user_id", uid),
+          sb.from("watchlists").select("*").eq("user_id", uid).maybeSingle(),
+          sb.from("activity").select("*").eq("user_id", uid).order("ts", { ascending: false }).limit(60),
+          sb.from("bot_runs").select("*").eq("user_id", uid).eq("status", "live"),
+        ]);
+        if (stop) return;
+        if (w.data) { setSolBalance(+w.data.sol_balance || 0); setValoWallet(+w.data.valo_balance || 0); }
+        if (pos.data) {
+          const P = {};
+          for (const r of pos.data) if (+r.qty > 0) P[r.token_key] = { amt: +r.qty, entry: +r.entry_price, pay: r.pay_unit || "SOL" };
+          setPositions(P);
+        }
+        if (wl.data) {
+          if (Array.isArray(wl.data.sections)) setWatchSections(wl.data.sections);
+          if (Array.isArray(wl.data.loose)) setWatchLoose(wl.data.loose);
+        }
+        if (act.data) setMyActivity(act.data.map((r) => ({
+          id: "c" + r.id, t: new Date(r.ts).getTime(), sym: r.sym || "?", hue: symbolHue(r.sym || "?"), img: null,
+          side: r.side, amt: +r.amt, unit: r.unit, price: +r.price,
+          tokQty: r.tok_qty != null ? +r.tok_qty : null, valUsd: r.val_usd != null ? +r.val_usd : null,
+          remQty: r.rem_qty != null ? +r.rem_qty : null,
+          pnlMoney: r.pnl_money != null ? +r.pnl_money : null, pnlPct: null, mult: null,
+          tx: "cloud" + String(r.id).slice(-4),
+        })));
+        if (bots.data && bots.data.length) setBotRuns((B) => B.length ? B : bots.data.map((r) => ({
+          id: "cb" + r.id, tokenId: isNaN(+r.token_key) ? r.token_key : +r.token_key, sym: r.sym,
+          side: r.side || "buy", level: +r.level || 0, remaining: +r.remaining || 0,
+          entry: +r.entry || 0, pay: r.pay || "SOL", status: "live", exits: [],
+        })));
+        cloudLoaded.current = true; setCloudSynced(true);
+      } catch (e) { console.warn("[VALO ☁] load failed", e); }
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudUser && cloudUser.id]);
+  // debounced sync-up: any change to the account state writes back (2s quiet)
+  useEffect(() => {
+    if (!sb || !cloudUser || !cloudLoaded.current) return;
+    const uid = cloudUser.id;
+    const id = setTimeout(async () => {
+      try {
+        setCloudSynced(false);
+        await sb.from("wallets").upsert({ user_id: uid, sol_balance: solBalance, valo_balance: valoWallet, updated_at: new Date().toISOString() });
+        await sb.from("watchlists").upsert({ user_id: uid, sections: watchSections, loose: watchLoose, updated_at: new Date().toISOString() });
+        await sb.from("positions").delete().eq("user_id", uid);
+        const posRows = Object.entries(positions).filter(([, p]) => p && p.amt > 0).map(([k, p]) => ({
+          user_id: uid, token_key: String(k), sym: (tokensRef.current.find((t) => String(t.id) === String(k)) || {}).sym || null,
+          qty: p.amt, entry_price: p.entry || 0, pay_unit: p.pay || "SOL", updated_at: new Date().toISOString(),
+        }));
+        if (posRows.length) await sb.from("positions").insert(posRows);
+        await sb.from("bot_runs").delete().eq("user_id", uid);
+        const botRows = botRuns.filter((r) => r.status === "live").map((r) => ({
+          user_id: uid, token_key: String(r.tokenId), sym: r.sym || null, side: r.side || "buy",
+          level: r.level || 0, remaining: r.remaining || 0, entry: r.entry || 0, pay: r.pay || "SOL", status: "live",
+        }));
+        if (botRows.length) await sb.from("bot_runs").insert(botRows);
+        setCloudSynced(true);
+      } catch (e) { console.warn("[VALO ☁] sync failed", e); }
+    }, 2000);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solBalance, valoWallet, positions, watchSections, watchLoose, botRuns, cloudUser && cloudUser.id]);
+  // activity rows: INSERT-only, one per new fill
+  const cloudActQueue = useRef([]);
+  const pushCloudActivity = (a) => { if (sb && cloudUser) cloudActQueue.current.push(a); };
+  useEffect(() => {
+    if (!sb || !cloudUser) return;
+    const iv = setInterval(async () => {
+      if (!cloudActQueue.current.length) return;
+      const batch = cloudActQueue.current.splice(0);
+      try {
+        await sb.from("activity").insert(batch.map((a) => ({
+          user_id: cloudUser.id, token_key: String(a.tokenKey || a.sym), sym: a.sym, side: a.side,
+          amt: a.amt, unit: a.unit, price: a.price, tok_qty: a.tokQty ?? null, val_usd: a.valUsd ?? null,
+          pnl_money: a.pnlMoney ?? null, rem_qty: a.remQty ?? null,
+        })));
+      } catch (e) { console.warn("[VALO ☁] activity push failed", e); }
+    }, 2500);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudUser && cloudUser.id]);
+
   const [watchExp, setWatchExp] = useState(null);           // expanded token id
   const [watchTrash, setWatchTrash] = useState(null);       // {id, sec, x, y}
   const [secDelete, setSecDelete] = useState(null);         // {id, name, count, x, y} — delete a whole subsection
@@ -7532,6 +7639,9 @@ export default function App() {
     const posBefore = positions[t.id];
     const heldQty = posBefore && posBefore.amt > 0 ? posTokenQty(t, posBefore) : 0;
     const txRemQty = o.side === "sell" ? Math.max(0, heldQty - txTokQty) : heldQty + txTokQty;
+    pushCloudActivity({ tokenKey: t.pool || t.id, sym: t.sym, side: o.side, amt: o.amt, unit,
+      price: t.price, tokQty: txTokQty, valUsd: txValUsd, remQty: txRemQty,
+      pnlMoney: o.side === "sell" ? sellPnlMoney : null });
     setMyActivity((A) => [{
       id: Math.random().toString(36).slice(2), t: Date.now(),
       sym: t.sym, hue: t.hue, img: t.img, side: o.side, amt: o.amt, unit,
@@ -9396,6 +9506,62 @@ export default function App() {
             ≈ ${((parseFloat(amount) || 0) * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })} buy-in
           </span>
         </button>
+      )}
+      {sb && !isMobile && (
+        <button onClick={() => setCloudOpen(true)}
+          title={cloudUser ? `Signed in as ${cloudUser.email} — portfolio syncs to the cloud` : "Sign in — your paper portfolio, watchlist and bots follow you across devices"}
+          style={{ position: "fixed", top: 6, right: 262, zIndex: 55, display: "flex", alignItems: "center", gap: 6,
+            background: cloudUser ? "rgba(125,92,240,0.16)" : "rgba(15,19,28,0.72)", border: `1px solid ${cloudUser ? VALO_PURPLE : T.border}`, borderRadius: 8, padding: "4px 9px", cursor: "pointer",
+            boxShadow: cloudUser ? `0 0 10px ${VALO_PURPLE}55` : "none" }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: cloudUser ? (cloudSynced ? T.green : T.amber) : "#39414f", boxShadow: cloudUser ? `0 0 6px ${cloudSynced ? T.green : T.amber}` : "none" }} />
+          <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: cloudUser ? VALO_PURPLE : "rgba(138,148,168,0.7)", fontWeight: 800 }}>{cloudUser ? "☁ SYNCED" : "☁ SIGN IN"}</span>
+        </button>
+      )}
+      {sb && isMobile && (
+        <button onClick={() => setCloudOpen(true)}
+          style={{ position: "fixed", top: "max(8px, env(safe-area-inset-top))", right: 52, zIndex: 55,
+            background: cloudUser ? "rgba(125,92,240,0.16)" : "rgba(15,19,28,0.72)", border: `1px solid ${cloudUser ? VALO_PURPLE : T.border}`, borderRadius: 8, padding: "4px 7px", cursor: "pointer" }}>
+          <span style={{ fontFamily: T.mono, fontSize: 9, color: cloudUser ? VALO_PURPLE : T.dim, fontWeight: 900 }}>☁{cloudUser ? "✓" : ""}</span>
+        </button>
+      )}
+      {cloudOpen && (
+        <>
+          <div onClick={() => setCloudOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 96, background: "rgba(4,6,10,0.7)", backdropFilter: "blur(3px)" }} />
+          <div style={{ position: "fixed", left: "50%", top: "22%", transform: "translateX(-50%)", zIndex: 97, width: "min(92vw, 360px)",
+            background: T.panel, border: `1px solid ${VALO_PURPLE}66`, borderRadius: 14, padding: 16, boxShadow: "0 24px 70px rgba(0,0,0,0.7)" }}>
+            <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, letterSpacing: 1.5, color: VALO_PURPLE, marginBottom: 4 }}>☁ VALO ACCOUNT</div>
+            {cloudUser ? (
+              <>
+                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.text, marginBottom: 4 }}>Signed in as <b>{cloudUser.email}</b></div>
+                <div style={{ fontFamily: T.mono, fontSize: 8.5, color: cloudSynced ? T.green : T.amber, marginBottom: 12 }}>{cloudSynced ? "● portfolio synced to the cloud" : "● syncing…"}</div>
+                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, lineHeight: 1.6, marginBottom: 12 }}>Wallet, positions, activity, watchlist and live bots follow this account on any device.</div>
+                <button onClick={async () => { try { await sb.auth.signOut(); } catch (e) {} setCloudOpen(false); }}
+                  style={{ width: "100%", border: `1px solid ${T.red}66`, background: "rgba(234,57,67,0.1)", color: T.red, borderRadius: 9, padding: "9px", fontFamily: T.mono, fontSize: 10, fontWeight: 900, cursor: "pointer" }}>⎋ SIGN OUT</button>
+              </>
+            ) : (
+              <>
+                <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, lineHeight: 1.6, marginBottom: 10 }}>
+                  Enter your email — you'll get a one-tap magic link. Your paper wallet, positions, watchlist and bots then sync across devices.
+                </div>
+                <input value={cloudEmail} onChange={(e) => setCloudEmail(e.target.value)} placeholder="you@email.com" type="email" autoFocus
+                  onKeyDown={(e) => { if (e.key === "Enter") document.getElementById("valo-cloud-go")?.click(); }}
+                  style={{ width: "100%", boxSizing: "border-box", background: "#0c0f16", border: `1px solid ${T.border2}`, borderRadius: 9, padding: "10px 12px", color: T.text, fontFamily: T.mono, fontSize: 11, outline: "none", marginBottom: 8 }} />
+                <button id="valo-cloud-go"
+                  onClick={async () => {
+                    const em = cloudEmail.trim();
+                    if (!/^\S+@\S+\.\S+$/.test(em)) { setCloudMsg("That doesn't look like an email."); return; }
+                    setCloudMsg("Sending…");
+                    try {
+                      const { error } = await sb.auth.signInWithOtp({ email: em, options: { emailRedirectTo: window.location.origin } });
+                      setCloudMsg(error ? `Couldn't send: ${error.message}` : "✓ Check your inbox — tap the link and come back.");
+                    } catch (e) { setCloudMsg("Couldn't send — try again."); }
+                  }}
+                  style={{ width: "100%", border: "none", background: VALO_PURPLE, color: "#0a0713", borderRadius: 9, padding: "10px", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>SEND MAGIC LINK</button>
+                {cloudMsg && <div style={{ fontFamily: T.mono, fontSize: 8.5, color: cloudMsg.startsWith("✓") ? T.green : T.amber, marginTop: 8 }}>{cloudMsg}</div>}
+              </>
+            )}
+          </div>
+        </>
       )}
       {!isMobile && (
         <button onClick={() => setLiveData((v) => !v)}
