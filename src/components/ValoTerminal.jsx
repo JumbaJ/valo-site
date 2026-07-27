@@ -420,7 +420,7 @@ const ratingColor = (s) => (s >= 66 ? T.green : s >= 40 ? T.amber : T.red);
 // ================================================================
 // CHART
 // ================================================================
-function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null }) {
+function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null, shiftArm = false }) {
   const wrapRef = useRef(null);
   const cvsRef = useRef(null);
   const [cross, setCross] = useState(null);
@@ -803,7 +803,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   const clickModeRef = useRef(clickMode); clickModeRef.current = clickMode;
   const onChartTradeRef = useRef(onChartTrade); onChartTradeRef.current = onChartTrade;
   // bot-set mode: dragging the chart paints the buy-in line instead of panning
-  const botSetRef = useRef({}); botSetRef.current = { on: botSetMode, draft: onBotDraft, set: onBotSet, arm: onBotArm, lineDrag: onBotLineDrag };
+  const botSetRef = useRef({}); botSetRef.current = { on: botSetMode, draft: onBotDraft, set: onBotSet, arm: onBotArm, lineDrag: onBotLineDrag, shiftArm };
   const lineHitsRef = useRef([]);      // grabbable bot lines: {id, y}
   const lineDragRef = useRef(null);    // active line drag: {id}
   const touchIntentRef = useRef(null); // first-move decision: chart gesture vs page scroll
@@ -1009,7 +1009,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       return;
     }
     const bs = botSetRef.current;
-    if (bs.on && g.idxOf && cy >= g.padT && cy <= g.padT + g.chartH && cx <= g.plotW) {
+    if ((bs.on || (e.shiftKey && bs.shiftArm)) && g.idxOf && cy >= g.padT && cy <= g.padT + g.chartH && cx <= g.plotW) {
       // drag anywhere on the plot → the yellow buy-in line follows the finger
       dragRef.current = { botset: true, moved: false, t0: Date.now(), touch: !!e.touches };
       bs.draft && bs.draft(priceAtY(cy));
@@ -1065,7 +1065,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     if (!e.touches && !dragRef.current && !lineDragRef.current && !st) {
       const bs0 = botSetRef.current; const g0 = geom.current;
       const inPlot = g0 && cy >= g0.padT && cy <= g0.padT + g0.chartH && cx <= g0.plotW;
-      if (bs0 && bs0.draft && inPlot && (bs0.on || e.shiftKey)) {
+      if (bs0 && bs0.draft && inPlot && (bs0.on || (e.shiftKey && bs0.shiftArm))) {
         if (e.shiftKey && !shiftTraceRef.current) shiftTraceRef.current = true;
         bs0.draft(priceAtY(cy));
         setCross({ cx, cy });
@@ -9291,6 +9291,7 @@ export default function App() {
                     ]}
                     botRuns={botRuns.filter((r) => r.status === "live" && String(r.tokenId) === String(selected.id))}
                     botSetMode={!isMobile && ticketTab === "auto" && botDragSet}
+                    shiftArm={!isMobile && ticketTab === "auto"}
                     onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
                     onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop(at); }}
                     onBotArm={(lvl) => armAtLevel(lvl)}
@@ -11077,7 +11078,7 @@ export default function App() {
               ...(botDraftLevel && String(botDraftLevel.tokenId) === String(selected.id) ? [{ level: botDraftLevel.level, side: botDraftLevel.side || "buy", draft: true, vt: !!vtLines }] : []),
             ]}
             botRuns={botRuns.filter((r) => r.status === "live" && String(r.tokenId) === String(selected.id))}
-            botSetMode={botDragSet} onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq} eyesToken={selected}
+            botSetMode={botDragSet} shiftArm={false} onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq} eyesToken={selected}
             onLineSelect={(id) => setSelLineId(id)}
             onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
             onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop(at); }} />
