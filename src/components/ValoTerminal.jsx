@@ -8147,7 +8147,13 @@ export default function App() {
         if (!r.ok) return;
         const j = await r.json();
         if (stale || !Array.isArray(j) || j.length < 10) return;
-        const mapped = j.slice(-260).map((c) => ({ o: +c.o, h: +c.h, l: +c.l, c: +c.c }));
+        let mapped = j.slice(-260).map((c) => ({ o: +c.o, h: +c.h, l: +c.l, c: +c.c }))
+          .filter((c) => [c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v) && v > 0));
+        if (mapped.length < 10) return;
+        // drop wild prints: anything ±50× off the median close distorts the scale
+        const med = [...mapped].map((c) => c.c).sort((a, b) => a - b)[Math.floor(mapped.length / 2)];
+        mapped = mapped.filter((c) => c.h <= med * 50 && c.l >= med / 50);
+        if (mapped.length < 10) return;
         setTokens((Ts) => Ts.map((x) => (x.id === sel ? { ...x, candles: mapped, price: mapped[mapped.length - 1].c } : x)));
       } catch (e) { /* keep what's drawn */ }
     };
@@ -8346,8 +8352,17 @@ export default function App() {
           const prev = t.price;
           const target = lv.price;
           const c = prev + (target - prev) * 0.5;
-          const cd = { o: prev, h: Math.max(prev, c) * 1.0004, l: Math.min(prev, c) * 0.9996, c };
-          const candlesL = [...t.candles.slice(1), cd];
+          let candlesL;
+          if (t.pool && t.candles && t.candles.length) {
+            // real history: only the newest candle moves — its close tracks the
+            // live price and its wick stretches to cover it
+            const last = t.candles[t.candles.length - 1];
+            candlesL = [...t.candles.slice(0, -1),
+              { o: last.o, h: Math.max(last.h, c), l: Math.min(last.l, c), c }];
+          } else {
+            const cd = { o: prev, h: Math.max(prev, c) * 1.0004, l: Math.min(prev, c) * 0.9996, c };
+            candlesL = [...t.candles.slice(1), cd];
+          }
           const driftL = (c - prev) / (prev || 1);
           return { ...t, candles: candlesL, price: c, sym: lv.sym, name: lv.name,
             mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
