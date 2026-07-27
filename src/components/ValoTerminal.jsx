@@ -4371,7 +4371,7 @@ function pnlSeries(range, seed, unreal, realized) {
 function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realizedPnl, unrealizedPnl, extraEquity = 0, walletConnected = true, onConnectWallet,
   tab, setTab, range, setRange, mode, setMode, seed, onDeposit, onWithdraw, onSwap,
   hideBalance, setHideBalance, heldSlot, maxDeposit = 0, maxWithdraw = 0, activity = [], onOpenToken,
-  username, setUsername, isNameTaken,
+  username, setUsername, isNameTaken, checkHandle,
   nameChangedAt = 0, setNameChangedAt,
   myCallouts = {}, onOpenMyCallouts,
   followersCount = 0, followingCount = 0, onOpenFollowList,
@@ -4423,6 +4423,24 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
     const d = Math.floor(ms / 86400e3), h = Math.ceil((ms % 86400e3) / 3600e3);
     return d > 0 ? `${d}d ${h}h` : `${h}h`;
   };
+  // 🪪 live handle availability — checks the real account directory as you type
+  const [nameCheck, setNameCheck] = useState(null); // null | "checking" | "free" | "taken"
+  useEffect(() => {
+    if (!editingName) { setNameCheck(null); return; }
+    const v = (nameDraft || "").trim().replace(/^@+/, "");
+    if (v.length < 3 || !/^[a-zA-Z0-9_]+$/.test(v)) { setNameCheck(null); return; }
+    if (v.toLowerCase() === (username || "").toLowerCase()) { setNameCheck(null); return; }
+    if (isNameTaken && isNameTaken(v)) { setNameCheck("taken"); return; }
+    if (!checkHandle) { setNameCheck("free"); return; }
+    setNameCheck("checking");
+    let stop = false;
+    const id = setTimeout(async () => {
+      const taken = await checkHandle(v);
+      if (!stop) setNameCheck(taken ? "taken" : "free");
+    }, 400);
+    return () => { stop = true; clearTimeout(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nameDraft, editingName]);
   const tryEditName = () => {
     if (nameLocked) { setNameErr(`Once a week only — next change in ${nameLockLeft()}`); return; }
     setNameDraft(username); setNameErr(""); setEditingName(true);
@@ -4431,7 +4449,11 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
     const v = (nameDraft || "").trim().replace(/^@+/, "");
     if (v.length < 3) { setNameErr("Too short (3+ chars)"); return; }
     if (!/^[a-zA-Z0-9_]+$/.test(v)) { setNameErr("Letters, numbers, _ only"); return; }
-    if (v.toLowerCase() !== (username || "").toLowerCase() && isNameTaken && isNameTaken(v)) { setNameErr("That username is taken"); return; }
+    if (v.toLowerCase() !== (username || "").toLowerCase()) {
+      if (isNameTaken && isNameTaken(v)) { setNameErr(`@${v} is already taken — try another`); return; }
+      if (nameCheck === "taken") { setNameErr(`@${v} is already taken — try another`); return; }
+      if (nameCheck === "checking") { setNameErr("Still checking that name — one moment"); return; }
+    }
     setUsername && setUsername(v);
     if (v !== username) setNameChangedAt && setNameChangedAt(Date.now()); // starts the weekly lock
     setEditingName(false); setNameErr("");
@@ -4493,7 +4515,10 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                 <button onClick={() => { setEditingName(false); setNameErr(""); }} style={{ ...chip(false), padding: "5px 9px", fontSize: 10 }}>✕</button>
               </div>
               {nameErr && <div style={{ fontFamily: T.mono, fontSize: 9, color: T.red, marginTop: 4 }}>⚠ {nameErr}</div>}
-              {!nameErr && <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, marginTop: 4 }}>shown when you chat · must be unique</div>}
+              {!nameErr && nameCheck === "checking" && <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, marginTop: 4 }}>⋯ checking availability…</div>}
+              {!nameErr && nameCheck === "free" && <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.green, fontWeight: 800, marginTop: 4 }}>✓ @{(nameDraft || "").trim().replace(/^@+/, "")} is available</div>}
+              {!nameErr && nameCheck === "taken" && <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.red, fontWeight: 800, marginTop: 4 }}>✕ @{(nameDraft || "").trim().replace(/^@+/, "")} is taken — try another</div>}
+              {!nameErr && !nameCheck && <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, marginTop: 4 }}>shown when you chat · must be unique</div>}
             </div>
           )}
         </div>
@@ -7341,6 +7366,14 @@ export default function App() {
     return () => { stop = true; clearTimeout(rt); if (ch) { try { sb.removeChannel(ch); } catch (e) {} } };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileUser, cloudUser && cloudUser.id]);
+  // is this handle already claimed by a real account? (case-insensitive)
+  const checkHandle = async (name) => {
+    if (!sb || !name) return false;
+    try {
+      const { data } = await sb.from("profiles").select("id, handle").ilike("handle", name).limit(2);
+      return (data || []).some((r) => !cloudUser || r.id !== cloudUser.id);
+    } catch (e) { return false; }
+  };
   const lookupProfile = async (handle) => {
     if (!sb || !handle) return null;
     try { const { data } = await sb.from("profiles").select("id, handle").ilike("handle", handle).limit(1); return (data && data[0]) || null; }
@@ -7399,7 +7432,15 @@ export default function App() {
     if (!sb || !cloudUser || !cloudLoaded.current || !username) return;
     const id = setTimeout(() => {
       sb.from("profiles").update({ handle: username }).eq("id", cloudUser.id)
-        .then(({ error }) => { if (error) console.warn("[VALO ☁] handle sync failed", error.message); });
+        .then(({ error }) => {
+          if (!error) return;
+          console.warn("[VALO ☁] handle sync failed", error.message);
+          // the database enforces uniqueness — tell the user instead of failing quietly
+          if (/duplicate|unique/i.test(error.message || "")) {
+            pushNotif({ type: "system", user: null, tokenId: null,
+              text: `@${username} was just claimed by someone else — pick another name so your profile matches your chat.` });
+          }
+        });
     }, 1500);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -10006,7 +10047,7 @@ export default function App() {
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
               hideBalance={hideBalance} setHideBalance={setHideBalance}
               activity={myActivity} onOpenToken={(sym, act) => { const tk = tokens.find((x) => x.sym === sym); if (tk) { setSel(tk.id); setClickMode(null); if (typeof setPortfolioDrawer === 'function') setPortfolioDrawer(false); if (act) { setHistMarker({ t: act.t, side: act.side, p: act.price, price: act.price, amt: act.amt, unit: act.unit, mc: mcOf(tk), pnlPct: act.pnlPct, pnlMoney: act.pnlMoney, sym: act.sym, tx: act.tx }); setHighlightTx(act.tx); } } }}
-              username={username} setUsername={(v) => { takenNames.current.add(v.toLowerCase()); setUsername(v); }} isNameTaken={(v) => takenNames.current.has(v.toLowerCase())}
+              username={username} setUsername={(v) => { takenNames.current.add(v.toLowerCase()); setUsername(v); }} isNameTaken={(v) => takenNames.current.has(v.toLowerCase())} checkHandle={checkHandle}
               myCallouts={myMcCallouts} onOpenMyCallouts={() => setMyCalloutsOpen(true)}
               followersCount={followersList.length} followingCount={followingList.length} onOpenFollowList={(k) => setFollowListOpen(k)}
               nameChangedAt={nameChangedAt} setNameChangedAt={setNameChangedAt}
@@ -11276,7 +11317,7 @@ export default function App() {
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
               hideBalance={hideBalance} setHideBalance={setHideBalance}
               activity={myActivity} onOpenToken={(sym, act) => { const tk = tokens.find((x) => x.sym === sym); if (tk) { setSel(tk.id); setClickMode(null); if (typeof setPortfolioDrawer === 'function') setPortfolioDrawer(false); if (act) { setHistMarker({ t: act.t, side: act.side, p: act.price, price: act.price, amt: act.amt, unit: act.unit, mc: mcOf(tk), pnlPct: act.pnlPct, pnlMoney: act.pnlMoney, sym: act.sym, tx: act.tx }); setHighlightTx(act.tx); } } }}
-              username={username} setUsername={(v) => { takenNames.current.add(v.toLowerCase()); setUsername(v); }} isNameTaken={(v) => takenNames.current.has(v.toLowerCase())}
+              username={username} setUsername={(v) => { takenNames.current.add(v.toLowerCase()); setUsername(v); }} isNameTaken={(v) => takenNames.current.has(v.toLowerCase())} checkHandle={checkHandle}
               myCallouts={myMcCallouts} onOpenMyCallouts={() => setMyCalloutsOpen(true)}
               followersCount={followersList.length} followingCount={followingList.length} onOpenFollowList={(k) => setFollowListOpen(k)}
               nameChangedAt={nameChangedAt} setNameChangedAt={setNameChangedAt}
