@@ -501,7 +501,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     if (hi - lo < minRange) { hi = mid + minRange / 2; lo = mid - minRange / 2; }
     const p8 = (hi - lo) * 0.1 || hi * 0.01; lo -= p8; hi += p8;
     // vertical free-drag: shift the visible price window up/down without clamping
-    const vShift = 0; // price window auto-fits — no vertical panning (DexScreener-style)
+    // horizontal panning never moves this; touch may nudge it within ±0.35
+    const vShift = Math.max(-0.35, Math.min(0.35, view.priceOff || 0)) * (hi - lo);
     lo -= vShift; hi -= vShift;
     const y = (p) => padT + (1 - (p - lo) / (hi - lo)) * chartH;
     const tfMs = tfMin * 60000;
@@ -1148,16 +1149,21 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const dx = cx - d.sx;
       const dyTot = cy - d.sy;
       const thr = d.touch ? 12 : 5;
-      if (Math.abs(dx) > thr) { d.moved = true; clearTimeout(holdRef.current); }
-      else if (Math.abs(dyTot) > thr) clearTimeout(holdRef.current); // vertical = not a pan
+      if (Math.abs(dx) > thr || (d.touch && Math.abs(dyTot) > thr)) { d.moved = true; clearTimeout(holdRef.current); }
+      else if (Math.abs(dyTot) > thr) clearTimeout(holdRef.current);
       if (d.moved) {
         const g = geom.current;
         // lock the gesture to one axis: sideways pans time, up/down pans price.
         // (mixing them made a horizontal drag drag the price scale with it)
+        // ⇄ time on both platforms; ↕ a small amount of give on touch only
+        const WIGGLE = 0.35;                                   // ~a third of the visible range
+        const vGive = d.touch
+          ? Math.max(-WIGGLE, Math.min(WIGGLE, (d.startPriceOff || 0) - (dyTot / (g.chartH || 300))))
+          : 0;
         setView((v) => ({
           ...v,
-          offset: d.startOffset + Math.round(dx / (g.step || 6)), // ⇄ time only
-          priceOff: 0,                                            // ↕ price always auto-fits
+          offset: d.startOffset + Math.round(dx / (g.step || 6)),
+          priceOff: vGive,
         }));
         return;
       }
@@ -1255,7 +1261,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
               <ViewerPills token={eyesToken} small />
             </div>
           )}
-          <div style={{ position: "absolute", top: 52, left: 10, zIndex: 3, display: "flex", gap: 6, alignItems: "center" }}>
+          <div style={{ position: "absolute", top: 6, right: 8, zIndex: 4, display: "flex", gap: 6, alignItems: "center" }}>
             <button onClick={() => setView({ count: 18, offset: 0, priceOff: 0, follow: true })}
               style={{ height: 21, padding: "0 9px", borderRadius: 6, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 9, fontWeight: 700, fontFamily: T.mono }}>◉ LIVE</button>
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
