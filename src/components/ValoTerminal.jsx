@@ -3425,7 +3425,8 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
 function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], onOpenToken, onOpenUser, onAccept, onDecline, onCloudReq, notifSetting, setNotifSetting }) {
   const [tab, setTab] = useState("all"); // all | callout | follower | friend
   const shown = notifs.filter((n) => tab === "all" || n.type === tab || (tab === "friend" && n.type === "friendreq"));
-  const icon = (t) => (t === "callout" ? "📣" : t === "follower" ? "👥" : "🤝");
+  const icon = (t) => (t === "callout" ? "📣" : t === "follower" ? "👥" : t === "tier" ? "🏆"
+    : t === "rank" ? "🥇" : t === "system" ? "⚙" : "🤝");
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 62, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, maxHeight: "84vh", display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, overflow: "hidden" }}>
@@ -6798,17 +6799,23 @@ export default function App() {
   const [tierPop, setTierPop] = useState(null);        // { fx } — new-tier celebration
   const lastTierRef = useRef({});
   useEffect(() => {
-    let best = null;
+    let best = null, bestSym = null, bestId = null, bestMult = 1;
     for (const [id, c] of Object.entries(myMcCallouts)) {
       const tr = calloutTier(c.peak || 1).tier;
       const prev = lastTierRef.current[id];
-      if (prev && tr.label !== prev && (c.peak || 1) > 1) best = tr;
+      if (prev && tr.label !== prev && (c.peak || 1) > 1) {
+        best = tr; bestMult = c.peak || 1; bestId = isNaN(+id) ? null : +id;
+        const tk = tokensRef.current.find((t) => String(t.id) === String(id));
+        bestSym = tk ? tk.sym : null;
+      }
       lastTierRef.current[id] = tr.label;
     }
     if (best) {
       const fx = Math.min(5, Math.max(1, best.fx || 1));
       setTierPop({ fx, k: Date.now() });
       if (navigator.vibrate) navigator.vibrate(fx > 3 ? [14, 40, 22] : 14);
+      if (bestSym) pushNotif({ type: "tier", user: null, tokenId: bestId,
+        text: `🏆 your $${bestSym} call reached ×${bestMult.toFixed(1)} — ${best.label} tier` });
       const id = setTimeout(() => setTierPop(null), 950);
       return () => clearTimeout(id);
     }
@@ -7372,6 +7379,41 @@ export default function App() {
     return () => { stop = true; clearTimeout(rt); if (ch) { try { sb.removeChannel(ch); } catch (e) {} } };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileUser, cloudUser && cloudUser.id]);
+  // 🥇 RANK WATCH — your standing on the 1D real board, checked each minute.
+  // Someone overtaking you, or you breaking into the top tiers, lands in the feed.
+  const rankRef = useRef(null);
+  useEffect(() => {
+    if (!sb || !cloudUser) { rankRef.current = null; return; }
+    let stop = false;
+    const check = async () => {
+      try {
+        const since = new Date(Date.now() - 86400e3).toISOString();
+        const { data } = await sb.from("callouts").select("user_id, handle, sym, peak_mult")
+          .gte("ts", since).order("peak_mult", { ascending: false }).limit(250);
+        if (stop || !data || !data.length) return;
+        const idx = data.findIndex((r) => r.user_id === cloudUser.id);
+        if (idx < 0) { rankRef.current = null; return; }
+        const rank = idx + 1;
+        const prev = rankRef.current;
+        rankRef.current = rank;
+        if (prev == null) return;                       // first read = baseline only
+        if (rank > prev) {
+          const passer = data[Math.max(0, idx - 1)];
+          pushNotif({ type: "rank", user: passer && passer.handle !== (cloudUser.handle || "") ? passer.handle : null, tokenId: null,
+            text: passer ? `@${passer.handle} passed you on the 1D board — you're #${rank}` : `you slipped to #${rank} on the 1D board` });
+        } else if (rank < prev) {
+          const milestone = (n) => (prev > n && rank <= n);
+          if (milestone(3)) pushNotif({ type: "rank", user: null, tokenId: null, text: `🥇 you broke into the TOP 3 — #${rank} on the 1D board` });
+          else if (milestone(10)) pushNotif({ type: "rank", user: null, tokenId: null, text: `🔥 top 10 — you're #${rank} on the 1D board` });
+          else if (milestone(100)) pushNotif({ type: "rank", user: null, tokenId: null, text: `📈 top 100 — you're #${rank}, earning an epoch bonus` });
+        }
+      } catch (e) {}
+    };
+    check();
+    const iv = setInterval(check, 60000);
+    return () => { stop = true; clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudUser && cloudUser.id]);
   // 👥 REAL social graph — your followers, following and friends come from the
   // database and refresh live as people follow you or accept requests
   const loadGraph = async () => {
