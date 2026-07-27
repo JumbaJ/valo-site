@@ -810,7 +810,18 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   const pendGrabRef = useRef(null);    // touch press-and-hold before a line grab engages
   const traceRef = useRef(false);      // touch hold-to-trace: crosshair rides the finger, no panning
   const pendTraceRef = useRef(null);
-  const stickyRef = useRef(null);      // instant-edit: the line rides the cursor until you click/release
+  const stickyRef = useRef(null);
+  const shiftTraceRef = useRef(false); // SHIFT-held preview line is showing
+  useEffect(() => {
+    const clear = (e) => {
+      if (e.key !== "Shift" || !shiftTraceRef.current) return;
+      shiftTraceRef.current = false;
+      const bs0 = botSetRef.current;
+      if (bs0 && bs0.draft) bs0.draft(null);   // preview disappears on release
+    };
+    window.addEventListener("keyup", clear);
+    return () => window.removeEventListener("keyup", clear);
+  }, []);      // instant-edit: the line rides the cursor until you click/release
   useEffect(() => {
     if (!editLineReq || editLineReq.id == null) return;
     // remember where the line IS — it stays put and moves relative to your hand,
@@ -1049,6 +1060,19 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   const onMove = (e) => {
     const { cx, cy } = ptOf(e);
     const st = stickyRef.current;
+    // ✋ hover-trace: with drag-set armed (or SHIFT held) the yellow buy-in bar
+    // simply follows the cursor — no button held down
+    if (!e.touches && !dragRef.current && !lineDragRef.current && !st) {
+      const bs0 = botSetRef.current; const g0 = geom.current;
+      const inPlot = g0 && cy >= g0.padT && cy <= g0.padT + g0.chartH && cx <= g0.plotW;
+      if (bs0 && bs0.draft && inPlot && (bs0.on || e.shiftKey)) {
+        if (e.shiftKey && !shiftTraceRef.current) shiftTraceRef.current = true;
+        bs0.draft(priceAtY(cy));
+        setCross({ cx, cy });
+        return;
+      }
+      if (shiftTraceRef.current && !e.shiftKey) { shiftTraceRef.current = false; if (bs0 && bs0.draft) bs0.draft(null); }
+    }
     if (st && !e.touches) {
       botSetRef.current.lineDrag && botSetRef.current.lineDrag(st.id, stickyPriceAt(cy), false);
       return;
@@ -8117,7 +8141,7 @@ export default function App() {
     const t0 = tokensRef.current ? tokensRef.current.find((x) => x.id === sel) : null;
     const pool = t0 && t0.pool;
     if (!pool) return;
-    (async () => {
+    const pull = async () => {
       try {
         const r = await fetch(`/api/candles?pool=${encodeURIComponent(pool)}&tf=${tf}`);
         if (!r.ok) return;
@@ -8125,9 +8149,15 @@ export default function App() {
         if (stale || !Array.isArray(j) || j.length < 10) return;
         const mapped = j.slice(-260).map((c) => ({ o: +c.o, h: +c.h, l: +c.l, c: +c.c }));
         setTokens((Ts) => Ts.map((x) => (x.id === sel ? { ...x, candles: mapped, price: mapped[mapped.length - 1].c } : x)));
-      } catch (e) { /* keep synthetic candles */ }
-    })();
-    return () => { stale = true; };
+      } catch (e) { /* keep what's drawn */ }
+    };
+    pull();
+    // keep pulling: short timeframes refresh fast, long ones slowly
+    const every = tf <= 1 ? 15000 : tf <= 15 ? 30000 : 60000;
+    const iv = setInterval(pull, every);
+    const onVis = () => { if (!document.hidden) pull(); }; // returning to the tab = instant catch-up
+    document.addEventListener("visibilitychange", onVis);
+    return () => { stale = true; clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
   }, [liveData, sel, tf]);
   const [isFs, setIsFs] = useState(false);                          // ⛶ fullscreen state (Esc exits natively)
   useEffect(() => {
