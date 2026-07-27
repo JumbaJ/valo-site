@@ -440,7 +440,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
 
   const agg = useMemo(() => aggregate(candles, tfMin), [candles, tfMin]);
   const total = agg.length;
-  const count = Math.max(12, Math.min(view.count, 60000));
+  const count = Math.max(12, Math.min(view.count, Math.max(24, agg.length + 8)));
   const PAD_BARS = 6;                                  // how far past either end you may drift
   const maxOff = Math.max(0, total - count);           // oldest candle at the left edge
   const offset = Math.max(-PAD_BARS, Math.min(view.offset, maxOff + PAD_BARS));
@@ -493,6 +493,11 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const last = agg[total - 1];
       if (last) { lo = last.l * 0.9; hi = last.h * 1.1; vMax = 1; } else { lo = 0; hi = 1; vMax = 1; }
     }
+    // floor the range: a series that barely moves stays a flat line instead of
+    // stretching every candle across the whole plot
+    const mid = (hi + lo) / 2 || hi || 1;
+    const minRange = mid * 0.02;                     // never tighter than ±1%
+    if (hi - lo < minRange) { hi = mid + minRange / 2; lo = mid - minRange / 2; }
     const p8 = (hi - lo) * 0.1 || hi * 0.01; lo -= p8; hi += p8;
     // vertical free-drag: shift the visible price window up/down without clamping
     const vShift = (view.priceOff || 0) * (hi - lo);
@@ -9012,7 +9017,10 @@ export default function App() {
         if (trader === selected.dev.wallet) return showDevTrades ? [] : (selected.dev.trades || []);
         return traderTradesFor(selected, trader);
       });
-    const all = [...mine, ...dev, ...hist, ...followed, ...realChartTrades];
+    const liveReal = liveData && selected.pool;   // real market → no invented prints
+    const all = liveReal
+      ? [...mine, ...hist, ...realChartTrades]
+      : [...mine, ...dev, ...hist, ...followed];
     // de-dupe by tx so a followed dev doesn't double-draw
     const seen = new Set();
     return all.filter((t) => {
@@ -9020,7 +9028,7 @@ export default function App() {
       if (seen.has(t.tx)) return false;
       seen.add(t.tx); return true;
     });
-  }, [selected, tradesByToken, showDevTrades, histMarker, traderPrefs, realChartTrades]);
+  }, [selected, tradesByToken, showDevTrades, histMarker, traderPrefs, realChartTrades, liveData]);
 
   // trending button + callout widget — shared between the desktop header row
   // and the mobile chart-tools row (noBox drops the frame on mobile)
