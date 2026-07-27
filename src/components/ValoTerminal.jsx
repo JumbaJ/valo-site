@@ -10209,21 +10209,27 @@ export default function App() {
                   {...chipEditProps(() => setMobHeadPill("epoch"))}
                   style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
                     border: `1.5px solid ${T.blue}`, background: "rgba(59,130,246,0.14)",
-                    borderRadius: 9, padding: "5px 12px", lineHeight: 1.1,
+                    borderRadius: 9, padding: "5px 8px", lineHeight: 1.1,
                     userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent",
                     boxShadow: `0 0 14px ${T.blue}55`,
                     animation: cloudUser ? "none" : "claimPulse 2.6s ease-in-out infinite" }}>
-                <span style={{ fontSize: 13 }}>☁</span>
+                <span style={{ fontSize: 12 }}>☁</span>
                 <span style={{ textAlign: "left" }}>
-                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1, color: T.blue }}>
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 0.4, color: T.blue }}>
                     {cloudUser ? "SIGNED IN" : "SIGN UP"}
                   </span>
-                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 7.5, color: cloudUser ? (cloudSynced ? T.green : T.amber) : "rgba(138,168,248,0.85)", letterSpacing: 0.5 }}>
-                    {cloudUser ? (cloudSynced ? "● SYNCED · SIGN OUT" : "● SYNCING…") : "or sign in · free"}
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 6.8, color: cloudUser ? (cloudSynced ? T.green : T.amber) : "rgba(138,168,248,0.85)", letterSpacing: 0.2 }}>
+                    {cloudUser ? (cloudSynced ? "● SYNCED" : "● SYNCING…") : "free · sign in"}
                   </span>
                 </span>
               </button>
                 )}
+                {/* ⛶ fullscreen — right of the account pill */}
+                <button onClick={goFullscreen} title="Fullscreen"
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: "0 0 auto",
+                    width: 30, height: 30, marginLeft: 5, borderRadius: 8,
+                    border: `1px solid ${VALO_PURPLE}55`, background: "rgba(125,92,240,0.12)",
+                    color: VALO_PURPLE, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 0 }}>⛶</button>
               </div>
             </div>
             {/* tidy stats strip */}
@@ -10275,11 +10281,6 @@ export default function App() {
             </div>
 
             {/* NOTIFICATIONS */}
-            <button onClick={goFullscreen} title="Fullscreen"
-              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34,
-                border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.03)", borderRadius: 9, cursor: "pointer", color: T.dim }}>
-              <span style={{ fontSize: 14 }}>⛶</span>
-            </button>
             <button onClick={() => { setNotifOpen(true); markNotifsRead(); }} title="Notifications — followed callouts, followers, friend requests"
               style={{ position: "relative", display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
                 border: `1px solid ${T.border2}`, background: "rgba(125,92,240,0.06)", borderRadius: 9, padding: "6px 12px" }}>
