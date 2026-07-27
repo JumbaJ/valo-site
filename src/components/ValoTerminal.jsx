@@ -9357,24 +9357,37 @@ export default function App() {
                     </span>
                     </span>
                     {isMobile && (
-                      <span style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, whiteSpace: "nowrap" }}>
-                        MC <b style={{ color: T.text, fontWeight: 800 }}>{fmt$(mcOf(selected))}</b>
+                      <span onClick={(e) => { e.stopPropagation(); const ca = selected.liveMint || selected.ca;
+                          try { navigator.clipboard.writeText(ca); } catch (er) {}
+                          setCaCopied(selected.id); setTimeout(() => setCaCopied(null), 1400); }}
+                        title="Copy the contract address"
+                        style={{ fontFamily: T.mono, fontSize: 10, cursor: "pointer", flex: "0 0 auto",
+                          color: caCopied === selected.id ? T.green : T.faint,
+                          border: `1px solid ${caCopied === selected.id ? T.green : T.border2}`,
+                          background: caCopied === selected.id ? "rgba(22,199,132,0.14)" : "rgba(255,255,255,0.03)",
+                          borderRadius: 6, padding: "1px 5px", lineHeight: 1.5 }}>
+                        {caCopied === selected.id ? "✓" : "⧉"}
                       </span>
                     )}
                     <span style={{ fontSize: 8.5, border: `1px solid ${ratingColor(scoreToken(selected))}66`, background: `${ratingColor(scoreToken(selected))}14`, color: ratingColor(scoreToken(selected)), padding: "2px 7px", borderRadius: 5, fontFamily: T.mono, fontWeight: 800 }}>
                       {scoreToken(selected)} {rating(scoreToken(selected))}
                     </span>
                   </div>
-                  <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap",
+                  <div style={{ display: "flex", gap: 5, alignItems: "center",
+                    flexWrap: isMobile ? "nowrap" : "wrap",
+                    overflowX: isMobile ? "auto" : "visible", overflowY: "visible",
+                    scrollbarWidth: "none", WebkitOverflowScrolling: "touch",
                     paddingRight: !isMobile && myMcCallouts[selected.id]
                       ? Math.max(64, ("×" + myMcCallouts[selected.id].peak.toFixed(1)).length * 15 + 26) : 0 }}>
                     {/* socials */}
                     {/* CA — tap to copy the contract address */}
+                    {!isMobile && (
                     <button onClick={() => { const ca = selected.liveMint || selected.ca; try { navigator.clipboard.writeText(ca); } catch (e) {} setCaCopied(selected.id); setTimeout(() => setCaCopied(null), 1400); }}
                       title={`Copy contract address\n${selected.ca}`}
                       style={{ display: "flex", alignItems: "center", gap: 4, height: 26, borderRadius: 7, border: `1px solid ${caCopied === selected.id ? T.green : T.border2}`, background: caCopied === selected.id ? "rgba(22,199,132,0.15)" : "rgba(255,255,255,0.03)", color: caCopied === selected.id ? T.green : T.dim, fontFamily: T.mono, fontSize: 9.5, fontWeight: 700, padding: "0 8px", cursor: "pointer" }}>
                       {caCopied === selected.id ? "✓ copied" : <>📋 CA <span style={{ color: T.faint }}>{(selected.liveMint || selected.ca).slice(0, 4)}…{(selected.liveMint || selected.ca).slice(-4)}</span></>}
                     </button>
+                    )}
                     {/* real destinations for live tokens — the actual coin page */}
                     {tokLinks && tokLinks.links && [
                       ["💊", tokLinks.links.pumpfun, "#16c784", "Open on pump.fun"],
