@@ -7348,11 +7348,20 @@ export default function App() {
           pnlMoney: r.pnl_money != null ? +r.pnl_money : null, pnlPct: null, mult: null,
           tx: "cloud" + String(r.id).slice(-4),
         })));
-        if (bots.data && bots.data.length) setBotRuns((B) => B.length ? B : bots.data.map((r) => ({
-          id: "cb" + r.id, tokenId: isNaN(+r.token_key) ? r.token_key : +r.token_key, sym: r.sym,
-          side: r.side || "buy", level: +r.level || 0, remaining: +r.remaining || 0,
-          entry: +r.entry || 0, pay: r.pay || "SOL", status: "live", exits: [],
-        })));
+        if (bots.data && bots.data.length) setBotRuns((B) => B.length ? B : bots.data.map((r) => {
+          const tk = tokensRef.current.find((t) => String(t.pool || t.id) === String(r.token_key));
+          return {
+            id: "cb" + r.id, tokenId: tk ? tk.id : (isNaN(+r.token_key) ? r.token_key : +r.token_key),
+            pool: String(r.token_key).length > 20 ? String(r.token_key) : (tk && tk.pool) || null,
+            sym: r.sym, hue: tk ? tk.hue : symbolHue(r.sym || "?"),
+            side: r.side || "buy", level: +r.level || 0, remaining: +r.remaining || 0,
+            amt: +r.amt || +r.remaining || 0, entry: +r.entry || 0, pay: r.pay || "SOL", status: "live",
+            legs: Array.isArray(r.legs) ? r.legs : [],
+            exits: Array.isArray(r.exits) ? r.exits : [],
+            stopLossPrice: r.stop_loss != null ? +r.stop_loss : null,
+            filledTs: r.filled_ts ? new Date(r.filled_ts).getTime() : Date.now(),
+          };
+        }));
         cloudLoaded.current = true; setCloudSynced(true);
       } catch (e) { console.warn("[VALO ☁] load failed", e); }
     })();
@@ -7377,12 +7386,22 @@ export default function App() {
           };
         });
         if (posRows.length) await sb.from("positions").insert(posRows);
-        await sb.from("bot_runs").delete().eq("user_id", uid);
+        await sb.from("bot_runs").delete().eq("user_id", uid).eq("status", "live");
+        // finished runs are archived once, so their exit history survives
+        const doneRows = botRuns.filter((r) => r.status === "sold" && r.exits && r.exits.length).map((r) => ({
+          user_id: uid, token_key: String(r.pool || r.tokenId), sym: r.sym || null, side: r.side || "buy",
+          level: r.level || 0, remaining: 0, entry: r.entry || 0, pay: r.pay || "SOL", status: "sold",
+          amt: r.amt || 0, legs: r.legs || [], exits: r.exits || [],
+          stop_loss: r.stopLossPrice || null, filled_ts: r.filledTs ? new Date(r.filledTs).toISOString() : null,
+        }));
+        if (doneRows.length) await sb.from("bot_runs").upsert(doneRows, { onConflict: "user_id,token_key,filled_ts" });
         const botRows = botRuns.filter((r) => r.status === "live").map((r) => {
           const tk = tokensRef.current.find((t) => String(t.id) === String(r.tokenId));
           return {
           user_id: uid, token_key: String(r.pool || r.tokenId), sym: r.sym || null, side: r.side || "buy",
           level: r.level || 0, remaining: r.remaining || 0, entry: r.entry || 0, pay: r.pay || "SOL", status: "live",
+          amt: r.amt || 0, legs: r.legs || [], exits: r.exits || [],
+          stop_loss: r.stopLossPrice || null, filled_ts: r.filledTs ? new Date(r.filledTs).toISOString() : null,
         }; });
         if (botRows.length) await sb.from("bot_runs").insert(botRows);
         setCloudSynced(true);
