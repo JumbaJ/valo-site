@@ -3,11 +3,48 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover paints under the notch and home indicator;
+         interactive-widget keeps the layout stable when the keyboard opens -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#0a0d14" />
+    <meta name="color-scheme" content="dark" />
+    <!-- installed to the home screen, VALO runs with no browser chrome at all -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="VALO" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <title>VALO</title>
+    <style>
+      html, body, #root { margin: 0; padding: 0; background: #0a0d14; }
+      /* fill the *visible* viewport and re-fit the moment the browser bar collapses */
+      html, body { height: 100%; height: 100dvh; overscroll-behavior-y: none; }
+      #root { min-height: 100dvh; }
+      body { -webkit-text-size-adjust: 100%; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Phones: nudge the page so Safari/Chrome collapse their address bar into
+      // the slim form. The bottom toolbar (back · forward · share · bookmarks)
+      // stays exactly where it is, so leaving the site is always one tap away.
+      (function () {
+        if (!/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) return;
+        var collapse = function () { if (window.scrollY < 2) window.scrollTo(0, 1); };
+        window.addEventListener("load", function () { setTimeout(collapse, 120); setTimeout(collapse, 600); });
+        window.addEventListener("orientationchange", function () { setTimeout(collapse, 350); });
+        // keep a CSS var with the true visible height for any layout that needs it
+        var setVH = function () {
+          var h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+          document.documentElement.style.setProperty("--vvh", h + "px");
+        };
+        setVH();
+        window.addEventListener("resize", setVH);
+        if (window.visualViewport) window.visualViewport.addEventListener("resize", setVH);
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

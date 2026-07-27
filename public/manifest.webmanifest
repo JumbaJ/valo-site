@@ -1,0 +1,14 @@
+{
+  "name": "VALO Terminal",
+  "short_name": "VALO",
+  "description": "Visual trading terminal for Solana meme coins — live market data, paper trading.",
+  "start_url": "/?live=1",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0d14",
+  "theme_color": "#0a0d14",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
