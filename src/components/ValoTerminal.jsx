@@ -5453,7 +5453,6 @@ function MobileExpanded({ onClose, chartBlock, tradeStrip, ticketBlock, sym, onC
           {/* EXIT + drag-catch are fixed to the viewport so they're always reachable */}
           <div onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
             onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
-        onContextMenu={onCtx}
         onDoubleClick={(e) => {
           const bs = botSetRef.current; if (!bs.on || !bs.arm) return;
           const { cx, cy } = ptOf(e); const g = geom.current;
