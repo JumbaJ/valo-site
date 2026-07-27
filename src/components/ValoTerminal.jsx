@@ -6646,7 +6646,8 @@ export default function App() {
   const [botRuns, setBotRuns] = useState([]);                      // filled bot positions — never touch the Live P/L book
   const [botRunOpen, setBotRunOpen] = useState(null);              // run id → full stats popup
   const [ticketTab, setTicketTab] = useState("ticket");            // PC right column: ticket | auto
-  const [layoutPro, setLayoutPro] = useState(false);               // PC layout B: panels under the chart, feeds on the right
+  const layoutPro = true;   // PC is always the pro desk: panels under the chart, feeds on the right
+  const setLayoutPro = () => {}; // retired switch — kept as a no-op so nothing downstream breaks
   const [pcCrunch, setPcCrunch] = useState(0);                     // PC: chart pulled up over the stats (0..1)
   const pcPullRef = useRef(null);
   const [chartInsetL, setChartInsetL] = useState(0);               // PC: chart pulled in from the left → token strip
@@ -9971,16 +9972,7 @@ export default function App() {
               </span>
             </button>
 
-            {!isMobile && (
-            <button onClick={() => setLayoutPro((v) => !v)}
-              title={layoutPro ? "Back to the side-panel layout" : "Pro layout — trading desk under the chart, feeds on the right"}
-              style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginRight: 8,
-                border: `1px solid ${T.amber}`, background: "rgba(240,185,11,0.12)", color: T.amber,
-                borderRadius: 9, padding: "7px 13px", fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 1,
-                boxShadow: `0 0 12px ${T.amber}44` }}>
-              {layoutPro ? "◧ SIDE LAYOUT" : "⿲ PRO LAYOUT"}
-            </button>
-            )}
+
             {/* CLAIM REWARDS */}
             <button onClick={() => setClaimOpen(true)} title="Claim your rolling hourly airdrop"
               style={{
