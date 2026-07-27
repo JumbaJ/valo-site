@@ -529,7 +529,12 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     lo -= vShift; hi -= vShift;
     const y = (p) => padT + (1 - (p - lo) / (hi - lo)) * chartH;
     const tfMs = tfMin * 60000;
-    const timeAtSlot = (s) => agg[0].t + idxOf(s) * tfMs; // extrapolates into empty space
+    // candles may arrive without timestamps (simulated series) — anchor the
+    // axis so the newest candle is "now" and step backwards by the timeframe
+    const baseT = agg.length && Number.isFinite(agg[0].t)
+      ? agg[0].t
+      : Date.now() - Math.max(0, agg.length - 1) * tfMs;
+    const timeAtSlot = (s) => baseT + idxOf(s) * tfMs; // extrapolates into empty space
     geom.current = { y, x, step, lo, hi, padT, chartH, plotW, slotOf, idxOf, inData, timeAtSlot, hiLoRange: hi - lo };
 
     ctx.font = `10px ${T.mono}`; ctx.textBaseline = "middle";
@@ -1276,6 +1281,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
               <span>H <b style={{ color: T.green }}>{fmtP(ohlc.h)}</b></span>
               <span>L <b style={{ color: T.red }}>{fmtP(ohlc.l)}</b></span>
               <span>C <b style={{ color: chg >= 0 ? T.green : T.red }}>{fmtP(ohlc.c)}</b></span>
+              {ohlc.v > 0 && <span>V <b style={{ color: T.blue }}>{fmt$(ohlc.v)}</b></span>}
               <span style={{ color: chg >= 0 ? T.green : T.red }}>{pct(chg)}</span>
             </div>
           )}
@@ -1301,6 +1307,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
               <span>H <b style={{ color: T.green }}>{fmtP(ohlc.h)}</b></span>
               <span>L <b style={{ color: T.red }}>{fmtP(ohlc.l)}</b></span>
               <span>C <b style={{ color: chg >= 0 ? T.green : T.red }}>{fmtP(ohlc.c)}</b></span>
+              {ohlc.v > 0 && <span>V <b style={{ color: T.blue }}>{fmt$(ohlc.v)}</b></span>}
               <span style={{ color: chg >= 0 ? T.green : T.red }}>{pct(chg)}</span>
             </>)}
           </div>
@@ -8319,7 +8326,7 @@ export default function App() {
         if (!r.ok) return;
         const j = await r.json();
         if (stale || !Array.isArray(j) || j.length < 10) return;
-        let mapped = j.slice(-260).map((c) => ({ o: +c.o, h: +c.h, l: +c.l, c: +c.c }))
+        let mapped = j.slice(-260).map((c) => ({ t: +c.t || undefined, o: +c.o, h: +c.h, l: +c.l, c: +c.c, v: +c.v || 0 }))
           .filter((c) => [c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v) && v > 0));
         if (mapped.length < 10) return;
         // drop wild prints: anything ±50× off the median close distorts the scale
@@ -8338,6 +8345,21 @@ export default function App() {
     return () => { stale = true; clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
   }, [liveData, sel, tf]);
   const [fsHint, setFsHint] = useState("");
+  const [installOpen, setInstallOpen] = useState(false);
+  const installEvtRef = useRef(null);
+  const standalone = typeof window !== "undefined" &&
+    (window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true);
+  const iOS = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  useEffect(() => {
+    const grab = (e) => { e.preventDefault(); installEvtRef.current = e; };
+    window.addEventListener("beforeinstallprompt", grab);
+    return () => window.removeEventListener("beforeinstallprompt", grab);
+  }, []);
+  const doInstall = async () => {
+    const evt = installEvtRef.current;
+    if (evt) { evt.prompt(); try { await evt.userChoice; } catch (e) {} installEvtRef.current = null; setInstallOpen(false); return; }
+    setInstallOpen(true); // iOS (or a browser without the prompt) → show the steps
+  };
   // ⛶ mobile fullscreen: Android/Chrome can go truly immersive; iOS Safari
   // reserves that for installed apps, so we tell people how to get it
   const goFullscreen = async () => {
@@ -8351,8 +8373,7 @@ export default function App() {
       if (el.webkitRequestFullscreen) { el.webkitRequestFullscreen(); return; }
       throw new Error("unsupported");
     } catch (e) {
-      setFsHint("iPhone: tap Share ⬆ → Add to Home Screen, then open VALO from the icon for true fullscreen.");
-      setTimeout(() => setFsHint(""), 6000);
+      setInstallOpen(true); // no web fullscreen here — installing is the real answer
     }
   };
   const [isFs, setIsFs] = useState(false);                          // ⛶ fullscreen state (Esc exits natively)
@@ -8560,7 +8581,7 @@ export default function App() {
             // live price and its wick stretches to cover it
             const last = t.candles[t.candles.length - 1];
             candlesL = [...t.candles.slice(0, -1),
-              { o: last.o, h: Math.max(last.h, c), l: Math.min(last.l, c), c }];
+              { t: last.t, v: last.v, o: last.o, h: Math.max(last.h, c), l: Math.min(last.l, c), c }];
           } else {
             const cd = { o: prev, h: Math.max(prev, c) * 1.0004, l: Math.min(prev, c) * 0.9996, c };
             candlesL = [...t.candles.slice(1), cd];
@@ -10888,6 +10909,47 @@ export default function App() {
           </span>
         </button>
       )}
+      {installOpen && !standalone && (
+        <>
+          <div onClick={() => setInstallOpen(false)}
+            style={{ position: "fixed", inset: 0, zIndex: 204, background: "rgba(4,6,10,0.72)", backdropFilter: "blur(4px)" }} />
+          <div style={{ position: "fixed", left: 10, right: 10, bottom: 14, zIndex: 205,
+            background: T.panel, border: `1px solid ${VALO_PURPLE}66`, borderRadius: 16, padding: "16px 16px 14px",
+            boxShadow: "0 20px 60px rgba(0,0,0,0.7)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
+              <span style={{ width: 26, height: 26, borderRadius: 7, transform: "rotate(45deg)",
+                background: "linear-gradient(135deg, #a07ff2, #5b93ec)", boxShadow: `0 0 12px ${VALO_PURPLE}` }} />
+              <span style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 900, letterSpacing: 1, color: T.text, marginLeft: 4 }}>VALO FULLSCREEN</span>
+              <button onClick={() => setInstallOpen(false)} style={{ marginLeft: "auto", ...chip(false), padding: "3px 9px", fontSize: 11 }}>✕</button>
+            </div>
+            <div style={{ fontFamily: T.mono, fontSize: 10, lineHeight: 1.65, color: T.dim, marginBottom: 12 }}>
+              {iOS
+                ? "Safari won't hide its bars for a web page — Apple only allows that for installed apps. Add VALO to your home screen and it opens with no address bar and no bottom toolbar at all."
+                : "Install VALO to run it without any browser bars — it opens straight into the terminal."}
+            </div>
+            {iOS ? (
+              <div style={{ display: "grid", gap: 7 }}>
+                {[["1", "Tap the Share button ⬆ in Safari's bottom bar"],
+                  ["2", "Scroll down and pick “Add to Home Screen”"],
+                  ["3", "Open VALO from the new icon — true fullscreen"]].map(([n, txt]) => (
+                  <div key={n} style={{ display: "flex", alignItems: "center", gap: 9,
+                    border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "9px 11px" }}>
+                    <span style={{ width: 19, height: 19, borderRadius: "50%", background: VALO_PURPLE, color: "#0a0713",
+                      display: "grid", placeItems: "center", fontFamily: T.mono, fontSize: 10, fontWeight: 900, flex: "0 0 auto" }}>{n}</span>
+                    <span style={{ fontFamily: T.mono, fontSize: 10, color: T.text }}>{txt}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <button onClick={doInstall}
+                style={{ width: "100%", border: "none", background: VALO_PURPLE, color: "#0a0713", borderRadius: 11,
+                  padding: "12px", fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>
+                ⬇ INSTALL VALO
+              </button>
+            )}
+          </div>
+        </>
+      )}
       {fsHint && (
         <div onClick={() => setFsHint("")}
           style={{ position: "fixed", left: 12, right: 12, bottom: 74, zIndex: 205, cursor: "pointer",
@@ -12048,6 +12110,9 @@ export default function App() {
           *{ scrollbar-width: none; }
           ::-webkit-scrollbar{ width:0; height:0; background: transparent; }
         }
+        /* the page scroller itself stays invisible on every device — panels keep theirs */
+        html, body { scrollbar-width: none; -ms-overflow-style: none; }
+        html::-webkit-scrollbar, body::-webkit-scrollbar { width: 0; height: 0; background: transparent; }
         /* no double-tap / focus zoom surprises on touch — taps act instantly */
         input, textarea, select, button{ touch-action: manipulation; }
         @media(max-width:1150px){ .pt-grid{grid-template-columns:1fr !important;} }
