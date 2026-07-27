@@ -420,7 +420,7 @@ const ratingColor = (s) => (s >= 66 ? T.green : s >= 40 ? T.amber : T.red);
 // ================================================================
 // CHART
 // ================================================================
-function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null, shiftArm = false }) {
+function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null, shiftArm = false, onCancelLine = null }) {
   const wrapRef = useRef(null);
   const cvsRef = useRef(null);
   const [cross, setCross] = useState(null);
@@ -500,7 +500,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     if (hi - lo < minRange) { hi = mid + minRange / 2; lo = mid - minRange / 2; }
     const p8 = (hi - lo) * 0.1 || hi * 0.01; lo -= p8; hi += p8;
     // vertical free-drag: shift the visible price window up/down without clamping
-    const vShift = (view.priceOff || 0) * (hi - lo);
+    const vShift = 0; // price window auto-fits — no vertical panning (DexScreener-style)
     lo -= vShift; hi -= vShift;
     const y = (p) => padT + (1 - (p - lo) / (hi - lo)) * chartH;
     const tfMs = tfMin * 60000;
@@ -824,6 +824,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   // bot-set mode: dragging the chart paints the buy-in line instead of panning
   const botSetRef = useRef({}); botSetRef.current = { on: botSetMode, draft: onBotDraft, set: onBotSet, arm: onBotArm, lineDrag: onBotLineDrag, shiftArm };
   const lineHitsRef = useRef([]);      // grabbable bot lines: {id, y}
+  const [lineMenu, setLineMenu] = useState(null); // { id, x, y } — cancel bubble
+  const holdRef = useRef(null);        // touch press-and-hold timer
   const lineDragRef = useRef(null);    // active line drag: {id}
   const touchIntentRef = useRef(null); // first-move decision: chart gesture vs page scroll
   const pendGrabRef = useRef(null);    // touch press-and-hold before a line grab engages
@@ -1074,6 +1076,18 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     }
     onLineSelect && onLineSelect(null); // tapped open chart — drop the highlight
     dragRef.current = { sx: cx, sy: cy, startOffset: offset, startPriceOff: view.priceOff || 0, moved: false, t0: Date.now(), touch: !!e.touches };
+    if (e.touches) {                       // press-and-hold a line → cancel bubble
+      const hit = lineAt(cy);
+      clearTimeout(holdRef.current);
+      if (hit) {
+        const p0 = e.touches[0];
+        holdRef.current = setTimeout(() => {
+          if (dragRef.current && dragRef.current.moved) return;
+          if (navigator.vibrate) navigator.vibrate(14);
+          setLineMenu({ id: hit.id, x: p0.clientX, y: p0.clientY });
+        }, 550);
+      }
+    }
     setCross({ cx, cy });
   };
   const onMove = (e) => {
@@ -1127,19 +1141,16 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const dx = cx - d.sx;
       const dyTot = cy - d.sy;
       const thr = d.touch ? 12 : 5;
-      if (Math.abs(dx) > thr || Math.abs(dyTot) > thr) d.moved = true;
+      if (Math.abs(dx) > thr) { d.moved = true; clearTimeout(holdRef.current); }
+      else if (Math.abs(dyTot) > thr) clearTimeout(holdRef.current); // vertical = not a pan
       if (d.moved) {
         const g = geom.current;
         // lock the gesture to one axis: sideways pans time, up/down pans price.
         // (mixing them made a horizontal drag drag the price scale with it)
-        if (!d.axis) d.axis = Math.abs(dx) >= Math.abs(dyTot) ? "x" : "y";
-        const priceShift = d.axis === "y" ? (dyTot / (g.chartH || 300)) : 0;
-        const timeShift = d.axis === "x" ? Math.round(dx / (g.step || 6)) : 0;
         setView((v) => ({
           ...v,
-          offset: d.startOffset + timeShift,
-          // clamp the vertical drift so the window can never fly off the data
-          priceOff: Math.max(-2, Math.min(2, (d.startPriceOff || 0) - priceShift)),
+          offset: d.startOffset + Math.round(dx / (g.step || 6)), // ⇄ time only
+          priceOff: 0,                                            // ↕ price always auto-fits
         }));
         return;
       }
@@ -1151,6 +1162,17 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const i = g.idxOf(s);
       setHover(g.inData(i) ? agg[i] : null);
     }
+  };
+  const lineAt = (cy) => {
+    const slop = isMobile ? 16 : 10;
+    return lineHitsRef.current.find((l) => Math.abs(l.y - cy) <= slop) || null;
+  };
+  const onCtx = (e) => {
+    const { cy } = ptOf(e);
+    const hit = lineAt(cy);
+    if (!hit) return;
+    e.preventDefault();
+    setLineMenu({ id: hit.id, x: e.clientX, y: e.clientY });
   };
   const onUp = (e) => {
     if (e.touches) {
@@ -1261,10 +1283,26 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       <div style={{ position: "absolute", bottom: 30, right: 84, zIndex: 3, fontFamily: T.mono, fontSize: 9, letterSpacing: 1, color: synthetic ? T.amber : T.faint, pointerEvents: "none" }}>
         {synthetic ? "⟲ SYNTH" : "DEXSCREENER"} · drag ⇄ pan · drag price axis ↕ zoom
       </div>
+      {lineMenu && (
+        <>
+          <div onClick={() => setLineMenu(null)} onTouchStart={() => setLineMenu(null)}
+            style={{ position: "fixed", inset: 0, zIndex: 149 }} />
+          <div style={{ position: "fixed", left: Math.max(8, lineMenu.x - 52), top: Math.max(8, lineMenu.y - 46), zIndex: 150 }}>
+            <button onClick={() => { onCancelLine && onCancelLine(lineMenu.id); setLineMenu(null); }}
+              style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                border: `1px solid ${T.red}`, background: "rgba(234,57,67,0.16)", color: T.red,
+                borderRadius: 9, padding: "7px 12px", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900,
+                boxShadow: `0 8px 24px rgba(0,0,0,0.6), 0 0 12px ${T.red}55`, backdropFilter: "blur(4px)" }}>
+              ✕ CANCEL
+            </button>
+          </div>
+        </>
+      )}
       <canvas
         ref={cvsRef}
         style={{ width: "100%", height, display: "block", cursor: clickMode ? "pointer" : "crosshair", touchAction: "pan-y", overscrollBehavior: "contain", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
         onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
+        onContextMenu={onCtx}
         onDoubleClick={(e) => {
           const bs = botSetRef.current; if (!bs.on || !bs.arm) return;
           const { cx, cy } = ptOf(e); const g = geom.current;
@@ -5408,6 +5446,7 @@ function MobileExpanded({ onClose, chartBlock, tradeStrip, ticketBlock, sym, onC
           {/* EXIT + drag-catch are fixed to the viewport so they're always reachable */}
           <div onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
             onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
+        onContextMenu={onCtx}
         onDoubleClick={(e) => {
           const bs = botSetRef.current; if (!bs.on || !bs.arm) return;
           const { cx, cy } = ptOf(e); const g = geom.current;
@@ -9421,6 +9460,7 @@ export default function App() {
                     onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop(at); }}
                     onBotArm={(lvl) => armAtLevel(lvl)}
                     onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq} eyesToken={selected}
+                    onCancelLine={(id) => { cancelBot(id); setSelLineId(null); }}
                     onLineSelect={(id) => setSelLineId(id)}
                     isMobile={isMobile} height={isMobile ? mobChartH : 480 + extraH + Math.round(pcCrunch * 150)} />
 
@@ -11204,6 +11244,7 @@ export default function App() {
             ]}
             botRuns={botRuns.filter((r) => r.status === "live" && String(r.tokenId) === String(selected.id))}
             botSetMode={botDragSet} shiftArm={false} onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq} eyesToken={selected}
+            onCancelLine={(id) => { cancelBot(id); setSelLineId(null); }}
             onLineSelect={(id) => setSelLineId(id)}
             onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
             onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop(at); }} />
