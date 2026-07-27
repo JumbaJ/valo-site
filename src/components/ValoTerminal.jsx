@@ -415,6 +415,29 @@ function scoreToken(t) {
   return Math.round(t.momentum * 0.25 + t.buyPressure * 0.25 + g * 100 * 0.25 + liq * 0.15 + age * 0.1);
 }
 const rating = (s) => (s >= 66 ? "SAFE" : s >= 40 ? "CAUTION" : "RISKY");
+// rugState(t) → { rugged, dying, drawdown, recovery }
+//   drawdown : how far below its peak the price sits now (0–1)
+//   recovery : how much of the crash it has bounced back (0–1)
+// RUGGED  = down ≥78% from peak, bounced back <20%, and liquidity gone thin
+// DYING   = the same crash but showing some life — a warning, not a verdict
+const rugState = (t) => {
+  const cs = t && t.candles;
+  if (!cs || cs.length < 12) return { rugged: false, dying: false, drawdown: 0, recovery: 1 };
+  let peak = 0, peakIdx = 0;
+  for (let i = 0; i < cs.length; i++) { const h = cs[i].h; if (Number.isFinite(h) && h > peak) { peak = h; peakIdx = i; } }
+  if (!(peak > 0) || peakIdx > cs.length - 4) return { rugged: false, dying: false, drawdown: 0, recovery: 1 };
+  let low = Infinity;
+  for (let i = peakIdx; i < cs.length; i++) { const l = cs[i].l; if (Number.isFinite(l) && l < low) low = l; }
+  const now = t.price || cs[cs.length - 1].c;
+  const drawdown = Math.max(0, Math.min(1, (peak - now) / peak));
+  const span = Math.max(peak - low, peak * 1e-9);
+  const recovery = Math.max(0, Math.min(1, (now - low) / span));   // 0 = still on the floor
+  // liquidity check: a real rug drains the pool, not just the price
+  const liqThin = t.tvl > 0 && t.mc > 0 ? (t.tvl / t.mc) < 0.02 : false;
+  const rugged = drawdown >= 0.78 && recovery < 0.20 && (liqThin || drawdown >= 0.9);
+  const dying = !rugged && drawdown >= 0.6 && recovery < 0.35;
+  return { rugged, dying, drawdown, recovery };
+};
 const ratingColor = (s) => (s >= 66 ? T.green : s >= 40 ? T.amber : T.red);
 
 // ================================================================
@@ -3191,6 +3214,12 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   const [fundAmt, setFundAmt] = useState("");
   const [holdsOpen, setHoldsOpen] = useState(false); // 💼 all-holdings dropdown
   const [holdsTab, setHoldsTab] = useState("open");  // open ⇄ closed positions
+  const [holdsView, setHoldsView] = useState("trades"); // trades ⇄ dev (launched/rugged)
+  // every token this person launched, and which of them died
+  const devTokens = useMemo(() => (tokens || []).filter((t) => {
+    try { return devOf(t).name === name; } catch (e) { return false; }
+  }), [tokens, name]);
+  const devRugs = useMemo(() => devTokens.filter((t) => rugState(t).rugged), [devTokens]);
   const [cpFilter, setCpFilter] = useState(null);    // closed tab: view one token only
   const [txFilter, setTxFilter] = useState(null);    // activity: view one token's txs only
   // held-for durations: 15-minute steps → hours → days → months → lifetime
@@ -3398,6 +3427,30 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                   )}
                 </div>
                 <div style={{ display: "flex", borderTop: `1px solid ${T.border}` }}>
+                  <button onClick={() => { setHoldsView((v) => (v === "trades" ? "dev" : "trades")); setHoldsOpen(false); }}
+                    title={holdsView === "trades" ? "Show what this dev launched" : "Back to their positions"}
+                    style={{ flex: "0 0 auto", border: "none", borderRight: `1px solid ${T.border}`,
+                      background: holdsView === "dev" ? "rgba(240,185,11,0.12)" : "rgba(255,255,255,0.02)",
+                      color: holdsView === "dev" ? T.amber : T.faint, padding: "7px 9px", cursor: "pointer",
+                      fontFamily: T.mono, fontSize: 10, fontWeight: 900 }}>{holdsView === "dev" ? "◂" : "⚗"}</button>
+                  {holdsView === "dev" ? (
+                    <>
+                      <button onClick={() => { if (holdsOpen && holdsTab === "launched") setHoldsOpen(false); else { setHoldsTab("launched"); setHoldsOpen(true); } }}
+                        style={{ flex: 1, border: "none", borderRight: `1px solid ${T.border}`,
+                          background: holdsOpen && holdsTab === "launched" ? "rgba(125,92,240,0.1)" : "rgba(255,255,255,0.02)",
+                          color: holdsOpen && holdsTab === "launched" ? VALO_PURPLE : T.dim, padding: "7px 2px",
+                          fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1, cursor: "pointer", whiteSpace: "nowrap" }}>
+                        ⚗ LAUNCHED · {devTokens.length}
+                      </button>
+                      <button onClick={() => { if (holdsOpen && holdsTab === "rugged") setHoldsOpen(false); else { setHoldsTab("rugged"); setHoldsOpen(true); } }}
+                        style={{ flex: 1, border: "none",
+                          background: holdsOpen && holdsTab === "rugged" ? "rgba(234,57,67,0.1)" : "rgba(255,255,255,0.02)",
+                          color: holdsOpen && holdsTab === "rugged" ? T.red : T.dim, padding: "7px 2px",
+                          fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1, cursor: "pointer", whiteSpace: "nowrap" }}>
+                        ☠ RUGGED · {devRugs.length}
+                      </button>
+                    </>
+                  ) : (<>
                   <button onClick={() => { if (holdsOpen && holdsTab === "closed") { setHoldsOpen(false); } else { setHoldsTab("closed"); setHoldsOpen(true); } }}
                     style={{ flex: 1, border: "none", borderRight: `1px solid ${T.border}`,
                       background: holdsOpen && holdsTab === "closed" ? "rgba(234,57,67,0.08)" : "rgba(255,255,255,0.02)",
@@ -3416,7 +3469,51 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                       color: holdsOpen && holdsTab === "open" ? VALO_PURPLE : T.dim, padding: "7px 2px", fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1, cursor: "pointer", whiteSpace: "nowrap", minWidth: 0 }}>
                     {holdsOpen && holdsTab === "open" ? "▴" : "▾"} ALL HOLDINGS · {rows.length}
                   </button>
+                  </>)}
                 </div>
+                {holdsOpen && (holdsTab === "launched" || holdsTab === "rugged") && (() => {
+                  const list = holdsTab === "rugged" ? devRugs : devTokens;
+                  const red = holdsTab === "rugged";
+                  return (
+                    <div style={{ padding: "4px 8px 8px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 9,
+                        color: T.faint, letterSpacing: 1, padding: "4px 3px 6px" }}>
+                        <span>{red ? "☠ TOKENS THAT RUGGED" : "⚗ TOKENS LAUNCHED"}</span>
+                        <b style={{ color: red ? T.red : VALO_PURPLE }}>{list.length}</b>
+                      </div>
+                      {list.length === 0 && (
+                        <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, padding: "10px 4px", textAlign: "center" }}>
+                          {red ? "None of their launches have rugged." : "No launches under this name."}
+                        </div>
+                      )}
+                      <div style={{ maxHeight: 260, overflowY: "auto" }}>
+                        {list.map((t2) => {
+                          const rg = rugState(t2);
+                          const ageH = Math.max(0, Math.round((t2.ageMin || 0) / 60));
+                          const ageTxt = ageH < 24 ? `${ageH}h` : `${(ageH / 24).toFixed(1)}d`;
+                          return (
+                            <div key={"dv" + t2.id} onClick={() => onOpenToken(t2.id)}
+                              style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 4,
+                                border: `1px solid ${T.border}`, borderLeft: `2px solid ${rg.rugged ? T.red : rg.dying ? T.amber : T.green}`,
+                                background: "#0c0f16", borderRadius: 9, padding: "7px 9px" }}>
+                              <TokenAvatar sym={t2.sym} hue={t2.hue} img={t2.img} size={18} />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: accent(t2.hue) }}>${t2.sym}
+                                  {rg.rugged && <span style={{ color: T.red, fontSize: 7.5, marginLeft: 5, fontWeight: 900 }}>☠ RUGGED −{(rg.drawdown * 100).toFixed(0)}%</span>}
+                                  {!rg.rugged && rg.dying && <span style={{ color: T.amber, fontSize: 7.5, marginLeft: 5, fontWeight: 900 }}>DYING −{(rg.drawdown * 100).toFixed(0)}%</span>}
+                                </div>
+                                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim }}>
+                                  ${fmtP(t2.price)} <span style={{ color: T.faint }}>· MC</span> {fmt$(mcOf(t2))} <span style={{ color: T.faint }}>· {ageTxt} old</span>
+                                </div>
+                              </div>
+                              <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint }}>OPEN ▸</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {holdsOpen && holdsTab === "closed" && (
                   <div style={{ padding: "4px 8px 8px" }}>
                     {(() => { const syms = [...new Set(closedRows.map((c) => c.t.sym))].slice(0, 10);
@@ -5250,7 +5347,8 @@ function CardMiniChart({ candles, hue, mode, tfMin = 15, count = 90, full = fals
 function TokenCard({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf = 15, isMobile = false }) {
   const liveEyes = liveViewersOf(t, "pump"); // re-renders ride the price ticks
   const score = scoreToken(t);
-  const rc = ratingColor(score);
+  const rug = rugState(t);
+  const rc = rug.rugged ? T.red : ratingColor(score);
   const net = t.greenUsd - t.redUsd;
   const cs = calloutStyle(calloutCount);
   return (
@@ -5292,14 +5390,14 @@ function TokenCard({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf 
             <span style={{ color: net >= 0 ? T.green : T.red, fontWeight: 700 }}>{net >= 0 ? "+" : "−"}{fmt$(Math.abs(net))}</span>
           </div>
         </div>
-        <div title={`Score ${score} · ${rating(score)}`}
+        <div title={rug.rugged ? `Rugged — down ${(rug.drawdown * 100).toFixed(0)}% from peak with no recovery` : `Score ${score} · ${rating(score)}`}
           style={{ position: "absolute", top: 7, right: 0, zIndex: 3, display: "flex", alignItems: "baseline", gap: 4,
             border: `1px solid ${rc}77`, borderRight: "none", background: `${rc}14`,
             borderRadius: "8px 0 0 8px", padding: "3px 8px 3px 7px", lineHeight: 1,
             boxShadow: `inset 0 0 10px ${rc}18` }}>
           <span style={{ fontSize: isMobile ? 13 : 12, fontWeight: 900, color: rc, fontFamily: T.mono, letterSpacing: -0.3,
             textShadow: `0 0 9px ${rc}55` }}>{score}</span>
-          <span style={{ fontSize: isMobile ? 6.5 : 6, letterSpacing: 1.1, color: rc, fontWeight: 800, opacity: 0.85 }}>{rating(score)}</span>
+          <span style={{ fontSize: isMobile ? 6.5 : 6, letterSpacing: 1.1, color: rc, fontWeight: 800, opacity: 0.85 }}>{rug.rugged ? "RUGGED" : rug.dying ? "DYING" : rating(score)}</span>
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
@@ -8239,6 +8337,24 @@ export default function App() {
     document.addEventListener("visibilitychange", onVis);
     return () => { stale = true; clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
   }, [liveData, sel, tf]);
+  const [fsHint, setFsHint] = useState("");
+  // ⛶ mobile fullscreen: Android/Chrome can go truly immersive; iOS Safari
+  // reserves that for installed apps, so we tell people how to get it
+  const goFullscreen = async () => {
+    const el = document.documentElement;
+    try {
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        await (document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen());
+        return;
+      }
+      if (el.requestFullscreen) { await el.requestFullscreen({ navigationUI: "hide" }); return; }
+      if (el.webkitRequestFullscreen) { el.webkitRequestFullscreen(); return; }
+      throw new Error("unsupported");
+    } catch (e) {
+      setFsHint("iPhone: tap Share ⬆ → Add to Home Screen, then open VALO from the icon for true fullscreen.");
+      setTimeout(() => setFsHint(""), 6000);
+    }
+  };
   const [isFs, setIsFs] = useState(false);                          // ⛶ fullscreen state (Esc exits natively)
   useEffect(() => {
     const on = () => setIsFs(!!document.fullscreenElement);
@@ -10159,6 +10275,11 @@ export default function App() {
             </div>
 
             {/* NOTIFICATIONS */}
+            <button onClick={goFullscreen} title="Fullscreen"
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34,
+                border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.03)", borderRadius: 9, cursor: "pointer", color: T.dim }}>
+              <span style={{ fontSize: 14 }}>⛶</span>
+            </button>
             <button onClick={() => { setNotifOpen(true); markNotifsRead(); }} title="Notifications — followed callouts, followers, friend requests"
               style={{ position: "relative", display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
                 border: `1px solid ${T.border2}`, background: "rgba(125,92,240,0.06)", borderRadius: 9, padding: "6px 12px" }}>
@@ -10765,6 +10886,15 @@ export default function App() {
             ≈ ${((parseFloat(amount) || 0) * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })} buy-in
           </span>
         </button>
+      )}
+      {fsHint && (
+        <div onClick={() => setFsHint("")}
+          style={{ position: "fixed", left: 12, right: 12, bottom: 74, zIndex: 205, cursor: "pointer",
+            background: "rgba(15,19,28,0.96)", border: `1px solid ${VALO_PURPLE}66`, borderRadius: 12,
+            padding: "11px 13px", fontFamily: T.mono, fontSize: 10, lineHeight: 1.5, color: T.text,
+            boxShadow: "0 12px 40px rgba(0,0,0,0.65)" }}>
+          ⛶ {fsHint}
+        </div>
       )}
       {liveData && (
         <div style={{ position: "fixed", bottom: 8, left: "50%", transform: "translateX(-50%)", zIndex: 54, pointerEvents: "none",
@@ -11892,7 +12022,8 @@ export default function App() {
       )}
 
       <style>{`
-        /* VALO scrollbars — dark rail, glowing purple glider */
+        /* VALO scrollbars — desktop only; phones keep native overlay bars */
+        @media (hover: hover) and (pointer: fine) {
         *{ scrollbar-width: thin; scrollbar-color: #7d5cf0 rgba(10,13,19,0.55); }
         ::-webkit-scrollbar{ width:10px; height:10px; }
         ::-webkit-scrollbar-track{ background: rgba(10,13,19,0.55); border-radius: 10px; }
@@ -11911,6 +12042,11 @@ export default function App() {
           box-shadow: 0 0 18px rgba(125,92,240,1), inset 0 0 8px rgba(255,255,255,0.45);
         }
         ::-webkit-scrollbar-thumb:horizontal{ background: linear-gradient(90deg, #a07ff2, #7d5cf0 55%, #5b93ec); }
+        }
+        @media (hover: none), (pointer: coarse) {
+          *{ scrollbar-width: none; }
+          ::-webkit-scrollbar{ width:0; height:0; background: transparent; }
+        }
         /* no double-tap / focus zoom surprises on touch — taps act instantly */
         input, textarea, select, button{ touch-action: manipulation; }
         @media(max-width:1150px){ .pt-grid{grid-template-columns:1fr !important;} }
