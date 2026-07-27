@@ -1290,7 +1290,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
               <ViewerPills token={eyesToken} small />
             </div>
           )}
-          <div style={{ position: "absolute", top: 6, right: 8, zIndex: 4, display: "flex", gap: 6, alignItems: "center" }}>
+          <div style={{ position: "absolute", top: 2, right: 6, zIndex: 6, display: "flex", gap: 5, alignItems: "center" }}>
             <button onClick={() => setView({ count: 18, offset: 0, priceOff: 0, follow: true })}
               style={{ height: 21, padding: "0 9px", borderRadius: 6, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 9, fontWeight: 700, fontFamily: T.mono }}>◉ LIVE</button>
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
@@ -9377,6 +9377,15 @@ export default function App() {
                     flexWrap: isMobile ? "nowrap" : "wrap",
                     overflowX: isMobile ? "auto" : "visible", overflowY: "visible",
                     scrollbarWidth: "none", WebkitOverflowScrolling: "touch",
+                    // chart pulled up → the socials fold away with the stats
+                    ...(isMobile ? {
+                      maxHeight: metricsCrunch > 0.5 ? 0 : 44,
+                      opacity: metricsCrunch > 0.5 ? 0 : 1,
+                      marginTop: metricsCrunch > 0.5 ? 0 : undefined,
+                      overflow: metricsCrunch > 0.5 ? "hidden" : undefined,
+                      pointerEvents: metricsCrunch > 0.5 ? "none" : "auto",
+                      transition: "max-height .22s ease, opacity .18s ease",
+                    } : {}),
                     paddingRight: !isMobile && myMcCallouts[selected.id]
                       ? Math.max(64, ("×" + myMcCallouts[selected.id].peak.toFixed(1)).length * 15 + 26) : 0 }}>
                     {/* socials */}
