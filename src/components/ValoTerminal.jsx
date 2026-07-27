@@ -440,7 +440,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
 
   const agg = useMemo(() => aggregate(candles, tfMin), [candles, tfMin]);
   const total = agg.length;
-  const count = Math.max(12, Math.min(view.count, Math.max(24, agg.length + 8)));
+  const zoomCap = Math.max(30, Math.round(agg.length * 1.2) + 10); // whole chart + a little more
+  const count = Math.max(12, Math.min(view.count, zoomCap));
   const PAD_BARS = 6;                                  // how far past either end you may drift
   const maxOff = Math.max(0, total - count);           // oldest candle at the left edge
   const offset = Math.max(-PAD_BARS, Math.min(view.offset, maxOff + PAD_BARS));
