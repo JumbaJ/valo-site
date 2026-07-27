@@ -441,7 +441,9 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   const agg = useMemo(() => aggregate(candles, tfMin), [candles, tfMin]);
   const total = agg.length;
   const count = Math.max(12, Math.min(view.count, 60000));
-  const offset = Math.max(-(count + 20), Math.min(view.offset, total + 20));
+  const PAD_BARS = 6;                                  // how far past either end you may drift
+  const maxOff = Math.max(0, total - count);           // oldest candle at the left edge
+  const offset = Math.max(-PAD_BARS, Math.min(view.offset, maxOff + PAD_BARS));
   // window of slots: slot s ↔ agg index (total - count - offset + s)
   const winStart = total - count - offset;
 
@@ -468,16 +470,18 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
 
     // visible candles
     let lo = Infinity, hi = -Infinity, vMax = 0, anyVisible = false;
-    for (let s = 0; s < count; s++) {
-      const i = idxOf(s);
-      if (!inData(i)) continue;
-      anyVisible = true;
+    // scale off a full-width window pinned inside the data — overscrolling then
+    // moves the candles WITHOUT changing the price range underneath them
+    const scaleStart = Math.max(0, Math.min(winStart, Math.max(0, total - count)));
+    for (let i = scaleStart; i < Math.min(total, scaleStart + count); i++) {
       const c = agg[i];
+      if (!c) continue;
+      anyVisible = true;
       lo = Math.min(lo, c.l); hi = Math.max(hi, c.h); vMax = Math.max(vMax, c.v);
     }
-    if (!anyVisible) { // fully panned off — keep a sane price scale
+    if (!anyVisible) {
       const last = agg[total - 1];
-      lo = last.l * 0.9; hi = last.h * 1.1; vMax = 1;
+      if (last) { lo = last.l * 0.9; hi = last.h * 1.1; vMax = 1; } else { lo = 0; hi = 1; vMax = 1; }
     }
     const p8 = (hi - lo) * 0.1 || hi * 0.01; lo -= p8; hi += p8;
     // vertical free-drag: shift the visible price window up/down without clamping
