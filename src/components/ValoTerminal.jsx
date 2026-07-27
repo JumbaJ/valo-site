@@ -3056,7 +3056,9 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   // API: replace with a real user-profile endpoint — all stats below are seeded fakes
   const rand = seededRand(hashStr("user-" + name));
   const peak = +(1 + rand() * (rand() < 0.12 ? 120 : 24)).toFixed(2);
-  const fols = Math.floor(20 + rand() * 900), folg = Math.floor(5 + rand() * 300);
+  const simFols = Math.floor(20 + rand() * 900), simFolg = Math.floor(5 + rand() * 300);
+  const fols = cloudProfile ? (cloudProfile.followers || 0) : simFols;
+  const folg = cloudProfile ? (cloudProfile.following || 0) : simFolg;
   const calls = cloudProfile
     ? (cloudProfile.callouts || []).slice(0, 8).map((c) => {
         const t = tokens.find((x) => x.sym === c.sym) || { sym: c.sym || "?", hue: symbolHue(c.sym || "?"), img: null, id: null };
@@ -7311,11 +7313,13 @@ export default function App() {
     let ch = null, rt = null;
     const load = async (prof) => {
       try {
-        const [{ data: w }, { data: pos }, { data: act }, { data: cos }] = await Promise.all([
+        const [{ data: w }, { data: pos }, { data: act }, { data: cos }, fCount, gCount] = await Promise.all([
           sb.from("wallets").select("*").eq("user_id", prof.id).maybeSingle(),
           sb.from("positions").select("*").eq("user_id", prof.id),
           sb.from("activity").select("*").eq("user_id", prof.id).order("ts", { ascending: false }).limit(26),
           sb.from("callouts").select("*").eq("user_id", prof.id).order("ts", { ascending: false }).limit(30),
+          sb.from("follows").select("id", { count: "exact", head: true }).eq("followed_id", prof.id),
+          sb.from("follows").select("id", { count: "exact", head: true }).eq("follower_id", prof.id),
         ]);
         if (stop) return;
         const holds = (pos || []).map((r) => {
@@ -7343,6 +7347,8 @@ export default function App() {
             tokQty: r.tok_qty != null ? +r.tok_qty : null, priceAt: +r.price || t2.price || 0 };
         });
         setProfileCloud({ id: prof.id, handle: prof.handle, icon: prof.icon, holds, activity,
+          followers: fCount && fCount.count != null ? fCount.count : 0,
+          following: gCount && gCount.count != null ? gCount.count : 0,
           callouts: (cos || []).map((r) => ({ sym: r.sym, mcAt: +r.mc_at || 0, ts: new Date(r.ts).getTime(),
             peak: Math.max(1, +r.peak_mult || 1), peakMc: +r.peak_mc || 0 })),
           solBalance: w ? +w.sol_balance : null, valoBalance: w ? +w.valo_balance : null });
@@ -7366,6 +7372,41 @@ export default function App() {
     return () => { stop = true; clearTimeout(rt); if (ch) { try { sb.removeChannel(ch); } catch (e) {} } };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileUser, cloudUser && cloudUser.id]);
+  // 👥 REAL social graph — your followers, following and friends come from the
+  // database and refresh live as people follow you or accept requests
+  const loadGraph = async () => {
+    if (!sb || !cloudUser) return;
+    const uid = cloudUser.id;
+    try {
+      const [fr, fg, rq] = await Promise.all([
+        sb.from("follows").select("follower_handle").eq("followed_id", uid),
+        sb.from("follows").select("followed_id").eq("follower_id", uid),
+        sb.from("friend_requests").select("from_handle, to_handle, from_id, to_id, status").or(`from_id.eq.${uid},to_id.eq.${uid}`).eq("status", "accepted"),
+      ]);
+      const followers = [...new Set((fr.data || []).map((r) => r.follower_handle).filter(Boolean))];
+      setFollowersList(followers);
+      const ids = (fg.data || []).map((r) => r.followed_id).filter(Boolean);
+      if (ids.length) {
+        const { data: profs } = await sb.from("profiles").select("id, handle").in("id", ids);
+        setFollowingList([...new Set((profs || []).map((p) => p.handle).filter(Boolean))]);
+      } else setFollowingList([]);
+      setFriendsList([...new Set((rq.data || []).map((r) => (r.from_id === uid ? r.to_handle : r.from_handle)).filter(Boolean))]);
+    } catch (e) { console.warn("[VALO 👥] graph load failed", e); }
+  };
+  useEffect(() => {
+    if (!sb || !cloudUser) return;
+    loadGraph();
+    const uid = cloudUser.id;
+    const ch = sb.channel("valo-graph-" + uid)
+      .on("postgres_changes", { event: "*", schema: "public", table: "follows", filter: `followed_id=eq.${uid}` }, loadGraph)
+      .on("postgres_changes", { event: "*", schema: "public", table: "follows", filter: `follower_id=eq.${uid}` }, loadGraph)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "friend_requests", filter: `from_id=eq.${uid}` }, loadGraph)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "friend_requests", filter: `to_id=eq.${uid}` }, loadGraph)
+      .subscribe();
+    return () => { try { sb.removeChannel(ch); } catch (e) {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudUser && cloudUser.id]);
+  // accepting a request also refreshes both sides' friend lists
   // is this handle already claimed by a real account? (case-insensitive)
   const checkHandle = async (name) => {
     if (!sb || !name) return false;
