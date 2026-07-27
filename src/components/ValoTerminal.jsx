@@ -475,9 +475,19 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     const scaleStart = Math.max(0, Math.min(winStart, Math.max(0, total - count)));
     for (let i = scaleStart; i < Math.min(total, scaleStart + count); i++) {
       const c = agg[i];
-      if (!c) continue;
+      if (!c || !Number.isFinite(c.h) || !Number.isFinite(c.l) || c.h <= 0 || c.l <= 0) continue;
       anyVisible = true;
-      lo = Math.min(lo, c.l); hi = Math.max(hi, c.h); vMax = Math.max(vMax, c.v);
+      lo = Math.min(lo, c.l); hi = Math.max(hi, c.h); vMax = Math.max(vMax, c.v || 0);
+    }
+    // one absurd print can't own the axis: cap the range around the median close
+    if (anyVisible && hi / Math.max(lo, 1e-12) > 1e4) {
+      const win = [];
+      for (let i = scaleStart; i < Math.min(total, scaleStart + count); i++) if (agg[i] && agg[i].c > 0) win.push(agg[i].c);
+      if (win.length) {
+        win.sort((a, b) => a - b);
+        const med = win[Math.floor(win.length / 2)];
+        lo = Math.max(lo, med / 20); hi = Math.min(hi, med * 20);
+      }
     }
     if (!anyVisible) {
       const last = agg[total - 1];
@@ -1115,12 +1125,16 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       if (Math.abs(dx) > thr || Math.abs(dyTot) > thr) d.moved = true;
       if (d.moved) {
         const g = geom.current;
-        // horizontal → time offset; vertical → free price shift (no bar limit)
-        const priceShift = (dyTot / (g.chartH || 300)); // fraction of visible range
+        // lock the gesture to one axis: sideways pans time, up/down pans price.
+        // (mixing them made a horizontal drag drag the price scale with it)
+        if (!d.axis) d.axis = Math.abs(dx) >= Math.abs(dyTot) ? "x" : "y";
+        const priceShift = d.axis === "y" ? (dyTot / (g.chartH || 300)) : 0;
+        const timeShift = d.axis === "x" ? Math.round(dx / (g.step || 6)) : 0;
         setView((v) => ({
           ...v,
-          offset: d.startOffset + Math.round(dx / (g.step || 6)),
-          priceOff: (d.startPriceOff || 0) - priceShift,
+          offset: d.startOffset + timeShift,
+          // clamp the vertical drift so the window can never fly off the data
+          priceOff: Math.max(-2, Math.min(2, (d.startPriceOff || 0) - priceShift)),
         }));
         return;
       }
@@ -8356,6 +8370,18 @@ export default function App() {
           const prev = t.price;
           const target = lv.price;
           const c = prev + (target - prev) * 0.5;
+          const ratio = prev > 0 && target > 0 ? target / prev : 1;
+          if (!(target > 0) || ratio > 4 || ratio < 0.25) {
+            // this card just adopted a different token — reseed a flat series at
+            // the new price rather than corrupting the existing one
+            const seed = Array.from({ length: Math.max(40, (t.candles || []).length || 90) }, () => ({
+              o: target, h: target * 1.001, l: target * 0.999, c: target,
+            }));
+            return { ...t, candles: target > 0 ? seed : t.candles, price: target > 0 ? target : t.price,
+              sym: lv.sym, name: lv.name, mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
+              img: lv.img || t.img, pool: lv.pool || t.pool, liveMint: lv.mint || t.liveMint,
+              traders: lv.traders || t.traders, ageMin: t.ageMin + 0.04 };
+          }
           let candlesL;
           if (t.pool && t.candles && t.candles.length) {
             // real history: only the newest candle moves — its close tracks the
@@ -8925,6 +8951,55 @@ export default function App() {
 
   // Markers on the chart = your trades + (optionally) the dev's + any trader you
   // are following. Followed traders stay pinned while you trade until unpinned.
+  // 🔗 real links for the selected live token (site, X, telegram, pump.fun…)
+  const [tokLinks, setTokLinks] = useState(null);
+  useEffect(() => {
+    setTokLinks(null);
+    if (!selected || !selected.liveMint) return;
+    let stop = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/tokeninfo?mint=${encodeURIComponent(selected.liveMint)}&pool=${encodeURIComponent(selected.pool || "")}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop && j && !j.error) setTokLinks(j);
+      } catch (e) {}
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected && selected.liveMint, selected && selected.pool]);
+
+  // ---- B. REAL trades on the chart: the market's own buys and sells become
+  // the green ▲ / red ▼ badges, biggest first so the chart stays readable
+  const [realChartTrades, setRealChartTrades] = useState([]);
+  useEffect(() => {
+    setRealChartTrades([]);
+    if (!liveData || !selected || !selected.pool) return;
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch(`/api/trades?pool=${encodeURIComponent(selected.pool)}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (stop || !Array.isArray(j)) return;
+        const rows = j
+          .filter((x) => x.price > 0 && x.usd > 0)
+          .sort((a, b) => b.usd - a.usd).slice(0, 40)   // the ones worth drawing
+          .map((x) => ({
+            t: x.at, price: x.price, side: x.isBuy ? "buy" : "sell",
+            amt: +(x.usd / SOL_USD).toFixed(3), unit: "SOL", usd: x.usd,
+            trader: x.trader || "market", wallet: x.wallet || null,
+            tx: x.tx || `mkt${x.at}`, market: true,
+          }));
+        setRealChartTrades(rows);
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 10000);
+    return () => { stop = true; clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData, selected && selected.id, selected && selected.pool]);
+
   const chartTrades = useMemo(() => {
     if (!selected) return [];
     const mine = (tradesByToken[selected.id] || []).map((t) => ({ ...t, trader: t.trader || "__me__" }));
@@ -8937,7 +9012,7 @@ export default function App() {
         if (trader === selected.dev.wallet) return showDevTrades ? [] : (selected.dev.trades || []);
         return traderTradesFor(selected, trader);
       });
-    const all = [...mine, ...dev, ...hist, ...followed];
+    const all = [...mine, ...dev, ...hist, ...followed, ...realChartTrades];
     // de-dupe by tx so a followed dev doesn't double-draw
     const seen = new Set();
     return all.filter((t) => {
@@ -8945,7 +9020,7 @@ export default function App() {
       if (seen.has(t.tx)) return false;
       seen.add(t.tx); return true;
     });
-  }, [selected, tradesByToken, showDevTrades, histMarker, traderPrefs]);
+  }, [selected, tradesByToken, showDevTrades, histMarker, traderPrefs, realChartTrades]);
 
   // trending button + callout widget — shared between the desktop header row
   // and the mobile chart-tools row (noBox drops the frame on mobile)
@@ -9099,12 +9174,35 @@ export default function App() {
                       ? Math.max(64, ("×" + myMcCallouts[selected.id].peak.toFixed(1)).length * 15 + 26) : 0 }}>
                     {/* socials */}
                     {/* CA — tap to copy the contract address */}
-                    <button onClick={() => { try { navigator.clipboard.writeText(selected.ca); } catch (e) {} setCaCopied(selected.id); setTimeout(() => setCaCopied(null), 1400); }}
+                    <button onClick={() => { const ca = selected.liveMint || selected.ca; try { navigator.clipboard.writeText(ca); } catch (e) {} setCaCopied(selected.id); setTimeout(() => setCaCopied(null), 1400); }}
                       title={`Copy contract address\n${selected.ca}`}
                       style={{ display: "flex", alignItems: "center", gap: 4, height: 26, borderRadius: 7, border: `1px solid ${caCopied === selected.id ? T.green : T.border2}`, background: caCopied === selected.id ? "rgba(22,199,132,0.15)" : "rgba(255,255,255,0.03)", color: caCopied === selected.id ? T.green : T.dim, fontFamily: T.mono, fontSize: 9.5, fontWeight: 700, padding: "0 8px", cursor: "pointer" }}>
-                      {caCopied === selected.id ? "✓ copied" : <>📋 CA <span style={{ color: T.faint }}>{selected.ca.slice(0, 4)}…{selected.ca.slice(-4)}</span></>}
+                      {caCopied === selected.id ? "✓ copied" : <>📋 CA <span style={{ color: T.faint }}>{(selected.liveMint || selected.ca).slice(0, 4)}…{(selected.liveMint || selected.ca).slice(-4)}</span></>}
                     </button>
-                    {[["𝕏", selected.socials.x, "#e6e9ef"], ["✈", selected.socials.tg, "#4c9aff"], ["🌐", selected.socials.site, "#a98fff"], ["💊", selected.socials.pump, "#16c784"]].filter(([, url]) => url).map(([ic, url, col], i) => (
+                    {/* real destinations for live tokens — the actual coin page */}
+                    {tokLinks && tokLinks.links && [
+                      ["💊", tokLinks.links.pumpfun, "#16c784", "Open on pump.fun"],
+                      ["📈", tokLinks.links.dexscreener, "#4c9aff", "Open on DexScreener"],
+                      ["🔎", tokLinks.links.solscan, "#a98fff", "Open on Solscan"],
+                      ["🪐", tokLinks.links.jupiter, "#f0b90b", "Trade on Jupiter"],
+                    ].filter(([, u]) => u).map(([ic, url, col, tip], i) => (
+                      <a key={"L" + i} href={url} target="_blank" rel="noopener noreferrer" title={tip}
+                        style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 26, minWidth: 26,
+                          borderRadius: 7, border: `1px solid ${col}55`, background: `${col}14`, color: col,
+                          fontSize: 12, textDecoration: "none", padding: "0 5px" }}>{ic}</a>
+                    ))}
+                    {tokLinks && [
+                      ["𝕏", tokLinks.socials && tokLinks.socials.twitter, "#e6e9ef", "Their X"],
+                      ["✈", tokLinks.socials && tokLinks.socials.telegram, "#4c9aff", "Their Telegram"],
+                      ["🎮", tokLinks.socials && tokLinks.socials.discord, "#8b9cff", "Their Discord"],
+                      ["🌐", tokLinks.websites && tokLinks.websites[0], "#a98fff", "Their website"],
+                    ].filter(([, u]) => u).map(([ic, url, col, tip], i) => (
+                      <a key={"S" + i} href={url} target="_blank" rel="noopener noreferrer" title={tip}
+                        style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 26, minWidth: 26,
+                          borderRadius: 7, border: `1px solid ${col}55`, background: `${col}14`, color: col,
+                          fontSize: 11.5, textDecoration: "none", padding: "0 5px" }}>{ic}</a>
+                    ))}
+                    {!tokLinks && [["𝕏", selected.socials.x, "#e6e9ef"], ["✈", selected.socials.tg, "#4c9aff"], ["🌐", selected.socials.site, "#a98fff"], ["💊", selected.socials.pump, "#16c784"]].filter(([, url]) => url).map(([ic, url, col], i) => (
                       <a key={i} href={url} target="_blank" rel="noopener noreferrer" title="Open social"
                         style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 7, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)", color: col, fontSize: 12, textDecoration: "none", cursor: "pointer" }}>{ic}</a>
                     ))}
