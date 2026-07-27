@@ -3426,7 +3426,7 @@ function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], o
   const [tab, setTab] = useState("all"); // all | callout | follower | friend
   const shown = notifs.filter((n) => tab === "all" || n.type === tab || (tab === "friend" && n.type === "friendreq"));
   const icon = (t) => (t === "callout" ? "📣" : t === "follower" ? "👥" : t === "tier" ? "🏆"
-    : t === "rank" ? "🥇" : t === "system" ? "⚙" : "🤝");
+    : t === "rank" ? "🥇" : t === "system" ? "⚙" : t === "dm" ? "✉️" : "🤝");
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 62, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, maxHeight: "84vh", display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, overflow: "hidden" }}>
@@ -5073,7 +5073,7 @@ function CardMiniChart({ candles, hue, mode, tfMin = 15, count = 90, full = fals
   return <canvas ref={ref} style={{ width: full ? "100%" : "128%", height: full ? "100%" : 52, display: "block" }} />;
 }
 
-function TokenCard({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf = 15 }) {
+function TokenCard({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf = 15, isMobile = false }) {
   const liveEyes = liveViewersOf(t, "pump"); // re-renders ride the price ticks
   const score = scoreToken(t);
   const rc = ratingColor(score);
@@ -5088,7 +5088,7 @@ function TokenCard({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf 
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", paddingRight: 62 }}>
             <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={20} />
             <span style={{ fontWeight: 800, fontSize: 14 }}>{t.sym}</span>
             <span title="Watching right now" style={{ display: "inline-flex", alignItems: "center", gap: 3, fontFamily: T.mono, fontSize: 8, fontWeight: 800, color: T.green }}>
@@ -5118,9 +5118,14 @@ function TokenCard({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf 
             <span style={{ color: net >= 0 ? T.green : T.red, fontWeight: 700 }}>{net >= 0 ? "+" : "−"}{fmt$(Math.abs(net))}</span>
           </div>
         </div>
-        <div style={{ border: `1px solid ${rc}55`, background: `${rc}14`, borderRadius: 8, padding: "5px 9px", textAlign: "center", alignSelf: "center", minWidth: 50 }}>
-          <div style={{ fontSize: 16, fontWeight: 800, color: rc, fontFamily: T.mono, lineHeight: 1 }}>{score}</div>
-          <div style={{ fontSize: 7, letterSpacing: 1.5, color: rc, fontWeight: 800, marginTop: 2 }}>{rating(score)}</div>
+        <div title={`Score ${score} · ${rating(score)}`}
+          style={{ position: "absolute", top: 7, right: 0, zIndex: 3, display: "flex", alignItems: "baseline", gap: 4,
+            border: `1px solid ${rc}77`, borderRight: "none", background: `${rc}14`,
+            borderRadius: "8px 0 0 8px", padding: "3px 8px 3px 7px", lineHeight: 1,
+            boxShadow: `inset 0 0 10px ${rc}18` }}>
+          <span style={{ fontSize: isMobile ? 13 : 12, fontWeight: 900, color: rc, fontFamily: T.mono, letterSpacing: -0.3,
+            textShadow: `0 0 9px ${rc}55` }}>{score}</span>
+          <span style={{ fontSize: isMobile ? 6.5 : 6, letterSpacing: 1.1, color: rc, fontWeight: 800, opacity: 0.85 }}>{rating(score)}</span>
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
@@ -7379,6 +7384,57 @@ export default function App() {
     return () => { stop = true; clearTimeout(rt); if (ch) { try { sb.removeChannel(ch); } catch (e) {} } };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileUser, cloudUser && cloudUser.id]);
+  // ✉️ REAL DIRECT MESSAGES — private threads between accounts, delivered live.
+  // Rows are readable only by sender and recipient (enforced in the database).
+  const dmSeen = useRef(new Set());
+  const addDm = (handle, row) => setDmLogs((D) => {
+    const cur = D[handle] || [];
+    if (row.id && cur.some((m) => m.id === row.id)) return D;
+    return { ...D, [handle]: [...cur, row].slice(-80) };
+  });
+  useEffect(() => {
+    if (!sb || !cloudUser) return;
+    const uid = cloudUser.id;
+    let stop = false;
+    (async () => {
+      try {
+        const { data } = await sb.from("dms").select("*").or(`from_id.eq.${uid},to_id.eq.${uid}`).order("ts", { ascending: true }).limit(300);
+        if (stop || !data) return;
+        for (const r of data) {
+          if (dmSeen.current.has(r.id)) continue;
+          dmSeen.current.add(r.id);
+          const mine = r.from_id === uid;
+          addDm(mine ? r.to_handle : r.from_handle, { id: r.id, me: mine, text: r.text });
+        }
+      } catch (e) { /* table not created yet */ }
+    })();
+    const ch = sb.channel("valo-dms-" + uid)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "dms", filter: `to_id=eq.${uid}` }, (payload) => {
+        const r = payload.new; if (!r || dmSeen.current.has(r.id)) return;
+        dmSeen.current.add(r.id);
+        addDm(r.from_handle, { id: r.id, me: false, text: r.text });
+        pushNotif({ type: "dm", user: r.from_handle, tokenId: null, text: `@${r.from_handle} sent you a message` });
+      })
+      .subscribe();
+    return () => { stop = true; try { sb.removeChannel(ch); } catch (e) {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudUser && cloudUser.id]);
+  const sendDm = async (handle, text) => {
+    if (!sb || !cloudUser) { setDmLogs((D) => ({ ...D, [handle]: [...(D[handle] || []), { me: true, text }] })); return; }
+    const target = await lookupProfile(handle);
+    if (!target) { setDmLogs((D) => ({ ...D, [handle]: [...(D[handle] || []), { me: true, text }] })); return; } // sim personality
+    try {
+      const { data, error } = await sb.from("dms")
+        .insert({ from_id: cloudUser.id, from_handle: username, to_id: target.id, to_handle: target.handle, text })
+        .select("id").maybeSingle();
+      if (error) throw error;
+      if (data) dmSeen.current.add(data.id);
+      addDm(handle, { id: data ? data.id : undefined, me: true, text });
+    } catch (e) {
+      console.warn("[VALO ✉️] dm failed", e.message || e);
+      setDmLogs((D) => ({ ...D, [handle]: [...(D[handle] || []), { me: true, text }] }));
+    }
+  };
   // 🥇 RANK WATCH — your standing on the 1D real board, checked each minute.
   // Someone overtaking you, or you breaking into the top tiers, lands in the feed.
   const rankRef = useRef(null);
@@ -9855,7 +9911,7 @@ export default function App() {
                         const n = [...base]; const already = n.indexOf(id);
                         if (already >= 0) { [n[si], n[already]] = [n[already], n[si]]; } else n[si] = id;
                         setScanOrder(n); window.__valoDrag = null; }}>
-                    <TokenCard t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf}
+                    <TokenCard t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf} isMobile={isMobile}
                       onOpen={() => { setSel(sel === t.id ? null : t.id); setClickMode(null); }} /></div>
               ))}
             </div>
@@ -9903,7 +9959,7 @@ export default function App() {
                   const n = [...base]; const already = n.indexOf(id);
                   if (already >= 0) { [n[si], n[already]] = [n[already], n[si]]; } else n[si] = id;
                   setScanOrder(n); window.__valoDrag = null; }}>
-              <TokenCard t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf}
+              <TokenCard t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf} isMobile={isMobile}
                 onOpen={() => { setSel(sel === t.id ? null : t.id); setClickMode(null); }} /></div>
             ))}
           </div>
@@ -10799,7 +10855,7 @@ export default function App() {
           setDmLogs((D) => ({ ...D, [profileUser]: [...(D[profileUser] || []), { me: true, text: `💸 sent ${a} ${unit === "SOL" ? "SOL" : "$VALO"}` }] }));
         }}
         dmLog={dmLogs[profileUser] || []}
-        onSendDm={(text) => setDmLogs((D) => ({ ...D, [profileUser]: [...(D[profileUser] || []), { me: true, text }] }))} />}
+        onSendDm={(text) => sendDm(profileUser, text)} />}
       {botHub && <BotHubModal view={botHub} setView={setBotHub} orders={pendingOrders} tokens={tokens} selectedId={selected && selected.id}
         onSave={saveBot} onCancelBot={cancelBot} onClose={() => { setBotHub(null); setBotDraftLevel(null); }} isMobile={isMobile}
         onDraftLevel={(lvl, tid, side) => setBotDraftLevel(lvl ? { tokenId: tid, level: lvl, side: side || botSide } : null)}
@@ -11463,7 +11519,25 @@ export default function App() {
       )}
 
       <style>{`
-        ::-webkit-scrollbar{width:8px;height:8px} ::-webkit-scrollbar-thumb{background:#232a38;border-radius:4px}
+        /* VALO scrollbars — dark rail, glowing purple glider */
+        *{ scrollbar-width: thin; scrollbar-color: #7d5cf0 rgba(10,13,19,0.55); }
+        ::-webkit-scrollbar{ width:10px; height:10px; }
+        ::-webkit-scrollbar-track{ background: rgba(10,13,19,0.55); border-radius: 10px; }
+        ::-webkit-scrollbar-corner{ background: transparent; }
+        ::-webkit-scrollbar-thumb{
+          background: linear-gradient(180deg, #a07ff2, #7d5cf0 55%, #5b93ec);
+          border-radius: 10px; border: 2px solid rgba(10,13,19,0.85);
+          box-shadow: 0 0 8px rgba(125,92,240,0.55), inset 0 0 4px rgba(255,255,255,0.25);
+        }
+        ::-webkit-scrollbar-thumb:hover{
+          background: linear-gradient(180deg, #b899ff, #8d6bff 55%, #6ba2ff);
+          box-shadow: 0 0 14px rgba(125,92,240,0.85), inset 0 0 6px rgba(255,255,255,0.35);
+        }
+        ::-webkit-scrollbar-thumb:active{
+          background: linear-gradient(180deg, #c9b0ff, #9a7bff 55%, #7ab0ff);
+          box-shadow: 0 0 18px rgba(125,92,240,1), inset 0 0 8px rgba(255,255,255,0.45);
+        }
+        ::-webkit-scrollbar-thumb:horizontal{ background: linear-gradient(90deg, #a07ff2, #7d5cf0 55%, #5b93ec); }
         /* no double-tap / focus zoom surprises on touch — taps act instantly */
         input, textarea, select, button{ touch-action: manipulation; }
         @media(max-width:1150px){ .pt-grid{grid-template-columns:1fr !important;} }
