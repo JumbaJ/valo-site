@@ -442,7 +442,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   const total = agg.length;
   const zoomCap = Math.max(30, Math.round(agg.length * 1.2) + 10); // whole chart + a little more
   const count = Math.max(12, Math.min(view.count, zoomCap));
-  const PAD_BARS = 6;                                  // how far past either end you may drift
+  const PAD_BARS = Math.round(count * 0.85);           // roam most of a screen past either end
   const maxOff = Math.max(0, total - count);           // oldest candle at the left edge
   const offset = Math.max(-PAD_BARS, Math.min(view.offset, maxOff + PAD_BARS));
   // window of slots: slot s ↔ agg index (total - count - offset + s)
@@ -808,7 +808,13 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     const cvs = cvsRef.current; if (!cvs) return;
     const onWheel = (e) => {
       e.preventDefault();
-      setView((v) => ({ ...v, count: Math.max(12, Math.min(60000, Math.round(v.count * (e.deltaY > 0 ? 1.18 : 1 / 1.18)))) }));
+      setView((v) => {
+        const f = e.deltaY > 0 ? 1.07 : 1 / 1.07;               // fine notches, not jumps
+        const next = v.count * f;
+        // always move at least one bar so small counts still respond
+        const stepped = Math.abs(next - v.count) < 1 ? v.count + (e.deltaY > 0 ? 1 : -1) : next;
+        return { ...v, count: Math.max(12, Math.min(60000, Math.round(stepped))) };
+      });
     };
     cvs.addEventListener("wheel", onWheel, { passive: false });
     return () => cvs.removeEventListener("wheel", onWheel);
@@ -1133,7 +1139,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     if (ax) {
       // up (negative dy) → fewer candles (zoom in); down → more (zoom out)
       const dy = cy - ax.sy;
-      const factor = Math.pow(1.9, dy / 120); // smooth, ~1.9× per 120px
+      const factor = Math.pow(1.6, dy / 150); // easier travel — ~1.6× per 150px
       setView((v) => ({ ...v, count: Math.max(12, Math.min(60000, Math.round(ax.c0 * factor))) }));
       return;
     }
