@@ -2410,7 +2410,7 @@ function TierListModal({ onClose, isMobile, myBest = 0, embed = false }) {
     </div>
   );
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 94, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 540, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "80vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 13px", borderBottom: `1px solid ${T.border}` }}>
@@ -2623,7 +2623,7 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
   );
   if (embed) return body;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 94, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div data-lbscroll="1" onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 620, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "82vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         {body}
@@ -2645,7 +2645,7 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0 }, valoUsd 
     </div>
   );
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 94, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 390, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "80vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 13px", borderBottom: `1px solid ${T.border}` }}>
@@ -2684,7 +2684,7 @@ function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 
   }, [focusUser]);
   const [tab, setTab] = useState(inTop250 ? "board" : "tiers");
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 94, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 560, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "82vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 3, padding: "11px 13px 0", borderBottom: `1px solid ${T.border}` }}>
@@ -2823,7 +2823,7 @@ function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned =
   );
   const tot = buys + sells || 1;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 76, background: "rgba(4,6,10,0.84)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 116, background: "rgba(4,6,10,0.84)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 380 : 660, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "88vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, padding: "11px 13px 9px", borderBottom: `1px solid ${T.border}` }}>
@@ -2905,7 +2905,7 @@ function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOp
   );
   return (
     <div onClick={onClose}
-      style={{ position: "fixed", inset: 0, zIndex: 61, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
+      style={{ position: "fixed", inset: 0, zIndex: 106, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()}
         style={{ width: "100%", maxWidth: 780, maxHeight: "88vh", display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, overflow: "hidden" }}>
         {/* header */}
@@ -2976,7 +2976,7 @@ function MyCalloutsModal({ onClose, isMobile, myCallouts = {}, tokens = [], user
   const bestPeak = rows.reduce((m, r) => Math.max(m, r.peak), 0);
   return (
     <div onClick={onClose}
-      style={{ position: "fixed", inset: 0, zIndex: 61, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
+      style={{ position: "fixed", inset: 0, zIndex: 106, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()}
         style={{ width: "100%", maxWidth: 620, maxHeight: "86vh", display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
@@ -3029,16 +3029,24 @@ const HANDLE_B = ["mike", "queen", "lord", "boi", "wizard", "cat", "dog", "hunte
 function randomHandle(rand) {
   return HANDLE_A[Math.floor(rand() * HANDLE_A.length)] + HANDLE_B[Math.floor(rand() * HANDLE_B.length)] + (rand() < 0.5 ? String(Math.floor(rand() * 999)) : "");
 }
-function FollowListModal({ kind, list, onClose, isMobile, onOpenUser }) {
+function FollowListModal({ kind, list, onClose, isMobile, onOpenUser, ownerHandle = null, loading = false }) {
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 62, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 145, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 400, maxHeight: "80vh", display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
-          <div style={{ fontWeight: 800, fontSize: 14 }}>{kind === "followers" ? "👥 Followers" : "➡️ Following"} · {list.length}</div>
+          <div style={{ fontWeight: 800, fontSize: 14, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {kind === "followers" ? "👥 Followers" : "➡️ Following"}{ownerHandle ? ` · @${ownerHandle}` : ""} · {loading ? "…" : list.length}
+          </div>
           <button onClick={onClose} style={{ ...chip(false), padding: "5px 10px", fontSize: 12 }}>✕</button>
         </div>
         <div style={{ overflowY: "auto", padding: 10 }}>
           {list.length === 0 && <div style={{ fontFamily: T.mono, fontSize: 10.5, color: T.faint, textAlign: "center", padding: 24 }}>Nobody here yet.</div>}
+          {loading && <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, padding: "14px 8px", textAlign: "center" }}>Loading…</div>}
+          {!loading && list.length === 0 && (
+            <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, padding: "16px 8px", textAlign: "center" }}>
+              {kind === "followers" ? "No followers yet." : "Not following anyone yet."}
+            </div>
+          )}
           {list.map((u, i) => (
             <div key={i} onClick={() => onOpenUser(u)} title="Open profile"
               style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 10px", borderRadius: 9, marginBottom: 2, cursor: "pointer", background: i % 2 ? "rgba(255,255,255,0.015)" : "transparent" }}>
@@ -3051,8 +3059,11 @@ function FollowListModal({ kind, list, onClose, isMobile, onOpenUser }) {
     </div>
   );
 }
-function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, onToggleFollow, friendStatus, onFriendAction, onOpenToken, onSendFunds, dmLog = [], onSendDm, solBalance = 0, valoWallet = 0 , incomingReq = false, onAcceptReq, onDeclineReq, onOpenTierList, onOpenLeaderboard, cloudProfile = null, onOpenTrade = null }) {
+function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, onToggleFollow, friendStatus, onFriendAction, onOpenToken, onSendFunds, dmLog = [], onSendDm, solBalance = 0, valoWallet = 0 , incomingReq = false, onAcceptReq, onDeclineReq, onOpenTierList, onOpenLeaderboard, cloudProfile = null, onOpenTrade = null, onOpenFollowList = null }) {
   const [badgeTab, setBadgeTab] = useState(false); // insignia tapped → tier/leaderboard tab
+  const [dmOpen, setDmOpen] = useState(false);     // ✉️ private thread with this person
+  const dmEndRef = useRef(null);
+  useEffect(() => { if (dmOpen && dmEndRef.current) dmEndRef.current.scrollIntoView({ block: "end" }); }, [dmOpen, dmLog.length]);
   // API: replace with a real user-profile endpoint — all stats below are seeded fakes
   const rand = seededRand(hashStr("user-" + name));
   const peak = +(1 + rand() * (rand() < 0.12 ? 120 : 24)).toFixed(2);
@@ -3141,8 +3152,53 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     const b = txTo ? new Date(txTo + "T23:59:59").getTime() : Infinity;
     return x.ts >= a && x.ts <= b;                            // inclusive range, e.g. 7/3–7/9
   });
+  const dmBoard = dmOpen && friends ? (
+    <>
+      <div onClick={(e) => { e.stopPropagation(); setDmOpen(false); }}
+        style={{ position: "fixed", inset: 0, zIndex: 140, background: "rgba(4,6,10,0.72)", backdropFilter: "blur(4px)" }} />
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ position: "fixed", zIndex: 141, left: "50%", top: isMobile ? "auto" : "50%", bottom: isMobile ? 0 : "auto",
+          transform: isMobile ? "translateX(-50%)" : "translate(-50%,-50%)",
+          width: isMobile ? "100%" : "min(94vw, 420px)", maxHeight: isMobile ? "78dvh" : "70vh",
+          display: "flex", flexDirection: "column", background: T.panel,
+          border: `1px solid ${VALO_PURPLE}55`, borderRadius: isMobile ? "14px 14px 0 0" : 14,
+          boxShadow: "0 24px 70px rgba(0,0,0,0.7)", overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 13px", borderBottom: `1px solid ${T.border}` }}>
+          <span style={{ fontSize: 13 }}>✉️</span>
+          <span style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{name}</span>
+          <button onClick={() => setDmOpen(false)} style={{ ...chip(false), padding: "3px 9px", fontSize: 10 }}>✕</button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "10px 12px", minHeight: 120 }}>
+          {dmLog.length === 0 && (
+            <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center", padding: "22px 8px" }}>
+              No messages yet — say gm.
+            </div>
+          )}
+          {dmLog.map((m, i) => (
+            <div key={m.id || i} style={{ display: "flex", justifyContent: m.me ? "flex-end" : "flex-start", marginBottom: 5 }}>
+              <span style={{ fontFamily: T.mono, fontSize: 10.5, lineHeight: 1.45, color: m.me ? T.text : T.dim,
+                background: m.me ? "rgba(125,92,240,0.18)" : "rgba(255,255,255,0.05)",
+                border: `1px solid ${m.me ? VALO_PURPLE + "44" : T.border}`,
+                borderRadius: m.me ? "10px 10px 3px 10px" : "10px 10px 10px 3px",
+                padding: "6px 10px", maxWidth: "80%", wordBreak: "break-word" }}>{m.text}</span>
+            </div>
+          ))}
+          <div ref={dmEndRef} />
+        </div>
+        <div style={{ display: "flex", gap: 6, padding: "10px 12px", borderTop: `1px solid ${T.border}` }}>
+          <input value={dmDraft} onChange={(e) => setDmDraft(e.target.value)} placeholder={`Message @${name}…`} autoFocus={!isMobile}
+            onKeyDown={(e) => { if (e.key === "Enter" && dmDraft.trim()) { onSendDm(dmDraft.trim()); setDmDraft(""); } }}
+            style={{ ...inp, flex: 1, padding: "9px 11px", fontSize: 11 }} />
+          <button onClick={() => { if (dmDraft.trim()) { onSendDm(dmDraft.trim()); setDmDraft(""); } }}
+            style={{ ...chip(true), padding: "9px 15px", fontSize: 11, fontWeight: 900 }}>Send</button>
+        </div>
+      </div>
+    </>
+  ) : null;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 92, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <>
+    {dmBoard}
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 137, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "88vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14 }}>
         {/* profile head */}
@@ -3155,8 +3211,27 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                 {cloudProfile && <span title="Verified VALO account — real holdings shown"
                   style={{ fontFamily: T.mono, fontSize: 7, fontWeight: 900, letterSpacing: 1, color: T.blue, flexShrink: 0,
                     border: `1px solid ${T.blue}66`, background: "rgba(59,130,246,0.12)", borderRadius: 6, padding: "2px 6px" }}>☁ REAL</span>}
+                <button onClick={(e) => { e.stopPropagation(); if (friends) setDmOpen(true); }}
+                  title={friends ? `Message @${name}` : `Friends only — send @${name} a friend request to message them`}
+                  style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 3, cursor: friends ? "pointer" : "default",
+                    border: `1px solid ${friends ? VALO_PURPLE + "66" : T.border}`,
+                    background: friends ? "rgba(125,92,240,0.12)" : "rgba(255,255,255,0.02)",
+                    color: friends ? VALO_PURPLE : T.faint, opacity: friends ? 1 : 0.65,
+                    borderRadius: 7, padding: "2px 7px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, lineHeight: 1.5 }}>
+                  {friends ? "✉️" : "🔒"}{friends && dmLog.length > 0 && <span style={{ fontSize: 8 }}>{dmLog.length}</span>}
+                </button>
               </div>
-              <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{fols} followers · {folg} following</div>
+              <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>
+                <span onClick={(e) => { e.stopPropagation(); if (onOpenFollowList) onOpenFollowList("followers", name); }}
+                  title={`See who follows @${name}`}
+                  style={{ cursor: onOpenFollowList ? "pointer" : "default", textDecoration: onOpenFollowList ? "underline dotted" : "none", textUnderlineOffset: 2 }}>
+                  <b style={{ color: T.text }}>{fols}</b> followers</span>
+                {" · "}
+                <span onClick={(e) => { e.stopPropagation(); if (onOpenFollowList) onOpenFollowList("following", name); }}
+                  title={`See who @${name} follows`}
+                  style={{ cursor: onOpenFollowList ? "pointer" : "default", textDecoration: onOpenFollowList ? "underline dotted" : "none", textUnderlineOffset: 2 }}>
+                  <b style={{ color: T.text }}>{folg}</b> following</span>
+              </div>
             </div>
             <div onClick={() => onOpenTierList && onOpenTierList()} title="Tap: tiers & leaderboards — if they're on the board, we jump straight to their name"
               style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
@@ -3420,6 +3495,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
         </div>
       </div>
     </div>
+    </>
   );
 }
 function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], onOpenToken, onOpenUser, onAccept, onDecline, onCloudReq, notifSetting, setNotifSetting }) {
@@ -3428,7 +3504,7 @@ function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], o
   const icon = (t) => (t === "callout" ? "📣" : t === "follower" ? "👥" : t === "tier" ? "🏆"
     : t === "rank" ? "🥇" : t === "system" ? "⚙" : t === "dm" ? "✉️" : "🤝");
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 62, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 107, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, maxHeight: "84vh", display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
           <div style={{ fontWeight: 800, fontSize: 14 }}>🔔 Notifications</div>
@@ -3499,7 +3575,7 @@ function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], o
 function NotifToast({ notif, isMobile, onClick, onClose }) {
   return (
     <div onClick={onClick} className="co-open"
-      style={{ position: "fixed", top: isMobile ? 62 : 36, right: 12, zIndex: 70, maxWidth: 290, cursor: "pointer",
+      style={{ position: "fixed", top: isMobile ? 62 : 36, right: 12, zIndex: 110, maxWidth: 290, cursor: "pointer",
         background: T.panel2, border: `1px solid ${VALO_PURPLE}55`, borderRadius: 11, padding: "9px 12px",
         boxShadow: "0 12px 34px rgba(0,0,0,0.65)", transformOrigin: "90% 0%" }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
@@ -3585,7 +3661,7 @@ function BotHubModal({ view, setView, orders = [], tokens = [], selectedId, onSa
     </div>
   );
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 110, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 440, maxHeight: "84vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
           <div style={{ fontWeight: 800, fontSize: 14 }}>🤖 {view && view.mode === "edit" ? "Edit bot" : "Pending bots"}</div>
@@ -3698,7 +3774,7 @@ function BotRunStatsModal({ run, onClose, isMobile }) {
   const pnl = run.exits.reduce((s, e) => s + e.pnlUsd, 0);
   const up = pnl >= 0;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 71, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 111, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 420, maxHeight: "84vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
           <div>
@@ -4983,7 +5059,7 @@ function DropFxPill({ fx }) {
     ], { duration: 300, easing: "cubic-bezier(.3,.75,.35,1)", fill: "forwards" });
   }, [fx.key]);
   return (
-    <div ref={r} style={{ position: "fixed", left: fx.fx, top: fx.fy, zIndex: 97, pointerEvents: "none",
+    <div ref={r} style={{ position: "fixed", left: fx.fx, top: fx.fy, zIndex: 142, pointerEvents: "none",
       fontFamily: T.mono, fontWeight: 900, fontSize: 13,
       background: `linear-gradient(135deg, hsl(${fx.hue},70%,24%), hsl(${fx.hue},80%,40%))`,
       border: `1.5px solid ${VALO_PURPLE}`, color: "#fff", borderRadius: 11, padding: "9px 14px",
@@ -5603,7 +5679,7 @@ function WhitepaperModal({ onClose, isMobile }) {
 
   return (
     <div onClick={onClose}
-      style={{ position: "fixed", inset: 0, zIndex: 61, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex",
+      style={{ position: "fixed", inset: 0, zIndex: 106, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex",
         alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
         padding: isMobile ? "max(12px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()}
@@ -6258,7 +6334,7 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
 
   return (
     <div onClick={onClose}
-      style={{ position: "fixed", inset: 0, zIndex: 62, background: "rgba(4,6,10,0.6)", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      style={{ position: "fixed", inset: 0, zIndex: 107, background: "rgba(4,6,10,0.6)", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div onClick={(e) => e.stopPropagation()}
         style={{ width: "min(92vw, 360px)", background: T.panel, border: `1px solid ${col}`, borderRadius: 14, padding: 16, boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
         {/* header */}
@@ -7420,6 +7496,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudUser && cloudUser.id]);
   const sendDm = async (handle, text) => {
+    if (!friendsList.includes(handle)) return; // friends only — enforced again in the database
     if (!sb || !cloudUser) { setDmLogs((D) => ({ ...D, [handle]: [...(D[handle] || []), { me: true, text }] })); return; }
     const target = await lookupProfile(handle);
     if (!target) { setDmLogs((D) => ({ ...D, [handle]: [...(D[handle] || []), { me: true, text }] })); return; } // sim personality
@@ -7470,6 +7547,31 @@ export default function App() {
     return () => { stop = true; clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudUser && cloudUser.id]);
+  // 👥 whose follow list are we viewing? { kind, handle, names[] }
+  const [otherFollowList, setOtherFollowList] = useState(null);
+  const openFollowListFor = async (kind, handle) => {
+    // your own lists already live in state
+    if (handle && username && handle.toLowerCase() === username.toLowerCase()) { setFollowListOpen(kind); return; }
+    setOtherFollowList({ kind, handle, names: null });          // opens in a loading state
+    if (!sb) { setOtherFollowList({ kind, handle, names: [] }); return; }
+    try {
+      const target = await lookupProfile(handle);
+      if (!target) { setOtherFollowList({ kind, handle, names: [] }); return; }
+      let names = [];
+      if (kind === "followers") {
+        const { data } = await sb.from("follows").select("follower_handle").eq("followed_id", target.id).limit(200);
+        names = [...new Set((data || []).map((r) => r.follower_handle).filter(Boolean))];
+      } else {
+        const { data } = await sb.from("follows").select("followed_id").eq("follower_id", target.id).limit(200);
+        const ids = (data || []).map((r) => r.followed_id).filter(Boolean);
+        if (ids.length) {
+          const { data: profs } = await sb.from("profiles").select("handle").in("id", ids);
+          names = [...new Set((profs || []).map((p) => p.handle).filter(Boolean))];
+        }
+      }
+      setOtherFollowList({ kind, handle, names });
+    } catch (e) { setOtherFollowList({ kind, handle, names: [] }); }
+  };
   // 👥 REAL social graph — your followers, following and friends come from the
   // database and refresh live as people follow you or accept requests
   const loadGraph = async () => {
@@ -10367,7 +10469,7 @@ export default function App() {
 
       {/* background-mode toast (easter egg feedback) */}
       {themeFlash && (
-        <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: 90, zIndex: 80, pointerEvents: "none",
+        <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: 90, zIndex: 118, pointerEvents: "none",
           display: "flex", alignItems: "center", gap: 9, background: T.panel, border: `1px solid ${T.border2}`,
           borderRadius: 999, padding: "8px 15px", boxShadow: "0 14px 40px rgba(0,0,0,0.5)" }}>
           <span style={{ width: 13, height: 13, borderRadius: "50%", background: THEMES[themeIdx].swatch, border: `1px solid ${T.border2}` }} />
@@ -10390,7 +10492,7 @@ export default function App() {
       {!isMobile && quickArmOn && armPop && (
         <button data-armpop="1" onClick={() => { const fn = quickArmRef.current; fn && fn(); setArmPop(null); }}
           title="Arm this strategy at the line you just set"
-          style={{ position: "fixed", left: armPop.x + 14, top: Math.max(8, armPop.y - 48), zIndex: 92,
+          style={{ position: "fixed", left: armPop.x + 14, top: Math.max(8, armPop.y - 48), zIndex: 137,
             border: "none", borderRadius: 9, padding: "7px 14px", fontFamily: T.mono, fontWeight: 900, letterSpacing: 1.2,
             background: T.blue, color: "#07101d", cursor: "pointer", boxShadow: `0 4px 18px rgba(46,112,204,0.55), 0 0 10px ${T.blue}66`,
             animation: "coPop .18s ease", textAlign: "left", lineHeight: 1.25 }}>
@@ -10428,8 +10530,8 @@ export default function App() {
 
       {cloudOpen && (
         <>
-          <div onClick={() => setCloudOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 96, background: "rgba(4,6,10,0.7)", backdropFilter: "blur(3px)" }} />
-          <div style={{ position: "fixed", left: "50%", top: "22%", transform: "translateX(-50%)", zIndex: 97, width: "min(92vw, 360px)",
+          <div onClick={() => setCloudOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 141, background: "rgba(4,6,10,0.7)", backdropFilter: "blur(3px)" }} />
+          <div style={{ position: "fixed", left: "50%", top: "22%", transform: "translateX(-50%)", zIndex: 142, width: "min(92vw, 360px)",
             background: T.panel, border: `1px solid ${VALO_PURPLE}66`, borderRadius: 14, padding: 16, boxShadow: "0 24px 70px rgba(0,0,0,0.7)" }}>
             <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, letterSpacing: 1.5, color: VALO_PURPLE, marginBottom: 4 }}>☁ VALO ACCOUNT</div>
             {cloudUser ? (
@@ -10490,7 +10592,7 @@ export default function App() {
         </button>
       )}
       {ecoFull && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 88, background: T.bg, display: "flex", flexDirection: "column",
+        <div style={{ position: "fixed", inset: 0, zIndex: 102, background: T.bg, display: "flex", flexDirection: "column",
           opacity: ecoDim ? 0.06 : 1, pointerEvents: ecoDim ? "none" : "auto", transition: "opacity .22s ease" }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "max(10px, env(safe-area-inset-top)) 10px 8px", borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
             <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.04)", border: `1px solid ${VALO_PURPLE}`, borderRadius: 9, padding: "8px 10px" }}>
@@ -10563,8 +10665,8 @@ export default function App() {
         );
         return (
           <>
-            <div onClick={() => setPosDrawer(false)} style={{ position: "fixed", inset: 0, zIndex: 90, background: "rgba(4,6,10,0.55)" }} />
-            <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 91, width: "min(92vw, 380px)", background: "rgba(12,15,22,0.98)",
+            <div onClick={() => setPosDrawer(false)} style={{ position: "fixed", inset: 0, zIndex: 135, background: "rgba(4,6,10,0.55)" }} />
+            <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 136, width: "min(92vw, 380px)", background: "rgba(12,15,22,0.98)",
               boxShadow: "-12px 0 40px rgba(0,0,0,0.6)", overflowY: "auto", padding: "max(10px, env(safe-area-inset-top)) 12px 16px",
               animation: "posSlide .28s cubic-bezier(.22,.8,.3,1)" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
@@ -10641,8 +10743,8 @@ export default function App() {
       })()}
       {secDelete && (
         <>
-          <div onClick={() => setSecDelete(null)} style={{ position: "fixed", inset: 0, zIndex: 96 }} />
-          <div style={{ position: "fixed", left: Math.min(secDelete.x, (typeof window !== "undefined" ? window.innerWidth : 999) - 230), top: Math.min(secDelete.y, (typeof window !== "undefined" ? window.innerHeight : 999) - 150), zIndex: 97,
+          <div onClick={() => setSecDelete(null)} style={{ position: "fixed", inset: 0, zIndex: 141 }} />
+          <div style={{ position: "fixed", left: Math.min(secDelete.x, (typeof window !== "undefined" ? window.innerWidth : 999) - 230), top: Math.min(secDelete.y, (typeof window !== "undefined" ? window.innerHeight : 999) - 150), zIndex: 142,
             background: T.panel, border: `1px solid ${T.red}66`, borderRadius: 11, padding: 6, minWidth: 200,
             boxShadow: "0 14px 40px rgba(0,0,0,0.6)", animation: "coPop .12s ease" }}>
             <div style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, color: T.text, padding: "4px 8px 7px", lineHeight: 1.5 }}>
@@ -10665,16 +10767,16 @@ export default function App() {
         </>
       )}
       {/* file-drag ghost — follows the pointer during any scanner drag */}
-      <div ref={dragGhostRef} style={{ display: "none", position: "fixed", left: 0, top: 0, zIndex: 120, pointerEvents: "none",
+      <div ref={dragGhostRef} style={{ display: "none", position: "fixed", left: 0, top: 0, zIndex: 200, pointerEvents: "none",
         alignItems: "center", gap: 5, background: "rgba(17,21,29,0.96)", border: `1.5px solid ${VALO_PURPLE}`, borderRadius: 999,
         padding: "5px 12px", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, whiteSpace: "nowrap",
         boxShadow: "0 10px 28px rgba(0,0,0,0.6), 0 0 12px rgba(125,92,240,0.5)" }} />
       {walletPop && (
         <>
-          <div onClick={() => setWalletPop(null)} style={{ position: "fixed", inset: 0, zIndex: 93 }} />
+          <div onClick={() => setWalletPop(null)} style={{ position: "fixed", inset: 0, zIndex: 138 }} />
           <button onClick={() => { setWalletPop(null); setPortfolioDrawer(true); }}
             onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); setWalletPop(null); setPortfolioDrawer(true); }}
-            style={{ position: "fixed", left: walletPop.x, top: walletPop.y, zIndex: 94, border: `1.5px solid ${VALO_PURPLE}`,
+            style={{ position: "fixed", left: walletPop.x, top: walletPop.y, zIndex: 139, border: `1.5px solid ${VALO_PURPLE}`,
               background: T.panel, color: T.text, borderRadius: 11, padding: "10px 15px", fontFamily: T.mono, fontSize: 11.5, fontWeight: 900,
               boxShadow: `0 12px 34px rgba(0,0,0,0.6), 0 0 14px ${VALO_PURPLE}55`, cursor: "pointer", animation: "coPop .14s ease" }}>
             💼 OPEN WALLET
@@ -10682,7 +10784,7 @@ export default function App() {
         </>
       )}
       {watchMenu && (
-        <div data-wmenu="1" style={{ position: "fixed", left: watchMenu.x, top: watchMenu.y, zIndex: 96,
+        <div data-wmenu="1" style={{ position: "fixed", left: watchMenu.x, top: watchMenu.y, zIndex: 141,
           background: T.panel, border: `1px solid ${VALO_PURPLE}66`, borderRadius: 11, padding: 5, minWidth: 176,
           boxShadow: "0 14px 40px rgba(0,0,0,0.6)", animation: "coPop .12s ease" }}>
           {watchMenu.confirmRemove != null && (
@@ -10734,12 +10836,12 @@ export default function App() {
         </div>
       )}
       {isMobile && plusPop > 0 && (
-        <div key={"m" + plusPop} style={{ pointerEvents: "none", position: "fixed", right: 12, top: `calc(${chatTabTop}% - 24px)`, zIndex: 92,
+        <div key={"m" + plusPop} style={{ pointerEvents: "none", position: "fixed", right: 12, top: `calc(${chatTabTop}% - 24px)`, zIndex: 137,
           fontFamily: T.mono, fontSize: 15, fontWeight: 900, color: T.green, textShadow: `0 0 12px ${T.green}`,
           animation: "plusFloat 1.05s ease forwards" }}>+1</div>
       )}
       {watchTrash && (
-        <div data-wtrash="1" style={{ position: "fixed", left: Math.min(watchTrash.x, (typeof window !== "undefined" ? window.innerWidth : 999) - 130), top: watchTrash.y, zIndex: 96,
+        <div data-wtrash="1" style={{ position: "fixed", left: Math.min(watchTrash.x, (typeof window !== "undefined" ? window.innerWidth : 999) - 130), top: watchTrash.y, zIndex: 141,
           background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 10, padding: 4, boxShadow: "0 14px 40px rgba(0,0,0,0.6)", animation: "coPop .12s ease" }}>
           {watchSections.filter((s2) => s2.id !== watchTrash.sec).slice(0, 4).map((s2) => (
             <button key={s2.id} onClick={() => { watchAdd(watchTrash.id, s2.id); setWatchTrash(null); }}
@@ -10760,7 +10862,7 @@ export default function App() {
         </div>
       )}
       {pnlDrop && (
-        <div data-pnldrop="1" style={{ position: "fixed", left: pnlDrop.x, top: pnlDrop.y, zIndex: 96,
+        <div data-pnldrop="1" style={{ position: "fixed", left: pnlDrop.x, top: pnlDrop.y, zIndex: 141,
           background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 11, padding: 5, minWidth: 142,
           boxShadow: "0 14px 40px rgba(0,0,0,0.6)", animation: "coPop .14s ease" }}>
           <div style={{ fontFamily: T.mono, fontSize: 6.5, letterSpacing: 1.2, color: T.faint, padding: "3px 8px 5px" }}>BOT PNL · PICK A WINDOW</div>
@@ -10780,7 +10882,7 @@ export default function App() {
         </div>
       )}
       {chipEditCfg && (
-        <div onClick={() => setChipEditCfg(null)} style={{ position: "fixed", inset: 0, zIndex: 95, background: "rgba(4,6,10,0.7)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <div onClick={() => setChipEditCfg(null)} style={{ position: "fixed", inset: 0, zIndex: 140, background: "rgba(4,6,10,0.7)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 300, background: T.panel, border: `1px solid ${chipEditErr ? T.red : T.border2}`, borderRadius: 14, padding: 15, boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
             <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, letterSpacing: 1.5, marginBottom: 3 }}>{chipEditCfg.title}</div>
             <div style={{ fontFamily: T.mono, fontSize: 8, color: chipEditErr ? T.red : T.faint, marginBottom: 9 }}>{chipEditErr ? "that number's outside the range" : chipEditCfg.hint}</div>
@@ -10819,10 +10921,16 @@ export default function App() {
         onAccept={(u) => { setFriendReqs((L) => L.filter((x) => x !== u)); setFriendsList((L) => [...L, u]); }}
         onDecline={(u) => setFriendReqs((L) => L.filter((x) => x !== u))}
         notifSetting={notifSetting} setNotifSetting={setNotifSetting} />}
+      {otherFollowList && <FollowListModal kind={otherFollowList.kind} list={otherFollowList.names || []}
+        ownerHandle={otherFollowList.handle} loading={otherFollowList.names === null}
+        onClose={() => setOtherFollowList(null)} isMobile={isMobile}
+        onOpenUser={(u) => { setOtherFollowList(null); setProfileUser(u); }} />}
       {followListOpen && <FollowListModal kind={followListOpen} list={followListOpen === "followers" ? followersList : followingList}
-        onClose={() => setFollowListOpen(null)} isMobile={isMobile} onOpenUser={(u) => setProfileUser(u)} />}
+        onClose={() => setFollowListOpen(null)} isMobile={isMobile}
+        onOpenUser={(u) => { setFollowListOpen(null); setProfileUser(u); }} />}
       {profileUser && <UserProfileModal name={profileUser} onClose={() => { setProfileUser(null); setProfileCloud(null); }} isMobile={isMobile} tokens={tokens}
         cloudProfile={profileCloud}
+        onOpenFollowList={(kind, handle) => openFollowListFor(kind, handle)}
         onOpenTrade={(x) => {
           const tk = tokens.find((t3) => x.key && String(t3.pool || t3.id) === String(x.key)) ||
             tokens.find((t3) => t3.id === x.t.id) || tokens.find((t3) => t3.sym === x.t.sym);
@@ -10984,7 +11092,7 @@ export default function App() {
       {/* WHY IT'S TRENDING / DEV WALLET POPUP (fills the screen) */}
       {trendOpen && selected && (
         <div onClick={() => setTrendOpen(false)}
-          style={{ position: "fixed", inset: 0, zIndex: 62, background: "rgba(4,6,10,0.8)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 20 }}>
+          style={{ position: "fixed", inset: 0, zIndex: 107, background: "rgba(4,6,10,0.8)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 20 }}>
           <div onClick={(e) => e.stopPropagation()}
             style={{ width: "min(96vw, 720px)", height: isMobile ? "94vh" : "88vh", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 16, boxShadow: "0 30px 90px rgba(0,0,0,0.7)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
             {/* header */}
@@ -11139,7 +11247,7 @@ export default function App() {
       {/* CLAIM MODAL */}
       {claimOpen && (
         <div onClick={() => !claiming && setClaimOpen(false)}
-          style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(4,6,10,0.72)", backdropFilter: "blur(3px)",
+          style={{ position: "fixed", inset: 0, zIndex: 105, background: "rgba(4,6,10,0.72)", backdropFilter: "blur(3px)",
             display: "flex", alignItems: "flex-start", justifyContent: "center",
             overflowY: "auto", WebkitOverflowScrolling: "touch",
             padding: "max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom))" }}>
@@ -11299,14 +11407,14 @@ export default function App() {
 
           <div onClick={() => setDrawerOpen(false)}
             style={{
-              position: "fixed", inset: 0, zIndex: 84,
+              position: "fixed", inset: 0, zIndex: 100,
               background: "rgba(4,6,10,0.55)", backdropFilter: "blur(2px)",
               opacity: drawerOpen ? 1 : 0, pointerEvents: drawerOpen ? "auto" : "none",
               transition: "opacity .28s ease",
             }} />
 
           <div style={{
-            position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 85,
+            position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 101,
             width: "min(90vw, 400px)", background: "rgba(12,15,22,0.98)",
             borderLeft: `1px solid ${T.border2}`, boxShadow: "-12px 0 40px rgba(0,0,0,0.6)",
             transform: drawerOpen ? "translateX(0)" : "translateX(102%)",
@@ -11433,11 +11541,11 @@ export default function App() {
           </button>
 
           <div onClick={() => setPortfolioDrawer(false)}
-            style={{ position: "fixed", inset: 0, zIndex: 88, background: "rgba(4,6,10,0.55)", backdropFilter: "blur(2px)",
+            style={{ position: "fixed", inset: 0, zIndex: 102, background: "rgba(4,6,10,0.55)", backdropFilter: "blur(2px)",
               opacity: portfolioDrawer ? 1 : 0, pointerEvents: portfolioDrawer ? "auto" : "none", transition: "opacity .28s ease" }} />
 
           <div style={{
-            position: "fixed", top: 0, right: 0, bottom: 0, left: 0, zIndex: 89,
+            position: "fixed", top: 0, right: 0, bottom: 0, left: 0, zIndex: 103,
             width: "100vw", background: "rgba(12,15,22,0.98)",
             boxShadow: "-12px 0 40px rgba(0,0,0,0.6)",
             transform: portfolioDrawer ? "translateX(0)" : "translateX(102%)",
