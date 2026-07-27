@@ -6923,12 +6923,14 @@ export default function App() {
   const [followListOpen, setFollowListOpen] = useState(null);// "followers" | "following"
   const [dmLogs, setDmLogs] = useState({});                  // { name: [{me, text}] }
   const unreadCount = notifs.filter((n) => !n.read).length + friendReqs.length;
+  const notifSaveRef = useRef(null); // set once the cloud is ready
   const pushNotif = (n) => {
     const notif = { id: Date.now() + Math.random(), ts: Date.now(), read: false, ...n };
     setNotifs((N) => [notif, ...N].slice(0, 200));           // history log
     setNotifToast(notif);
     clearTimeout(notifTimer.current);
     notifTimer.current = setTimeout(() => setNotifToast(null), 10000); // text fades after 10s
+    if (notifSaveRef.current && !n.noSave) notifSaveRef.current(notif); // survives refresh
   };
   const navigateToToken = (tokenId) => {
     const tk = tokens.find((t) => String(t.id) === String(tokenId));
@@ -7547,6 +7549,49 @@ export default function App() {
     return () => { stop = true; clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudUser && cloudUser.id]);
+  // 🔔 PERSISTENT NOTIFICATIONS — your feed follows your account, not the tab
+  const notifLoaded = useRef(false);
+  useEffect(() => {
+    if (!sb || !cloudUser) { notifSaveRef.current = null; notifLoaded.current = false; return; }
+    const uid = cloudUser.id;
+    notifSaveRef.current = (n) => {
+      sb.from("notifications").insert({
+        user_id: uid, kind: n.type || "system", body: n.text || "",
+        from_handle: n.user || null, token_key: n.tokenId != null ? String(n.tokenId) : null,
+        req_id: n.reqId != null ? String(n.reqId) : null, read: false,
+      }).then(({ error }) => { if (error) console.warn("[VALO 🔔] save failed", error.message); });
+    };
+    let stop = false;
+    (async () => {
+      try {
+        const { data } = await sb.from("notifications").select("*")
+          .eq("user_id", uid).order("ts", { ascending: false }).limit(120);
+        if (stop || !data) return;
+        const restored = data.map((r) => ({
+          id: "n" + r.id, dbId: r.id, ts: new Date(r.ts).getTime(), read: !!r.read,
+          type: r.kind, text: r.body, user: r.from_handle || null,
+          tokenId: r.token_key != null && !isNaN(+r.token_key) ? +r.token_key : null,
+          reqId: r.req_id != null && !isNaN(+r.req_id) ? +r.req_id : r.req_id,
+        }));
+        // merge under anything that arrived live in this session
+        setNotifs((N) => {
+          const seen = new Set(N.map((x) => x.text + "|" + x.ts));
+          return [...N, ...restored.filter((r) => !seen.has(r.text + "|" + r.ts))].slice(0, 200);
+        });
+        notifLoaded.current = true;
+      } catch (e) { /* table not created yet */ }
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudUser && cloudUser.id]);
+  // opening the panel marks everything read — on this device and every other
+  const markNotifsRead = () => {
+    setNotifs((N) => N.map((n) => ({ ...n, read: true })));
+    if (sb && cloudUser) {
+      sb.from("notifications").update({ read: true }).eq("user_id", cloudUser.id).eq("read", false)
+        .then(({ error }) => { if (error) console.warn("[VALO 🔔] read sync failed", error.message); });
+    }
+  };
   // 👥 whose follow list are we viewing? { kind, handle, names[] }
   const [otherFollowList, setOtherFollowList] = useState(null);
   const openFollowListFor = async (kind, handle) => {
@@ -9783,7 +9828,7 @@ export default function App() {
               </button>
               {/* whitepaper + claim */}
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <button onClick={() => { setNotifOpen(true); setNotifs((N) => N.map((n) => ({ ...n, read: true }))); }} title="Notifications"
+                <button onClick={() => { setNotifOpen(true); markNotifsRead(); }} title="Notifications"
                   style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
                     border: `1px solid ${T.border2}`, background: "rgba(125,92,240,0.08)", borderRadius: 9, padding: "7px 9px" }}>
                   <span style={{ fontSize: 15 }}>🔔</span>
@@ -9886,7 +9931,7 @@ export default function App() {
             </div>
 
             {/* NOTIFICATIONS */}
-            <button onClick={() => { setNotifOpen(true); setNotifs((N) => N.map((n) => ({ ...n, read: true }))); }} title="Notifications — followed callouts, followers, friend requests"
+            <button onClick={() => { setNotifOpen(true); markNotifsRead(); }} title="Notifications — followed callouts, followers, friend requests"
               style={{ position: "relative", display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
                 border: `1px solid ${T.border2}`, background: "rgba(125,92,240,0.06)", borderRadius: 9, padding: "6px 12px" }}>
               <span style={{ fontSize: 15 }}>🔔</span>
