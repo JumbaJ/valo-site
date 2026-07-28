@@ -8465,6 +8465,9 @@ export default function App() {
   // ♾ ENDLESS SCANNER — more real tokens append as you reach the bottom
   const [moreToks, setMoreToks] = useState([]);
   const [pageScrolled, setPageScrolled] = useState(false);
+  const [scanScrolled, setScanScrolled] = useState(false);  // PC scanner column
+  const [topFlash, setTopFlash] = useState(false);          // ▲ pressed → purple
+  const flashTop = () => { setTopFlash(true); setTimeout(() => setTopFlash(false), 420); };
   useEffect(() => {
     if (!isMobile) return;
     const onS = () => setPageScrolled(window.scrollY > 260);
@@ -10785,13 +10788,16 @@ export default function App() {
                     borderRadius: 9, padding: "0 13px", fontSize: 15, fontWeight: 900, cursor: "pointer" }}>{compactList ? "▦" : "▤"}</button>
               </div>
               {/* ▲ back to the top — a full row that fades in once you're down the list */}
-              <div onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+              <div onClick={() => { flashTop(); window.scrollTo({ top: 0, behavior: "smooth" }); }}
                 style={{ marginTop: 5, height: pageScrolled ? 22 : 0, opacity: pageScrolled ? 1 : 0,
-                  overflow: "hidden", transition: "height .18s ease, opacity .18s ease",
+                  overflow: "hidden",
+                  transition: "height .18s ease, opacity .18s ease, background .18s, color .18s, box-shadow .18s",
                   display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
-                  background: "rgba(15,19,28,0.42)", border: pageScrolled ? `1px solid ${T.border2}55` : "none",
-                  borderRadius: 8, color: T.faint, fontFamily: T.mono, fontSize: 10, letterSpacing: 2,
-                  backdropFilter: "blur(3px)" }}>▲</div>
+                  background: topFlash ? "rgba(125,92,240,0.28)" : "rgba(15,19,28,0.42)",
+                  border: pageScrolled ? `1px solid ${topFlash ? VALO_PURPLE : T.border2 + "55"}` : "none",
+                  boxShadow: topFlash ? `0 0 14px ${VALO_PURPLE}88` : "none",
+                  borderRadius: 8, color: topFlash ? VALO_PURPLE : T.faint, fontFamily: T.mono, fontSize: 10,
+                  letterSpacing: 2, backdropFilter: "blur(3px)" }}>▲</div>
             </StickySearch>
 
             <div style={{ display: "grid", gap: compactList ? 6 : 10, paddingRight: 6 }}>
@@ -10843,16 +10849,22 @@ export default function App() {
           <div ref={scannerRef}
             onWheel={(e) => e.stopPropagation()}
             onScroll={(e) => { const el = e.currentTarget;
+              setScanScrolled(el.scrollTop > 180);
               if (el.scrollHeight - el.scrollTop - el.clientHeight < 380) loadMoreTokens(); }}
             style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start",
             transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s", display: "grid", gap: 10,
             maxHeight: "calc((100vh - 30px) / 1.13 - var(--stkTop))", overflowY: "auto", padding: "2px 10px 2px 2px" }}>
-            <button onClick={() => { const el = scannerRef.current; if (el) el.scrollTo({ top: 0, behavior: "smooth" }); }}
+            <button onClick={() => { flashTop(); const el = scannerRef.current; if (el) el.scrollTo({ top: 0, behavior: "smooth" }); }}
               title="Back to the top of the scanner"
-              style={{ position: "sticky", top: 0, zIndex: 3, justifySelf: "stretch", marginRight: 30, height: 22,
+              style={{ position: "sticky", top: 0, zIndex: 3, justifySelf: "stretch", marginRight: 30,
+                height: scanScrolled ? 22 : 0, opacity: scanScrolled ? 1 : 0, overflow: "hidden",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                background: "rgba(15,19,28,0.42)", border: `1px solid ${T.border2}55`, borderRadius: 8,
-                cursor: "pointer", color: T.faint, fontSize: 11, letterSpacing: 2, marginBottom: -22, backdropFilter: "blur(3px)" }}>▲</button>
+                background: topFlash ? "rgba(125,92,240,0.28)" : "rgba(15,19,28,0.42)",
+                border: `1px solid ${topFlash ? VALO_PURPLE : T.border2 + "55"}`, borderRadius: 8,
+                boxShadow: topFlash ? `0 0 14px ${VALO_PURPLE}88` : "none",
+                cursor: "pointer", color: topFlash ? VALO_PURPLE : T.faint, fontSize: 11, letterSpacing: 2,
+                marginBottom: scanScrolled ? -22 : 0, backdropFilter: "blur(3px)",
+                transition: "height .18s ease, opacity .18s ease, background .18s, color .18s, box-shadow .18s" }}>▲</button>
             <button onClick={() => setScanCollapsed(true)} title="Fold the scanner into a rail"
               style={{ position: "sticky", top: 0, zIndex: 3, justifySelf: "end", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center",
                 background: "rgba(15,19,28,0.9)", border: `1px solid ${T.border2}`, borderRadius: 7, cursor: "pointer", color: T.dim, fontSize: 12, marginBottom: -34 }}>‹</button>
