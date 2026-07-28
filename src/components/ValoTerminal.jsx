@@ -8444,7 +8444,11 @@ export default function App() {
         if (!r.ok) return;
         const j = await r.json();
         if (stop || !Array.isArray(j)) return;
-        setMktHits(j.map(adoptMarketToken));
+        setMktHits(j.map(adoptMarketToken).map((t) => {
+          // reuse the board's object when we already have this pool, so ids stay stable
+          const have = (tokensRef.current || []).find((b) => String(b.pool || "") === String(t.pool));
+          return have || t;
+        }));
       } catch (e) { /* keep local results */ }
     }, 320);
     return () => { stop = true; clearTimeout(id); };
@@ -8536,7 +8540,10 @@ export default function App() {
           morePage.current = page;
           setMoreToks((M) => {
             const seen = new Set([...M.map((m) => m.pool), ...(tokensRef.current || []).map((t) => t.pool).filter(Boolean)]);
-            const add = j.filter((x) => !seen.has(x.id)).map(adoptMarketToken);
+            const add = j.filter((x) => !seen.has(x.id)).map(adoptMarketToken)
+              // never re-create a card the board already holds — that orphaned
+              // the current selection and froze the chart
+              .filter((t) => !(tokensRef.current || []).some((b) => String(b.pool || "") === String(t.pool)));
             return [...M, ...add];
           });
         }
@@ -9146,6 +9153,16 @@ export default function App() {
   }, [sel]);
 
   const selected = tokens.find((t) => t.id === sel) || null;
+  const selPoolRef = useRef(null);
+  useEffect(() => { if (selected) selPoolRef.current = selected.pool || null; }, [selected && selected.id, selected && selected.pool]);
+  useEffect(() => {
+    if (sel == null || selected) return;                 // healthy
+    const pool = selPoolRef.current;
+    const again = pool ? tokens.find((t) => String(t.pool || "") === String(pool)) : null;
+    if (again) setSel(again.id);                          // same token, new object
+    else { setSel(null); setClickMode(null); }            // truly gone → back to the board
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel, selected, tokens]);
 
   // core execute — marker always lands on the live candle at fill price
   const execute = (t, o, spot) => {
