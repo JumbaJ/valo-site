@@ -674,7 +674,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
 
     if (!anyVisible) {
       ctx.fillStyle = T.faint; ctx.font = `11px ${T.mono}`; ctx.textAlign = "center";
-      ctx.fillText("— chart panned off screen · hit LIVE ⟶ to return —", plotW / 2, padT + chartH / 2);
+      ctx.fillText(total === 0 ? "loading chart…" : "— chart panned off screen · hit LIVE ⟶ to return —",
+        plotW / 2, padT + chartH / 2);
       ctx.textAlign = "left"; ctx.font = `10px ${T.mono}`;
     }
 
@@ -8661,7 +8662,7 @@ export default function App() {
   useEffect(() => {
     if (!liveData || sel == null) return;
     let stale = false;
-    const t0 = tokensRef.current ? tokensRef.current.find((x) => x.id === sel) : null;
+    const t0 = (tokens || []).find((x) => x.id === sel) || (tokensRef.current || []).find((x) => x.id === sel) || null;
     const pool = t0 && t0.pool;
     if (!pool) return;
     const pull = async () => {
@@ -8688,7 +8689,8 @@ export default function App() {
     const onVis = () => { if (!document.hidden) pull(); }; // returning to the tab = instant catch-up
     document.addEventListener("visibilitychange", onVis);
     return () => { stale = true; clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
-  }, [liveData, sel, tf]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData, sel, tf, (tokens.find((x) => x.id === sel) || {}).pool]);
   const [fsHint, setFsHint] = useState("");
   const [installOpen, setInstallOpen] = useState(false);
   const installEvtRef = useRef(null);
