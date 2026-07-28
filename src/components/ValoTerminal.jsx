@@ -8496,7 +8496,7 @@ export default function App() {
             const B = liveBindRef.current;
             for (const lv of mapped) {
               if (B.byPool[lv.pool] != null) { B.byTok[B.byPool[lv.pool]] = lv; continue; } // refresh bound data
-              const free = (tokensRef.current || []).find((t3) => t3.sym !== "VALO" && !t3.pool && B.byTok[t3.id] == null && !Object.values(B.byPool).includes(t3.id));
+              const free = (tokensRef.current || []).find((t3) => t3.sym !== "VALO" && !t3.pool && !t3.market && B.byTok[t3.id] == null && !Object.values(B.byPool).includes(t3.id));
               if (free) { B.byPool[lv.pool] = free.id; B.byTok[free.id] = lv; }
             }
             return;
@@ -8769,7 +8769,14 @@ export default function App() {
       setTokens((Ts) => Ts.map((t, ti) => {
         // LIVE DATA: this token mirrors a real pump.fun pair — each tick glides
         // the close toward the actual DexScreener price. Trading stays simulated.
-        const lv = liveDataRef.current && (liveBindRef.current.byTok[t.id] || liveArrRef.current[ti]);
+        const lv = liveDataRef.current && (
+          // a card that already carries its own pool matches ONLY by that pool
+          t.pool
+            ? (liveBindRef.current.byTok[t.id] && liveBindRef.current.byTok[t.id].pool === t.pool
+                ? liveBindRef.current.byTok[t.id]
+                : (liveArrRef.current || []).find((x) => x.pool === t.pool) || null)
+            : (liveBindRef.current.byTok[t.id] || liveArrRef.current[ti])
+        );
         if (lv) {
           const prev = t.price;
           const target = lv.price;
