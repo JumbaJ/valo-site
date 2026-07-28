@@ -5119,7 +5119,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                           {mask(`${gain ? "+" : "−"}$${Math.abs(a.pnlMoney * SOL_USD).toFixed(2)}`)}
                         </span>
                       )}
-                      <a href={`https://solscan.io/tx/${a.tx}`} target="_blank" rel="noopener noreferrer" title="View on Solscan"
+                      <a href={`https://solscan.io/tx/${a.txFull || a.tx}`} target="_blank" rel="noopener noreferrer" title="View on Solscan"
                         style={{ flexShrink: 0, textDecoration: "none", color: T.blue, fontSize: 12 }}>🔗</a>
                     </div>
                   );
@@ -6090,6 +6090,7 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
             usd: +x.usd || 0, sol: (+x.usd || 0) / SOL_USD, mc: mcOf(token),
             trader: x.trader || "unknown", wallet: x.wallet || null, pnlPct: null,
             tx: (x.tx || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || Math.random().toString(16).slice(2, 10),
+            txFull: x.tx || null,     // the real signature — what Solscan needs
             live: true,
           }));
           setRows((R) => {
@@ -6255,7 +6256,7 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
               <span style={{ fontFamily: T.mono, fontSize: isMobile ? 11 : 9.5, textAlign: "right", color: r.pnlPct == null ? T.faint : r.pnlPct >= 0 ? T.green : T.red }}>
                 {r.pnlPct == null ? "—" : `${r.pnlPct >= 0 ? "+" : ""}${r.pnlPct.toFixed(0)}%`}
               </span>
-              <a href={`https://solscan.io/tx/${r.tx}`} target="_blank" rel="noopener noreferrer" title="View on Solscan"
+              <a href={`https://solscan.io/tx/${r.txFull || r.tx}`} target="_blank" rel="noopener noreferrer" title="View on Solscan"
                 onClick={(e) => e.stopPropagation()}
                 style={{ textAlign: "center", textDecoration: "none", color: T.blue, fontSize: 11 }}>🔗</a>
             </div>
@@ -6807,7 +6808,7 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
           <div style={{ marginTop: 10, fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center" }}>PnL is shown on the matching sell marker.</div>
         )}
         {tr.tx && (
-          <a href={`https://solscan.io/tx/${tr.tx}`} target="_blank" rel="noopener noreferrer"
+          <a href={`https://solscan.io/tx/${tr.txFull || tr.tx}`} target="_blank" rel="noopener noreferrer"
             style={{ display: "block", marginTop: 12, textAlign: "center", textDecoration: "none", border: `1px solid ${T.border2}`, borderRadius: 9, padding: "9px", fontFamily: T.mono, fontSize: 11, fontWeight: 700, color: T.blue, background: "rgba(76,154,255,0.08)" }}>
             🔗 View this transaction on Solscan →
           </a>
@@ -7204,6 +7205,14 @@ export default function App() {
     clearTimeout(notifTimer.current);
     notifTimer.current = setTimeout(() => setNotifToast(null), 10000); // text fades after 10s
     if (notifSaveRef.current && !n.noSave) notifSaveRef.current(notif); // survives refresh
+  };
+  // one exit rule everywhere: ✕ (and tapping the backdrop) drops every open
+  // page and lands you back on the terminal, not on the last thing you opened
+  const closeAllPages = () => {
+    setProfileUser(null); setProfileCloud(null); setOtherFollowList(null); setFollowListOpen(null);
+    setNotifOpen(false); setLbOpen(false); setRanksOpen(null); setCalloutHubOpen(false);
+    setMyCalloutsOpen(false); setWpOpen(false); setClaimOpen(false); setCloudOpen(false);
+    setEcoFull(false); setInstallOpen(false);
   };
   const navigateToToken = (tokenId) => {
     const tk = tokens.find((t) => String(t.id) === String(tokenId));
@@ -7841,6 +7850,17 @@ export default function App() {
     return () => { stop = true; clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudUser && cloudUser.id]);
+  // 📱 safe-area: keep the UI clear of the status bar (clock · wifi · battery)
+  // and the home indicator, in the browser and when installed
+  useEffect(() => {
+    if (!isMobile) return;
+    const root = document.getElementById("root");
+    if (!root) return;
+    root.style.paddingTop = "env(safe-area-inset-top, 0px)";
+    root.style.paddingBottom = "env(safe-area-inset-bottom, 0px)";
+    root.style.boxSizing = "border-box";
+    return () => { root.style.paddingTop = ""; root.style.paddingBottom = ""; };
+  }, [isMobile]);
   // 🔔 PERSISTENT NOTIFICATIONS — your feed follows your account, not the tab
   const notifLoaded = useRef(false);
   useEffect(() => {
@@ -9375,7 +9395,7 @@ export default function App() {
             t: x.at, price: x.price, side: x.isBuy ? "buy" : "sell",
             amt: +(x.usd / SOL_USD).toFixed(3), unit: "SOL", usd: x.usd,
             trader: x.trader || "market", wallet: x.wallet || null,
-            tx: x.tx || `mkt${x.at}`, market: true,
+            tx: x.tx || `mkt${x.at}`, txFull: x.tx || null, market: true,
           }));
         setRealChartTrades(rows);
       } catch (e) {}
@@ -11116,7 +11136,7 @@ export default function App() {
 
       {/* WHITEPAPER MODAL — interactive reader with expandable TOC sidebar */}
       {wpOpen && <WhitepaperModal onClose={() => setWpOpen(false)} isMobile={isMobile} />}
-      {calloutHubOpen && <CalloutHubModal onClose={() => setCalloutHubOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
+      {calloutHubOpen && <CalloutHubModal onClose={closeAllPages} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
         onOpenUser={(u) => { setCalloutHubOpen(false); setProfileUser(u); }} />}
       {!isMobile && quickArmOn && armPop && (
         <button data-armpop="1" onClick={() => { const fn = quickArmRef.current; fn && fn(); setArmPop(null); }}
@@ -11608,15 +11628,15 @@ export default function App() {
       {valoStatsOpen && <ValoStatsModal onClose={() => setValoStatsOpen(false)} isMobile={isMobile}
         valoUsd={valoUsdPrice} tvl={gTvl} burned={burned} valoWallet={valoWallet} />}
       {burnOpen && <BurnModal valoUsd={valoUsdPrice} onClose={() => setBurnOpen(false)} isMobile={isMobile} myBurned={myBurned} siteBurned={burned} />}
-      {ranksOpen && <RanksModal onClose={() => setRanksOpen(null)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
+      {ranksOpen && <RanksModal onClose={closeAllPages} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
         myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)}
         focusUser={ranksOpen.focus || null} onOpenUser={(u) => { setRanksOpen(null); setProfileUser(u); }} />}
-      {lbOpen && <LeaderboardModal onClose={() => setLbOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
+      {lbOpen && <LeaderboardModal onClose={closeAllPages} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
         onOpenUser={(u) => setProfileUser(u)} />}
       {tierListOpen && <TierListModal onClose={() => setTierListOpen(false)} isMobile={isMobile}
         myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)} />}
       {myCalloutsOpen && <MyCalloutsModal onClose={() => setMyCalloutsOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username} onOpenToken={navigateToToken} />}
-      {notifOpen && <NotificationsModal onClose={() => setNotifOpen(false)} isMobile={isMobile} notifs={notifs} friendReqs={friendReqs}
+      {notifOpen && <NotificationsModal onClose={closeAllPages} isMobile={isMobile} notifs={notifs} friendReqs={friendReqs}
         onCloudReq={(n, accept) => {
           cloudFriendAnswer(n.reqId, accept);
           if (accept) setFriendsList((F) => (F.includes(n.user) ? F : [...F, n.user]));
@@ -11633,7 +11653,7 @@ export default function App() {
       {followListOpen && <FollowListModal kind={followListOpen} list={followListOpen === "followers" ? followersList : followingList}
         onClose={() => setFollowListOpen(null)} isMobile={isMobile}
         onOpenUser={(u) => { setFollowListOpen(null); setProfileUser(u); }} />}
-      {profileUser && <UserProfileModal name={profileUser} onClose={() => { setProfileUser(null); setProfileCloud(null); }} isMobile={isMobile} tokens={tokens}
+      {profileUser && <UserProfileModal name={profileUser} onClose={closeAllPages} isMobile={isMobile} tokens={tokens}
         cloudProfile={profileCloud}
         onOpenFollowList={(kind, handle) => openFollowListFor(kind, handle)}
         onOpenTrade={(x) => {
