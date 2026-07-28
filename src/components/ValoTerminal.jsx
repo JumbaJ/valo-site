@@ -441,10 +441,14 @@ function candlesFromTrades(trades, tfMin) {
   if (!Array.isArray(trades) || !trades.length) return [];
   const ms = Math.max(1, tfMin) * 60000;
   const byBucket = new Map();
+  // ignore prints wildly off the median — one bad price used to own the axis
+  const px0 = trades.map((x) => +x.price || 0).filter((v) => v > 0).sort((a, b) => a - b);
+  const med = px0.length ? px0[Math.floor(px0.length / 2)] : 0;
   for (const tr of trades) {
     const at = +tr.at || +tr.t || 0;
     const px = +tr.price || 0;
     if (!(at > 0) || !(px > 0)) continue;
+    if (med > 0 && (px > med * 20 || px < med / 20)) continue;
     const b = Math.floor(at / ms) * ms;
     const cur = byBucket.get(b);
     if (!cur) byBucket.set(b, { t: b, o: px, h: px, l: px, c: px, v: +tr.usd || 0, first: at, last: at });
@@ -8482,7 +8486,7 @@ export default function App() {
       const dupe = Ts.find((t) => (hit.pool && String(t.pool || "") === String(hit.pool))
         || (hit.liveMint && String(t.liveMint || "") === String(hit.liveMint)));
       if (dupe) { setSel(dupe.id); setClickMode(null); return Ts; }   // open the one we already have
-      return [hit, ...Ts];
+      return [...Ts, hit];   // append: the scanner never reflows under your cursor
     });
     setSel(hit.id); setClickMode(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -10780,6 +10784,7 @@ export default function App() {
           </div>
           ) : (
           <div ref={scannerRef}
+            onWheel={(e) => e.stopPropagation()}
             onScroll={(e) => { const el = e.currentTarget;
               if (el.scrollHeight - el.scrollTop - el.clientHeight < 380) loadMoreTokens(); }}
             style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start",
