@@ -507,12 +507,15 @@ const ratingColor = (s) => (s >= 66 ? T.green : s >= 40 ? T.amber : T.red);
 // ================================================================
 // CHART
 // ================================================================
-function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null, shiftArm = false, onCancelLine = null, onNeedHistory = null, historyShift = null }) {
+function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null, shiftArm = false, onCancelLine = null, onNeedHistory = null, historyShift = null, mcRatio = 0 }) {
   const wrapRef = useRef(null);
   const cvsRef = useRef(null);
   const [cross, setCross] = useState(null);
   const [hover, setHover] = useState(null);
   const scaleRef = useRef({ key: null, lo: NaN, hi: NaN }); // locked price axis
+  const [axisMC, setAxisMC] = useState(false);   // right axis shows market cap instead of price
+  const fmtAxis = (v) => (axisMC && mcRatio > 0 ? fmt$(v * mcRatio) : fmtP(v));
+  const [pinCross, setPinCross] = useState(null); // mobile: held crosshair {cx, cy}
   const [pulseTick, setPulseTick] = useState(0);
   const requestRepaint = useCallback(() => setPulseTick((t) => t + 1), []);
   const markerHitsRef = useRef([]);
@@ -652,7 +655,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const p = lo + ((hi - lo) * i) / 5, yy = y(p);
       ctx.strokeStyle = "rgba(255,255,255,0.045)";
       ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(plotW, yy); ctx.stroke();
-      ctx.fillStyle = T.faint; ctx.fillText(fmtP(p), plotW + 8, yy);
+      ctx.fillStyle = T.faint; ctx.fillText(fmtAxis(p), plotW + 8, yy);
     }
     ctx.textAlign = "center";
     const nLab = 6;
@@ -884,7 +887,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       ctx.setLineDash([]);
       ctx.fillStyle = up ? T.green : T.red;
       ctx.fillRect(plotW + 2, ly - 9, padR - 4, 18);
-      ctx.fillStyle = "#0a0d13"; ctx.fillText(fmtP(last.c), plotW + 8, ly);
+      ctx.fillStyle = "#0a0d13"; ctx.fillText(fmtAxis(last.c), plotW + 8, ly);
       lastPxRef.current = { y: ly, x: x(lastSlot), plotW, visible: true };
     } else {
       lastPxRef.current = { visible: false };
@@ -907,7 +910,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
         const price = lo + (1 - (cy - padT) / chartH) * (hi - lo);
         ctx.setLineDash([]);
         ctx.fillStyle = "#2e3648"; ctx.fillRect(plotW + 2, cy - 9, padR - 4, 18);
-        ctx.fillStyle = T.text; ctx.fillText(fmtP(price), plotW + 8, cy);
+        ctx.fillStyle = T.text; ctx.fillText(fmtAxis(price), plotW + 8, cy);
         if (clickMode) {
           ctx.fillStyle = armCol; ctx.font = `bold 10px ${T.mono}`;
           ctx.fillText(clickMode === "buy" ? "CLICK = ARM BUY BOT HERE 🤖" : "CLICK = ARM SELL BOT HERE 🤖", Math.min(sx + 12, plotW - 170), Math.max(cy - 14, padT + 10));
@@ -926,7 +929,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       ctx.fillText(tl, Math.min(Math.max(tw / 2, sx), plotW - tw / 2), H - 12);
       ctx.textAlign = "left";
     }
-  }, [agg, total, count, offset, winStart, hue, mode, cross, height, tfMin, trades, clickMode, view.priceOff, highlightTx, pulseTick, traderPrefs, theme, pendingLevels, botRuns, price]);
+  }, [agg, total, count, offset, winStart, hue, mode, cross, height, tfMin, trades, clickMode, view.priceOff, highlightTx, pulseTick, traderPrefs, theme, pendingLevels, botRuns, price, axisMC, mcRatio, pinCross]);
 
   // keep repainting while a marker is highlighted so its ring pulses
   useEffect(() => {
@@ -1172,7 +1175,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     // touch/press starting in the right-hand price-number strip = zoom mode:
     // run finger UP to zoom in, DOWN to zoom out. No pinch, no browser fight.
     if (g.plotW != null && cx >= g.plotW - 4) {
-      axisRef.current = { sy: cy, c0: count };
+      axisRef.current = { sy: cy, c0: count, t0: Date.now(), moved: false };
       dragRef.current = null;
       setCross(null);
       return;
@@ -1224,9 +1227,20 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     }
     onLineSelect && onLineSelect(null); // tapped open chart — drop the highlight
     dragRef.current = { sx: cx, sy: cy, startOffset: offset, startPriceOff: view.priceOff || 0, moved: false, t0: Date.now(), touch: !!e.touches };
+    if (e.touches) {
+      // already reading the chart → keep the crosshair under the finger
+      if (pinCross) { setPinCross({ cx, cy }); setCross({ cx, cy }); return; }
+    }
     if (e.touches) {                       // press-and-hold a line → cancel bubble
       const hit = lineAt(cy);
       clearTimeout(holdRef.current);
+      if (!hit) {                          // hold on open chart → crosshair mode
+        holdRef.current = setTimeout(() => {
+          if (dragRef.current && dragRef.current.moved) return;
+          if (navigator.vibrate) navigator.vibrate(12);
+          setPinCross({ cx, cy }); setCross({ cx, cy });
+        }, 480);
+      }
       if (hit) {
         const p0 = e.touches[0];
         holdRef.current = setTimeout(() => {
@@ -1280,10 +1294,12 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     if (ax) {
       // up (negative dy) → fewer candles (zoom in); down → more (zoom out)
       const dy = cy - ax.sy;
+      if (Math.abs(dy) > 4) ax.moved = true;
       const factor = Math.pow(1.6, dy / 150); // easier travel — ~1.6× per 150px
       setView((v) => ({ ...v, count: Math.max(12, Math.min(60000, Math.round(ax.c0 * factor))) }));
       return;
     }
+    if (pinCross && e.touches) { setPinCross({ cx, cy }); setCross({ cx, cy }); return; }
     const d = dragRef.current;
     if (d) {
       const dx = cx - d.sx;
@@ -1350,9 +1366,15 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       dragRef.current = null;
       return;
     }
-    if (axisRef.current) { axisRef.current = null; return; }
+    if (axisRef.current) {
+      const ax0 = axisRef.current; axisRef.current = null;
+      if (ax0 && !ax0.moved && Date.now() - (ax0.t0 || 0) < 600 && mcRatio > 0) setAxisMC((v) => !v);
+      return;
+    }
     const d = dragRef.current;
     dragRef.current = null;
+    clearTimeout(holdRef.current);
+    if (pinCross && d && !d.moved) { setPinCross(null); setCross(null); return; }  // tap → back to drag mode
     // a clean tap on a $ marker opens its receipt — takes priority over trading
     if (d && !d.moved) {
       const { cx, cy } = ptOf(e);
@@ -5285,7 +5307,10 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
 function PerfChart({ series, mode, height = 130 }) {
   const ref = useRef(null);
   const [hover, setHover] = useState(null);
-  const scaleRef = useRef({ key: null, lo: NaN, hi: NaN }); // locked price axis // {i, x, y, v}
+  const scaleRef = useRef({ key: null, lo: NaN, hi: NaN }); // locked price axis
+  const [axisMC, setAxisMC] = useState(false);   // right axis shows market cap instead of price
+  const fmtAxis = (v) => (axisMC && mcRatio > 0 ? fmt$(v * mcRatio) : fmtP(v));
+  const [pinCross, setPinCross] = useState(null); // mobile: held crosshair {cx, cy} // {i, x, y, v}
   const geomRef = useRef(null);
   useEffect(() => {
     const c = ref.current; if (!c) return;
@@ -9501,7 +9526,7 @@ export default function App() {
         if (stop || !Array.isArray(j)) return;
         const rows = j
           .filter((x) => x.price > 0 && x.usd > 0)
-          .sort((a, b) => b.usd - a.usd).slice(0, 14)   // only the meaningful prints
+          .sort((a, b) => b.usd - a.usd).slice(0, 10)   // only the meaningful prints
           .map((x) => ({
             t: x.at, price: x.price, side: x.isBuy ? "buy" : "sell",
             amt: +(x.usd / SOL_USD).toFixed(3), unit: "SOL", usd: x.usd,
@@ -9561,10 +9586,10 @@ export default function App() {
         if (trader === selected.dev.wallet) return showDevTrades ? [] : (selected.dev.trades || []);
         return traderTradesFor(selected, trader);
       });
-    const liveReal = liveData && selected.pool;   // real market → your prints only
+    const liveReal = liveData && selected.pool;   // real market → real prints only
     const all = liveReal
-      ? [...mine, ...hist]                        // no anonymous market markers
-      : [...mine, ...dev, ...hist, ...followed];
+      ? [...mine, ...hist, ...realChartTrades]    // your fills + genuine market trades
+      : [...mine, ...dev, ...hist, ...followed];  // simulation keeps its own cast
     // de-dupe by tx so a followed dev doesn't double-draw
     const seen = new Set();
     return all.filter((t) => {
@@ -9989,8 +10014,10 @@ export default function App() {
                     onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq} eyesToken={selected}
                     onCancelLine={(id) => { cancelBot(id); setSelLineId(null); }}
             onNeedHistory={() => selected && loadOlder(selected.id)}
+            mcRatio={selected && selected.price > 0 ? mcOf(selected) / selected.price : 0}
             historyShift={histShift && selected && histShift.id === selected.id ? histShift : null}
                     onNeedHistory={() => selected && loadOlder(selected.id)}
+                    mcRatio={selected && selected.price > 0 ? mcOf(selected) / selected.price : 0}
                     historyShift={histShift && selected && histShift.id === selected.id ? histShift : null}
                     onLineSelect={(id) => setSelLineId(id)}
                     isMobile={isMobile} height={isMobile ? mobChartH : 480 + extraH + Math.round(pcCrunch * 150)} />
@@ -11505,7 +11532,7 @@ export default function App() {
           </div>
           <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
             <TokenEcosystem tokens={[...tokens, ...mktHits.filter((m) => !tokens.some((t) => String(t.pool || "") === String(m.pool)))]} q={ecoQ} isMobile maxH="100%" tdProps={tdProps}
-              onPick={(id) => { setSel(id); setClickMode(null); setEcoFull(false); setEcoQ(""); }}
+              onPick={(id) => { setEcoFull(false); setEcoQ(""); openAnyToken(id); }}
               onWatchAdd={(id) => { watchAdd(id, null); popPlus(); }}
               onOpenUser={(u) => setProfileUser(u)} />
           </div>
