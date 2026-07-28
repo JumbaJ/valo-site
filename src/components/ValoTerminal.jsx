@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 
 /* ================================================================
    VALO TERMINAL — $VALO
@@ -5490,7 +5490,7 @@ function CardMiniChart({ candles, hue, mode, tfMin = 15, count = 90, full = fals
   return <canvas ref={ref} style={{ width: full ? "100%" : "128%", height: full ? "100%" : 52, display: "block" }} />;
 }
 
-function TokenCard({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf = 15, isMobile = false }) {
+function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf = 15, isMobile = false }) {
   const liveEyes = liveViewersOf(t, "pump"); // re-renders ride the price ticks
   const score = scoreToken(t);
   const rug = rugState(t);
@@ -5560,6 +5560,12 @@ function TokenCard({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf 
 
 // compact token card (mobile collapsed list) — same info, longer format, with
 // a momentum + B/S pressure meter strip squeezed underneath each row
+// repaint a card only when something it actually shows has moved
+const TokenCard = React.memo(TokenCardBase, (a, b) => (
+  a.t === b.t && a.active === b.active && a.calloutCount === b.calloutCount
+  && a.miniMode === b.miniMode && a.tf === b.tf && a.isMobile === b.isMobile
+));
+
 function TokenRow({ t, active, onOpen, calloutCount = 0, tf = 15 }) {
   const score = scoreToken(t);
   const rc = ratingColor(score);
@@ -6959,7 +6965,8 @@ export default function App() {
   const [showDevTrades, setShowDevTrades] = useState(false); // overlay dev buys/sells on chart
   const [createdOpen, setCreatedOpen] = useState(false);     // dev "created tokens" sub-section
   const [tf, setTf] = useState(15);
-  const tokensRef = useRef([]); tokensRef.current = tokens; // live mirror for effects that must not re-run on every tick
+  const tokensRef = useRef([]); tokensRef.current = tokens;
+  const selRef = useRef(null); // live mirror for effects that must not re-run on every tick
   const [alerts, setAlerts] = useState([]);     // MARKET ALERTS — rising/falling coins only
   const [socialMsgs, setSocialMsgs] = useState([]); // PUBLIC user chat
   const [username, setUsername] = useState(() => {
@@ -8903,6 +8910,9 @@ export default function App() {
   useEffect(() => {
     const iv = setInterval(() => {
       setTokens((Ts) => Ts.map((t, ti) => {
+        // real-market cards are driven by the live feeds, not the simulation —
+        // skipping them keeps the tick cheap no matter how many are loaded
+        if (t.market && t.id !== selRef.current) return t;
         // LIVE DATA: this token mirrors a real pump.fun pair — each tick glides
         // the close toward the actual DexScreener price. Trading stays simulated.
         const lv = liveDataRef.current && (
@@ -9155,6 +9165,7 @@ export default function App() {
   }, [sel]);
 
   const selected = tokens.find((t) => t.id === sel) || null;
+  selRef.current = sel;
   const selPoolRef = useRef(null);
   useEffect(() => { if (selected) selPoolRef.current = selected.pool || null; }, [selected && selected.id, selected && selected.pool]);
   useEffect(() => {
