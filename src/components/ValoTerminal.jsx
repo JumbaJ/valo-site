@@ -6701,14 +6701,14 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
         </div>
 
         {/* follow this trader — pin, colour, marker icon. Applies site-wide. */}
-        {traderKey && traderKey !== "__me__" && (
+        {traderKey && traderKey !== "__me__" && traderKey !== "__mkt__" && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.03)", border: `1px solid ${T.border2}`, borderRadius: 10, padding: "8px 10px", marginBottom: 10 }}>
             {/* the whole wallet block (address + label) opens their profile */}
             <span onClick={() => onOpenUser && onOpenUser(traderKey)} title="View this trader's profile"
               style={{ minWidth: 0, flex: 1, cursor: "pointer" }}>
               <span style={{ display: "block", fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 1 }}>TRADER · tap for profile</span>
               <span style={{ display: "block", fontFamily: T.mono, fontSize: 10.5, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
-                {tr.dev ? "👨‍💻 " : ""}{traderKey}
+                {tr.dev ? "👨‍💻 " : ""}{traderKey === "__mkt__" ? "market" : traderKey}
               </span>
             </span>
 
@@ -8548,14 +8548,20 @@ export default function App() {
   // opening a searched token adopts it into the board so charts, tickets and
   // bots all work on it exactly like any other card
   // opening/closing a chart must never scroll the scanner away from you
+  const scanSpotRef = useRef(0);
   const holdScroll = () => {
     const el = scannerRef.current;
     const top = el ? el.scrollTop : null;
     const win = typeof window !== "undefined" ? window.scrollY : 0;
-    requestAnimationFrame(() => {
+    scanSpotRef.current = win;                       // remembered across chart open/close
+    const restore = () => {
       if (el && top != null) el.scrollTop = top;
       if (typeof window !== "undefined" && Math.abs(window.scrollY - win) > 4) window.scrollTo(0, win);
-    });
+    };
+    requestAnimationFrame(restore);
+    // mobile re-lays out as the chart mounts, so hold the spot a moment longer
+    setTimeout(restore, 60);
+    setTimeout(restore, 220);
   };
   const openAnyToken = useCallback((id) => {
     holdScroll();
@@ -9538,7 +9544,7 @@ export default function App() {
         if (stop || !Array.isArray(j)) return;
         const rows = j
           .filter((x) => x.price > 0 && x.usd > 0)
-          .sort((a, b) => b.usd - a.usd).slice(0, 10)   // only the meaningful prints
+          .sort((a, b) => b.usd - a.usd).slice(0, 5)    // only the biggest prints
           .map((x) => ({
             t: x.at, price: x.price, side: x.isBuy ? "buy" : "sell",
             amt: +(x.usd / SOL_USD).toFixed(3), unit: "SOL", usd: x.usd,
