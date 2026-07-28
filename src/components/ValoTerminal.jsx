@@ -210,8 +210,10 @@ function seedCandles(startPrice, momentum) {
   return out;
 }
 function tickCandles(candles, momentum, buyP) {
+  if (!Array.isArray(candles) || !candles.length) return candles || [];  // nothing to tick yet
   const now = Date.now();
   const last = candles[candles.length - 1];
+  if (!last || !(last.c > 0)) return candles;
   const drift = (momentum - 50) / 30000 + (buyP - 50) / 40000;
   const vol = rnd(0.002, 0.018);
   const nc = Math.max(1e-12, last.c * (1 + drift + rnd(-vol, vol)));
@@ -778,7 +780,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const byIdx = new Map();
       for (const tr of trades) {
         const bucket = Math.floor(tr.t / tfMs) * tfMs;
-        const anchor = Number.isFinite(agg[0].t) ? agg[0].t : (Date.now() - Math.max(0, agg.length - 1) * tfMs);
+        const anchor = (agg.length && Number.isFinite(agg[0].t)) ? agg[0].t : (Date.now() - Math.max(0, agg.length - 1) * tfMs);
         const i = Math.round((bucket - anchor) / tfMs);
         if (!inData(i)) continue;
         const s = slotOf(i);
@@ -1350,8 +1352,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     }
   };
 
-  const ohlc = hover || agg[total - 1];
-  const chg = ohlc ? ((ohlc.c - ohlc.o) / ohlc.o) * 100 : 0;
+  const ohlc = hover || agg[total - 1] || null;
+  const chg = ohlc && ohlc.o > 0 ? ((ohlc.c - ohlc.o) / ohlc.o) * 100 : 0;
 
   return (
     <div ref={wrapRef}
@@ -8430,7 +8432,7 @@ export default function App() {
       setTokens((Ts) => Ts.map((x) => {
         if (x.id !== tokenId) return x;
         const merged = [...older, ...x.candles];
-        const trimmed = merged.slice(-2000);                  // deep but bounded
+        const trimmed = merged.slice(-20000);                 // deep enough to reach a token's very first candle
         const added = trimmed.length - x.candles.length;      // what actually survived
         if (added > 0) setHistShift({ id: tokenId, n: added, k: Date.now() });
         return { ...x, candles: trimmed };
