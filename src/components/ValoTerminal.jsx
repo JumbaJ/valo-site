@@ -6357,7 +6357,7 @@ function FadedBars({ candles, h = "100%" }) {
       ctx.fillStyle = up ? "rgba(22,199,132,0.30)" : "rgba(234,57,67,0.30)";
       ctx.fillRect(i * bw + bw * 0.16, hh - bh, Math.max(1.4, bw * 0.68), bh);
     });
-  }, [candles[candles.length - 1] && candles[candles.length - 1].c]);
+  }, [candles && candles.length ? candles[candles.length - 1].c : 0]);
   return <canvas ref={ref} style={{ position: "absolute", inset: 0, width: "100%", height: h, opacity: 0.5, pointerEvents: "none",
     maskImage: "linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.55) 45%, rgba(0,0,0,0.95) 100%)",
     WebkitMaskImage: "linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.55) 45%, rgba(0,0,0,0.95) 100%)" }} />;
@@ -8479,7 +8479,18 @@ export default function App() {
   }, [liveData]);
   // opening a searched token adopts it into the board so charts, tickets and
   // bots all work on it exactly like any other card
+  // opening/closing a chart must never scroll the scanner away from you
+  const holdScroll = () => {
+    const el = scannerRef.current;
+    const top = el ? el.scrollTop : null;
+    const win = typeof window !== "undefined" ? window.scrollY : 0;
+    requestAnimationFrame(() => {
+      if (el && top != null) el.scrollTop = top;
+      if (typeof window !== "undefined" && Math.abs(window.scrollY - win) > 4) window.scrollTo(0, win);
+    });
+  };
   const openAnyToken = useCallback((id) => {
+    holdScroll();
     const local = (tokensRef.current || []).find((t) => t.id === id);
     if (local) { setSel(id); setClickMode(null); return; }
     const hit = [...mktHits, ...moreToks].find((t) => t.id === id);
@@ -8857,6 +8868,7 @@ export default function App() {
             ageMin: t.ageMin + 0.04 };
         }
         const candles = tickCandles(t.candles, t.momentum, t.buyPressure);
+        if (!candles.length) return t;                  // history still loading — leave it alone
         const price = candles[candles.length - 1].c;
         const drift = (price - t.price) / t.price;
         return {
@@ -10744,7 +10756,7 @@ export default function App() {
               {shown.map((t) => (
                 compactList
                   ? <div key={t.id} data-mslot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 10, transition: "opacity .12s, transform .12s" }} {...tdProps(t)}><TokenRow t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} tf={tf}
-                      onOpen={() => { if (sel === t.id) { setSel(null); setClickMode(null); } else openAnyToken(t.id); }} /></div>
+                      onOpen={() => { if (sel === t.id) { holdScroll(); setSel(null); setClickMode(null); } else openAnyToken(t.id); }} /></div>
                   : <div key={t.id} data-slot={t.id} data-mslot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ position: "relative", opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
                       onDrop={(e) => { e.preventDefault(); const id = dragIdOf(e); if (id == null || id === t.id) return;
                         const base = (scanOrder || shown.map((x) => x.id));
@@ -10753,7 +10765,7 @@ export default function App() {
                         if (already >= 0) { [n[si], n[already]] = [n[already], n[si]]; } else n[si] = id;
                         setScanOrder(n); window.__valoDrag = null; }}>
                     <TokenCard t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf} isMobile={isMobile}
-                      onOpen={() => { if (sel === t.id) { setSel(null); setClickMode(null); } else openAnyToken(t.id); }} /></div>
+                      onOpen={() => { if (sel === t.id) { holdScroll(); setSel(null); setClickMode(null); } else openAnyToken(t.id); }} /></div>
               ))}
             </div>
 
@@ -10792,6 +10804,12 @@ export default function App() {
             style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start",
             transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s", display: "grid", gap: 10,
             maxHeight: "calc((100vh - 30px) / 1.13 - var(--stkTop))", overflowY: "auto", padding: "2px 10px 2px 2px" }}>
+            <button onClick={() => { const el = scannerRef.current; if (el) el.scrollTo({ top: 0, behavior: "smooth" }); }}
+              title="Back to the top of the scanner"
+              style={{ position: "sticky", top: 0, zIndex: 3, justifySelf: "end", marginRight: 30, width: 24, height: 24,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                background: "rgba(15,19,28,0.45)", border: `1px solid ${T.border2}66`, borderRadius: 7,
+                cursor: "pointer", color: T.faint, fontSize: 11, marginBottom: -24, backdropFilter: "blur(3px)" }}>▲</button>
             <button onClick={() => setScanCollapsed(true)} title="Fold the scanner into a rail"
               style={{ position: "sticky", top: 0, zIndex: 3, justifySelf: "end", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center",
                 background: "rgba(15,19,28,0.9)", border: `1px solid ${T.border2}`, borderRadius: 7, cursor: "pointer", color: T.dim, fontSize: 12, marginBottom: -34 }}>‹</button>
@@ -10805,7 +10823,7 @@ export default function App() {
                   if (already >= 0) { [n[si], n[already]] = [n[already], n[si]]; } else n[si] = id;
                   setScanOrder(n); window.__valoDrag = null; }}>
               <TokenCard t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf} isMobile={isMobile}
-                onOpen={() => { if (sel === t.id) { setSel(null); setClickMode(null); } else openAnyToken(t.id); }} /></div>
+                onOpen={() => { if (sel === t.id) { holdScroll(); setSel(null); setClickMode(null); } else openAnyToken(t.id); }} /></div>
             ))}
           </div>
           )}
@@ -11431,6 +11449,12 @@ export default function App() {
                 borderRadius: 14, padding: "4px 12px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, cursor: "pointer" }}>📊 POSITIONS</button>
           </div>
           <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", padding: "2px 4px 0" }}>
+              <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} title="Back to the top"
+                style={{ width: 26, height: 22, display: "flex", alignItems: "center", justifyContent: "center",
+                  background: "rgba(15,19,28,0.45)", border: `1px solid ${T.border2}66`, borderRadius: 7,
+                  color: T.faint, fontSize: 11, cursor: "pointer", backdropFilter: "blur(3px)" }}>▲</button>
+            </div>
             <TokenEcosystem tokens={[...tokens, ...mktHits.filter((m) => !tokens.some((t) => String(t.pool || "") === String(m.pool)))]} q={ecoQ} isMobile maxH="100%" tdProps={tdProps}
               onPick={(id) => { setSel(id); setClickMode(null); setEcoFull(false); setEcoQ(""); }}
               onWatchAdd={(id) => { watchAdd(id, null); popPlus(); }}
