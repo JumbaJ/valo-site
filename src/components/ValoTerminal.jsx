@@ -6213,10 +6213,14 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
 
 // ---------------- search bar (tokens + users) with live suggestions ----------------
 // ---- search ecosystem helpers: platform, dev, description (deterministic) ----
-const platOf = (t) => (((t.id * 7 + 3) % 10) < 7 ? "pump" : "rh");
+// token ids may be numbers (simulated) or pool addresses (real market results)
+const tokSeed = (t) => (typeof t?.id === "number" ? t.id : hashStr(String((t && (t.id || t.sym)) || "x")));
+const platOf = (t) => (t && t.chain === "pump" ? "pump" : t && t.chain === "rh" ? "rh"
+  : ((tokSeed(t) * 7 + 3) % 10) < 7 ? "pump" : "rh");
 const devOf = (t) => {
-  const n = CALLERS[(t.id * 5 + 2) % CALLERS.length];
-  const wal = ((t.id * 2654435761) >>> 0).toString(16).padStart(8, "0");
+  const sd = tokSeed(t);
+  const n = CALLERS[Math.abs(sd * 5 + 2) % CALLERS.length] || CALLERS[0];
+  const wal = ((sd * 2654435761) >>> 0).toString(16).padStart(8, "0");
   return { name: n, short: wal.slice(0, 4).toUpperCase() + "…" + wal.slice(-4).toUpperCase() };
 };
 const DESC_BITS = [
@@ -6229,7 +6233,7 @@ const DESC_BITS = [
   "The dev streams every buyback live. Full transparency.",
   "Micro-cap moonshot with a meme that refuses to die.",
 ];
-const descOf = (t) => (((t.id * 11 + 1) % 13) < 9 ? DESC_BITS[(t.id * 3 + 1) % DESC_BITS.length] : null);
+const descOf = (t) => (((tokSeed(t) * 11 + 1) % 13) < 9 ? DESC_BITS[Math.abs(tokSeed(t) * 3 + 1) % DESC_BITS.length] : null);
 const gainOf = (t) => { const c = t.candles[t.candles.length - 1]; return ((c.c - c.o) / c.o) * 100; };
 const isHotTok = (t) => t.momentum > 78 || Math.abs(gainOf(t)) > 1.4;
 
@@ -10882,8 +10886,8 @@ export default function App() {
                             <span>24H Δ <b style={{ color: ch >= 0 ? T.green : T.red }}>{pct(ch)}</b></span>
                             <span>PRICE <b style={{ color: T.text }}>${fmtP(t.price)}</b></span>
                             <span>MC <b style={{ color: T.text }}>{fmt$(mcOf(t))}</b></span>
-                            <span>CIRC <b style={{ color: T.text }}>{fmtQty(1e9 * (0.35 + ((t.id * 13) % 50) / 100))}</b></span>
-                            <span>TOP 10 HOLD <b style={{ color: T.amber }}>{(16 + ((t.id * 7) % 26)).toFixed(1)}%</b></span>
+                            <span>CIRC <b style={{ color: T.text }}>{fmtQty(1e9 * (0.35 + (Math.abs(tokSeed(t) * 13) % 50) / 100))}</b></span>
+                            <span>TOP 10 HOLD <b style={{ color: T.amber }}>{(16 + (Math.abs(tokSeed(t) * 7) % 26)).toFixed(1)}%</b></span>
                             <span>MOM <b style={{ color: t.momentum > 60 ? T.green : T.dim }}>{Math.round(t.momentum)}</b></span>
                             <span>HOLDERS <b style={{ color: T.text }}>{t.traders}</b></span>
                           </div>
@@ -12000,7 +12004,7 @@ export default function App() {
                           <span>24H VOL <b style={{ color: T.text }}>{fmt$(t.greenUsd + t.redUsd)}</b></span>
                           <span>24H Δ <b style={{ color: ch >= 0 ? T.green : T.red }}>{pct(ch)}</b></span>
                           <span>PRICE <b style={{ color: T.text }}>${fmtP(t.price)}</b></span>
-                          <span>TOP 10 <b style={{ color: T.amber }}>{(16 + ((t.id * 7) % 26)).toFixed(1)}%</b></span>
+                          <span>TOP 10 <b style={{ color: T.amber }}>{(16 + (Math.abs(tokSeed(t) * 7) % 26)).toFixed(1)}%</b></span>
                         </div>
                         <div style={{ display: "flex", gap: 6 }}>
                           <button onClick={() => { setSel(t.id); setClickMode(null); setWatchExp(null); setDrawerOpen(false); }}
