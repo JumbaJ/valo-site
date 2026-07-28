@@ -507,7 +507,7 @@ const ratingColor = (s) => (s >= 66 ? T.green : s >= 40 ? T.amber : T.red);
 // ================================================================
 // CHART
 // ================================================================
-function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null, shiftArm = false, onCancelLine = null, onNeedHistory = null, historyShift = null, mcRatio = 0 }) {
+function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null, shiftArm = false, onCancelLine = null, onNeedHistory = null, historyShift = null, mcRatio = 0 }) {
   const wrapRef = useRef(null);
   const cvsRef = useRef(null);
   const [cross, setCross] = useState(null);
@@ -531,7 +531,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
 
   const agg = useMemo(() => aggregate(candles, tfMin), [candles, tfMin]);
   const total = agg.length;
-  const zoomCap = Math.max(30, Math.round(agg.length * 1.2) + 10); // whole chart + a little more
+  // room to zoom past what's loaded — the gap is what pulls older candles in
+  const zoomCap = Math.max(60, Math.min(6000, Math.round(agg.length * 2.5) + 60));
   const count = Math.max(12, Math.min(view.count, zoomCap));
   const PAD_BARS = Math.round(count * 0.85);           // roam most of a screen past either end
   const maxOff = Math.max(0, total - count);           // oldest candle at the left edge
@@ -548,8 +549,11 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   // approaching the left edge of what we have → ask for the previous page
   useEffect(() => {
     if (!onNeedHistory) return;
-    if (winStart <= Math.max(8, Math.round(count * 0.25))) onNeedHistory();
-  }, [winStart, count, onNeedHistory]);
+    // near the left edge, OR zoomed out wider than the data we hold
+    const reaching = winStart <= Math.max(8, Math.round(count * 0.35));
+    const wider = count > total - 4;
+    if (reaching || wider) onNeedHistory();
+  }, [winStart, count, total, onNeedHistory]);
 
   const geom = useRef({});
 
@@ -1522,6 +1526,33 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
 
 // ---------------- UI atoms ----------------
 // double-tap (mobile), hold ~500ms, double-click or right-click (PC) → edit the chip
+// repaint only when something the chart actually draws has changed.
+// price-line arrays are rebuilt inline by the parent, so they're compared by
+// value rather than identity — cheap, since they hold a handful of entries.
+const sameLevels = (a, b) => {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i], y = b[i];
+    if (!x || !y) return false;
+    if (x.id !== y.id || x.level !== y.level || x.side !== y.side
+      || x.draft !== y.draft || x.vt !== y.vt || x.amt !== y.amt) return false;
+  }
+  return true;
+};
+const ProChart = React.memo(ProChartBase, (a, b) => (
+  a.candles === b.candles && a.trades === b.trades && a.hue === b.hue
+  && a.mode === b.mode && a.tfMin === b.tfMin && a.height === b.height
+  && a.clickMode === b.clickMode && a.price === b.price && a.sym === b.sym
+  && a.position === b.position && a.highlightTx === b.highlightTx
+  && a.theme === b.theme && a.traderPrefs === b.traderPrefs
+  && a.botSetMode === b.botSetMode && a.selectedLineId === b.selectedLineId
+  && a.editLineReq === b.editLineReq && a.eyesToken === b.eyesToken
+  && a.shiftArm === b.shiftArm && a.historyShift === b.historyShift
+  && a.mcRatio === b.mcRatio && a.synthetic === b.synthetic && a.isMobile === b.isMobile
+  && sameLevels(a.pendingLevels, b.pendingLevels) && sameLevels(a.botRuns, b.botRuns)
+));
+
 function UserSearchFly({ onOpenUser }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -8466,6 +8497,7 @@ export default function App() {
   // 📜 INFINITE HISTORY — nearing the left edge loads older candles and
   // prepends them, so you can pan back to a pool's very first trade
   const histBusy = useRef({});
+  const histChainRef = useRef({});   // how many pages deep we've gone this session
   const [histShift, setHistShift] = useState(null); // {id, n, k} — keep the view anchored
   const loadOlder = useCallback(async (tokenId) => {
     const t = (tokensRef.current || []).find((x) => x.id === tokenId);
@@ -8497,6 +8529,7 @@ export default function App() {
         if (misses >= 3) histBusy.current[key] = "done";
         return;
       }
+      histChainRef.current[key] = (histChainRef.current[key] || 0) + 1;
       setTokens((Ts) => Ts.map((x) => {
         if (x.id !== tokenId) return x;
         const merged = [...older, ...x.candles];
@@ -8506,7 +8539,13 @@ export default function App() {
         return { ...x, candles: trimmed };
       }));
     } catch (e) { /* leave what we have */ }
-    finally { if (histBusy.current[key] !== "done") histBusy.current[key] = false; }
+    finally {
+      if (histBusy.current[key] !== "done") histBusy.current[key] = false;
+      // chain a few pages when the chart is asking for a lot at once
+      if (histBusy.current[key] === false && (histChainRef.current[key] || 0) % 4 !== 0) {
+        setTimeout(() => loadOlder(tokenId), 120);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tf]);
   useEffect(() => { histBusy.current = {}; }, [tf, sel]);  // new frame or token → page freely again
