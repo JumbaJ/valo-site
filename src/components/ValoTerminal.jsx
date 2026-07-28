@@ -471,7 +471,7 @@ const ratingColor = (s) => (s >= 66 ? T.green : s >= 40 ? T.amber : T.red);
 // ================================================================
 // CHART
 // ================================================================
-function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null, shiftArm = false, onCancelLine = null, onNeedHistory = null }) {
+function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null, shiftArm = false, onCancelLine = null, onNeedHistory = null, historyShift = null }) {
   const wrapRef = useRef(null);
   const cvsRef = useRef(null);
   const [cross, setCross] = useState(null);
@@ -498,6 +498,13 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   const maxOff = Math.max(0, total - count);           // oldest candle at the left edge
   const offset = Math.max(-PAD_BARS, Math.min(view.offset, maxOff + PAD_BARS));
   // window of slots: slot s ↔ agg index (total - count - offset + s)
+  // older candles just arrived → slide the offset by the same amount so the
+  // candles under your cursor stay exactly where they were
+  useEffect(() => {
+    if (!historyShift || !historyShift.n) return;
+    setView((v) => ({ ...v, offset: (v.offset || 0) + historyShift.n }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyShift && historyShift.k]);
   const winStart = total - count - offset;
   // approaching the left edge of what we have → ask for the previous page
   useEffect(() => {
@@ -556,7 +563,12 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     const sKey = `${sym || ""}|${tfMin}|${count}`;
     const sc = scaleRef.current;
     if (sc.key === sKey && Number.isFinite(sc.lo) && Number.isFinite(sc.hi) && sc.hi > sc.lo) {
-      lo = Math.min(sc.lo, lo); hi = Math.max(sc.hi, hi);   // grow-only, never shrink mid-pan
+      // hold the locked axis; only the newest candle may stretch it, so a live
+      // breakout stays visible while old history scrolling by changes nothing
+      const last = agg[total - 1];
+      const growLo = last && Number.isFinite(last.l) ? Math.min(sc.lo, last.l) : sc.lo;
+      const growHi = last && Number.isFinite(last.h) ? Math.max(sc.hi, last.h) : sc.hi;
+      lo = growLo; hi = growHi;
     }
     scaleRef.current = { key: sKey, lo, hi };
     // floor the range: a series that barely moves stays a flat line instead of
@@ -8341,6 +8353,7 @@ export default function App() {
   // 📜 INFINITE HISTORY — nearing the left edge loads older candles and
   // prepends them, so you can pan back to a pool's very first trade
   const histBusy = useRef({});
+  const [histShift, setHistShift] = useState(null); // {id, n, k} — keep the view anchored
   const loadOlder = useCallback(async (tokenId) => {
     const t = (tokensRef.current || []).find((x) => x.id === tokenId);
     if (!t || !t.pool || !t.realCandles || !t.candles || !t.candles.length) return;
@@ -8359,9 +8372,14 @@ export default function App() {
         .map((c) => ({ t: +c.t, o: +c.o, h: +c.h, l: +c.l, c: +c.c, v: +c.v || 0 }))
         .filter((c) => Number.isFinite(c.t) && c.t < oldest.t && [c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v) && v > 0));
       if (!older.length) { histBusy.current[key] = "done"; return; }
-      setTokens((Ts) => Ts.map((x) => (x.id === tokenId
-        ? { ...x, candles: [...older, ...x.candles].slice(-2000) }   // keep a deep but bounded history
-        : x)));
+      setTokens((Ts) => Ts.map((x) => {
+        if (x.id !== tokenId) return x;
+        const merged = [...older, ...x.candles];
+        const trimmed = merged.slice(-2000);                  // deep but bounded
+        const added = trimmed.length - x.candles.length;      // what actually survived
+        if (added > 0) setHistShift({ id: tokenId, n: added, k: Date.now() });
+        return { ...x, candles: trimmed };
+      }));
     } catch (e) { /* leave what we have */ }
     finally { if (histBusy.current[key] !== "done") histBusy.current[key] = false; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -9808,7 +9826,9 @@ export default function App() {
                     onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq} eyesToken={selected}
                     onCancelLine={(id) => { cancelBot(id); setSelLineId(null); }}
             onNeedHistory={() => selected && loadOlder(selected.id)}
+            historyShift={histShift && selected && histShift.id === selected.id ? histShift : null}
                     onNeedHistory={() => selected && loadOlder(selected.id)}
+                    historyShift={histShift && selected && histShift.id === selected.id ? histShift : null}
                     onLineSelect={(id) => setSelLineId(id)}
                     isMobile={isMobile} height={isMobile ? mobChartH : 480 + extraH + Math.round(pcCrunch * 150)} />
 
