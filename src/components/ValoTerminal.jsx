@@ -476,6 +476,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   const cvsRef = useRef(null);
   const [cross, setCross] = useState(null);
   const [hover, setHover] = useState(null);
+  const scaleRef = useRef({ key: null, lo: NaN, hi: NaN }); // locked price axis
   const [pulseTick, setPulseTick] = useState(0);
   const requestRepaint = useCallback(() => setPulseTick((t) => t + 1), []);
   const markerHitsRef = useRef([]);
@@ -550,6 +551,14 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const last = agg[total - 1];
       if (last) { lo = last.l * 0.9; hi = last.h * 1.1; vMax = 1; } else { lo = 0; hi = 1; vMax = 1; }
     }
+    // ⚓ hold the axis still while panning: the range is locked per
+    // token · timeframe · zoom level, and only grows if price runs past it
+    const sKey = `${sym || ""}|${tfMin}|${count}`;
+    const sc = scaleRef.current;
+    if (sc.key === sKey && Number.isFinite(sc.lo) && Number.isFinite(sc.hi) && sc.hi > sc.lo) {
+      lo = Math.min(sc.lo, lo); hi = Math.max(sc.hi, hi);   // grow-only, never shrink mid-pan
+    }
+    scaleRef.current = { key: sKey, lo, hi };
     // floor the range: a series that barely moves stays a flat line instead of
     // stretching every candle across the whole plot
     const mid = (hi + lo) / 2 || hi || 1;
@@ -1326,10 +1335,10 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
             </div>
           )}
           <div style={{ position: "absolute", top: 2, right: 6, zIndex: 6, display: "flex", gap: 5, alignItems: "center" }}>
-            <button onClick={() => setView({ count: 18, offset: 0, priceOff: 0, follow: true })}
+            <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; setView({ count: 18, offset: 0, priceOff: 0, follow: true }); }}
               style={{ height: 21, padding: "0 9px", borderRadius: 6, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 9, fontWeight: 700, fontFamily: T.mono }}>◉ LIVE</button>
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
-              <button onClick={() => setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, follow: false })}
+              <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, follow: false }); }}
                 style={{ height: 21, padding: "0 8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.9)", color: T.dim, cursor: "pointer", fontSize: 9, fontFamily: T.mono }}>⤢ fit</button>
             )}
           </div>
@@ -1348,11 +1357,11 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
           </div>
           <div style={{ position: "absolute", top: 8, right: 82, zIndex: 3, display: "flex", gap: 8, alignItems: "center" }}>
             {eyesToken && <ViewerPills token={eyesToken} small />}
-            <button onClick={() => setView({ count: 18, offset: 0, priceOff: 0, follow: true })}
+            <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; setView({ count: 18, offset: 0, priceOff: 0, follow: true }); }}
               title="Zoom to the live edge and follow the price"
               style={{ height: 24, padding: "0 10px", borderRadius: 6, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.15)", color: T.blue, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: T.mono }}>◉ LIVE</button>
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
-              <button onClick={() => setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, follow: false })}
+              <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, follow: false }); }}
                 style={{ height: 24, padding: "0 8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.85)", color: T.dim, cursor: "pointer", fontSize: 10, fontFamily: T.mono }}>⤢ fit</button>
             )}
           </div>
@@ -5207,7 +5216,8 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
 
 function PerfChart({ series, mode, height = 130 }) {
   const ref = useRef(null);
-  const [hover, setHover] = useState(null); // {i, x, y, v}
+  const [hover, setHover] = useState(null);
+  const scaleRef = useRef({ key: null, lo: NaN, hi: NaN }); // locked price axis // {i, x, y, v}
   const geomRef = useRef(null);
   useEffect(() => {
     const c = ref.current; if (!c) return;
@@ -9189,8 +9199,8 @@ export default function App() {
   const shownCore = scanOrder
     ? scanOrder.map((id) => tokens.find((t) => t.id === id)).filter(Boolean)
     : shownBase;
-  // ♾ endless: pages of real tokens append beneath the curated list
-  const shown = moreToks.length ? [...shownCore, ...moreToks] : shownCore;
+  // ♾ endless by default; a chosen subsection narrows to exactly its tokens
+  const shown = scanSec ? shownCore : (moreToks.length ? [...shownCore, ...moreToks] : shownCore);
   shownRef.current = shown;
 
   const gTvl = tokens.reduce((a, t) => a + t.tvl, 0);
@@ -9370,9 +9380,9 @@ export default function App() {
         if (trader === selected.dev.wallet) return showDevTrades ? [] : (selected.dev.trades || []);
         return traderTradesFor(selected, trader);
       });
-    const liveReal = liveData && selected.pool;   // real market → no invented prints
+    const liveReal = liveData && selected.pool;   // real market → your prints only
     const all = liveReal
-      ? [...mine, ...hist, ...realChartTrades]
+      ? [...mine, ...hist]                        // no anonymous market markers
       : [...mine, ...dev, ...hist, ...followed];
     // de-dupe by tx so a followed dev doesn't double-draw
     const seen = new Set();
@@ -10601,7 +10611,7 @@ export default function App() {
               {shown.map((t) => (
                 compactList
                   ? <div key={t.id} data-mslot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 10, transition: "opacity .12s, transform .12s" }} {...tdProps(t)}><TokenRow t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} tf={tf}
-                      onOpen={() => { setSel(sel === t.id ? null : t.id); setClickMode(null); }} /></div>
+                      onOpen={() => { if (sel === t.id) { setSel(null); setClickMode(null); } else openAnyToken(t.id); }} /></div>
                   : <div key={t.id} data-slot={t.id} data-mslot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ position: "relative", opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
                       onDrop={(e) => { e.preventDefault(); const id = dragIdOf(e); if (id == null || id === t.id) return;
                         const base = (scanOrder || shown.map((x) => x.id));
@@ -10610,7 +10620,7 @@ export default function App() {
                         if (already >= 0) { [n[si], n[already]] = [n[already], n[si]]; } else n[si] = id;
                         setScanOrder(n); window.__valoDrag = null; }}>
                     <TokenCard t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf} isMobile={isMobile}
-                      onOpen={() => { setSel(sel === t.id ? null : t.id); setClickMode(null); }} /></div>
+                      onOpen={() => { if (sel === t.id) { setSel(null); setClickMode(null); } else openAnyToken(t.id); }} /></div>
               ))}
             </div>
 
@@ -10661,7 +10671,7 @@ export default function App() {
                   if (already >= 0) { [n[si], n[already]] = [n[already], n[si]]; } else n[si] = id;
                   setScanOrder(n); window.__valoDrag = null; }}>
               <TokenCard t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf} isMobile={isMobile}
-                onOpen={() => { setSel(sel === t.id ? null : t.id); setClickMode(null); }} /></div>
+                onOpen={() => { if (sel === t.id) { setSel(null); setClickMode(null); } else openAnyToken(t.id); }} /></div>
             ))}
           </div>
           )}
