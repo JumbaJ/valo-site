@@ -6051,7 +6051,7 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
       };
       setRows([]);
       load();
-      const iv = setInterval(load, 8000);
+      const iv = setInterval(load, 4000);   // trades stay within seconds of the tape
       return () => { stop = true; clearInterval(iv); };
     }
     const seed = Array.from({ length: 14 }, (_, i) => mkRow(token, i * 1400));
@@ -6101,7 +6101,7 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
       } catch (e) { /* sim book stays */ }
     };
     load();
-    const iv = setInterval(load, 60000);
+    const iv = setInterval(load, 20000);  // holder book refreshes with the tape
     return () => { stop = true; clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token.id, token.liveMint]);
@@ -8691,13 +8691,15 @@ export default function App() {
           const target = lv.price;
           const c = prev + (target - prev) * 0.5;
           const ratio = prev > 0 && target > 0 ? target / prev : 1;
-          if (!(target > 0) || ratio > 4 || ratio < 0.25) {
-            // this card just adopted a different token — reseed a flat series at
-            // the new price rather than corrupting the existing one
-            const seed = Array.from({ length: Math.max(40, (t.candles || []).length || 90) }, () => ({
-              o: target, h: target * 1.001, l: target * 0.999, c: target,
+          if (target > 0 && (ratio > 4 || ratio < 0.25)) {
+            // this card just moved to a different price scale — RESCALE the
+            // existing candles so the shape survives (a flat reseed looked
+            // exactly like a dead chart)
+            const k = ratio;
+            const scaled = (t.candles || []).map((c) => ({
+              t: c.t, v: c.v, o: c.o * k, h: c.h * k, l: c.l * k, c: c.c * k,
             }));
-            return { ...t, candles: target > 0 ? seed : t.candles, price: target > 0 ? target : t.price,
+            return { ...t, candles: scaled.length ? scaled : t.candles, price: target,
               sym: lv.sym, name: lv.name, mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
               img: lv.img || t.img, pool: lv.pool || t.pool, liveMint: lv.mint || t.liveMint,
               traders: lv.traders || t.traders, ageMin: t.ageMin + 0.04 };
@@ -9306,7 +9308,7 @@ export default function App() {
         if (stop || !Array.isArray(j)) return;
         const rows = j
           .filter((x) => x.price > 0 && x.usd > 0)
-          .sort((a, b) => b.usd - a.usd).slice(0, 40)   // the ones worth drawing
+          .sort((a, b) => b.usd - a.usd).slice(0, 14)   // only the meaningful prints
           .map((x) => ({
             t: x.at, price: x.price, side: x.isBuy ? "buy" : "sell",
             amt: +(x.usd / SOL_USD).toFixed(3), unit: "SOL", usd: x.usd,
@@ -9317,7 +9319,7 @@ export default function App() {
       } catch (e) {}
     };
     pull();
-    const iv = setInterval(pull, 10000);
+    const iv = setInterval(pull, 5000);
     return () => { stop = true; clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveData, selected && selected.id, selected && selected.pool]);
@@ -9757,7 +9759,7 @@ export default function App() {
                     botSetMode={!isMobile && ticketTab === "auto" && botDragSet}
                     shiftArm={!isMobile && ticketTab === "auto"}
                     onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
-                    onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop(at); }}
+                    onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop({ ...at, level: lvl, side: botSide }); }}
                     onBotArm={(lvl) => armAtLevel(lvl)}
                     onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq} eyesToken={selected}
                     onCancelLine={(id) => { cancelBot(id); setSelLineId(null); }}
@@ -11059,10 +11061,36 @@ export default function App() {
             border: "none", borderRadius: 9, padding: "7px 14px", fontFamily: T.mono, fontWeight: 900, letterSpacing: 1.2,
             background: T.blue, color: "#07101d", cursor: "pointer", boxShadow: `0 4px 18px rgba(46,112,204,0.55), 0 0 10px ${T.blue}66`,
             animation: "coPop .18s ease", textAlign: "left", lineHeight: 1.25 }}>
-          <span style={{ fontSize: 11.5 }}>⚡ ARM · {(parseFloat(amount) || 0).toFixed(1)} {pay}</span>
-          <span style={{ display: "block", fontSize: 8, fontWeight: 800, opacity: 0.8 }}>
-            ≈ ${((parseFloat(amount) || 0) * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })} buy-in
-          </span>
+          {(() => {
+            const amtN = parseFloat(amount) || 0;
+            const unitUsd = pay === "SOL" ? SOL_USD : 0.0125;
+            const inUsd = amtN * unitUsd;
+            const lvl = armPop.level || (selected && selected.price) || 0;
+            const entry = (selected && positions[selected.id] && positions[selected.id].entry)
+              || (selected && selected.price) || 0;
+            const isExit = armPop.side === "sell" || (entry > 0 && lvl > entry);
+            const tokQty = entry > 0 ? inUsd / entry : 0;
+            const outUsd = tokQty * lvl;                    // what the line returns
+            const pnl = outUsd - inUsd;
+            const mult = entry > 0 ? lvl / entry : 1;
+            return (
+              <>
+                <span style={{ fontSize: 11.5 }}>⚡ ARM · {amtN.toFixed(1)} {pay}</span>
+                <span style={{ display: "block", fontSize: 8, fontWeight: 800, opacity: 0.85 }}>
+                  ≈ ${inUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })} in
+                  {isExit && outUsd > 0 && (
+                    <> · exit ${outUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}</>
+                  )}
+                </span>
+                {isExit && outUsd > 0 && (
+                  <span style={{ display: "block", fontSize: 9, fontWeight: 900,
+                    color: pnl >= 0 ? "#0b3d24" : "#3d0b0b" }}>
+                    {pnl >= 0 ? "▲ +" : "▼ −"}${Math.abs(pnl).toLocaleString(undefined, { maximumFractionDigits: 0 })} · ×{mult.toFixed(2)}
+                  </span>
+                )}
+              </>
+            );
+          })()}
         </button>
       )}
       {installOpen && !standalone && (
@@ -11608,7 +11636,7 @@ export default function App() {
             onCancelLine={(id) => { cancelBot(id); setSelLineId(null); }}
             onLineSelect={(id) => setSelLineId(id)}
             onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
-            onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop(at); }} />
+            onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop({ ...at, level: lvl, side: botSide }); }} />
           {/* SKINNY PILL BAR — one line, sits right under the chart where the
               times live. drag-set · trader · visual · all bots · watchlist.
               HOLD the watchlist pill and it swaps into 📊 POSITIONS (the auto
