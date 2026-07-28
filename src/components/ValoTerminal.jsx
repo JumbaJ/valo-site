@@ -690,7 +690,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const byIdx = new Map();
       for (const tr of trades) {
         const bucket = Math.floor(tr.t / tfMs) * tfMs;
-        const i = Math.round((bucket - agg[0].t) / tfMs);
+        const anchor = Number.isFinite(agg[0].t) ? agg[0].t : (Date.now() - Math.max(0, agg.length - 1) * tfMs);
+        const i = Math.round((bucket - anchor) / tfMs);
         if (!inData(i)) continue;
         const s = slotOf(i);
         if (s < 0 || s >= count) continue;
@@ -705,7 +706,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
           if (!all.length) return;
           const byTrader = new Map();
           for (const tr of all) {
-            const key = tr.trader || (tr.dev ? "__dev__" : "__me__");
+            const key = tr.market ? "__mkt__" : (tr.trader || (tr.dev ? "__dev__" : "__me__"));
             if (!byTrader.has(key)) byTrader.set(key, []);
             byTrader.get(key).push(tr);
           }
@@ -714,7 +715,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
             const pref = traderPrefs[traderKey];
             const mine = traderKey === "__me__";
             const hiIn = highlightTx && list.some((t) => t.tx === highlightTx);
-            const baseY = (isBuy ? y(c.h) - 16 : y(c.l) + 16) + (isBuy ? -rank * 19 : rank * 19);
+            const rankC = Math.min(rank, 2);   // three tiers max — never a tower
+            const baseY = (isBuy ? y(c.h) - 16 : y(c.l) + 16) + (isBuy ? -rankC * 19 : rankC * 19);
             // badge body is always the gain/loss colour (green buy / red sell) so
             // direction reads instantly; the trader's own colour becomes the ring.
             const own = isBuy ? T.green : T.red;
@@ -6423,9 +6425,10 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
   );
 }
 
-function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, eco = false, isMobile = false, onFullEco }) {
+function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, eco = false, isMobile = false, onFullEco, mktExtra = [], onQuery}) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
+  useEffect(() => { onQuery && onQuery(q); }, [q]);
   const ref = useRef(null);
   useEffect(() => {
     const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -6453,7 +6456,8 @@ function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, ec
       {eco && open && !isMobile && (
         <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 40, background: T.panel, border: `1px solid ${VALO_PURPLE}55`, borderRadius: 12, boxShadow: "0 26px 70px rgba(0,0,0,0.7)", overflow: "hidden",
           opacity: (typeof window !== "undefined" && window.__valoEcoDim) ? 0.07 : 1, pointerEvents: (typeof window !== "undefined" && window.__valoEcoDim) ? "none" : "auto", transition: "opacity .22s ease" }}>
-          <TokenEcosystem tokens={tokens} q={q} isMobile={false} maxH="min(72vh, 760px)" tdProps={(typeof window !== "undefined" && window.__valoTdProps) || null}
+          <TokenEcosystem tokens={mktExtra && mktExtra.length ? [...tokens, ...mktExtra.filter((m) => !tokens.some((t) => String(t.pool || "") === String(m.pool)))] : tokens}
+            q={q} isMobile={false} maxH="min(72vh, 760px)" tdProps={(typeof window !== "undefined" && window.__valoTdProps) || null}
             onPick={(id) => { onPickToken && onPickToken(id); setOpen(false); setQ(""); }}
             onWatchAdd={typeof window !== "undefined" && window.__valoWatchAdd ? window.__valoWatchAdd : undefined}
             onOpenUser={(u) => { onPickUser && onPickUser(u); }} />
@@ -8254,11 +8258,55 @@ export default function App() {
   };
   const [ecoFull, setEcoFull] = useState(false);  // 📱 fullscreen token ecosystem
   const [ecoQ, setEcoQ] = useState("");
+
   const [liveData, setLiveData] = useState(() => {
     if (typeof window === "undefined") return false;
     const url = /[?&](live|test)=1/.test(window.location.search);
     return url || window.__VALO_LIVE__ === true; // env bridge set by main.jsx (VITE_LIVE_DATA=1)
   }); // 🛰 real tokens, simulated wallet
+  // 🔎 market-wide search: every pump.fun / Robinhood-chain token DexScreener
+  // indexes, merged in behind whatever is already on screen
+  const [mktHits, setMktHits] = useState([]);
+  useEffect(() => {
+    const q = (ecoQ || "").trim();
+    if (!liveData || q.length < 2) { setMktHits([]); return; }
+    let stop = false;
+    const id = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (stop || !Array.isArray(j)) return;
+        setMktHits(j.map((x) => ({
+          id: "mkt:" + x.id, pool: x.id, liveMint: x.mint, sym: x.sym, name: x.name, img: x.img,
+          hue: x.hue, price: x.price, mc: x.mc, tvl: x.tvl, greenUsd: x.greenUsd, redUsd: x.redUsd,
+          traders: x.traders, ageMin: x.createdAt ? Math.max(1, Math.round((Date.now() - x.createdAt) / 60000)) : 600,
+          candles: [], chain: x.launchpad === "pump" ? "pump" : "rh", ca: x.mint || x.id,
+          socials: {}, isNew: false, hasDex: true, marketOnly: true,
+        })));
+      } catch (e) { /* keep local results */ }
+    }, 320);
+    return () => { stop = true; clearTimeout(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ecoQ, liveData]);
+
+  // 🚀 new launches stream into the live feed as they happen
+  const [freshPools, setFreshPools] = useState([]);
+  useEffect(() => {
+    if (!liveData) { setFreshPools([]); return; }
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch("/api/new");
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop && Array.isArray(j)) setFreshPools(j.slice(0, 12));
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 20000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [liveData]);
   const liveArrRef = useRef([]);           // DexScreener top pump pairs → token overrides
   const liveBindRef = useRef({ byPool: {}, byTok: {} }); // 🔒 pool ⇄ card bindings — stable all session
   const liveDataRef = useRef(false);
@@ -10421,7 +10469,7 @@ export default function App() {
             <StickySearch top={headerH}>
               <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <SearchBar tokens={tokens} username={username} full eco isMobile onFullEco={() => setEcoFull(true)} onPickToken={(id) => { setSel(id); setClickMode(null); }} onPickUser={(u) => setProfileUser(u)} />
+                  <SearchBar tokens={tokens} username={username} full eco isMobile onFullEco={() => setEcoFull(true)} mktExtra={mktHits} onQuery={setEcoQ} onPickToken={(id) => { setSel(id); setClickMode(null); }} onPickUser={(u) => setProfileUser(u)} />
                 </div>
                 <button onClick={() => setCompactList((v) => !v)} title={compactList ? "Expand cards" : "Compact list"}
                   style={{ flex: "0 0 auto", border: `1px solid ${compactList ? VALO_PURPLE : T.border2}`, background: T.panel, color: compactList ? VALO_PURPLE : T.dim,
@@ -10502,7 +10550,7 @@ export default function App() {
               {/* search — the chart's exact width, glued under the callout
                   banner, riding along as you scroll */}
               <div style={{ position: "sticky", top: "calc(var(--stkTop, 8px) - 8px)", zIndex: 34, margin: "0 0 8px" }}>
-                <SearchBar tokens={tokens} username={username} full eco onPickToken={(id) => { setSel(id); setClickMode(null); }} onPickUser={(u) => setProfileUser(u)} />
+                <SearchBar tokens={tokens} username={username} full eco mktExtra={mktHits} onQuery={setEcoQ} onPickToken={(id) => { setSel(id); setClickMode(null); }} onPickUser={(u) => setProfileUser(u)} />
               </div>
 
               {chartBlock}
@@ -11091,7 +11139,7 @@ export default function App() {
                 borderRadius: 14, padding: "4px 12px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, cursor: "pointer" }}>📊 POSITIONS</button>
           </div>
           <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-            <TokenEcosystem tokens={tokens} q={ecoQ} isMobile maxH="100%" tdProps={tdProps}
+            <TokenEcosystem tokens={[...tokens, ...mktHits.filter((m) => !tokens.some((t) => String(t.pool || "") === String(m.pool)))]} q={ecoQ} isMobile maxH="100%" tdProps={tdProps}
               onPick={(id) => { setSel(id); setClickMode(null); setEcoFull(false); setEcoQ(""); }}
               onWatchAdd={(id) => { watchAdd(id, null); popPlus(); }}
               onOpenUser={(u) => setProfileUser(u)} />
