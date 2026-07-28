@@ -755,11 +755,11 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const c = agg[i], up = c.c >= c.o;
       ctx.fillStyle = up ? "rgba(22,199,132,0.28)" : "rgba(234,57,67,0.28)";
       const vh = (c.v / vMax) * volH;
-      ctx.fillRect(x(s) - Math.max(0.6, step * 0.32), volTop + volH - vh, Math.max(1.2, step * 0.64), vh);
+      ctx.fillRect(x(s) - Math.max(0.8, (step - Math.max(0.6, step * 0.08)) / 2), volTop + volH - vh, Math.max(1.5, step - Math.max(0.6, step * 0.08)), vh);
     }
 
     if (mode === "candles") {
-      const bw = Math.max(1, Math.min(12, step * 0.62));
+      const bw = Math.max(1.5, Math.min(26, step - Math.max(0.6, step * 0.08)));  // near-touching bodies
       for (let s = 0; s < count; s++) {
         const i = idxOf(s); if (!inData(i)) continue;
         const c = agg[i], up = c.c >= c.o, col = up ? T.green : T.red;
@@ -8469,11 +8469,22 @@ export default function App() {
       const r = await fetch(`/api/candles?pool=${encodeURIComponent(t.pool)}&tf=${tf}&before=${before}${mintQ}`);
       if (!r.ok) return;
       const j = await r.json();
-      if (!Array.isArray(j) || !j.length) { histBusy.current[key] = "done"; return; }
+      if (!Array.isArray(j) || !j.length) {
+        const misses = (histBusy.current[key + ":miss"] || 0) + 1;
+        histBusy.current[key + ":miss"] = misses;
+        if (misses >= 3) histBusy.current[key] = "done";   // genuinely at the token's first candle
+        return;
+      }
+      histBusy.current[key + ":miss"] = 0;
       const older = j
         .map((c) => ({ t: +c.t, o: +c.o, h: +c.h, l: +c.l, c: +c.c, v: +c.v || 0 }))
         .filter((c) => Number.isFinite(c.t) && c.t < oldest.t && [c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v) && v > 0));
-      if (!older.length) { histBusy.current[key] = "done"; return; }
+      if (!older.length) {
+        const misses = (histBusy.current[key + ":miss"] || 0) + 1;
+        histBusy.current[key + ":miss"] = misses;
+        if (misses >= 3) histBusy.current[key] = "done";
+        return;
+      }
       setTokens((Ts) => Ts.map((x) => {
         if (x.id !== tokenId) return x;
         const merged = [...older, ...x.candles];
@@ -8486,6 +8497,7 @@ export default function App() {
     finally { if (histBusy.current[key] !== "done") histBusy.current[key] = false; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tf]);
+  useEffect(() => { histBusy.current = {}; }, [tf, sel]);  // new frame or token → page freely again
 
   // ♾ ENDLESS SCANNER — more real tokens append as you reach the bottom
   const [moreToks, setMoreToks] = useState([]);
