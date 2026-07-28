@@ -408,6 +408,34 @@ function buysSellsFor(t, tfMin, count = 90) {
   return { buys, sells: Math.max(0, total - buys) };
 }
 
+// real market pool → a complete VALO token card
+let mktNid = 900000;
+function adoptMarketToken(x) {
+  const sym = String(x.sym || "???").toUpperCase().slice(0, 12);
+  const buys = +x.buys24 || 0, sells = +x.sells24 || 0;
+  const flow = Math.max(1, buys + sells);
+  const green = +x.greenUsd || 0, red = +x.redUsd || 0;
+  const tvl = +x.tvl || 0, mc = +x.mc || 0, price = +x.price || 0;
+  const buyPressure = Math.round((buys / flow) * 100);
+  const ch = +x.ch24 || 0;
+  const momentum = Math.max(1, Math.min(99, Math.round(50 + ch / 2 + (buyPressure - 50) * 0.4)));
+  const ageMin = x.createdAt ? Math.max(1, Math.round((Date.now() - x.createdAt) / 60000)) : 600;
+  return {
+    id: ++mktNid,                       // numeric id — every helper expects one
+    pool: x.id, liveMint: x.mint || null, market: true,
+    sym, name: x.name || sym, chain: x.launchpad === "pump" ? "pump" : "rh",
+    isNew: ageMin < 60, hasDex: true,
+    traders: +x.traders || flow, tvl, greenUsd: green, redUsd: red,
+    momentum, buyPressure,
+    liq: tvl * 0.55, vol24: green + red,
+    ageMin, hue: symbolHue(sym), img: x.img || null,
+    candles: [], price, supply: price > 0 && mc > 0 ? mc / price : 1e9,
+    ca: x.mint || x.id, socials: {},
+    trending: { reason: `$${sym} is live on Solana — real market data streaming from the pool.`,
+      tweet: null, desc: `${x.name || sym} (${sym}) — live pool tracked by VALO.` },
+    dev: { trades: [] },
+  };
+}
 function scoreToken(t) {
   const g = t.greenUsd / (t.greenUsd + t.redUsd);
   const liq = Math.min(100, (t.liq / t.tvl) * 180);
@@ -8276,6 +8304,7 @@ export default function App() {
   // 🔎 market-wide search: every pump.fun / Robinhood-chain token DexScreener
   // indexes, merged in behind whatever is already on screen
   const [mktHits, setMktHits] = useState([]);
+
   useEffect(() => {
     const q = (ecoQ || "").trim();
     if (!liveData || q.length < 2) { setMktHits([]); return; }
@@ -8286,13 +8315,7 @@ export default function App() {
         if (!r.ok) return;
         const j = await r.json();
         if (stop || !Array.isArray(j)) return;
-        setMktHits(j.map((x) => ({
-          id: "mkt:" + x.id, pool: x.id, liveMint: x.mint, sym: x.sym, name: x.name, img: x.img,
-          hue: x.hue, price: x.price, mc: x.mc, tvl: x.tvl, greenUsd: x.greenUsd, redUsd: x.redUsd,
-          traders: x.traders, ageMin: x.createdAt ? Math.max(1, Math.round((Date.now() - x.createdAt) / 60000)) : 600,
-          candles: [], chain: x.launchpad === "pump" ? "pump" : "rh", ca: x.mint || x.id,
-          socials: {}, isNew: false, hasDex: true, marketOnly: true,
-        })));
+        setMktHits(j.map(adoptMarketToken));
       } catch (e) { /* keep local results */ }
     }, 320);
     return () => { stop = true; clearTimeout(id); };
@@ -8304,7 +8327,7 @@ export default function App() {
   const histBusy = useRef({});
   const loadOlder = useCallback(async (tokenId) => {
     const t = (tokensRef.current || []).find((x) => x.id === tokenId);
-    if (!t || !t.pool || !t.candles || !t.candles.length) return;
+    if (!t || !t.pool || !t.realCandles || !t.candles || !t.candles.length) return;
     const oldest = t.candles[0];
     if (!oldest || !Number.isFinite(oldest.t)) return;          // nothing to page from
     const key = tokenId + ":" + tf;
@@ -8354,13 +8377,7 @@ export default function App() {
           morePage.current = page;
           setMoreToks((M) => {
             const seen = new Set([...M.map((m) => m.pool), ...(tokensRef.current || []).map((t) => t.pool).filter(Boolean)]);
-            const add = j.filter((x) => !seen.has(x.id)).map((x) => ({
-              id: "mkt:" + x.id, pool: x.id, liveMint: x.mint, sym: x.sym, name: x.name, img: x.img,
-              hue: x.hue, price: x.price, mc: x.mc, tvl: x.tvl, greenUsd: x.greenUsd, redUsd: x.redUsd,
-              traders: x.traders, ageMin: x.createdAt ? Math.max(1, Math.round((Date.now() - x.createdAt) / 60000)) : 600,
-              candles: [], chain: x.launchpad === "pump" ? "pump" : "rh", ca: x.mint || x.id,
-              socials: {}, isNew: false, hasDex: true, marketOnly: true,
-            }));
+            const add = j.filter((x) => !seen.has(x.id)).map(adoptMarketToken);
             return [...M, ...add];
           });
         }
@@ -8369,6 +8386,17 @@ export default function App() {
     moreBusy.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveData]);
+  // opening a searched token adopts it into the board so charts, tickets and
+  // bots all work on it exactly like any other card
+  const openAnyToken = useCallback((id) => {
+    const local = (tokensRef.current || []).find((t) => t.id === id);
+    if (local) { setSel(id); setClickMode(null); return; }
+    const hit = [...mktHits, ...moreToks].find((t) => t.id === id);
+    if (!hit) return;
+    setTokens((Ts) => (Ts.some((t) => String(t.pool || "") === String(hit.pool)) ? Ts : [hit, ...Ts]));
+    setSel(hit.id); setClickMode(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mktHits, moreToks]);
   // 🚀 new launches stream into the live feed as they happen
   const [freshPools, setFreshPools] = useState([]);
   useEffect(() => {
@@ -8460,7 +8488,7 @@ export default function App() {
         const med = [...mapped].map((c) => c.c).sort((a, b) => a - b)[Math.floor(mapped.length / 2)];
         mapped = mapped.filter((c) => c.h <= med * 50 && c.l >= med / 50);
         if (mapped.length < 10) return;
-        setTokens((Ts) => Ts.map((x) => (x.id === sel ? { ...x, candles: mapped, price: mapped[mapped.length - 1].c } : x)));
+        setTokens((Ts) => Ts.map((x) => (x.id === sel ? { ...x, candles: mapped, realCandles: true, price: mapped[mapped.length - 1].c } : x)));
       } catch (e) { /* keep what's drawn */ }
     };
     pull();
@@ -8691,7 +8719,7 @@ export default function App() {
           const target = lv.price;
           const c = prev + (target - prev) * 0.5;
           const ratio = prev > 0 && target > 0 ? target / prev : 1;
-          if (target > 0 && (ratio > 4 || ratio < 0.25)) {
+          if (target > 0 && !t.realCandles && (ratio > 4 || ratio < 0.25)) {
             // this card just moved to a different price scale — RESCALE the
             // existing candles so the shape survives (a flat reseed looked
             // exactly like a dead chart)
@@ -10554,7 +10582,7 @@ export default function App() {
             <StickySearch top={headerH}>
               <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <SearchBar tokens={tokens} username={username} full eco isMobile onFullEco={() => setEcoFull(true)} mktExtra={mktHits} onQuery={setEcoQ} onPickToken={(id) => { setSel(id); setClickMode(null); }} onPickUser={(u) => setProfileUser(u)} />
+                  <SearchBar tokens={tokens} username={username} full eco isMobile onFullEco={() => setEcoFull(true)} mktExtra={mktHits} onQuery={setEcoQ} onPickToken={openAnyToken} onPickUser={(u) => setProfileUser(u)} />
                 </div>
                 <button onClick={() => setCompactList((v) => !v)} title={compactList ? "Expand cards" : "Compact list"}
                   style={{ flex: "0 0 auto", border: `1px solid ${compactList ? VALO_PURPLE : T.border2}`, background: T.panel, color: compactList ? VALO_PURPLE : T.dim,
@@ -10638,7 +10666,7 @@ export default function App() {
               {/* search — the chart's exact width, glued under the callout
                   banner, riding along as you scroll */}
               <div style={{ position: "sticky", top: "calc(var(--stkTop, 8px) - 8px)", zIndex: 34, margin: "0 0 8px" }}>
-                <SearchBar tokens={tokens} username={username} full eco mktExtra={mktHits} onQuery={setEcoQ} onPickToken={(id) => { setSel(id); setClickMode(null); }} onPickUser={(u) => setProfileUser(u)} />
+                <SearchBar tokens={tokens} username={username} full eco mktExtra={mktHits} onQuery={setEcoQ} onPickToken={openAnyToken} onPickUser={(u) => setProfileUser(u)} />
               </div>
 
               {chartBlock}
