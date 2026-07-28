@@ -624,7 +624,18 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     const baseT = agg.length && Number.isFinite(agg[0].t)
       ? agg[0].t
       : Date.now() - Math.max(0, agg.length - 1) * tfMs;
-    const timeAtSlot = (s) => baseT + idxOf(s) * tfMs; // extrapolates into empty space
+    const timeAtSlot = (s) => {
+      const i = idxOf(s);
+      const c = i >= 0 && i < total ? agg[i] : null;
+      if (c && Number.isFinite(c.t)) return c.t;                  // the candle's own time
+      if (i < 0) {                                                // before the first candle
+        const f = agg[0] && Number.isFinite(agg[0].t) ? agg[0].t : baseT;
+        return f + i * tfMs;
+      }
+      const lastC = agg[total - 1];                               // past the newest
+      const lt = lastC && Number.isFinite(lastC.t) ? lastC.t : baseT + Math.max(0, total - 1) * tfMs;
+      return lt + (i - (total - 1)) * tfMs;
+    };
     geom.current = { y, x, step, lo, hi, padT, chartH, plotW, slotOf, idxOf, inData, timeAtSlot, hiLoRange: hi - lo };
 
     ctx.font = `10px ${T.mono}`; ctx.textBaseline = "middle";
@@ -780,8 +791,17 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const byIdx = new Map();
       for (const tr of trades) {
         const bucket = Math.floor(tr.t / tfMs) * tfMs;
-        const anchor = (agg.length && Number.isFinite(agg[0].t)) ? agg[0].t : (Date.now() - Math.max(0, agg.length - 1) * tfMs);
-        const i = Math.round((bucket - anchor) / tfMs);
+        // find the candle that actually owns this bucket (binary search — the
+        // series is sorted, and may have gaps where nothing traded)
+        let lo2 = 0, hi2 = agg.length - 1, i = -1;
+        while (lo2 <= hi2) {
+          const mid = (lo2 + hi2) >> 1;
+          const mt = agg[mid] && Number.isFinite(agg[mid].t) ? agg[mid].t : null;
+          if (mt == null) break;
+          if (mt === bucket) { i = mid; break; }
+          if (mt < bucket) { i = mid; lo2 = mid + 1; } else hi2 = mid - 1;  // nearest candle at or before
+        }
+        if (i < 0) continue;
         if (!inData(i)) continue;
         const s = slotOf(i);
         if (s < 0 || s >= count) continue;
