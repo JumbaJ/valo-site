@@ -443,7 +443,7 @@ const ratingColor = (s) => (s >= 66 ? T.green : s >= 40 ? T.amber : T.red);
 // ================================================================
 // CHART
 // ================================================================
-function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null, shiftArm = false, onCancelLine = null }) {
+function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null, shiftArm = false, onCancelLine = null, onNeedHistory = null }) {
   const wrapRef = useRef(null);
   const cvsRef = useRef(null);
   const [cross, setCross] = useState(null);
@@ -470,6 +470,11 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   const offset = Math.max(-PAD_BARS, Math.min(view.offset, maxOff + PAD_BARS));
   // window of slots: slot s ↔ agg index (total - count - offset + s)
   const winStart = total - count - offset;
+  // approaching the left edge of what we have → ask for the previous page
+  useEffect(() => {
+    if (!onNeedHistory) return;
+    if (winStart <= Math.max(8, Math.round(count * 0.25))) onNeedHistory();
+  }, [winStart, count, onNeedHistory]);
 
   const geom = useRef({});
 
@@ -8294,6 +8299,76 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ecoQ, liveData]);
 
+  // 📜 INFINITE HISTORY — nearing the left edge loads older candles and
+  // prepends them, so you can pan back to a pool's very first trade
+  const histBusy = useRef({});
+  const loadOlder = useCallback(async (tokenId) => {
+    const t = (tokensRef.current || []).find((x) => x.id === tokenId);
+    if (!t || !t.pool || !t.candles || !t.candles.length) return;
+    const oldest = t.candles[0];
+    if (!oldest || !Number.isFinite(oldest.t)) return;          // nothing to page from
+    const key = tokenId + ":" + tf;
+    if (histBusy.current[key]) return;
+    histBusy.current[key] = true;
+    try {
+      const before = Math.floor(oldest.t / 1000);
+      const r = await fetch(`/api/candles?pool=${encodeURIComponent(t.pool)}&tf=${tf}&before=${before}`);
+      if (!r.ok) return;
+      const j = await r.json();
+      if (!Array.isArray(j) || !j.length) { histBusy.current[key] = "done"; return; }
+      const older = j
+        .map((c) => ({ t: +c.t, o: +c.o, h: +c.h, l: +c.l, c: +c.c, v: +c.v || 0 }))
+        .filter((c) => Number.isFinite(c.t) && c.t < oldest.t && [c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v) && v > 0));
+      if (!older.length) { histBusy.current[key] = "done"; return; }
+      setTokens((Ts) => Ts.map((x) => (x.id === tokenId
+        ? { ...x, candles: [...older, ...x.candles].slice(-2000) }   // keep a deep but bounded history
+        : x)));
+    } catch (e) { /* leave what we have */ }
+    finally { if (histBusy.current[key] !== "done") histBusy.current[key] = false; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tf]);
+
+  // ♾ ENDLESS SCANNER — more real tokens append as you reach the bottom
+  const [moreToks, setMoreToks] = useState([]);
+  useEffect(() => {
+    if (!isMobile) return;
+    const onScroll = () => {
+      const left = document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
+      if (left < 520) loadMoreTokens();
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile, liveData]);
+  const morePage = useRef(1);
+  const moreBusy = useRef(false);
+  const loadMoreTokens = useCallback(async () => {
+    if (!liveData || moreBusy.current || morePage.current >= 10) return;
+    moreBusy.current = true;
+    const page = morePage.current + 1;
+    try {
+      const r = await fetch(`/api/tokens?page=${page}`);
+      if (r.ok) {
+        const j = await r.json();
+        if (Array.isArray(j) && j.length) {
+          morePage.current = page;
+          setMoreToks((M) => {
+            const seen = new Set([...M.map((m) => m.pool), ...(tokensRef.current || []).map((t) => t.pool).filter(Boolean)]);
+            const add = j.filter((x) => !seen.has(x.id)).map((x) => ({
+              id: "mkt:" + x.id, pool: x.id, liveMint: x.mint, sym: x.sym, name: x.name, img: x.img,
+              hue: x.hue, price: x.price, mc: x.mc, tvl: x.tvl, greenUsd: x.greenUsd, redUsd: x.redUsd,
+              traders: x.traders, ageMin: x.createdAt ? Math.max(1, Math.round((Date.now() - x.createdAt) / 60000)) : 600,
+              candles: [], chain: x.launchpad === "pump" ? "pump" : "rh", ca: x.mint || x.id,
+              socials: {}, isNew: false, hasDex: true, marketOnly: true,
+            }));
+            return [...M, ...add];
+          });
+        }
+      }
+    } catch (e) {}
+    moreBusy.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData]);
   // 🚀 new launches stream into the live feed as they happen
   const [freshPools, setFreshPools] = useState([]);
   useEffect(() => {
@@ -9075,9 +9150,11 @@ export default function App() {
     filter === "all" ? true : filter === "new" ? t.isNew :
     filter === "safe" ? scoreToken(t) >= 66 : filter === "risky" ? scoreToken(t) < 40 : t.chain === filter);
   // curated slots: a dropped token claims that exact position on the left rail
-  const shown = scanOrder
+  const shownCore = scanOrder
     ? scanOrder.map((id) => tokens.find((t) => t.id === id)).filter(Boolean)
     : shownBase;
+  // ♾ endless: pages of real tokens append beneath the curated list
+  const shown = moreToks.length ? [...shownCore, ...moreToks] : shownCore;
   shownRef.current = shown;
 
   const gTvl = tokens.reduce((a, t) => a + t.tvl, 0);
@@ -9684,6 +9761,8 @@ export default function App() {
                     onBotArm={(lvl) => armAtLevel(lvl)}
                     onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq} eyesToken={selected}
                     onCancelLine={(id) => { cancelBot(id); setSelLineId(null); }}
+            onNeedHistory={() => selected && loadOlder(selected.id)}
+                    onNeedHistory={() => selected && loadOlder(selected.id)}
                     onLineSelect={(id) => setSelLineId(id)}
                     isMobile={isMobile} height={isMobile ? mobChartH : 480 + extraH + Math.round(pcCrunch * 150)} />
 
@@ -10527,7 +10606,10 @@ export default function App() {
             </button>
           </div>
           ) : (
-          <div ref={scannerRef} style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start",
+          <div ref={scannerRef}
+            onScroll={(e) => { const el = e.currentTarget;
+              if (el.scrollHeight - el.scrollTop - el.clientHeight < 380) loadMoreTokens(); }}
+            style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start",
             transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s", display: "grid", gap: 10,
             maxHeight: "calc((100vh - 30px) / 1.13 - var(--stkTop))", overflowY: "auto", padding: "2px 10px 2px 2px" }}>
             <button onClick={() => setScanCollapsed(true)} title="Fold the scanner into a rail"
