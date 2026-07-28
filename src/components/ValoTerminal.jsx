@@ -9546,36 +9546,9 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected && selected.liveMint, selected && selected.pool]);
 
-  // ---- B. REAL trades on the chart: the market's own buys and sells become
-  // the green ▲ / red ▼ badges, biggest first so the chart stays readable
-  const [realChartTrades, setRealChartTrades] = useState([]);
-  useEffect(() => {
-    setRealChartTrades([]);
-    if (!liveData || !selected || !selected.pool) return;
-    let stop = false;
-    const pull = async () => {
-      try {
-        const r = await fetch(`/api/trades?pool=${encodeURIComponent(selected.pool)}`);
-        if (!r.ok) return;
-        const j = await r.json();
-        if (stop || !Array.isArray(j)) return;
-        const rows = j
-          .filter((x) => x.price > 0 && x.usd > 0)
-          .sort((a, b) => b.usd - a.usd).slice(0, 5)    // only the biggest prints
-          .map((x) => ({
-            t: x.at, price: x.price, side: x.isBuy ? "buy" : "sell",
-            amt: +(x.usd / SOL_USD).toFixed(3), unit: "SOL", usd: x.usd,
-            trader: x.trader || "market", wallet: x.wallet || null,
-            tx: x.tx || `mkt${x.at}`, txFull: x.tx || null, market: true,
-          }));
-        setRealChartTrades(rows);
-      } catch (e) {}
-    };
-    pull();
-    const iv = setInterval(pull, 5000);
-    return () => { stop = true; clearInterval(iv); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveData, selected && selected.id, selected && selected.pool]);
+  // (market prints are shown in the LIVE TRADES tab, not as chart markers)
+  const realChartTrades = [];
+
 
   // 🕯 the tape becomes candles: real prints drive the live end of the chart
   const tapeRef = useRef({});
@@ -9621,9 +9594,9 @@ export default function App() {
         if (trader === selected.dev.wallet) return showDevTrades ? [] : (selected.dev.trades || []);
         return traderTradesFor(selected, trader);
       });
-    const liveReal = liveData && selected.pool;   // real market → real prints only
+    const liveReal = liveData && selected.pool;
     const all = liveReal
-      ? [...mine, ...hist, ...realChartTrades]    // your fills + genuine market trades
+      ? [...mine, ...hist]                        // only your own trades mark the chart
       : [...mine, ...dev, ...hist, ...followed];  // simulation keeps its own cast
     // de-dupe by tx so a followed dev doesn't double-draw
     const seen = new Set();
