@@ -8384,7 +8384,8 @@ export default function App() {
     histBusy.current[key] = true;
     try {
       const before = Math.floor(oldest.t / 1000);
-      const r = await fetch(`/api/candles?pool=${encodeURIComponent(t.pool)}&tf=${tf}&before=${before}`);
+      const mintQ = t.liveMint ? `&mint=${encodeURIComponent(t.liveMint)}` : "";
+      const r = await fetch(`/api/candles?pool=${encodeURIComponent(t.pool)}&tf=${tf}&before=${before}${mintQ}`);
       if (!r.ok) return;
       const j = await r.json();
       if (!Array.isArray(j) || !j.length) { histBusy.current[key] = "done"; return; }
@@ -8531,7 +8532,8 @@ export default function App() {
     if (!pool) return;
     const pull = async () => {
       try {
-        const r = await fetch(`/api/candles?pool=${encodeURIComponent(pool)}&tf=${tf}`);
+        const mintQ = t0 && t0.liveMint ? `&mint=${encodeURIComponent(t0.liveMint)}` : "";
+        const r = await fetch(`/api/candles?pool=${encodeURIComponent(pool)}&tf=${tf}${mintQ}`);
         if (!r.ok) return;
         const j = await r.json();
         if (stale || !Array.isArray(j) || j.length < 10) return;
