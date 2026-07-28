@@ -8444,6 +8444,14 @@ export default function App() {
 
   // ♾ ENDLESS SCANNER — more real tokens append as you reach the bottom
   const [moreToks, setMoreToks] = useState([]);
+  const [pageScrolled, setPageScrolled] = useState(false);
+  useEffect(() => {
+    if (!isMobile) return;
+    const onS = () => setPageScrolled(window.scrollY > 260);
+    onS();
+    window.addEventListener("scroll", onS, { passive: true });
+    return () => window.removeEventListener("scroll", onS);
+  }, [isMobile]);
   useEffect(() => {
     if (!isMobile) return;
     const onScroll = () => {
@@ -8491,16 +8499,17 @@ export default function App() {
   };
   const openAnyToken = useCallback((id) => {
     holdScroll();
-    const local = (tokensRef.current || []).find((t) => t.id === id);
-    if (local) { setSel(id); setClickMode(null); return; }
+    const board = tokensRef.current || [];
+    const local = board.find((t) => t.id === id);
+    if (local) { setSel(local.id); setClickMode(null); return; }
     const hit = [...mktHits, ...moreToks].find((t) => t.id === id);
     if (!hit) return;
-    setTokens((Ts) => {
-      const dupe = Ts.find((t) => (hit.pool && String(t.pool || "") === String(hit.pool))
-        || (hit.liveMint && String(t.liveMint || "") === String(hit.liveMint)));
-      if (dupe) { setSel(dupe.id); setClickMode(null); return Ts; }   // open the one we already have
-      return [...Ts, hit];   // append: the scanner never reflows under your cursor
-    });
+    // resolve everything BEFORE touching state, so we never select an id that
+    // isn't on the board (that mismatch is what froze the chart)
+    const dupe = board.find((t) => (hit.pool && String(t.pool || "") === String(hit.pool))
+      || (hit.liveMint && String(t.liveMint || "") === String(hit.liveMint)));
+    if (dupe) { setSel(dupe.id); setClickMode(null); return; }
+    setTokens((Ts) => (Ts.some((t) => t.id === hit.id) ? Ts : [...Ts, hit]));
     setSel(hit.id); setClickMode(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mktHits, moreToks]);
@@ -9300,7 +9309,13 @@ export default function App() {
     ? scanOrder.map((id) => tokens.find((t) => t.id === id)).filter(Boolean)
     : shownBase;
   // ♾ endless by default; a chosen subsection narrows to exactly its tokens
-  const shownRaw = scanSec ? shownCore : (moreToks.length ? [...shownCore, ...moreToks] : shownCore);
+  const shownRaw = scanSec
+    ? shownCore
+    : (moreToks.length
+        // market cards live in the endless list — the board copy stays hidden
+        // so opening one never moves it up the scanner
+        ? [...shownCore.filter((t) => !t.market), ...moreToks]
+        : shownCore);
   // one card per pool / mint / symbol — duplicates from different feeds collapse
   const shown = useMemo(() => {
     const seen = new Set(); const out = [];
@@ -10749,6 +10764,14 @@ export default function App() {
                   style={{ flex: "0 0 auto", border: `1px solid ${compactList ? VALO_PURPLE : T.border2}`, background: T.panel, color: compactList ? VALO_PURPLE : T.dim,
                     borderRadius: 9, padding: "0 13px", fontSize: 15, fontWeight: 900, cursor: "pointer" }}>{compactList ? "▦" : "▤"}</button>
               </div>
+              {/* ▲ back to the top — a full row that fades in once you're down the list */}
+              <div onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+                style={{ marginTop: 5, height: pageScrolled ? 22 : 0, opacity: pageScrolled ? 1 : 0,
+                  overflow: "hidden", transition: "height .18s ease, opacity .18s ease",
+                  display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+                  background: "rgba(15,19,28,0.42)", border: pageScrolled ? `1px solid ${T.border2}55` : "none",
+                  borderRadius: 8, color: T.faint, fontFamily: T.mono, fontSize: 10, letterSpacing: 2,
+                  backdropFilter: "blur(3px)" }}>▲</div>
             </StickySearch>
 
             <div style={{ display: "grid", gap: compactList ? 6 : 10, paddingRight: 6 }}>
@@ -10806,10 +10829,10 @@ export default function App() {
             maxHeight: "calc((100vh - 30px) / 1.13 - var(--stkTop))", overflowY: "auto", padding: "2px 10px 2px 2px" }}>
             <button onClick={() => { const el = scannerRef.current; if (el) el.scrollTo({ top: 0, behavior: "smooth" }); }}
               title="Back to the top of the scanner"
-              style={{ position: "sticky", top: 0, zIndex: 3, justifySelf: "end", marginRight: 30, width: 24, height: 24,
+              style={{ position: "sticky", top: 0, zIndex: 3, justifySelf: "stretch", marginRight: 30, height: 22,
                 display: "flex", alignItems: "center", justifyContent: "center",
-                background: "rgba(15,19,28,0.45)", border: `1px solid ${T.border2}66`, borderRadius: 7,
-                cursor: "pointer", color: T.faint, fontSize: 11, marginBottom: -24, backdropFilter: "blur(3px)" }}>▲</button>
+                background: "rgba(15,19,28,0.42)", border: `1px solid ${T.border2}55`, borderRadius: 8,
+                cursor: "pointer", color: T.faint, fontSize: 11, letterSpacing: 2, marginBottom: -22, backdropFilter: "blur(3px)" }}>▲</button>
             <button onClick={() => setScanCollapsed(true)} title="Fold the scanner into a rail"
               style={{ position: "sticky", top: 0, zIndex: 3, justifySelf: "end", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center",
                 background: "rgba(15,19,28,0.9)", border: `1px solid ${T.border2}`, borderRadius: 7, cursor: "pointer", color: T.dim, fontSize: 12, marginBottom: -34 }}>‹</button>
@@ -11449,12 +11472,6 @@ export default function App() {
                 borderRadius: 14, padding: "4px 12px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, cursor: "pointer" }}>📊 POSITIONS</button>
           </div>
           <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "flex", justifyContent: "flex-end", padding: "2px 4px 0" }}>
-              <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} title="Back to the top"
-                style={{ width: 26, height: 22, display: "flex", alignItems: "center", justifyContent: "center",
-                  background: "rgba(15,19,28,0.45)", border: `1px solid ${T.border2}66`, borderRadius: 7,
-                  color: T.faint, fontSize: 11, cursor: "pointer", backdropFilter: "blur(3px)" }}>▲</button>
-            </div>
             <TokenEcosystem tokens={[...tokens, ...mktHits.filter((m) => !tokens.some((t) => String(t.pool || "") === String(m.pool)))]} q={ecoQ} isMobile maxH="100%" tdProps={tdProps}
               onPick={(id) => { setSel(id); setClickMode(null); setEcoFull(false); setEcoQ(""); }}
               onWatchAdd={(id) => { watchAdd(id, null); popPlus(); }}
