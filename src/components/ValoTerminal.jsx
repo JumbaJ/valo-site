@@ -428,7 +428,7 @@ function adoptMarketToken(x) {
     traders: +x.traders || flow, tvl, greenUsd: green, redUsd: red,
     momentum, buyPressure,
     liq: tvl * 0.55, vol24: green + red,
-    ageMin, hue: symbolHue(sym), img: x.img || null,
+    ageMin, hue: symbolHue(sym), img: x.img || null, ch24: ch,
     candles: [], price, supply: price > 0 && mc > 0 ? mc / price : 1e9,
     ca: x.mint || x.id, socials: {},
     trending: { reason: `$${sym} is live on Solana — real market data streaming from the pool.`,
@@ -6267,7 +6267,13 @@ const DESC_BITS = [
   "Micro-cap moonshot with a meme that refuses to die.",
 ];
 const descOf = (t) => (((tokSeed(t) * 11 + 1) % 13) < 9 ? DESC_BITS[Math.abs(tokSeed(t) * 3 + 1) % DESC_BITS.length] : null);
-const gainOf = (t) => { const c = t.candles[t.candles.length - 1]; return ((c.c - c.o) / c.o) * 100; };
+const gainOf = (t) => {
+  const cs = t && t.candles;
+  if (!cs || !cs.length) return +t?.ch24 || 0;      // no candles yet → use the real 24h move
+  const c = cs[cs.length - 1];
+  if (!c || !(c.o > 0)) return +t?.ch24 || 0;
+  return ((c.c - c.o) / c.o) * 100;
+};
 const isHotTok = (t) => t.momentum > 78 || Math.abs(gainOf(t)) > 1.4;
 
 // live faded bar-chart backdrop — each card breathes with its own token
