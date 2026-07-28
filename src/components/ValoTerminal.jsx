@@ -436,6 +436,36 @@ function adoptMarketToken(x) {
     dev: { trades: [] },
   };
 }
+// build candles straight from the trade tape: [{at, price, usd, isBuy}] → OHLCV
+function candlesFromTrades(trades, tfMin) {
+  if (!Array.isArray(trades) || !trades.length) return [];
+  const ms = Math.max(1, tfMin) * 60000;
+  const byBucket = new Map();
+  for (const tr of trades) {
+    const at = +tr.at || +tr.t || 0;
+    const px = +tr.price || 0;
+    if (!(at > 0) || !(px > 0)) continue;
+    const b = Math.floor(at / ms) * ms;
+    const cur = byBucket.get(b);
+    if (!cur) byBucket.set(b, { t: b, o: px, h: px, l: px, c: px, v: +tr.usd || 0, first: at, last: at });
+    else {
+      cur.h = Math.max(cur.h, px); cur.l = Math.min(cur.l, px); cur.v += +tr.usd || 0;
+      if (at < cur.first) { cur.first = at; cur.o = px; }     // earliest print opens
+      if (at >= cur.last) { cur.last = at; cur.c = px; }      // latest print closes
+    }
+  }
+  return [...byBucket.values()].sort((a, b) => a.t - b.t)
+    .map(({ t, o, h, l, c, v }) => ({ t, o, h, l, c, v }));
+}
+// splice the tape-built tail onto whatever history we have, so the newest
+// candles move with real trades instead of an interpolated price
+function mergeTapeCandles(history, tape) {
+  if (!tape.length) return history;
+  if (!history || !history.length) return tape;
+  const cut = tape[0].t;
+  const older = history.filter((c) => Number.isFinite(c.t) && c.t < cut);
+  return older.length ? [...older, ...tape] : tape;
+}
 function scoreToken(t) {
   const g = t.greenUsd / (t.greenUsd + t.redUsd);
   const liq = Math.min(100, (t.liq / t.tvl) * 180);
@@ -8448,7 +8478,12 @@ export default function App() {
     if (local) { setSel(id); setClickMode(null); return; }
     const hit = [...mktHits, ...moreToks].find((t) => t.id === id);
     if (!hit) return;
-    setTokens((Ts) => (Ts.some((t) => String(t.pool || "") === String(hit.pool)) ? Ts : [hit, ...Ts]));
+    setTokens((Ts) => {
+      const dupe = Ts.find((t) => (hit.pool && String(t.pool || "") === String(hit.pool))
+        || (hit.liveMint && String(t.liveMint || "") === String(hit.liveMint)));
+      if (dupe) { setSel(dupe.id); setClickMode(null); return Ts; }   // open the one we already have
+      return [hit, ...Ts];
+    });
     setSel(hit.id); setClickMode(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mktHits, moreToks]);
@@ -9247,7 +9282,18 @@ export default function App() {
     ? scanOrder.map((id) => tokens.find((t) => t.id === id)).filter(Boolean)
     : shownBase;
   // ♾ endless by default; a chosen subsection narrows to exactly its tokens
-  const shown = scanSec ? shownCore : (moreToks.length ? [...shownCore, ...moreToks] : shownCore);
+  const shownRaw = scanSec ? shownCore : (moreToks.length ? [...shownCore, ...moreToks] : shownCore);
+  // one card per pool / mint / symbol — duplicates from different feeds collapse
+  const shown = useMemo(() => {
+    const seen = new Set(); const out = [];
+    for (const t of shownRaw) {
+      if (!t) continue;
+      const k = String(t.pool || t.liveMint || t.ca || ("id" + t.id)).toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k); out.push(t);
+    }
+    return out;
+  }, [shownRaw]);
   shownRef.current = shown;
 
   const gTvl = tokens.reduce((a, t) => a + t.tvl, 0);
@@ -9414,6 +9460,38 @@ export default function App() {
     return () => { stop = true; clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveData, selected && selected.id, selected && selected.pool]);
+
+  // 🕯 the tape becomes candles: real prints drive the live end of the chart
+  const tapeRef = useRef({});
+  useEffect(() => {
+    if (!liveData || !selected || !selected.pool) return;
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch(`/api/trades?pool=${encodeURIComponent(selected.pool)}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (stop || !Array.isArray(j) || !j.length) return;
+        // keep a rolling tape per pool so candles fill in as prints accumulate
+        const key = selected.pool;
+        const prev = tapeRef.current[key] || [];
+        const seen = new Set(prev.map((x) => x.tx || x.at));
+        const merged = [...prev, ...j.filter((x) => !seen.has(x.tx || x.at))]
+          .sort((a, b) => a.at - b.at).slice(-1200);
+        tapeRef.current[key] = merged;
+        const tape = candlesFromTrades(merged, tf);
+        if (tape.length < 2) return;
+        setTokens((Ts) => Ts.map((x) => (x.id === selected.id
+          ? { ...x, candles: mergeTapeCandles(x.realCandles ? x.candles : [], tape), realCandles: true,
+              price: tape[tape.length - 1].c }
+          : x)));
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 5000);
+    return () => { stop = true; clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData, selected && selected.id, selected && selected.pool, tf]);
 
   const chartTrades = useMemo(() => {
     if (!selected) return [];
