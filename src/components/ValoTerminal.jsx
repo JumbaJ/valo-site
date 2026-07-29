@@ -3539,6 +3539,25 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   const [txShowAll, setTxShowAll] = useState(true);
   const { holds, txAll } = useMemo(() => {
     const r2 = seededRand(hashStr("acts-" + name));
+    // ⛓ on-chain wallet (no VALO account behind it): real holdings, real trades
+    if (chainWallet && Array.isArray(chainWallet.holdings) && !cloudProfile) {
+      const hs = chainWallet.holdings.map((h) => ({
+        t: {
+          id: "W:" + h.mint, liveMint: h.mint, pool: h.pool || null, offMarket: !h.pool,
+          sym: h.sym || h.mint.slice(0, 4), name: h.name || h.sym || h.mint.slice(0, 6),
+          hue: symbolHue(h.sym || h.mint), img: h.img || null, price: h.price || 0,
+          candles: [], supply: 0, tvl: 0, greenUsd: 0, redUsd: 0, traders: 0, ageMin: 0,
+        },
+        qty: h.qty, entry: h.price || 0, since: Date.now(), onChain: true,
+      }));
+      const tx = (chainWallet.trades || []).map((t3) => ({
+        t: { id: "W:" + (t3.mint || t3.sym), liveMint: t3.mint || null, offMarket: !t3.mint,
+          sym: t3.sym || "?", hue: symbolHue(t3.sym || "?"), img: null, price: t3.price || 0 },
+        isBuy: true, sol: (t3.usd || 0) / SOL_USD, valUsd: t3.usd || 0, pnlUsd: null,
+        key: t3.mint || t3.sym, ts: t3.at || Date.now(), tokQty: null, priceAt: t3.price || 0,
+      }));
+      return { holds: hs, txAll: tx };
+    }
     if (cloudProfile && cloudProfile.holds) {
       // ☁ REAL ACCOUNT — real positions AND their real trade log; zero fakes
       return { holds: cloudProfile.holds, txAll: cloudProfile.activity || [] };
@@ -3557,7 +3576,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
       return t && { t, isBuy: r2() < 0.55, sol: +(0.1 + r2() * 14).toFixed(2), ts: now - Math.floor(r2() * 30 * 86400e3) };
     }).filter(Boolean).sort((a, b) => b.ts - a.ts);
     return { holds, txAll };
-  }, [name, tokens, cloudProfile]); // cloudProfile lands async — without it here, real holdings load and get ignored
+  }, [name, tokens, cloudProfile, chainWallet]); // async sources — all must retrigger the memo
   // 🔒 closed positions: every sell, paired with its buy-in date and PnL
   const closedRows = useMemo(() => {
     const src2 = cloudProfile ? (cloudProfile.activity || []) : txAll;
@@ -3777,7 +3796,9 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
               const held = days >= 1 ? `${Math.floor(days)}d` : `${Math.max(1, Math.floor(days * 24))}h`;
               return { ...h, val, pnl, pnlPct, held };
             }).sort((a, b) => b.val - a.val);
-            const totalBal = rows.reduce((s, x) => s + x.val, 0);
+            const onChain = chainWallet && !cloudProfile;
+            const solUsd = onChain && chainWallet.sol != null ? chainWallet.sol * SOL_USD : 0;
+            const totalBal = rows.reduce((s, x) => s + x.val, 0) + solUsd;
             const top = rows[0];
             return (
               <div style={{ marginTop: 10, border: `1px solid ${T.border2}`, borderRadius: 12, background: "linear-gradient(180deg, rgba(22,27,37,0.9), rgba(12,15,22,0.95))", overflow: "hidden" }}>
@@ -3785,6 +3806,11 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.5, color: T.faint }}>TOTAL BALANCE</div>
                     <div style={{ fontFamily: T.mono, fontSize: 17, fontWeight: 900, color: T.text }}>${totalBal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                    {onChain && (
+                      <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint }}>
+                        on-chain · {chainWallet.sol != null ? chainWallet.sol.toFixed(2) + " SOL" : ""} + tokens
+                      </div>
+                    )}
                     {(() => { const livePnl = rows.reduce((s2, h) => s2 + h.pnl, 0); return (
                       <div style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: livePnl >= 0 ? T.green : T.red }}>
                         {livePnl >= 0 ? "▲ +" : "▼ −"}${Math.abs(livePnl).toLocaleString(undefined, { maximumFractionDigits: 2 })} <span style={{ color: T.faint, fontWeight: 700 }}>LIVE PNL</span>
