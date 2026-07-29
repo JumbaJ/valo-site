@@ -7,6 +7,7 @@ import App from "./App.jsx";
 window.__VALO_LIVE__ = import.meta.env.VITE_LIVE_DATA === "1";
 window.__VALO_STREAM__ = import.meta.env.VITE_VALO_STREAM || null;
 window.__VALO_STREAM__ = import.meta.env.VITE_VALO_STREAM || null;
+window.__VALO_STREAM__ = import.meta.env.VITE_VALO_STREAM || null;
 
 const sbUrl = import.meta.env.VITE_SUPABASE_URL;
 const sbAnon = import.meta.env.VITE_SUPABASE_ANON;
