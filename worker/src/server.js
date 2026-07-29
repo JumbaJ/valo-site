@@ -16,6 +16,14 @@ const recent = new Map();         // mint → last trades, so a new viewer sees 
 let upstreamStatus = "starting";
 
 const roomsList = () => [...rooms.keys()];
+// tell everyone in a room how many are watching it — this is a true count of
+// VALO users on that token right now
+const broadcastViewers = (mint) => {
+  const room = rooms.get(mint);
+  if (!room) return;
+  const msg = JSON.stringify({ type: "viewers", mint, count: room.size });
+  for (const ws of room) { if (ws.readyState === 1) ws.send(msg); }
+};
 const remember = (mint, trade) => {
   const arr = recent.get(mint) || [];
   arr.push(trade);
@@ -62,8 +70,9 @@ wss.on("connection", (ws, req) => {
     if (m.type !== "watch" || typeof m.mint !== "string") return;
     // leave the previous room
     if (ws.watching && rooms.has(ws.watching)) {
-      rooms.get(ws.watching).delete(ws);
-      if (!rooms.get(ws.watching).size) rooms.delete(ws.watching);
+      const prevRoom = ws.watching;
+      rooms.get(prevRoom).delete(ws);
+      if (!rooms.get(prevRoom).size) rooms.delete(prevRoom); else broadcastViewers(prevRoom);
     }
     ws.watching = m.mint;
     if (!rooms.has(m.mint)) rooms.set(m.mint, new Set());
@@ -72,12 +81,15 @@ wss.on("connection", (ws, req) => {
     // hand over what we already have so the chart fills immediately
     const back = recent.get(m.mint) || [];
     if (back.length) ws.send(JSON.stringify({ type: "backfill", mint: m.mint, trades: back.slice(-120) }));
+    broadcastViewers(m.mint);
   });
 
   ws.on("close", () => {
     if (ws.watching && rooms.has(ws.watching)) {
       rooms.get(ws.watching).delete(ws);
-      if (!rooms.get(ws.watching).size) { rooms.delete(ws.watching); recent.delete(ws.watching); }
+      const left = ws.watching;
+      if (!rooms.get(left).size) { rooms.delete(left); recent.delete(left); }
+      else broadcastViewers(left);
       upstream.watch(roomsList());
     }
   });
