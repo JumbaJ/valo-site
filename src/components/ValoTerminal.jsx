@@ -1421,7 +1421,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       onTouchStart={(e) => e.stopPropagation()} onTouchMove={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()}
       data-chart="1"
       style={{ position: "relative", background: "#0c0f16", border: `1px solid ${clickMode ? (clickMode === "buy" ? T.green : T.red) : T.border}`, borderRadius: 10,
-        overflow: isMobile ? "visible" : "hidden", marginTop: isMobile ? 18 : 0,
+        overflow: isMobile ? "visible" : "hidden", marginTop: isMobile ? 16 : 0,
         transition: "border-color .2s", touchAction: "pan-y", overscrollBehavior: "contain" }}>
       {/* mobile: stacked in-chart overlays — OHLC pill on top, eyes under it,
           LIVE/fit under that. The canvas runs full height beneath them. */}
@@ -1445,7 +1445,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
               <ViewerPills token={eyesToken} small />
             </div>
           )}
-          <div style={{ position: "absolute", top: -18, right: 4, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 15, lineHeight: 1 }}>
+          <div style={{ position: "absolute", top: -16, right: 4, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 14, lineHeight: 1 }}>
             <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; setView({ count: 18, offset: 0, priceOff: 0, follow: true }); }}
               style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 7.5, fontWeight: 800, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>◉ LIVE</button>
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
@@ -7519,7 +7519,7 @@ export default function App() {
     if (!isMobile || sel == null || mobOpenedRef.current === sel) return;
     mobOpenedRef.current = sel;
     setMetricsCrunch(1);
-    setMobChartH(Math.max(400, Math.round(window.innerHeight - 184)));
+    setMobChartH(Math.max(400, Math.round(window.innerHeight - 150)));
     // settle, then shave anything overlapping LIVE TRADES / HOLDERS
     setTimeout(() => {
       const lth = document.querySelector("[data-lth]"); const mc = document.querySelector("[data-mchart]");
@@ -7559,7 +7559,7 @@ export default function App() {
       else {
         d.nextC = Math.round(Math.min(1, Math.max(0, d.c0 - dy / 110)) * 100) / 100; // pull up → crunch away
         // the chart itself rides the pull — height tracks crunch toward full
-        const fullH = Math.max(400, Math.round(window.innerHeight - 184));
+        const fullH = Math.max(400, Math.round(window.innerHeight - 150));
         d.nextH = Math.round(348 + d.nextC * (fullH - 348));
       }
       if (!chartRaf.current) chartRaf.current = requestAnimationFrame(() => {
@@ -7574,7 +7574,7 @@ export default function App() {
       // top-pull SNAP — never rest half-way covering things: either fully up
       // (name + price only) or fully back down
       if (d && d.which === "top" && d.nextC != null) {
-        const fullH = Math.max(400, Math.round(window.innerHeight - 184));
+        const fullH = Math.max(400, Math.round(window.innerHeight - 150));
         if (d.nextC > 0.33) {
           setMetricsCrunch(1); setMobChartH(fullH);
           setTimeout(() => {
@@ -10183,11 +10183,6 @@ export default function App() {
                     <button onClick={() => setChartMode("candles")} style={{ ...chip(chartMode === "candles"), padding: "4px 7px", fontSize: 9.5 }}>▮</button>
                     <button onClick={() => setChartMode("line")} style={{ ...chip(chartMode === "line"), padding: "4px 7px", fontSize: 9.5 }}>∿</button>
                     {trendingBtn}
-                    <button onClick={() => setMetricsCrunch((c) => (c > 0.5 ? 0 : 1))}
-                      title={metricsCrunch > 0.5 ? "Expand the metrics" : "Collapse the metrics"}
-                      style={{ ...chip(metricsCrunch > 0.5), padding: "4px 7px", fontSize: 9.5, fontWeight: 900, color: metricsCrunch > 0.5 ? VALO_PURPLE : T.dim, borderColor: metricsCrunch > 0.5 ? `${VALO_PURPLE}66` : T.border }}>
-                      {metricsCrunch > 0.5 ? "▸" : "▾"} STATS
-                    </button>
                     <button onClick={() => setShowDevTrades((v) => !v)} title="Show developer buys & sells on the chart"
                       style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
                         border: `1px solid ${showDevTrades ? accent(selected.hue) : T.border2}`,
@@ -10286,7 +10281,7 @@ export default function App() {
                       const full = metricsCrunch > 0.05 || mobChartH > 360;
                       if (full) { setMetricsCrunch(0); setMobChartH(348); }
                       else {
-                        setMetricsCrunch(1); setMobChartH(Math.max(400, Math.round(window.innerHeight - 184)));
+                        setMetricsCrunch(1); setMobChartH(Math.max(400, Math.round(window.innerHeight - 150)));
                         // settle, then shave any overlap with LIVE TRADES / HOLDERS
                         setTimeout(() => {
                           const lth = document.querySelector("[data-lth]"); const mc = document.querySelector("[data-mchart]");
