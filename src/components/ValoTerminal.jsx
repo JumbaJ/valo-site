@@ -1420,7 +1420,9 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     <div ref={wrapRef}
       onTouchStart={(e) => e.stopPropagation()} onTouchMove={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()}
       data-chart="1"
-      style={{ position: "relative", background: "#0c0f16", border: `1px solid ${clickMode ? (clickMode === "buy" ? T.green : T.red) : T.border}`, borderRadius: 10, overflow: "hidden", transition: "border-color .2s", touchAction: "pan-y", overscrollBehavior: "contain" }}>
+      style={{ position: "relative", background: "#0c0f16", border: `1px solid ${clickMode ? (clickMode === "buy" ? T.green : T.red) : T.border}`, borderRadius: 10,
+        overflow: isMobile ? "visible" : "hidden", marginTop: isMobile ? 19 : 0,
+        transition: "border-color .2s", touchAction: "pan-y", overscrollBehavior: "contain" }}>
       {/* mobile: stacked in-chart overlays — OHLC pill on top, eyes under it,
           LIVE/fit under that. The canvas runs full height beneath them. */}
       {isMobile ? (
@@ -1443,12 +1445,12 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
               <ViewerPills token={eyesToken} small />
             </div>
           )}
-          <div style={{ position: "absolute", top: 2, right: 6, zIndex: 6, display: "flex", gap: 5, alignItems: "center" }}>
+          <div style={{ position: "absolute", top: -19, right: 2, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 16, lineHeight: 1 }}>
             <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; setView({ count: 18, offset: 0, priceOff: 0, follow: true }); }}
-              style={{ height: 21, padding: "0 9px", borderRadius: 6, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 9, fontWeight: 700, fontFamily: T.mono }}>◉ LIVE</button>
+              style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 7.5, fontWeight: 800, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>◉ LIVE</button>
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
               <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, follow: false }); }}
-                style={{ height: 21, padding: "0 8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.9)", color: T.dim, cursor: "pointer", fontSize: 9, fontFamily: T.mono }}>⤢ fit</button>
+                style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.9)", color: T.dim, cursor: "pointer", fontSize: 7.5, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>⤢ fit</button>
             )}
           </div>
         </>
@@ -3404,12 +3406,25 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   const [holdsView, setHoldsView] = useState("trades"); // trades ⇄ dev (launched/rugged)
   // every token this person launched, and which of them died
   // real launches when this profile is a creator wallet, otherwise the sim set
+  // does this profile correspond to a real on-chain wallet?
+  const devWallet = useMemo(() => {
+    for (const t of tokens || []) {
+      try {
+        const d = devOf(t);
+        if (d && d.real && (d.name === name || d.short === name)) return d.wallet;
+      } catch (e) {}
+    }
+    // a 4…4 shortened address IS the handle for creator profiles
+    if (/^[A-Za-z0-9]{4}…[A-Za-z0-9]{4}$/.test(name || "")) {
+      const w = (typeof window !== "undefined" && window.__VALO_CREATORS__) || {};
+      for (const k of Object.keys(w)) if (w[k] && w[k].short === name) return w[k].creator;
+    }
+    return null;
+  }, [tokens, name]);
   const [realLaunches, setRealLaunches] = useState(null);
   useEffect(() => {
     setRealLaunches(null);
-    const wallet = (tokens || []).map((t) => { try { return devOf(t); } catch (e) { return null; } })
-      .find((d) => d && d.real && d.name === name);
-    const addr = wallet && wallet.wallet;
+    const addr = devWallet;
     if (!addr) return;
     let stop = false;
     (async () => {
@@ -3422,7 +3437,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     })();
     return () => { stop = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, tokens]);
+  }, [name, devWallet]);
   const devTokens = useMemo(() => {
     if (realLaunches) {
       // pair each real launch with a live card when we have one
@@ -3559,6 +3574,16 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                 {cloudProfile && <span title="Verified VALO account — real holdings shown"
                   style={{ fontFamily: T.mono, fontSize: 7, fontWeight: 900, letterSpacing: 1, color: T.blue, flexShrink: 0,
                     border: `1px solid ${T.blue}66`, background: "rgba(59,130,246,0.12)", borderRadius: 6, padding: "2px 6px" }}>☁ REAL</span>}
+                {devWallet && (
+                  <a href={`https://solscan.io/account/${devWallet}`} target="_blank" rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    title={`Open ${devWallet} on Solscan — every trade and transfer on-chain`}
+                    style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 3, textDecoration: "none",
+                      border: `1px solid ${T.amber}77`, background: "rgba(240,185,11,0.12)", color: T.amber,
+                      borderRadius: 7, padding: "2px 7px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, lineHeight: 1.5 }}>
+                    🔎 SOLSCAN
+                  </a>
+                )}
                 <button onClick={(e) => { e.stopPropagation(); if (friends) setDmOpen(true); }}
                   title={friends ? `Message @${name}` : `Friends only — send @${name} a friend request to message them`}
                   style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 3, cursor: friends ? "pointer" : "default",
