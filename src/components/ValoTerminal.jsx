@@ -99,6 +99,12 @@ if (typeof window !== "undefined") window.__valoTest = TestLog;
 // 👁 viewer engine — deterministic, so every mount agrees, yet it breathes:
 // smooth sin-wobble makes people "join and leave" live; totals only ever climb
 const VIEW_EPOCH = 1700000000000;
+// real holder count when we've looked it up, else the estimate
+const holdersOf = (t, fallback) => {
+  const real = typeof window !== "undefined" && window.__VALO_HOLDERS__ && t && t.liveMint
+    ? window.__VALO_HOLDERS__[t.liveMint] : null;
+  return Number.isFinite(real) && real > 0 ? real : fallback;
+};
 const liveViewersOf = (t, mode) => {
   // real count first: how many VALO users are on this exact token right now
   const real = typeof window !== "undefined" && window.__VALO_VIEWERS__
@@ -6766,7 +6772,7 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
                   <span style={{ color: T.green }}>B {fmt$(t.greenUsd)}</span>
                   <span style={{ color: T.red }}>S {fmt$(t.redUsd)}</span>
                   <span>M {Math.round(t.momentum)}</span>
-                  <span>👥{t.traders}</span>
+                  <span title={holdersOf(t, null) ? "real on-chain holders" : "estimated"}>👥{holdersOf(t, t.traders)}</span>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}><EyeOpenIcon c={T.green} s={9} />{liveViewersOf(t, "pump")}</span>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}><EyeClosedIcon c={T.dim} s={9} />{fmtQty(totalViewsOf(t, "pump"))}</span>
                   <span style={{ fontSize: 6.5, fontWeight: 800, color: platOf(t) === "pump" ? T.green : "#c6f24e", marginLeft: "auto" }}>{platOf(t) === "pump" ? "PUMP" : "RH"}</span>
@@ -9728,17 +9734,22 @@ export default function App() {
         // so opening one never moves it up the scanner
         ? [...shownCore.filter((t) => !t.market), ...moreToks]
         : shownCore);
+  // in live mode, once real pools are on the board the simulated cards retire
+  const realOnly = liveData && shownRaw.some((t) => t && t.pool);
+  const shownLive = realOnly
+    ? shownRaw.filter((t) => t && (t.pool || t.sym === "VALO"))   // $VALO is ours, it stays
+    : shownRaw;
   // one card per pool / mint / symbol — duplicates from different feeds collapse
   const shown = useMemo(() => {
     const seen = new Set(); const out = [];
-    for (const t of shownRaw) {
+    for (const t of shownLive) {
       if (!t) continue;
       const k = String(t.pool || t.liveMint || t.ca || ("id" + t.id)).toLowerCase();
       if (seen.has(k)) continue;
       seen.add(k); out.push(t);
     }
     return out;
-  }, [shownRaw]);
+  }, [shownLive]);
   shownRef.current = shown;
 
   const gTvl = tokens.reduce((a, t) => a + t.tvl, 0);
@@ -9857,6 +9868,9 @@ export default function App() {
 
   // Markers on the chart = your trades + (optionally) the dev's + any trader you
   // are following. Followed traders stay pinned while you trade until unpinned.
+  useEffect(() => { if (selected && selected.liveMint) fetchHolders(selected.liveMint);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected && selected.liveMint]);
   // 👤 who actually launched the selected token (real creator wallet)
   const [tokCreator, setTokCreator] = useState(null);
   useEffect(() => {
@@ -9903,6 +9917,27 @@ export default function App() {
 
 
   const [liveViewers, setLiveViewers] = useState({});  // mint → real VALO viewers
+  // real on-chain holder counts, one lookup per token, kept for the session
+  const holderCache = useRef({});
+  const holderBusy = useRef({});
+  const fetchHolders = useCallback(async (mint) => {
+    if (!mint || holderCache.current[mint] != null || holderBusy.current[mint]) return;
+    holderBusy.current[mint] = true;
+    try {
+      const r = await fetch(`/api/holders?mint=${encodeURIComponent(mint)}`);
+      if (r.ok) {
+        const j = await r.json();
+        const n = Array.isArray(j && j.holders) ? j.holders.length : null;
+        if (n != null) {
+          holderCache.current[mint] = n;
+          if (typeof window !== "undefined") window.__VALO_HOLDERS__ = { ...(window.__VALO_HOLDERS__ || {}), [mint]: n };
+          setHolderTick((v) => v + 1);
+        }
+      }
+    } catch (e) {}
+    holderBusy.current[mint] = false;
+  }, []);
+  const [holderTick, setHolderTick] = useState(0);
   const tapeRef = useRef({});          // rolling per-pool trade tape → candles
   const [streamOn, setStreamOn] = useState(false);
   const streamRef = useRef(null);
@@ -11703,7 +11738,7 @@ export default function App() {
                             <span>CIRC <b style={{ color: T.text }}>{fmtQty(1e9 * (0.35 + (Math.abs(tokSeed(t) * 13) % 50) / 100))}</b></span>
                             <span>TOP 10 HOLD <b style={{ color: T.amber }}>{(16 + (Math.abs(tokSeed(t) * 7) % 26)).toFixed(1)}%</b></span>
                             <span>MOM <b style={{ color: t.momentum > 60 ? T.green : T.dim }}>{Math.round(t.momentum)}</b></span>
-                            <span>HOLDERS <b style={{ color: T.text }}>{t.traders}</b></span>
+                            <span>HOLDERS <b style={{ color: T.text }}>{holdersOf(t, t.traders)}</b></span>
                           </div>
                           <button onClick={() => { setSel(t.id); setClickMode(null); setWatchExp(null); }}
                             style={{ width: "100%", border: `1px solid ${VALO_PURPLE}`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE, borderRadius: 9, padding: "9px", fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1.2, cursor: "pointer" }}>
