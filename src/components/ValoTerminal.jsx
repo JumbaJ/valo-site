@@ -1898,12 +1898,13 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
 
       </div>
       <div style={sideM ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 12, alignItems: "start", marginTop: 8 }
-        : wide ? { display: "block" } : { display: "contents" }}>
+        : wide ? { display: "block" }
+        : { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 8, alignItems: "start", marginTop: 8 }}>
       <div style={wide ? { flex: "1 1 0", minWidth: 0, overflow: "hidden",
           border: `1px solid ${T.border}`, borderRadius: 9,
           padding: "7px 9px", background: "rgba(255,255,255,0.015)" }
         : sideM ? { gridColumn: 1, gridRow: "1 / span 2", minWidth: 0 }
-        : { border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", background: "rgba(255,255,255,0.015)", marginTop: 9 }}>
+        : { border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", background: "rgba(255,255,255,0.015)", minWidth: 0 }}>
       {!sideM && <div style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.5, color: T.faint, marginBottom: 6 }}>① ENTRY</div>}
       {/* buy-in price slider — tracks live price, drag to set a higher/lower entry */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 7 }}>
@@ -1937,19 +1938,13 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       </div>
       <div style={wide ? { marginTop: 8, paddingTop: 7, borderTop: `1px solid ${T.border}` }
         : sideM ? { display: "contents" }
-        : { border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", background: "rgba(255,255,255,0.015)", marginTop: 8 }}>
+        : { border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", background: "rgba(255,255,255,0.015)", minWidth: 0 }}>
       {!sideM && <div style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.5, color: T.faint, marginBottom: 6 }}>② RISK — STOP LOSS</div>}
       <label style={{ ...lbl, marginTop: wide || sideM ? 0 : 0, ...(sideM ? { gridColumn: 2, gridRow: 1 } : {}) }}>Stop loss — {stopLoss}% below entry</label>
       <input type="range" min={1} max={100} value={stopLoss} onChange={(e) => setStopLoss(+e.target.value)} style={{ width: "100%", accentColor: T.red, ...(sideM ? { gridColumn: 2, gridRow: 2, alignSelf: "start" } : {}) }} />
 
-      </div>
-      <div style={wide ? { flex: "1 1 0", minWidth: 0, overflow: "hidden",
-          border: `1px solid ${T.border}`, borderRadius: 9, padding: "7px 9px", background: "rgba(255,255,255,0.015)" }
-        : sideM ? { display: "contents" } : undefined}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
-        marginTop: wide ? 0 : (sideM ? 6 : 9), marginBottom: 5,
-        borderTop: wide ? "none" : `1px solid ${T.border}`, paddingTop: wide ? 0 : 7,
-        ...(sideM ? { gridColumn: "1 / -1" } : {}) }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: sideM ? 6 : 9, marginBottom: 5,
+        borderTop: `1px solid ${T.border}`, paddingTop: 7, ...(sideM ? { gridColumn: "1 / -1" } : {}) }}>
         <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.2, color: T.faint }}>③ LEGS</span>
         <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: allocTotal === 100 ? T.green : T.red,
           border: `1px solid ${allocTotal === 100 ? T.green : T.red}55`, background: allocTotal === 100 ? "rgba(22,199,132,0.1)" : "rgba(234,57,67,0.1)",
