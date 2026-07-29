@@ -10078,6 +10078,25 @@ export default function App() {
                       <a key={i} href={url} target="_blank" rel="noopener noreferrer" title="Open social"
                         style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 7, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)", color: col, fontSize: 12, textDecoration: "none", cursor: "pointer" }}>{ic}</a>
                     ))}
+                    {(() => {
+                      const d = (() => { try { return devOf(selected); } catch (e) { return null; } })();
+                      if (!d) return null;
+                      const label = d.real ? d.short : `@${d.name}`;
+                      return (
+                        <button onClick={() => setProfileUser(d.name)}
+                          title={d.real ? `Launched by ${d.wallet} — see everything they've launched`
+                                        : `Dev @${d.name} — see their launches`}
+                          style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap", flex: "0 0 auto",
+                            height: isMobile ? 26 : "auto", boxSizing: "border-box",
+                            border: `1px solid ${d.real ? T.amber + "77" : T.border2}`,
+                            background: d.real ? "rgba(240,185,11,0.10)" : "rgba(255,255,255,0.03)",
+                            color: d.real ? T.amber : T.dim, borderRadius: 7,
+                            padding: isMobile ? "0 8px" : "4px 9px",
+                            fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, cursor: "pointer" }}>
+                          👤 DEV {label}{d.real && <span style={{ fontSize: 7.5, opacity: 0.8 }}>✓</span>}
+                        </button>
+                      );
+                    })()}
                     {isMobile && (
                       <span style={{ display: "inline-flex", alignItems: "center", height: 26, overflow: "visible" }}>
                         {calloutWidget(true, 30, true)}
