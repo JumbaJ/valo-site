@@ -508,7 +508,8 @@ const rugState = (t) => {
   const span = Math.max(peak - low, peak * 1e-9);
   const recovery = Math.max(0, Math.min(1, (now - low) / span));   // 0 = still on the floor
   // liquidity check: a real rug drains the pool, not just the price
-  const liqThin = t.tvl > 0 && t.mc > 0 ? (t.tvl / t.mc) < 0.02 : false;
+  const liveMc = t.price > 0 && t.supply > 0 ? t.price * t.supply : (t.mc || 0);
+  const liqThin = t.tvl > 0 && liveMc > 0 ? (t.tvl / liveMc) < 0.02 : false;
   const rugged = drawdown >= 0.78 && recovery < 0.20 && (liqThin || drawdown >= 0.9);
   const dying = !rugged && drawdown >= 0.6 && recovery < 0.35;
   return { rugged, dying, drawdown, recovery };
@@ -9267,6 +9268,7 @@ export default function App() {
               t: c.t, v: c.v, o: c.o * k, h: c.h * k, l: c.l * k, c: c.c * k,
             }));
             return { ...t, candles: scaled.length ? scaled : t.candles, price: target,
+              supply: lv.mc > 0 && lv.price > 0 ? lv.mc / lv.price : t.supply,
               sym: lv.sym, name: lv.name, mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
               img: lv.img || t.img, pool: lv.pool || t.pool, liveMint: lv.mint || t.liveMint,
               traders: lv.traders || t.traders, ageMin: t.ageMin + 0.04 };
@@ -9283,10 +9285,15 @@ export default function App() {
             candlesL = [...t.candles.slice(1), cd];
           }
           const driftL = (c - prev) / (prev || 1);
-          return { ...t, candles: candlesL, price: c, sym: lv.sym, name: lv.name,
+          const supL = lv.mc > 0 && lv.price > 0 ? lv.mc / lv.price : t.supply;
+          return { ...t, candles: candlesL, price: c, supply: supL,
+            mc: supL > 0 ? c * supL : (lv.mc || t.mc),
+            sym: lv.sym, name: lv.name,
             mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
             img: lv.img || t.img, pool: lv.pool || t.pool, liveMint: lv.mint || t.liveMint,
             traders: lv.traders || t.traders,
+            // re-anchor supply from the reported MC so price × supply stays true
+            supply: lv.mc > 0 && lv.price > 0 ? lv.mc / lv.price : t.supply,
             greenUsd: lv.greenUsd > 0 ? lv.greenUsd : Math.max(0, t.greenUsd * (1 + driftL * 2)),
             redUsd: lv.redUsd > 0 ? lv.redUsd : Math.max(1, t.redUsd * (1 - driftL * 1.2)),
             ageMin: t.ageMin + 0.04 };
@@ -10008,11 +10015,13 @@ export default function App() {
         setTokens((Ts) => Ts.map((x) => (x.id === tk.id
           ? { ...x, candles: mergeTapeCandles(x.realCandles ? x.candles : [], tape),
               realCandles: true, price: last.c,
+              // MC follows the trade because supply is the anchor, not mc
+              mc: x.supply > 0 ? last.c * x.supply : x.mc,
               greenUsd: buyUsd > 0 ? buyUsd : x.greenUsd,
               redUsd: sellUsd > 0 ? sellUsd : x.redUsd,
               buyPressure: pressure != null ? pressure : x.buyPressure,
               momentum: flowTotal > 0 ? mom : x.momentum,
-              liveFlow: true }
+              liveFlow: true, lastTradeAt: Date.now() }
           : x)));
       };
     };
