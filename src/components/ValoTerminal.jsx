@@ -3468,6 +3468,22 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     if (/^[A-Za-z0-9]{32,50}$/.test(name || "")) return name;
     return null;
   }, [tokens, name]);
+  const [chainWallet, setChainWallet] = useState(null);   // real balance + holdings + trades
+  useEffect(() => {
+    setChainWallet(null);
+    if (!devWallet) return;
+    let stop = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/wallet?address=${encodeURIComponent(devWallet)}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop && j && !j.error) setChainWallet(j);
+      } catch (e) {}
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devWallet]);
   const [realLaunches, setRealLaunches] = useState(null);
   useEffect(() => {
     setRealLaunches(null);
@@ -3695,7 +3711,57 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
               </span>
               <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, color: T.amber, flex: "0 0 auto", letterSpacing: 1 }}>SOLSCAN ↗</span>
             </a>
-          ) : (
+          ) : null}
+          {devWallet && chainWallet && (
+            <div style={{ border: `1px solid ${T.border}`, borderRadius: 9, marginTop: 6, overflow: "hidden" }}>
+              {/* what this wallet actually holds, on-chain */}
+              <div style={{ display: "flex", gap: 1, background: T.border }}>
+                {[["SOL", chainWallet.sol != null ? chainWallet.sol.toFixed(2) : "—", T.text],
+                  ["TOKENS", chainWallet.tokensUsd ? fmt$(chainWallet.tokensUsd) : "$0", T.green],
+                  ["POSITIONS", String(chainWallet.holdingsCount || 0), VALO_PURPLE]].map(([k, v, c]) => (
+                  <div key={k} style={{ flex: 1, background: "#0c0f16", padding: "6px 8px" }}>
+                    <div style={{ fontFamily: T.mono, fontSize: 7, letterSpacing: 1, color: T.faint }}>{k}</div>
+                    <div style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: c }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              {chainWallet.holdings && chainWallet.holdings.length > 0 && (
+                <div style={{ maxHeight: 150, overflowY: "auto", background: "#0a0d13" }}>
+                  {chainWallet.holdings.slice(0, 12).map((h) => (
+                    <div key={h.mint} onClick={() => { if (onOpenByMint) { onOpenByMint(h.mint); onClose && onClose(); } }}
+                      title={h.sym ? `Open the $${h.sym} chart` : h.mint}
+                      style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 8px",
+                        borderTop: `1px solid ${T.border}`, cursor: onOpenByMint ? "pointer" : "default" }}>
+                      <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: accent(symbolHue(h.sym || "?")), flex: "0 0 auto" }}>
+                        ${h.sym || h.mint.slice(0, 4)}
+                      </span>
+                      <span style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {fmtQty(h.qty)} tok
+                      </span>
+                      <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: T.text }}>{fmt$(h.usd)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {chainWallet.trades && chainWallet.trades.length > 0 && (
+                <div style={{ borderTop: `1px solid ${T.border}`, background: "#0c0f16", padding: "5px 8px" }}>
+                  <div style={{ fontFamily: T.mono, fontSize: 7, letterSpacing: 1, color: T.faint, marginBottom: 3 }}>
+                    ON-CHAIN TRADES · {chainWallet.trades.length}
+                  </div>
+                  {chainWallet.trades.slice(0, 6).map((t3, i) => (
+                    <div key={i} style={{ display: "flex", gap: 6, fontFamily: T.mono, fontSize: 8.5, color: T.dim, lineHeight: 1.7 }}>
+                      <span style={{ color: accent(symbolHue(t3.sym || "?")), fontWeight: 800 }}>${t3.sym}</span>
+                      <span>{fmt$(t3.usd)}</span>
+                      <span style={{ marginLeft: "auto", color: T.faint }}>
+                        {t3.at ? new Date(t3.at).toLocaleDateString([], { month: "short", day: "numeric" }) : ""}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {!devWallet && (
             <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 6 }}>
               Followers get this user's callouts as alerts · friends can also DM & send SOL/$VALO
             </div>
