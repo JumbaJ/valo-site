@@ -6591,7 +6591,15 @@ const DESC_BITS = [
   "The dev streams every buyback live. Full transparency.",
   "Micro-cap moonshot with a meme that refuses to die.",
 ];
-const descOf = (t) => (((tokSeed(t) * 11 + 1) % 13) < 9 ? DESC_BITS[Math.abs(tokSeed(t) * 3 + 1) % DESC_BITS.length] : null);
+const descOf = (t) => {
+  // real pools: the project's own words, or nothing at all
+  if (t && t.pool) {
+    const info = typeof window !== "undefined" && window.__VALO_TOKINFO__ && t.liveMint
+      ? window.__VALO_TOKINFO__[t.liveMint] : null;
+    return (info && info.description) || null;
+  }
+  return ((tokSeed(t) * 11 + 1) % 13) < 9 ? DESC_BITS[Math.abs(tokSeed(t) * 3 + 1) % DESC_BITS.length] : null;
+};
 const gainOf = (t) => {
   const cs = t && t.candles;
   if (!cs || !cs.length) return +t?.ch24 || 0;      // no candles yet → use the real 24h move
@@ -9367,6 +9375,7 @@ export default function App() {
       "careful, liquidity is thin", "gm legends", "dev is active, good sign",
       "sold too early again 💀", "we eating good tonight", "what's the play here",
     ];
+    if (liveData) return;              // live mode → only real people talk here
     const iv = setInterval(() => {
       setTokens((Ts) => {
         const withToken = Math.random() > 0.45 && Ts.length;
@@ -9380,7 +9389,8 @@ export default function App() {
       });
     }, 5200);
     return () => clearInterval(iv);
-  }, [saySocial, chatOn]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saySocial, chatOn, liveData]);
 
   // community callouts — API: social/telegram callout feed
   useEffect(() => {
@@ -9468,11 +9478,13 @@ export default function App() {
       "watching for a retest", "loaded a bit more", "careful up here",
       "callouts stacking on this fast", "clean bounce off support",
     ];
+    if (liveData) return;              // real coin rooms carry real voices only
     const iv = setInterval(() => {
       sayCoin(sel, { user: CALLERS[Math.floor(Math.random() * CALLERS.length)], text: LINES[Math.floor(Math.random() * LINES.length)] });
     }, 6500);
     return () => clearInterval(iv);
-  }, [sel, chatOn, sayCoin]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel, chatOn, sayCoin, liveData]);
 
   // floating market flow — API: live trade stream
   useEffect(() => {
@@ -9905,7 +9917,12 @@ export default function App() {
         const r = await fetch(`/api/tokeninfo?mint=${encodeURIComponent(selected.liveMint)}&pool=${encodeURIComponent(selected.pool || "")}`);
         if (!r.ok) return;
         const j = await r.json();
-        if (!stop && j && !j.error) setTokLinks(j);
+        if (!stop && j && !j.error) {
+          setTokLinks(j);
+          if (typeof window !== "undefined" && selected.liveMint) {
+            window.__VALO_TOKINFO__ = { ...(window.__VALO_TOKINFO__ || {}), [selected.liveMint]: j };
+          }
+        }
       } catch (e) {}
     })();
     return () => { stop = true; };
@@ -12527,7 +12544,41 @@ export default function App() {
                   {/* trending reason */}
                   <div style={{ background: "rgba(240,185,11,0.06)", border: "1px solid rgba(240,185,11,0.3)", borderRadius: 12, padding: 14, marginBottom: 12 }}>
                     <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: T.amber, letterSpacing: 1, marginBottom: 7 }}>🔥 WHY IT'S TRENDING</div>
-                    <div style={{ fontFamily: T.sans, fontSize: 13, color: T.dim, lineHeight: 1.7 }}>{selected.trending.reason}</div>
+                    {(() => {
+                      const real = tokLinks && tokLinks.description;
+                      if (real) return (
+                        <>
+                          <div style={{ fontFamily: T.sans, fontSize: 13, color: T.dim, lineHeight: 1.7 }}>{real}</div>
+                          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 5, letterSpacing: 1 }}>
+                            — the project's own description
+                          </div>
+                        </>
+                      );
+                      if (selected.pool) {
+                        // no published description: state the facts instead of a story
+                        const flow = (selected.greenUsd || 0) + (selected.redUsd || 0);
+                        const bp = selected.buyPressure != null ? selected.buyPressure : null;
+                        const ageH = Math.round((selected.ageMin || 0) / 60);
+                        const ageTxt = ageH < 24 ? `${ageH}h old` : `${(ageH / 24).toFixed(1)}d old`;
+                        return (
+                          <div style={{ fontFamily: T.mono, fontSize: 11.5, color: T.dim, lineHeight: 1.9 }}>
+                            <div>This token has no published description. What the chain shows:</div>
+                            <div style={{ marginTop: 6, color: T.text }}>
+                              MC <b>{fmt$(mcOf(selected))}</b> · LIQ <b>{fmt$(selected.tvl || 0)}</b> · {ageTxt}
+                            </div>
+                            <div style={{ color: T.text }}>
+                              FLOW <b>{fmt$(flow)}</b>
+                              {bp != null && <> · <span style={{ color: bp >= 50 ? T.green : T.red }}>{bp}% buys</span></>}
+                              {holdersOf(selected, null) && <> · <b>{holdersOf(selected, null)}</b> holders</>}
+                            </div>
+                            <div style={{ color: T.faint, fontSize: 10, marginTop: 5 }}>
+                              Judge it on the numbers and the dev's record, not a blurb.
+                            </div>
+                          </div>
+                        );
+                      }
+                      return <div style={{ fontFamily: T.sans, fontSize: 13, color: T.dim, lineHeight: 1.7 }}>{selected.trending.reason}</div>;
+                    })()}
                   </div>
                   {/* social tweet */}
                   <div style={{ background: "#0c0f16", border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
