@@ -7227,6 +7227,7 @@ export default function App() {
     const mv = (e) => {
       if (pcPullRef.current) {
         const dy = pcPullRef.current.y0 - e.clientY;
+        if (Math.abs(dy) > 3) pcPullRef.current.moved = true;
         setPcCrunch(Math.max(0, Math.min(1, pcPullRef.current.base + dy / 120)));
       }
       const ed = edgeRef.current;
@@ -7235,7 +7236,11 @@ export default function App() {
         else setChartInsetR(Math.max(0, Math.min(240, ed.base - (e.clientX - ed.x0))));
       }
     };
-    const up = () => { pcPullRef.current = null; edgeRef.current = null; };
+    const up = () => {
+      if (pcPullRef.current) { const p0 = pcPullRef.current; setTimeout(() => { if (pcPullRef.current === p0) pcPullRef.current = null; }, 0); pcPullRef.current = p0; }
+      setTimeout(() => { pcPullRef.current = null; }, 60);   // click handler reads `moved` first
+      edgeRef.current = null;
+    };
     window.addEventListener("mousemove", mv); window.addEventListener("mouseup", up);
     return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
   }, []);
@@ -10298,7 +10303,7 @@ export default function App() {
                   ? { maxHeight: Math.round((1 - metricsCrunch) * 130), opacity: 1 - metricsCrunch, overflow: "hidden", pointerEvents: metricsCrunch > 0.85 ? "none" : "auto", transition: "max-height .28s ease, opacity .28s ease" }
                   : layoutPro
                   ? { display: "none" } /* pro layout: the skinny strip below replaces this block */
-                  : { maxHeight: Math.round((1 - pcCrunch) * 160), opacity: 1 - pcCrunch, overflow: "hidden", pointerEvents: pcCrunch > 0.85 ? "none" : "auto", transition: pcPullRef.current ? "none" : "max-height .2s ease, opacity .2s ease" }}>
+                  : { maxHeight: pcCrunch > 0.92 ? 0 : Math.round((1 - pcCrunch) * 160), opacity: 1 - pcCrunch, overflow: "hidden", marginBottom: pcCrunch > 0.92 ? 0 : undefined, pointerEvents: pcCrunch > 0.85 ? "none" : "auto", transition: pcPullRef.current ? "none" : "max-height .2s ease, opacity .2s ease, margin-bottom .2s ease" }}>
                 <div style={{ display: "flex", gap: 12, marginBottom: 10, flexWrap: "wrap", fontFamily: T.mono, fontSize: 10.5 }}>
                   <span style={{ color: T.faint }}>MOM <b style={{ color: accent(selected.hue) }}>{Math.round(selected.momentum)}</b></span>
                   <span style={{ color: T.faint }}>B/S <b style={{ color: selected.buyPressure >= 50 ? T.green : T.red }}>{Math.round(selected.buyPressure)}</b></span>
@@ -10394,8 +10399,10 @@ export default function App() {
                   </div>
                 )}
                 {!isMobile && (
-                  <div onMouseDown={(e) => { e.preventDefault(); pcPullRef.current = { y0: e.clientY, base: pcCrunch }; }}
-                    title="Drag up — the chart rises and the stats fold away (callout row and CA stay put)"
+                  <div onMouseDown={(e) => { e.preventDefault(); pcPullRef.current = { y0: e.clientY, base: pcCrunch, moved: false }; }}
+                    onClick={() => { if (pcPullRef.current && pcPullRef.current.moved) return;
+                      setPcCrunch((c) => (c > 0.5 ? 0 : 1)); }}
+                    title="Click or drag — the chart rises over the stats, leaving the name, price and socials"
                     style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "2px 0 6px", cursor: "ns-resize" }}>
                     <div style={{ width: 76, height: 5, borderRadius: 3, background: pcCrunch > 0 ? VALO_PURPLE : T.border2, boxShadow: pcCrunch > 0 ? `0 0 8px ${VALO_PURPLE}` : "none" }} />
                   </div>
@@ -10462,7 +10469,7 @@ export default function App() {
                     mcRatio={selected && selected.price > 0 ? mcOf(selected) / selected.price : 0}
                     historyShift={histShift && selected && histShift.id === selected.id ? histShift : null}
                     onLineSelect={(id) => setSelLineId(id)}
-                    isMobile={isMobile} height={isMobile ? mobChartH : 480 + extraH + Math.round(pcCrunch * 150)} />
+                    isMobile={isMobile} height={isMobile ? mobChartH : 480 + extraH + Math.round(pcCrunch * 196)} />
 
                   {/* MOBILE bottom handle — pull up for a skinnier chart, down for taller;
                       everything below follows in flow so it stays right under the chart */}
