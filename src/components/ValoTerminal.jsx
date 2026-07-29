@@ -1421,7 +1421,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       onTouchStart={(e) => e.stopPropagation()} onTouchMove={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()}
       data-chart="1"
       style={{ position: "relative", background: "#0c0f16", border: `1px solid ${clickMode ? (clickMode === "buy" ? T.green : T.red) : T.border}`, borderRadius: 10,
-        overflow: isMobile ? "visible" : "hidden", marginTop: isMobile ? 19 : 0,
+        overflow: isMobile ? "visible" : "hidden", marginTop: isMobile ? 21 : 0,
         transition: "border-color .2s", touchAction: "pan-y", overscrollBehavior: "contain" }}>
       {/* mobile: stacked in-chart overlays — OHLC pill on top, eyes under it,
           LIVE/fit under that. The canvas runs full height beneath them. */}
@@ -1445,7 +1445,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
               <ViewerPills token={eyesToken} small />
             </div>
           )}
-          <div style={{ position: "absolute", top: -19, right: 2, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 16, lineHeight: 1 }}>
+          <div style={{ position: "absolute", top: -21, right: 4, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 16, lineHeight: 1 }}>
             <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; setView({ count: 18, offset: 0, priceOff: 0, follow: true }); }}
               style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 7.5, fontWeight: 800, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>◉ LIVE</button>
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
@@ -3633,9 +3633,26 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
             </button>
             )}
           </div>
-          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 6 }}>
-            Followers get this user's callouts as alerts · friends can also DM & send SOL/$VALO
-          </div>
+          {devWallet ? (
+            <a href={`https://solscan.io/account/${devWallet}`} target="_blank" rel="noopener noreferrer"
+              title="Open this wallet on Solscan — every trade and transfer on-chain"
+              style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 7, textDecoration: "none",
+                border: `1px solid ${T.amber}55`, background: "rgba(240,185,11,0.08)", borderRadius: 9,
+                padding: "7px 9px", overflow: "hidden" }}>
+              <span style={{ fontSize: 11, flex: "0 0 auto" }}>🔎</span>
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", maskImage: "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)", WebkitMaskImage: "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)" }}>
+                <span style={{ display: "inline-block", whiteSpace: "nowrap", fontFamily: T.mono, fontSize: 9.5,
+                  color: T.amber, animation: "addrScroll 14s linear infinite", paddingLeft: "1%" }}>
+                  {devWallet}&nbsp;&nbsp;·&nbsp;&nbsp;{devWallet}
+                </span>
+              </span>
+              <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, color: T.amber, flex: "0 0 auto", letterSpacing: 1 }}>SOLSCAN ↗</span>
+            </a>
+          ) : (
+            <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 6 }}>
+              Followers get this user's callouts as alerts · friends can also DM & send SOL/$VALO
+            </div>
+          )}
           {/* 💼 PORTFOLIO HOLDINGS — one professional box: total balance, top
               holding, and a dropdown with every token they hold */}
           {(() => {
@@ -7525,7 +7542,7 @@ export default function App() {
       else {
         d.nextC = Math.round(Math.min(1, Math.max(0, d.c0 - dy / 110)) * 100) / 100; // pull up → crunch away
         // the chart itself rides the pull — height tracks crunch toward full
-        const fullH = Math.max(400, Math.round(window.innerHeight - 205));
+        const fullH = Math.max(400, Math.round(window.innerHeight - 184));
         d.nextH = Math.round(348 + d.nextC * (fullH - 348));
       }
       if (!chartRaf.current) chartRaf.current = requestAnimationFrame(() => {
@@ -7540,7 +7557,7 @@ export default function App() {
       // top-pull SNAP — never rest half-way covering things: either fully up
       // (name + price only) or fully back down
       if (d && d.which === "top" && d.nextC != null) {
-        const fullH = Math.max(400, Math.round(window.innerHeight - 205));
+        const fullH = Math.max(400, Math.round(window.innerHeight - 184));
         if (d.nextC > 0.33) {
           setMetricsCrunch(1); setMobChartH(fullH);
           setTimeout(() => {
@@ -10253,7 +10270,7 @@ export default function App() {
                       const full = metricsCrunch > 0.05 || mobChartH > 360;
                       if (full) { setMetricsCrunch(0); setMobChartH(348); }
                       else {
-                        setMetricsCrunch(1); setMobChartH(Math.max(400, Math.round(window.innerHeight - 205)));
+                        setMetricsCrunch(1); setMobChartH(Math.max(400, Math.round(window.innerHeight - 184)));
                         // settle, then shave any overlap with LIVE TRADES / HOLDERS
                         setTimeout(() => {
                           const lth = document.querySelector("[data-lth]"); const mc = document.querySelector("[data-mchart]");
@@ -12954,6 +12971,7 @@ export default function App() {
         @keyframes starFly3 { 0% { transform: translate(-30px, -26px) scale(0.4); opacity: 0; } 15% { opacity: 0.8; } 100% { transform: translate(36px, 30px) scale(1); opacity: 0; } }
         @keyframes twinkle1 { 0%, 86%, 100% { opacity: 0; transform: scale(0.3) rotate(0deg); } 90% { opacity: 1; transform: scale(1.2) rotate(25deg); } 95% { opacity: 0.35; transform: scale(0.7) rotate(45deg); } }
         @keyframes twinkle2 { 0%, 91%, 100% { opacity: 0; transform: scale(0.3) rotate(0deg); } 94% { opacity: 0.95; transform: scale(1.1) rotate(-20deg); } 97% { opacity: 0.3; transform: scale(0.6) rotate(-40deg); } }
+        @keyframes addrScroll{ 0%{ transform: translateX(0); } 100%{ transform: translateX(-50%); } }
         @keyframes sellPop{ 0%{ transform: scale(1); } 40%{ transform: scale(1.08); } 100%{ transform: scale(1); } }
         @keyframes apexHue{ from{ filter: drop-shadow(0 0 5px #9ceaff) hue-rotate(0deg); } to{ filter: drop-shadow(0 0 5px #9ceaff) hue-rotate(360deg); } }
         @keyframes apexRay{ from{ transform: rotate(0deg) scale(1); } 50%{ transform: rotate(180deg) scale(1.12); } to{ transform: rotate(360deg) scale(1); } }
