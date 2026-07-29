@@ -1823,7 +1823,8 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       </div>
       )}
 
-      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1 1 210px", minWidth: 200 } : undefined}>
+      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)",
+          flex: "0 0 340px", width: 340, maxWidth: 340, minWidth: 0 } : undefined}>
       {/* BUY-IN AMOUNT — swap SOL / $VALO freely */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <label style={{ ...lbl, marginBottom: 0 }}>Buy-in amount</label>
@@ -1898,7 +1899,8 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       </div>
       <div style={sideM ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 12, alignItems: "start", marginTop: 8 }
         : wide ? { display: "block" } : { display: "contents" }}>
-      <div style={wide ? { flex: "1 1 100%", minWidth: 0, border: `1px solid ${T.border}`, borderRadius: 10,
+      <div style={wide ? { flex: "1 1 380px", minWidth: 0, maxWidth: 420, margin: "0 auto",
+          border: `1px solid ${T.border}`, borderRadius: 10,
           padding: "9px 11px", background: "rgba(255,255,255,0.015)" }
         : sideM ? { gridColumn: 1, gridRow: "1 / span 2", minWidth: 0 }
         : { border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", background: "rgba(255,255,255,0.015)", marginTop: 9 }}>
@@ -2148,7 +2150,7 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
   );
 }
 
-function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, setAmount, pay, setPay, position, solBalance, valoBalance, positions, tokens, onOpenToken, onCloseAll, bestMult, pctSel, setPctSel, pendingOrders = [], onOpenBot, onCancelBot, onPosTrade, onDraftLevel, realized24 = 0 }) {
+function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, setAmount, pay, setPay, position, solBalance, valoBalance, positions, tokens, onOpenToken, onCloseAll, bestMult, pctSel, setPctSel, pendingOrders = [], onOpenBot, onCancelBot, onPosTrade, onDraftLevel, realized24 = 0, botRuns = [] }) {
   const [dtBuyPcts, setDtBuyPcts] = useState([10, 25, 50, 75, 100]);  // dbl-click / right-click a chip to retype it
   const [dtSellPcts, setDtSellPcts] = useState([10, 25, 50, 75, 100]);
   const [dtFixed, setDtFixed] = useState([0.5, 1, 2, 5]);
@@ -2185,8 +2187,31 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
               <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 3, lineHeight: 1.5 }}>
                 BUY-IN ${((position.amt || 0) * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 <span style={{ color: (realized24 || 0) >= 0 ? T.green : T.red }}> · REALIZED 24H {(realized24 || 0) >= 0 ? "+" : "−"}${Math.abs(realized24 || 0).toFixed(2)}</span>
-                <span style={{ color: gain ? T.green : T.red }}> · UNREALIZED {gain ? "+" : "−"}${Math.abs(livePnlUsd).toFixed(2)}</span>
               </div>
+              {/* your whole book on this token: ticket money vs bot money */}
+              {(() => {
+                const bots = (botRuns || []).filter((r) => r.status === "live" && String(r.tokenId) === String(token.id));
+                const botPnl = bots.reduce((s, r) => {
+                  const q = (r.amt || 0) * (r.pay === "SOL" ? SOL_USD : 0.0125) / (r.entry || token.price || 1);
+                  return s + q * (token.price - (r.entry || token.price));
+                }, 0);
+                const total = livePnlUsd + botPnl;
+                const cell = (label, v, always) => (always || Math.abs(v) > 0.004) ? (
+                  <span style={{ color: v >= 0 ? T.green : T.red, fontWeight: 800 }}>
+                    {label} {v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}
+                  </span>
+                ) : null;
+                return (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontFamily: T.mono, fontSize: 8,
+                    marginTop: 4, paddingTop: 4, borderTop: `1px solid ${T.border}` }}>
+                    {cell("🧾 TICKET", livePnlUsd, true)}
+                    {cell(`🤖 BOTS${bots.length ? " ×" + bots.length : ""}`, botPnl, bots.length > 0)}
+                    <span style={{ marginLeft: "auto", color: total >= 0 ? T.green : T.red, fontWeight: 900 }}>
+                      Σ TOTAL {total >= 0 ? "+" : "−"}${Math.abs(total).toFixed(2)}
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
             <MultBadge mult={liveMult} live />
           </div>
@@ -11449,7 +11474,7 @@ export default function App() {
                 onCancelBot={cancelBot} onSellRun={sellRun} onOpenBotRun={(id) => setBotRunOpen(id)}
                 onOpenTokenAuto={(tid, botId) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(botId || null); }} />
             ) : selected ? (
-              <DesktopTradePanel token={selected} onExecute={(o, tok) => execute(tok || selected, o)}
+              <DesktopTradePanel token={selected} botRuns={botRuns} onExecute={(o, tok) => execute(tok || selected, o)}
                 clickMode={clickMode} setClickMode={setClickMode}
                 amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
                 pctSel={pctSel} setPctSel={setPctSel}
