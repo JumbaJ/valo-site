@@ -1,0 +1,11 @@
+{
+  "name": "valo-stream-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "VALO live-trade stream: holds one upstream subscription and fans it out to browsers.",
+  "main": "src/server.js",
+  "scripts": { "start": "node src/server.js" },
+  "dependencies": { "ws": "^8.18.0" },
+  "engines": { "node": ">=18" }
+}
