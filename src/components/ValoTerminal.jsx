@@ -1421,7 +1421,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       onTouchStart={(e) => e.stopPropagation()} onTouchMove={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()}
       data-chart="1"
       style={{ position: "relative", background: "#0c0f16", border: `1px solid ${clickMode ? (clickMode === "buy" ? T.green : T.red) : T.border}`, borderRadius: 10,
-        overflow: isMobile ? "visible" : "hidden", marginTop: isMobile ? 16 : 0,
+        overflow: isMobile ? "visible" : "hidden", marginTop: isMobile ? 15 : 0,
         transition: "border-color .2s", touchAction: "pan-y", overscrollBehavior: "contain" }}>
       {/* mobile: stacked in-chart overlays — OHLC pill on top, eyes under it,
           LIVE/fit under that. The canvas runs full height beneath them. */}
@@ -1445,7 +1445,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
               <ViewerPills token={eyesToken} small />
             </div>
           )}
-          <div style={{ position: "absolute", top: -16, right: 4, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 14, lineHeight: 1 }}>
+          <div style={{ position: "absolute", top: -15, right: 4, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 14, lineHeight: 1 }}>
             <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; setView({ count: 18, offset: 0, priceOff: 0, follow: true }); }}
               style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 7.5, fontWeight: 800, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>◉ LIVE</button>
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
@@ -3369,7 +3369,7 @@ function FollowListModal({ kind, list, onClose, isMobile, onOpenUser, ownerHandl
     </div>
   );
 }
-function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, onToggleFollow, friendStatus, onFriendAction, onOpenToken, onSendFunds, dmLog = [], onSendDm, solBalance = 0, valoWallet = 0 , incomingReq = false, onAcceptReq, onDeclineReq, onOpenTierList, onOpenLeaderboard, cloudProfile = null, onOpenTrade = null, onOpenFollowList = null }) {
+function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, onToggleFollow, friendStatus, onFriendAction, onOpenToken, onSendFunds, dmLog = [], onSendDm, solBalance = 0, valoWallet = 0 , incomingReq = false, onAcceptReq, onDeclineReq, onOpenTierList, onOpenLeaderboard, cloudProfile = null, onOpenTrade = null, onOpenFollowList = null, onOpenByMint = null }) {
   const [badgeTab, setBadgeTab] = useState(false); // insignia tapped → tier/leaderboard tab
   const [dmOpen, setDmOpen] = useState(false);     // ✉️ private thread with this person
   const dmEndRef = useRef(null);
@@ -3755,7 +3755,11 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                           const ageH = Math.max(0, Math.round((t2.ageMin || 0) / 60));
                           const ageTxt = ageH < 24 ? `${ageH}h` : `${(ageH / 24).toFixed(1)}d`;
                           return (
-                            <div key={"dv" + t2.id} onClick={() => onOpenToken(t2.id)}
+                            <div key={"dv" + t2.id}
+                              onClick={() => {
+                                if (t2.offMarket && t2.liveMint && onOpenByMint) { onOpenByMint(t2.liveMint); onClose && onClose(); return; }
+                                onOpenToken(t2.id);
+                              }}
                               style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 4,
                                 border: `1px solid ${T.border}`, borderLeft: `2px solid ${rg.rugged ? T.red : rg.dying ? T.amber : T.green}`,
                                 background: "#0c0f16", borderRadius: 9, padding: "7px 9px" }}>
@@ -3793,7 +3797,9 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                     {closedRows.filter((c) => !cpFilter || c.t.sym === cpFilter).map((c, i) => {
                       const up = c.pnlUsd >= 0;
                       return (
-                        <div key={"c" + i} onClick={() => c.t && c.t.id != null && onOpenToken(c.t.id)}
+                        <div key={"c" + i} onClick={() => { if (!c.t) return;
+                          if (c.t.offMarket && c.t.liveMint && onOpenByMint) { onOpenByMint(c.t.liveMint); onClose && onClose(); return; }
+                          if (c.t.id != null) onOpenToken(c.t.id); }}
                           style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", border: `1px solid ${T.border}`, borderLeft: `2px solid ${up ? T.green : T.red}`,
                             background: "#0c0f16", borderRadius: 9, padding: "7px 9px", marginTop: 4 }}>
                           <TokenAvatar sym={c.t.sym} hue={c.t.hue} img={c.t.img} size={18} />
@@ -3832,7 +3838,9 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                     {rows.map((h, i) => {
                       const up = h.pnl >= 0;
                       return (
-                        <div key={i} onClick={() => onOpenToken(h.t.id)} title={`Open the $${h.t.sym} chart`}
+                        <div key={i} onClick={() => { if (!h.t) return;
+                          if (h.t.offMarket && h.t.liveMint && onOpenByMint) { onOpenByMint(h.t.liveMint); onClose && onClose(); return; }
+                          onOpenToken(h.t.id); }} title={`Open the $${h.t.sym} chart`}
                           style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", border: `1px solid ${T.border}`, borderLeft: `2px solid ${up ? T.green : T.red}`,
                             background: "#0c0f16", borderRadius: 9, padding: "7px 9px", marginTop: 4 }}>
                           <TokenAvatar sym={h.t.sym} hue={h.t.hue} img={h.t.img} size={18} />
@@ -3922,7 +3930,11 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
               const qty = x.tokQty != null ? x.tokQty : (x.sol * SOL_USD) / ((x.priceAt || x.t.price) || 1);
               const qtyTxt = qty >= 1e6 ? (qty / 1e6).toFixed(1) + "M" : qty >= 1e3 ? (qty / 1e3).toFixed(1) + "K" : qty.toFixed(qty >= 10 ? 0 : 2);
               return (
-              <div key={i} onClick={() => (onOpenTrade ? onOpenTrade(x) : onOpenToken(x.t.id))} title={`Open the $${x.t.sym} chart at this ${x.isBuy ? "buy" : "sell"}`}
+              <div key={i} onClick={() => {
+                  if (onOpenTrade) { onOpenTrade(x); return; }
+                  if (x.t && x.t.offMarket && x.t.liveMint && onOpenByMint) { onOpenByMint(x.t.liveMint); onClose && onClose(); return; }
+                  if (x.t && x.t.id != null) onOpenToken(x.t.id);
+                }} title={`Open the $${x.t.sym} chart at this ${x.isBuy ? "buy" : "sell"}`}
                 style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 8, marginBottom: 2, cursor: "pointer", background: i % 2 ? "rgba(255,255,255,0.015)" : "transparent" }}>
                 <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: x.isBuy ? T.green : T.red, width: 30, flex: "0 0 auto" }}>{x.isBuy ? "BUY" : "SELL"}</span>
                 <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: accent(x.t.hue), flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>${x.t.sym}
@@ -7519,7 +7531,7 @@ export default function App() {
     if (!isMobile || sel == null || mobOpenedRef.current === sel) return;
     mobOpenedRef.current = sel;
     setMetricsCrunch(1);
-    setMobChartH(Math.max(400, Math.round(window.innerHeight - 150)));
+    setMobChartH(Math.max(400, Math.round(window.innerHeight - 104)));
     // settle, then shave anything overlapping LIVE TRADES / HOLDERS
     setTimeout(() => {
       const lth = document.querySelector("[data-lth]"); const mc = document.querySelector("[data-mchart]");
@@ -7559,7 +7571,7 @@ export default function App() {
       else {
         d.nextC = Math.round(Math.min(1, Math.max(0, d.c0 - dy / 110)) * 100) / 100; // pull up → crunch away
         // the chart itself rides the pull — height tracks crunch toward full
-        const fullH = Math.max(400, Math.round(window.innerHeight - 150));
+        const fullH = Math.max(400, Math.round(window.innerHeight - 104));
         d.nextH = Math.round(348 + d.nextC * (fullH - 348));
       }
       if (!chartRaf.current) chartRaf.current = requestAnimationFrame(() => {
@@ -7574,7 +7586,7 @@ export default function App() {
       // top-pull SNAP — never rest half-way covering things: either fully up
       // (name + price only) or fully back down
       if (d && d.which === "top" && d.nextC != null) {
-        const fullH = Math.max(400, Math.round(window.innerHeight - 150));
+        const fullH = Math.max(400, Math.round(window.innerHeight - 104));
         if (d.nextC > 0.33) {
           setMetricsCrunch(1); setMobChartH(fullH);
           setTimeout(() => {
@@ -8769,6 +8781,22 @@ export default function App() {
     setTimeout(restore, 60);
     setTimeout(restore, 220);
   };
+  // open a token we only know by mint (a dev's launch history, for example)
+  const openTokenByMint = useCallback(async (mint) => {
+    if (!mint) return;
+    const have = (tokensRef.current || []).find((t) => t.liveMint === mint);
+    if (have) { setSel(have.id); setClickMode(null); return; }
+    try {
+      const r = await fetch(`/api/search?q=${encodeURIComponent(mint)}`);
+      if (!r.ok) return;
+      const j = await r.json();
+      const hit = Array.isArray(j) ? j.find((x) => x.mint === mint) || j[0] : null;
+      if (!hit) return;                       // no live pool — nothing to chart
+      const card = adoptMarketToken(hit);
+      setTokens((Ts) => (Ts.some((t) => String(t.pool || "") === String(card.pool)) ? Ts : [...Ts, card]));
+      setSel(card.id); setClickMode(null);
+    } catch (e) {}
+  }, []);
   const openAnyToken = useCallback((id) => {
     holdScroll();
     const board = tokensRef.current || [];
@@ -10253,7 +10281,7 @@ export default function App() {
                   );
                 })()}
                 {/* durations — always visible above the chart */}
-                <div style={{ display: "flex", gap: 4, marginBottom: 10, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 4, marginBottom: isMobile ? 0 : 10, flexWrap: "wrap" }}>
                   {TIMEFRAMES.map((f) => (
                     <button key={f.k} onClick={() => setTf(f.m)} style={{ ...chip(tf === f.m), padding: "3px 8px" }}>{f.k}</button>
                   ))}
@@ -10281,7 +10309,7 @@ export default function App() {
                       const full = metricsCrunch > 0.05 || mobChartH > 360;
                       if (full) { setMetricsCrunch(0); setMobChartH(348); }
                       else {
-                        setMetricsCrunch(1); setMobChartH(Math.max(400, Math.round(window.innerHeight - 150)));
+                        setMetricsCrunch(1); setMobChartH(Math.max(400, Math.round(window.innerHeight - 104)));
                         // settle, then shave any overlap with LIVE TRADES / HOLDERS
                         setTimeout(() => {
                           const lth = document.querySelector("[data-lth]"); const mc = document.querySelector("[data-mchart]");
@@ -12198,6 +12226,7 @@ export default function App() {
       {profileUser && <UserProfileModal name={profileUser} onClose={closeAllPages} isMobile={isMobile} tokens={tokens}
         cloudProfile={profileCloud}
         onOpenFollowList={(kind, handle) => openFollowListFor(kind, handle)}
+        onOpenByMint={openTokenByMint}
         onOpenTrade={(x) => {
           const tk = tokens.find((t3) => x.key && String(t3.pool || t3.id) === String(x.key)) ||
             tokens.find((t3) => t3.id === x.t.id) || tokens.find((t3) => t3.sym === x.t.sym);
