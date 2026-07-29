@@ -1764,7 +1764,7 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
 
   return (
     <div data-botui="1" style={{ background: wide ? "transparent" : T.panel, border: wide ? "none" : `1px solid ${T.border2}`, borderRadius: 12, padding: wide ? 0 : 14,
-      ...(wide ? { display: "flex", gap: 8, alignItems: "stretch", flexWrap: "nowrap" } : {}) }}>
+      ...(wide ? { display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1.15fr)", gap: 10, alignItems: "start" } : {}) }}>
       {!wide && (
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <div style={{ fontFamily: T.mono, fontSize: 11, letterSpacing: 2, color: T.dim, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1824,7 +1824,7 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       )}
 
       <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 9, padding: "7px 9px", background: "rgba(255,255,255,0.015)",
-          flex: "1 1 0", minWidth: 0, overflow: "hidden" } : undefined}>
+          minWidth: 0 } : undefined}>
       {/* BUY-IN AMOUNT — swap SOL / $VALO freely */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <label style={{ ...lbl, marginBottom: 0 }}>Buy-in amount</label>
@@ -1901,7 +1901,7 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
         : wide ? { display: "block" }
         : { border: `1px solid ${T.border}`, borderRadius: 10, background: "rgba(255,255,255,0.015)",
             padding: "9px 11px", marginTop: 8 }}>
-      <div style={wide ? { flex: "1 1 0", minWidth: 0, overflow: "hidden",
+      <div style={wide ? { minWidth: 0,
           border: `1px solid ${T.border}`, borderRadius: 9,
           padding: "7px 9px", background: "rgba(255,255,255,0.015)" }
         : sideM ? { gridColumn: 1, gridRow: "1 / span 2", minWidth: 0 }
@@ -4475,7 +4475,7 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
   );
   return (
     <div data-botui="1" style={{ background: wide ? "transparent" : T.panel, border: wide ? "none" : `1px solid ${T.border2}`, borderRadius: 12, padding: wide ? 0 : 14,
-      ...(wide ? { display: "flex", gap: 8, alignItems: "stretch", flexWrap: "nowrap" } : {}) }}>
+      ...(wide ? { display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1.15fr)", gap: 10, alignItems: "start" } : {}) }}>
       {!wide && (
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <div style={{ fontFamily: T.mono, fontSize: 11, letterSpacing: 2, color: T.dim, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
