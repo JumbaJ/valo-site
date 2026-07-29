@@ -100,7 +100,12 @@ if (typeof window !== "undefined") window.__valoTest = TestLog;
 // smooth sin-wobble makes people "join and leave" live; totals only ever climb
 const VIEW_EPOCH = 1700000000000;
 const liveViewersOf = (t, mode) => {
-  const seed = ((t && t.id) * 9301 + 11) % 233;
+  // real count first: how many VALO users are on this exact token right now
+  const real = typeof window !== "undefined" && window.__VALO_VIEWERS__
+    && t && t.liveMint ? window.__VALO_VIEWERS__[t.liveMint] : null;
+  if (Number.isFinite(real) && real > 0) return real;
+  const sd = typeof t?.id === "number" ? t.id : hashStr(String((t && (t.id || t.sym)) || "x"));
+  const seed = (sd * 9301 + 11) % 233;
   const base = mode === "valo" ? 7 + (seed % 21) : 24 + (seed % 150);
   const w = Math.sin(Date.now() / 9000 + seed) * base * 0.22 + Math.sin(Date.now() / 2400 + seed * 3) * 2.6;
   return Math.max(1, Math.round(base + w));
@@ -9672,6 +9677,7 @@ export default function App() {
   const realChartTrades = [];
 
 
+  const [liveViewers, setLiveViewers] = useState({});  // mint → real VALO viewers
   const tapeRef = useRef({});          // rolling per-pool trade tape → candles
   const [streamOn, setStreamOn] = useState(false);
   const streamRef = useRef(null);
@@ -9692,6 +9698,14 @@ export default function App() {
       ws.onerror = () => { try { ws.close(); } catch (e) {} };
       ws.onmessage = (ev) => {
         let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+        if (m.type === "viewers" && m.mint) {
+          setLiveViewers((V) => {
+            const next = V[m.mint] === m.count ? V : { ...V, [m.mint]: m.count };
+            if (typeof window !== "undefined") window.__VALO_VIEWERS__ = next;
+            return next;
+          });
+          return;
+        }
         const incoming = m.type === "trade" ? [m.trade] : m.type === "backfill" ? m.trades : null;
         if (!incoming || !incoming.length) return;
         const tk = tokensRef.current.find((x) => x.liveMint && x.liveMint === incoming[0].mint);
@@ -9704,9 +9718,24 @@ export default function App() {
         tapeRef.current[key] = merged;
         const tape = candlesFromTrades(merged, tf);
         if (tape.length < 2) return;
+        // live flow: what actually traded in the last 10 minutes
+        const since = Date.now() - 600000;
+        const win = merged.filter((x) => x.at >= since);
+        let buyUsd = 0, sellUsd = 0;
+        for (const x of win) { if (x.isBuy) buyUsd += +x.usd || 0; else sellUsd += +x.usd || 0; }
+        const flowTotal = buyUsd + sellUsd;
+        const pressure = flowTotal > 0 ? Math.round((buyUsd / flowTotal) * 100) : null;
+        const first = tape[0], last = tape[tape.length - 1];
+        const moved = first && first.o > 0 ? ((last.c - first.o) / first.o) * 100 : 0;
+        const mom = Math.max(1, Math.min(99, Math.round(50 + moved * 1.5 + ((pressure ?? 50) - 50) * 0.5)));
         setTokens((Ts) => Ts.map((x) => (x.id === tk.id
           ? { ...x, candles: mergeTapeCandles(x.realCandles ? x.candles : [], tape),
-              realCandles: true, price: tape[tape.length - 1].c }
+              realCandles: true, price: last.c,
+              greenUsd: buyUsd > 0 ? buyUsd : x.greenUsd,
+              redUsd: sellUsd > 0 ? sellUsd : x.redUsd,
+              buyPressure: pressure != null ? pressure : x.buyPressure,
+              momentum: flowTotal > 0 ? mom : x.momentum,
+              liveFlow: true }
           : x)));
       };
     };
