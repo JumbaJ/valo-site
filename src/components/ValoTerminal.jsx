@@ -4555,7 +4555,7 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
       })()}
       </div>
       <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1.5 1 300px", minWidth: 290 } : undefined}>
-      <div style={{ display: "flex", gap: 7, marginBottom: wide ? 6 : 9 }}>
+      <div style={{ display: "flex", gap: 7, marginBottom: wide ? 6 : 9, alignItems: "stretch" }}>
         {step("1", "BUY IN", buyLvl, T.green, stage === "buy" && dragSetOn,
           () => {
             if (stage === "buy" && dragSetOn) { onSetDragSet && onSetDragSet(false); onDraftLevel && onDraftLevel(null); return; } // re-tap = cancel
@@ -4568,6 +4568,34 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
             if (buyLvl != null) { setSellLvl(null); onSetDragSet && onSetDragSet(true); }
           },
           () => setSellLvl(null))}
+        {/* live P/L — a small square beside the two steps */}
+        {(() => {
+          const held3 = position && position.amt > 0;
+          const q3 = held3 ? posTokenQty(token, position) : 0;
+          const pnl3 = held3 ? q3 * (token.price - position.entry) : 0;
+          const pc3 = held3 && position.entry > 0 ? ((token.price - position.entry) / position.entry) * 100 : 0;
+          const g3 = pnl3 >= 0;
+          return (
+            <div style={{ flex: "0 0 84px", width: 84, minWidth: 84, aspectRatio: "1 / 1",
+              border: `1.5px solid ${held3 ? (g3 ? T.green : T.red) + "66" : T.border}`, borderRadius: 10,
+              background: held3 ? (g3 ? "rgba(22,199,132,0.07)" : "rgba(234,57,67,0.07)") : "rgba(255,255,255,0.02)",
+              boxShadow: held3 ? `0 0 12px ${g3 ? "rgba(22,199,132,0.22)" : "rgba(234,57,67,0.22)"}` : "none",
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+              padding: 4, textAlign: "center", overflow: "hidden" }}>
+              <div style={{ fontFamily: T.mono, fontSize: 6.5, letterSpacing: 1, color: T.faint }}>LIVE P/L</div>
+              {held3 ? (
+                <>
+                  <div style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 900, lineHeight: 1.1,
+                    color: g3 ? T.green : T.red }}>{g3 ? "+" : "−"}${Math.abs(pnl3).toFixed(0)}</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 800,
+                    color: g3 ? T.green : T.red, opacity: 0.9 }}>{g3 ? "+" : ""}{pc3.toFixed(1)}%</div>
+                </>
+              ) : (
+                <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, lineHeight: 1.3 }}>no<br />position</div>
+              )}
+            </div>
+          );
+        })()}
       </div>
       <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginBottom: 9 }}>
         buy in hits → buys automatically → exit point hits → sells all. Lines stay on the chart until hit.
@@ -4600,7 +4628,7 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
         const pc2 = held2 ? ((token.price - position.entry) / position.entry) * 100 : 0;
         const g2 = pnl2 >= 0;
         return (
-          <div style={{ border: `1.5px solid ${held2 ? (g2 ? T.green : T.red) + "66" : T.border}`, borderRadius: 10, padding: "8px 10px", flex: "1 1 190px", minWidth: 180,
+          <div style={{ display: wide ? "none" : "flex", border: `1.5px solid ${held2 ? (g2 ? T.green : T.red) + "66" : T.border}`, borderRadius: 10, padding: "8px 10px", flex: "1 1 190px", minWidth: 180,
             background: held2 ? (g2 ? "rgba(22,199,132,0.07)" : "rgba(234,57,67,0.07)") : "rgba(255,255,255,0.015)",
             boxShadow: held2 ? `0 0 16px ${g2 ? "rgba(22,199,132,0.25)" : "rgba(234,57,67,0.25)"}` : "none",
             display: "flex", flexDirection: "column", justifyContent: "center" }}>
