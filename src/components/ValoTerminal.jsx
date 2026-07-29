@@ -3403,9 +3403,43 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   const [holdsTab, setHoldsTab] = useState("open");  // open ⇄ closed positions
   const [holdsView, setHoldsView] = useState("trades"); // trades ⇄ dev (launched/rugged)
   // every token this person launched, and which of them died
-  const devTokens = useMemo(() => (tokens || []).filter((t) => {
-    try { return devOf(t).name === name; } catch (e) { return false; }
-  }), [tokens, name]);
+  // real launches when this profile is a creator wallet, otherwise the sim set
+  const [realLaunches, setRealLaunches] = useState(null);
+  useEffect(() => {
+    setRealLaunches(null);
+    const wallet = (tokens || []).map((t) => { try { return devOf(t); } catch (e) { return null; } })
+      .find((d) => d && d.real && d.name === name);
+    const addr = wallet && wallet.wallet;
+    if (!addr) return;
+    let stop = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/creator?wallet=${encodeURIComponent(addr)}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop && j && Array.isArray(j.launches)) setRealLaunches(j.launches);
+      } catch (e) {}
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name, tokens]);
+  const devTokens = useMemo(() => {
+    if (realLaunches) {
+      // pair each real launch with a live card when we have one
+      return realLaunches.map((L) => {
+        const live = (tokens || []).find((t) => t.liveMint === L.mint);
+        return live || {
+          id: "L:" + L.mint, liveMint: L.mint, pool: null, sym: L.sym, name: L.name,
+          hue: symbolHue(L.sym || "?"), img: null, price: 0, mc: 0, tvl: 0,
+          candles: [], ageMin: L.createdAt ? Math.max(1, Math.round((Date.now() - L.createdAt) / 60000)) : 0,
+          greenUsd: 0, redUsd: 0, traders: 0, offMarket: true,
+        };
+      });
+    }
+    return (tokens || []).filter((t) => {
+      try { return devOf(t).name === name; } catch (e) { return false; }
+    });
+  }, [tokens, name, realLaunches]);
   const devRugs = useMemo(() => devTokens.filter((t) => rugState(t).rugged), [devTokens]);
   const [cpFilter, setCpFilter] = useState(null);    // closed tab: view one token only
   const [txFilter, setTxFilter] = useState(null);    // activity: view one token's txs only
@@ -6406,6 +6440,13 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
 const tokSeed = (t) => (typeof t?.id === "number" ? t.id : hashStr(String((t && (t.id || t.sym)) || "x")));
 const platOf = () => "pump";   // Solana / pump.fun only
 const devOf = (t) => {
+  // real launcher when the chain told us who it was
+  const real = typeof window !== "undefined" && window.__VALO_CREATORS__ && t && t.liveMint
+    ? window.__VALO_CREATORS__[t.liveMint] : null;
+  if (real && real.creator) {
+    return { name: real.short || real.creator.slice(0, 8), short: real.short,
+      wallet: real.creator, real: true, createdAt: real.createdAt || null };
+  }
   const sd = tokSeed(t);
   const n = CALLERS[Math.abs(sd * 5 + 2) % CALLERS.length] || CALLERS[0];
   const wal = ((sd * 2654435761) >>> 0).toString(16).padStart(8, "0");
@@ -9655,6 +9696,29 @@ export default function App() {
 
   // Markers on the chart = your trades + (optionally) the dev's + any trader you
   // are following. Followed traders stay pinned while you trade until unpinned.
+  // 👤 who actually launched the selected token (real creator wallet)
+  const [tokCreator, setTokCreator] = useState(null);
+  useEffect(() => {
+    setTokCreator(null);
+    if (!selected || !selected.liveMint) return;
+    let stop = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/creator?mint=${encodeURIComponent(selected.liveMint)}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop && j && j.creator) {
+          setTokCreator(j);
+          if (typeof window !== "undefined") {
+            window.__VALO_CREATORS__ = { ...(window.__VALO_CREATORS__ || {}), [selected.liveMint]: j };
+          }
+        }
+      } catch (e) {}
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected && selected.liveMint]);
+
   // 🔗 real links for the selected live token (site, X, telegram, pump.fun…)
   const [tokLinks, setTokLinks] = useState(null);
   useEffect(() => {
