@@ -30,7 +30,7 @@ export default async function handler(req, res) {
         ch24: parseFloat(a.price_change_percentage?.h24) || 0,
         traders: tot, buys24: buys, sells24: sells,
         createdAt: created, ageMin: created ? Math.max(0, Math.round((Date.now() - created) / 60000)) : null,
-        launchpad: /pump$/i.test(m.address || "") ? "pump" : "rh",
+        launchpad: /pump$/i.test(m.address || "") ? "pump" : "solana",
       });
     }
     out.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));

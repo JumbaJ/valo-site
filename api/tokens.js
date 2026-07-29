@@ -33,7 +33,7 @@ export default async function handler(req, res) {
         ch24: parseFloat(a.price_change_percentage?.h24) || 0,
         traders: txTotal, buys24: buys, sells24: sells,
         createdAt: created,
-        launchpad: /pump$/i.test(meta.address || "") ? "pump" : "rh",
+        launchpad: /pump$/i.test(meta.address || "") ? "pump" : "solana",
         page,
       });
     }

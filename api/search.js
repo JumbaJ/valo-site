@@ -32,7 +32,7 @@ export default async function handler(req, res) {
           ch24: (p.priceChange && p.priceChange.h24) || 0,
           traders: tot, buys24: buys, sells24: sells,
           dex: p.dexId || null,
-          launchpad: /pump$/i.test(base.address || "") ? "pump" : (p.dexId || "").toLowerCase().includes("meteora") ? "meteora" : "rh",
+          launchpad: /pump$/i.test(base.address || "") ? "pump" : (p.dexId || "").toLowerCase() || "solana",
           createdAt: p.pairCreatedAt || null,
         };
       });

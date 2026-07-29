@@ -242,10 +242,10 @@ const TIMEFRAMES = [
 // ---------------- tokens ----------------
 const NAMES = [
   ["PEPEGOLD", "Pepe Gold", "pump"], ["MOONCAT", "Moon Cat", "pump"],
-  ["BLOODWOLF", "Blood Wolf", "pump"], ["ICEDOGE", "Ice Doge", "robinhood"],
+  ["BLOODWOLF", "Blood Wolf", "pump"], ["ICEDOGE", "Ice Doge", "pump"],
   ["NEONRAT", "Neon Rat", "pump"], ["LIMEFROG", "Lime Frog", "pump"],
-  ["SKYWHALE", "Sky Whale", "robinhood"], ["LAVASHIB", "Lava Shib", "pump"],
-  ["GRAPEAPE", "Grape Ape", "pump"], ["GHOSTFISH", "Ghost Fish", "robinhood"],
+  ["SKYWHALE", "Sky Whale", "pump"], ["LAVASHIB", "Lava Shib", "pump"],
+  ["GRAPEAPE", "Grape Ape", "pump"], ["GHOSTFISH", "Ghost Fish", "pump"],
   ["SUNBIRD", "Sun Bird", "pump"], ["TOXICPUP", "Toxic Pup", "pump"],
 ];
 let nid = 0;
@@ -283,7 +283,7 @@ function makeToken([sym, name, chain], isNew = false) {
     trending: {
       reason: `$${sym} is trending: a wave of new holders piled in over the last hour as volume spiked and the chart broke out. Callouts across Solana meme channels pushed fresh eyes to the pair.`,
       tweet: { user: `@${sym.toLowerCase()}whale`, text: `$${sym} looking absolutely dialed 🚀 volume ripping, holders up only. this is the one anon 👀`, likes: Math.floor(rnd(120, 4200)), rts: Math.floor(rnd(30, 900)) },
-      desc: `${name} (${sym}) is a community meme token on ${chain === "pump" ? "pump.fun" : "the Robinhood chain"} / Solana. Fair launch, no presale.`,
+      desc: `${name} (${sym}) is a community meme token on pump.fun / Solana. Fair launch, no presale.`,
     },
     dev: (() => {
       const now = Date.now();
@@ -425,7 +425,7 @@ function adoptMarketToken(x) {
   return {
     id: ++mktNid,                       // numeric id — every helper expects one
     pool: x.id, liveMint: x.mint || null, market: true,
-    sym, name: x.name || sym, chain: x.launchpad === "pump" ? "pump" : "rh",
+    sym, name: x.name || sym, chain: "pump",
     isNew: ageMin < 60, hasDex: true,
     traders: +x.traders || flow, tvl, greenUsd: green, redUsd: red,
     momentum, buyPressure,
@@ -5554,7 +5554,7 @@ function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line",
             </span>
             {t.isNew && <span style={{ fontSize: 8, background: T.amber, color: "#1a1508", padding: "1px 5px", borderRadius: 4, fontWeight: 800 }}>NEW</span>}
             <span style={{ fontSize: 8, border: `1px solid ${T.border2}`, color: T.dim, padding: "1px 5px", borderRadius: 4, fontFamily: T.mono }}>
-              {t.chain === "pump" ? "PUMP" : "RBHD"}
+              PUMP
             </span>
             <span title={`${calloutCount} community callouts`} style={{
               fontSize: 8.5, fontFamily: T.mono, fontWeight: 800, padding: "1.5px 7px", borderRadius: 10,
@@ -5979,7 +5979,7 @@ const PATCH_NOTES = [
     "📋 WATCHLIST WALL — left pull-tab on PC with a loose list + your own named SUBSECTIONS: ＋ LIST to create, double-click to rename, drag section headers to reorder, right-click any row to move/remove",
     "📊 MY POSITIONS slide-over — every open bot & ticket in one tab: BOTS | BOTH | TICKETS scoping, live scoped PnL with unrealized + realized, per-asset 10–100% sell chips showing exact SOL/$VALO, scoped SELL ALL",
     "Hold your wallet amount → it morphs into MY POSITIONS · tap any asset → straight to its chart (bots land on ALL BOTS) · partial bot sells are now real exits with proper realized PnL",
-    "🔍 ECOSYSTEM SEARCH — pump.fun-style token cards with score/B/S/momentum/viewers/dev, ALL·PUMP.FUN·ROBINHOOD + 🔥TRENDING/TOP TRADERS/NEW/SAFE⊕RISKY filters living inside the search, metallic GOLD borders + sweeping shine on hot tokens",
+    "🔍 ECOSYSTEM SEARCH — pump.fun-style token cards with score/B/S/momentum/viewers/dev, ALL·PUMP.FUN + 🔥TRENDING/TOP TRADERS/NEW/SAFE⊕RISKY filters living inside the search, metallic GOLD borders + sweeping shine on hot tokens",
     "🔍 in the auto trader header — pull the full search down mid-trade; wallet pill on top: balance, live bot PnL, POSITIONS shortcut",
     "👥 HOLDERS tab beside LIVE TRADES — top-25 book with tokens · $ · % of circ · B/S · P/L · hold time; text enlarged across both tabs; every row opens the trader popup",
     "PC hold-drag REORDER — pull scanner tokens or watchlist rows up/down inside their own tab; right-click adds to scanner / any subsection / removes",
@@ -6399,8 +6399,7 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
 // ---- search ecosystem helpers: platform, dev, description (deterministic) ----
 // token ids may be numbers (simulated) or pool addresses (real market results)
 const tokSeed = (t) => (typeof t?.id === "number" ? t.id : hashStr(String((t && (t.id || t.sym)) || "x")));
-const platOf = (t) => (t && t.chain === "pump" ? "pump" : t && t.chain === "rh" ? "rh"
-  : ((tokSeed(t) * 7 + 3) % 10) < 7 ? "pump" : "rh");
+const platOf = () => "pump";   // Solana / pump.fun only
 const devOf = (t) => {
   const sd = tokSeed(t);
   const n = CALLERS[Math.abs(sd * 5 + 2) % CALLERS.length] || CALLERS[0];
@@ -6536,7 +6535,7 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
       <div style={{ display: "flex", gap: 5, flexWrap: "wrap", padding: "9px 10px", borderBottom: `1px solid ${T.border}`, flexShrink: 0, position: "sticky", top: 0, background: T.panel, zIndex: 2 }}>
         {fbtn(plat === "all", "ALL", () => setPlat("all"), T.blue)}
         {fbtn(plat === "pump", "PUMP.FUN", () => setPlat("pump"), T.green)}
-        {fbtn(plat === "rh", "ROBINHOOD", () => setPlat("rh"), "#c6f24e")}
+
         <span style={{ width: 1, background: T.border, margin: "0 2px" }} />
         {fbtn(flags.trend, "🔥 TRENDING", () => flag("trend"), T.amber)}
         {fbtn(flags.top, "TOP TRADERS", () => flag("top"), VALO_PURPLE)}
@@ -8478,7 +8477,7 @@ export default function App() {
     const url = /[?&](live|test)=1/.test(window.location.search);
     return url || window.__VALO_LIVE__ === true; // env bridge set by main.jsx (VITE_LIVE_DATA=1)
   }); // 🛰 real tokens, simulated wallet
-  // 🔎 market-wide search: every pump.fun / Robinhood-chain token DexScreener
+  // 🔎 market-wide search: every Solana / pump.fun token DexScreener
   // indexes, merged in behind whatever is already on screen
   const [mktHits, setMktHits] = useState([]);
 
@@ -9121,7 +9120,7 @@ export default function App() {
       if (poolRef.current.length) {
         const t = makeToken(poolRef.current.shift(), true);
         setTokens((Ts) => [t, ...Ts]);
-        sayAlert({ tone: "launch", pre: "🚀 NEW TOKEN LAUNCHED —", sym: t.sym, tokenId: t.id, hot: `${t.chain === "pump" ? "PUMP.FUN" : "ROBINHOOD CHAIN"} · SYNTH CHART LIVE` });
+        sayAlert({ tone: "launch", pre: "🚀 NEW TOKEN LAUNCHED —", sym: t.sym, tokenId: t.id, hot: `PUMP.FUN · SYNTH CHART LIVE` });
         // API: fetch token metadata (image) for the new mint. In production:
         //   const meta = await fetch(`https://api.dexscreener.com/…/${mint}`)
         //   resolve meta.info.imageUrl and setTokens to attach t.img.
