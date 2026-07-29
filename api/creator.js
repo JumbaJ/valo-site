@@ -7,8 +7,16 @@
 const EP = "https://streaming.bitquery.io/eap";
 
 async function gql(query, variables) {
-  const token = process.env.BITQUERY_TOKEN;
-  if (!token) throw new Error("no BITQUERY_TOKEN");
+  const token = (process.env.BITQUERY_TOKEN || "").trim();
+  if (!token) {
+    // report what this function CAN see (names only — never values), so a
+    // missing variable is obvious instead of a guessing game
+    const seen = Object.keys(process.env).filter((k) => /BITQUERY|VITE_|SUPABASE|CRON/i.test(k)).sort();
+    const err = new Error("no BITQUERY_TOKEN");
+    err.envSeen = seen;
+    err.vercelEnv = process.env.VERCEL_ENV || null;
+    throw err;
+  }
   const r = await fetch(EP, {
     method: "POST",
     headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
@@ -92,6 +100,9 @@ export default async function handler(req, res) {
     }
     res.status(400).json({ error: "pass ?mint= or ?wallet=" });
   } catch (e) {
-    res.status(502).json({ error: String(e.message || e) });
+    res.status(502).json({
+      error: String(e.message || e),
+      ...(e.envSeen ? { envVarsThisFunctionSees: e.envSeen, environment: e.vercelEnv } : {}),
+    });
   }
 }
