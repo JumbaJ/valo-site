@@ -1823,8 +1823,8 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       </div>
       )}
 
-      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)",
-          flex: "0 0 340px", width: 340, maxWidth: 340, minWidth: 0 } : undefined}>
+      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 9, padding: "7px 9px", background: "rgba(255,255,255,0.015)",
+          flex: "1 1 0", minWidth: 0 } : undefined}>
       {/* BUY-IN AMOUNT — swap SOL / $VALO freely */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <label style={{ ...lbl, marginBottom: 0 }}>Buy-in amount</label>
@@ -1899,9 +1899,9 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       </div>
       <div style={sideM ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 12, alignItems: "start", marginTop: 8 }
         : wide ? { display: "block" } : { display: "contents" }}>
-      <div style={wide ? { flex: "1 1 380px", minWidth: 0, maxWidth: 420, margin: "0 auto",
-          border: `1px solid ${T.border}`, borderRadius: 10,
-          padding: "9px 11px", background: "rgba(255,255,255,0.015)" }
+      <div style={wide ? { flex: "1 1 0", minWidth: 0,
+          border: `1px solid ${T.border}`, borderRadius: 9,
+          padding: "7px 9px", background: "rgba(255,255,255,0.015)" }
         : sideM ? { gridColumn: 1, gridRow: "1 / span 2", minWidth: 0 }
         : { border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", background: "rgba(255,255,255,0.015)", marginTop: 9 }}>
       {!sideM && <div style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.5, color: T.faint, marginBottom: 6 }}>① ENTRY</div>}
@@ -1935,7 +1935,7 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       </div>
 
       </div>
-      <div style={wide ? { marginTop: 9, paddingTop: 9, borderTop: `1px solid ${T.border}` }
+      <div style={wide ? { marginTop: 8, paddingTop: 7, borderTop: `1px solid ${T.border}` }
         : sideM ? { display: "contents" }
         : { border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", background: "rgba(255,255,255,0.015)", marginTop: 8 }}>
       {!sideM && <div style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.5, color: T.faint, marginBottom: 6 }}>② RISK — STOP LOSS</div>}
@@ -1950,22 +1950,33 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
           borderRadius: 6, padding: "2px 7px" }}>Σ {allocTotal}% {allocTotal === 100 ? "✓" : "≠100"}</span>
       </div>
       {legs.map((l, i) => (
-        <div key={i} style={{ border: `1px solid ${T.border}`, borderRadius: 8, padding: "5px 7px", marginBottom: 4,
+        <div key={i} style={{ border: `1px solid ${T.border}`, borderRadius: 7, padding: "4px 5px", marginBottom: 3,
           background: "rgba(255,255,255,0.02)", ...(sideM ? { gridColumn: "1 / -1" } : {}) }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
-            <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1, color: T.dim }}>LEG {i + 1}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, color: T.dim, flex: "0 0 auto" }}>L{i + 1}</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 2, flex: 1, minWidth: 0 }}>
+              <span style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, flex: "0 0 auto" }}>×</span>
+              <input value={l.mult} onChange={(e) => setLeg(i, "mult", e.target.value)}
+                style={{ ...inpS, padding: "3px 4px", fontSize: 10, minWidth: 0, width: "100%" }} />
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 2, flex: 1, minWidth: 0 }}>
+              <span style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, flex: "0 0 auto" }}>TR</span>
+              <input value={l.trail} onChange={(e) => setLeg(i, "trail", e.target.value)}
+                style={{ ...inpS, padding: "3px 4px", fontSize: 10, minWidth: 0, width: "100%" }} />
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 2, flex: 1, minWidth: 0 }}>
+              <span style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, flex: "0 0 auto" }}>SL</span>
+              <input value={l.alloc} onChange={(e) => setLeg(i, "alloc", +e.target.value)}
+                style={{ ...inpS, padding: "3px 4px", fontSize: 10, minWidth: 0, width: "100%" }} />
+            </span>
             <button onClick={() => setLegs((L) => L.filter((_, j) => j !== i))} title="Remove this leg"
-              style={{ border: `1px solid ${T.border2}`, background: "transparent", color: T.faint, borderRadius: 6, width: 22, height: 20, cursor: "pointer", fontSize: 12, lineHeight: 1 }}>−</button>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
-            <div><span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>AT ×</span><input value={l.mult} onChange={(e) => setLeg(i, "mult", e.target.value)} style={inpS} /></div>
-            <div><span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>TRAIL %</span><input value={l.trail} onChange={(e) => setLeg(i, "trail", e.target.value)} style={inpS} /></div>
-            <div><span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>SELL %</span><input value={l.alloc} onChange={(e) => setLeg(i, "alloc", +e.target.value)} style={inpS} /></div>
+              style={{ border: `1px solid ${T.border2}`, background: "transparent", color: T.faint, borderRadius: 5,
+                width: 18, height: 18, cursor: "pointer", fontSize: 11, lineHeight: 1, flex: "0 0 auto", padding: 0 }}>−</button>
           </div>
           {(() => { const m = parseFloat(l.mult) || 0, al = Number(l.alloc || 0); const est = amt * (al / 100) * (m - 1) * (pay === "SOL" ? SOL_USD : 0.0125);
             return m > 1 && al > 0 ? (
-              <div style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, color: T.green, marginTop: 4, textAlign: "right" }}>
-                sells {al}% at ×{m} · ≈ +${est.toFixed(0)}
+              <div style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 800, color: T.green, marginTop: 2, textAlign: "right" }}>
+                {al}% @ ×{m} · ≈ +${est.toFixed(0)}
               </div>
             ) : null; })()}
         </div>
