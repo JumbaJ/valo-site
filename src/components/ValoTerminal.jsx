@@ -1899,13 +1899,14 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       </div>
       <div style={sideM ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 12, alignItems: "start", marginTop: 8 }
         : wide ? { display: "block" }
-        : { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 8, alignItems: "start", marginTop: 8 }}>
+        : { border: `1px solid ${T.border}`, borderRadius: 10, background: "rgba(255,255,255,0.015)",
+            padding: "9px 11px", marginTop: 8 }}>
       <div style={wide ? { flex: "1 1 0", minWidth: 0, overflow: "hidden",
           border: `1px solid ${T.border}`, borderRadius: 9,
           padding: "7px 9px", background: "rgba(255,255,255,0.015)" }
         : sideM ? { gridColumn: 1, gridRow: "1 / span 2", minWidth: 0 }
-        : { border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", background: "rgba(255,255,255,0.015)", minWidth: 0 }}>
-      {!sideM && <div style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.5, color: T.faint, marginBottom: 6 }}>① ENTRY</div>}
+        : { minWidth: 0 }}>
+      {!sideM && <div style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 2, color: T.faint, marginBottom: 5 }}>ENTRY</div>}
       {/* buy-in price slider — tracks live price, drag to set a higher/lower entry */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 7 }}>
         {onDraftLevel && (
@@ -1938,47 +1939,42 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       </div>
       <div style={wide ? { marginTop: 8, paddingTop: 7, borderTop: `1px solid ${T.border}` }
         : sideM ? { display: "contents" }
-        : { border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", background: "rgba(255,255,255,0.015)", minWidth: 0 }}>
-      {!sideM && <div style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.5, color: T.faint, marginBottom: 6 }}>② RISK — STOP LOSS</div>}
+        : { minWidth: 0, marginTop: 9, paddingTop: 8, borderTop: `1px solid ${T.border}` }}>
+      {!sideM && <div style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 2, color: T.faint, marginBottom: 5 }}>RISK</div>}
       <label style={{ ...lbl, marginTop: wide || sideM ? 0 : 0, ...(sideM ? { gridColumn: 2, gridRow: 1 } : {}) }}>Stop loss — {stopLoss}% below entry</label>
       <input type="range" min={1} max={100} value={stopLoss} onChange={(e) => setStopLoss(+e.target.value)} style={{ width: "100%", accentColor: T.red, ...(sideM ? { gridColumn: 2, gridRow: 2, alignSelf: "start" } : {}) }} />
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: sideM ? 6 : 9, marginBottom: 5,
         borderTop: `1px solid ${T.border}`, paddingTop: 7, ...(sideM ? { gridColumn: "1 / -1" } : {}) }}>
-        <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.2, color: T.faint }}>③ LEGS</span>
+        <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 2, color: T.faint }}>TAKE PROFIT</span>
         <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: allocTotal === 100 ? T.green : T.red,
           border: `1px solid ${allocTotal === 100 ? T.green : T.red}55`, background: allocTotal === 100 ? "rgba(22,199,132,0.1)" : "rgba(234,57,67,0.1)",
           borderRadius: 6, padding: "2px 7px" }}>Σ {allocTotal}% {allocTotal === 100 ? "✓" : "≠100"}</span>
       </div>
+      {!sideM && legs.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "18px 1fr 1fr 1fr 18px", gap: 5, alignItems: "center",
+          fontFamily: T.mono, fontSize: 7, letterSpacing: 1, color: T.faint, padding: "0 1px 3px" }}>
+          <span /><span>AT ×</span><span>TRAIL %</span><span>SELL %</span><span />
+        </div>
+      )}
       {legs.map((l, i) => (
-        <div key={i} style={{ border: `1px solid ${T.border}`, borderRadius: 7, padding: "4px 5px", marginBottom: 3,
-          background: "rgba(255,255,255,0.02)", ...(sideM ? { gridColumn: "1 / -1" } : {}) }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, color: T.dim, flex: "0 0 auto" }}>L{i + 1}</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 2, flex: 1, minWidth: 0 }}>
-              <span style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, flex: "0 0 auto" }}>×</span>
-              <input value={l.mult} onChange={(e) => setLeg(i, "mult", e.target.value)}
-                style={{ ...inpS, padding: "3px 4px", fontSize: 10, minWidth: 0, width: "100%" }} />
-            </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 2, flex: 1, minWidth: 0 }}>
-              <span style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, flex: "0 0 auto" }}>TR</span>
-              <input value={l.trail} onChange={(e) => setLeg(i, "trail", e.target.value)}
-                style={{ ...inpS, padding: "3px 4px", fontSize: 10, minWidth: 0, width: "100%" }} />
-            </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 2, flex: 1, minWidth: 0 }}>
-              <span style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, flex: "0 0 auto" }}>SL</span>
-              <input value={l.alloc} onChange={(e) => setLeg(i, "alloc", +e.target.value)}
-                style={{ ...inpS, padding: "3px 4px", fontSize: 10, minWidth: 0, width: "100%" }} />
-            </span>
+        <div key={i} style={{ marginBottom: 2, ...(sideM ? { gridColumn: "1 / -1" } : {}) }}>
+          <div style={{ display: "grid", gridTemplateColumns: "18px 1fr 1fr 1fr 18px", gap: 5, alignItems: "center" }}>
+            <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, color: T.dim }}>{i + 1}</span>
+            <input value={l.mult} onChange={(e) => setLeg(i, "mult", e.target.value)}
+              style={{ ...inpS, padding: "4px 5px", fontSize: 10.5, minWidth: 0, width: "100%", textAlign: "center" }} />
+            <input value={l.trail} onChange={(e) => setLeg(i, "trail", e.target.value)}
+              style={{ ...inpS, padding: "4px 5px", fontSize: 10.5, minWidth: 0, width: "100%", textAlign: "center" }} />
+            <input value={l.alloc} onChange={(e) => setLeg(i, "alloc", +e.target.value)}
+              style={{ ...inpS, padding: "4px 5px", fontSize: 10.5, minWidth: 0, width: "100%", textAlign: "center" }} />
             <button onClick={() => setLegs((L) => L.filter((_, j) => j !== i))} title="Remove this leg"
-              style={{ border: `1px solid ${T.border2}`, background: "transparent", color: T.faint, borderRadius: 5,
-                width: 18, height: 18, cursor: "pointer", fontSize: 11, lineHeight: 1, flex: "0 0 auto", padding: 0 }}>−</button>
+              style={{ border: "none", background: "transparent", color: T.faint, cursor: "pointer",
+                fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
           </div>
           {(() => { const m = parseFloat(l.mult) || 0, al = Number(l.alloc || 0); const est = amt * (al / 100) * (m - 1) * (pay === "SOL" ? SOL_USD : 0.0125);
             return m > 1 && al > 0 ? (
-              <div style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 800, color: T.green, marginTop: 2, textAlign: "right" }}>
-                {al}% @ ×{m} · ≈ +${est.toFixed(0)}
-              </div>
+              <div style={{ fontFamily: T.mono, fontSize: 7, color: T.green, opacity: 0.85, marginTop: 1,
+                textAlign: "right", paddingRight: 23 }}>≈ +${est.toFixed(0)}</div>
             ) : null; })()}
         </div>
       ))}
@@ -4231,7 +4227,13 @@ function BotHubModal({ view, setView, orders = [], tokens = [], selectedId, onSa
                       Σ sell {sum}%{legs.length > 0 && sum !== 100 ? " — must equal 100%" : ""}
                     </span>
                   </div>
-                  {legs.map((l, i) => (
+                  {!sideM && legs.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "18px 1fr 1fr 1fr 18px", gap: 5, alignItems: "center",
+          fontFamily: T.mono, fontSize: 7, letterSpacing: 1, color: T.faint, padding: "0 1px 3px" }}>
+          <span /><span>AT ×</span><span>TRAIL %</span><span>SELL %</span><span />
+        </div>
+      )}
+      {legs.map((l, i) => (
                     <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 24px", gap: 6, marginBottom: 5 }}>
                       <div><div style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, marginBottom: 2 }}>MULT ×</div><input value={l.mult} onChange={(e) => setLeg(i, "mult", e.target.value)} style={{ ...inp, padding: "5px 7px", fontSize: 10.5 }} /></div>
                       <div><div style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, marginBottom: 2 }}>TRAIL %</div><input value={l.trail} onChange={(e) => setLeg(i, "trail", e.target.value)} style={{ ...inp, padding: "5px 7px", fontSize: 10.5 }} /></div>
