@@ -5530,7 +5530,7 @@ function CardMiniChart({ candles, hue, mode, tfMin = 15, count = 90, full = fals
   return <canvas ref={ref} style={{ width: full ? "100%" : "128%", height: full ? "100%" : 52, display: "block" }} />;
 }
 
-function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf = 15, isMobile = false, onHover }) {
+function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf = 15, isMobile = false, onHover, onLeave }) {
   const liveEyes = liveViewersOf(t, "pump"); // re-renders ride the price ticks
   const score = scoreToken(t);
   const rug = rugState(t);
@@ -5538,7 +5538,7 @@ function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line",
   const net = t.greenUsd - t.redUsd;
   const cs = calloutStyle(calloutCount);
   return (
-    <div onClick={onOpen} onMouseEnter={onHover} className="token-card" style={{
+    <div onClick={onOpen} onMouseEnter={onHover} onMouseLeave={onLeave} className="token-card" style={{
       border: `1px solid ${active ? accent(t.hue, 45) : T.border}`,
       background: cardGrad(t.hue), borderRadius: 18, padding: "14px 18px 0", cursor: "pointer",
       boxShadow: active ? `0 0 0 1px ${accent(t.hue, 45)}` : "none", transition: "border-color .2s",
@@ -5612,7 +5612,7 @@ function TokenRow({ t, active, onOpen, calloutCount = 0, tf = 15 }) {
   const cs = calloutStyle(calloutCount);
   const mc = mcOf(t);
   return (
-    <div onClick={onOpen} onMouseEnter={onHover} className="token-card" style={{
+    <div onClick={onOpen} onMouseEnter={onHover} onMouseLeave={onLeave} className="token-card" style={{
       border: `1px solid ${active ? accent(t.hue, 45) : T.border}`,
       background: cardGrad(t.hue), borderRadius: 12, padding: "8px 10px", cursor: "pointer",
       boxShadow: active ? `0 0 0 1px ${accent(t.hue, 45)}` : "none", transition: "border-color .2s",
@@ -8507,14 +8507,23 @@ export default function App() {
   // prepends them, so you can pan back to a pool's very first trade
   const candleCache = useRef({});      // "pool:tf" → candles, so re-opening is instant
   const prefetchBusy = useRef({});
+  const preState = useRef({ inFlight: 0, stamps: [], cooldownUntil: 0, timer: null });
   const prefetchCandles = useCallback(async (tk) => {
     if (!liveData || !tk || !tk.pool) return;
     const key = tk.pool + ":" + tf;
     if (candleCache.current[key] || prefetchBusy.current[key]) return;
+    const st = preState.current;
+    const now = Date.now();
+    if (now < st.cooldownUntil) return;                 // upstream asked us to slow down
+    if (st.inFlight >= 2) return;                       // at most two at a time
+    st.stamps = st.stamps.filter((t) => now - t < 60000);
+    if (st.stamps.length >= 18) return;                 // ~18 prefetches a minute, tops
+    st.stamps.push(now); st.inFlight++;
     prefetchBusy.current[key] = true;
     try {
       const mintQ = tk.liveMint ? `&mint=${encodeURIComponent(tk.liveMint)}` : "";
       const r = await fetch(`/api/candles?pool=${encodeURIComponent(tk.pool)}&tf=${tf}${mintQ}`);
+      if (r.status === 429 || r.status === 502) preState.current.cooldownUntil = Date.now() + 20000;
       if (r.ok) {
         const j = await r.json();
         if (Array.isArray(j) && j.length >= 5) {
@@ -8524,9 +8533,17 @@ export default function App() {
         }
       }
     } catch (e) {}
+    preState.current.inFlight = Math.max(0, preState.current.inFlight - 1);
     prefetchBusy.current[key] = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveData, tf]);
+  // only a deliberate hover counts — scrolling past a card must cost nothing
+  const hoverPrefetch = useCallback((tk) => {
+    clearTimeout(preState.current.timer);
+    preState.current.timer = setTimeout(() => prefetchCandles(tk), 220);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefetchCandles]);
+  const cancelPrefetch = useCallback(() => clearTimeout(preState.current.timer), []);
   const histBusy = useRef({});
   const histChainRef = useRef({});   // how many pages deep we've gone this session
   const [histShift, setHistShift] = useState(null); // {id, n, k} — keep the view anchored
@@ -8773,7 +8790,16 @@ export default function App() {
         setTokens((Ts) => Ts.map((x) => (x.id === sel ? { ...x, candles: mapped, realCandles: true, price: mapped[mapped.length - 1].c } : x)));
       } catch (e) { /* keep what's drawn */ }
     };
-    pull();
+    let tries = 0;
+    const pullWithRetry = async () => {
+      const before = (tokensRef.current.find((x) => x.id === sel) || {}).candles || [];
+      await pull();
+      const after = (tokensRef.current.find((x) => x.id === sel) || {}).candles || [];
+      if (!stale && after.length === before.length && after.length < 5 && tries < 3) {
+        tries++; setTimeout(pullWithRetry, 700 * tries);   // the click always wins eventually
+      }
+    };
+    pullWithRetry();
     // keep pulling: short timeframes refresh fast, long ones slowly
     const every = tf <= 1 ? 15000 : tf <= 15 ? 30000 : 60000;
     const iv = setInterval(pull, every);
@@ -10938,7 +10964,7 @@ export default function App() {
                 compactList
                   ? <div key={t.id} data-mslot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 10, transition: "opacity .12s, transform .12s" }} {...tdProps(t)}><TokenRow t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} tf={tf}
                       onOpen={() => { if (sel === t.id) { holdScroll(); setSel(null); setClickMode(null); } else openAnyToken(t.id); }}
-                onHover={() => prefetchCandles(t)} /></div>
+                onHover={() => hoverPrefetch(t)} onLeave={cancelPrefetch} /></div>
                   : <div key={t.id} data-slot={t.id} data-mslot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ position: "relative", opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
                       onDrop={(e) => { e.preventDefault(); const id = dragIdOf(e); if (id == null || id === t.id) return;
                         const base = (scanOrder || shown.map((x) => x.id));
@@ -10948,7 +10974,7 @@ export default function App() {
                         setScanOrder(n); window.__valoDrag = null; }}>
                     <TokenCard t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf} isMobile={isMobile}
                       onOpen={() => { if (sel === t.id) { holdScroll(); setSel(null); setClickMode(null); } else openAnyToken(t.id); }}
-                onHover={() => prefetchCandles(t)} /></div>
+                onHover={() => hoverPrefetch(t)} onLeave={cancelPrefetch} /></div>
               ))}
             </div>
 
@@ -11013,7 +11039,7 @@ export default function App() {
                   setScanOrder(n); window.__valoDrag = null; }}>
               <TokenCard t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf} isMobile={isMobile}
                 onOpen={() => { if (sel === t.id) { holdScroll(); setSel(null); setClickMode(null); } else openAnyToken(t.id); }}
-                onHover={() => prefetchCandles(t)} /></div>
+                onHover={() => hoverPrefetch(t)} onLeave={cancelPrefetch} /></div>
             ))}
           </div>
           )}
