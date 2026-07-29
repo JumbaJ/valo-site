@@ -1421,7 +1421,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       onTouchStart={(e) => e.stopPropagation()} onTouchMove={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()}
       data-chart="1"
       style={{ position: "relative", background: "#0c0f16", border: `1px solid ${clickMode ? (clickMode === "buy" ? T.green : T.red) : T.border}`, borderRadius: 10,
-        overflow: isMobile ? "visible" : "hidden", marginTop: isMobile ? 21 : 0,
+        overflow: isMobile ? "visible" : "hidden", marginTop: isMobile ? 18 : 0,
         transition: "border-color .2s", touchAction: "pan-y", overscrollBehavior: "contain" }}>
       {/* mobile: stacked in-chart overlays — OHLC pill on top, eyes under it,
           LIVE/fit under that. The canvas runs full height beneath them. */}
@@ -1445,7 +1445,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
               <ViewerPills token={eyesToken} small />
             </div>
           )}
-          <div style={{ position: "absolute", top: -21, right: 4, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 16, lineHeight: 1 }}>
+          <div style={{ position: "absolute", top: -18, right: 4, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 15, lineHeight: 1 }}>
             <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; setView({ count: 18, offset: 0, priceOff: 0, follow: true }); }}
               style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 7.5, fontWeight: 800, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>◉ LIVE</button>
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
@@ -7511,7 +7511,24 @@ export default function App() {
   // MOBILE chart gestures — top handle crunches the metrics above the chart,
   // bottom handle resizes chart height (content below follows in flow)
   const [mobChartH, setMobChartH] = useState(348);
+
   const [metricsCrunch, setMetricsCrunch] = useState(0); // 0 = full metrics, 1 = hidden
+  // a freshly opened token starts pulled up: the chart meets the pull bar
+  const mobOpenedRef = useRef(null);
+  useEffect(() => {
+    if (!isMobile || sel == null || mobOpenedRef.current === sel) return;
+    mobOpenedRef.current = sel;
+    setMetricsCrunch(1);
+    setMobChartH(Math.max(400, Math.round(window.innerHeight - 184)));
+    // settle, then shave anything overlapping LIVE TRADES / HOLDERS
+    setTimeout(() => {
+      const lth = document.querySelector("[data-lth]"); const mc = document.querySelector("[data-mchart]");
+      if (!lth || !mc) return;
+      const over = mc.getBoundingClientRect().bottom - (lth.getBoundingClientRect().top - 8);
+      if (over > 4) setMobChartH((h) => Math.max(400, Math.round(h - over)));
+    }, 340);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile, sel]);
   const [priceMode, setPriceMode] = useState(0); // header price tap: 0 price · 1 market cap · 2 your tokens
   const chartDrag = useRef(null);
   const chartRaf = useRef(0);
@@ -10139,11 +10156,7 @@ export default function App() {
                         </button>
                       );
                     })()}
-                    {isMobile && (
-                      <span style={{ display: "inline-flex", alignItems: "center", height: 26, overflow: "visible" }}>
-                        {calloutWidget(true, 30, true)}
-                      </span>
-                    )}
+
                     {/* why it's trending — desktop; on mobile it moves to the chart-tools row */}
                     {!isMobile && trendingBtn}
                     {!isMobile && (
@@ -10181,6 +10194,9 @@ export default function App() {
                         background: showDevTrades ? `${accent(selected.hue)}22` : "rgba(255,255,255,0.03)",
                         color: showDevTrades ? accent(selected.hue) : T.dim, borderRadius: 7, padding: "4px 9px",
                         fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, cursor: "pointer" }}>👨‍💻 Dev buys</button>
+                    <span style={{ display: "inline-flex", alignItems: "center", height: 24, flex: "0 0 auto", overflow: "visible" }}>
+                      {calloutWidget(true, 26, true)}
+                    </span>
                   </div>
                 )}
 
