@@ -3456,11 +3456,16 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
         if (d && d.real && (d.name === name || d.short === name)) return d.wallet;
       } catch (e) {}
     }
-    // a 4…4 shortened address IS the handle for creator profiles
+    // a 4…4 shortened address IS the handle for on-chain profiles
     if (/^[A-Za-z0-9]{4}…[A-Za-z0-9]{4}$/.test(name || "")) {
       const w = (typeof window !== "undefined" && window.__VALO_CREATORS__) || {};
       for (const k of Object.keys(w)) if (w[k] && w[k].short === name) return w[k].creator;
+      // …or a trader we've seen on the tape
+      const tw = (typeof window !== "undefined" && window.__VALO_WALLETS__) || {};
+      if (tw[name]) return tw[name];
     }
+    // a full address used as the handle resolves to itself
+    if (/^[A-Za-z0-9]{32,50}$/.test(name || "")) return name;
     return null;
   }, [tokens, name]);
   const [realLaunches, setRealLaunches] = useState(null);
@@ -6382,6 +6387,12 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
           if (!r.ok) return;
           const j = await r.json();
           if (stop || !Array.isArray(j)) return;
+          // remember short → full so any handle can open the right wallet
+          if (typeof window !== "undefined") {
+            const W = { ...(window.__VALO_WALLETS__ || {}) };
+            for (const x of j) if (x.wallet && x.trader) W[x.trader] = x.wallet;
+            window.__VALO_WALLETS__ = W;
+          }
           const mapped = j.map((x) => ({
             id: x.tx || String(x.at), at: x.at, isBuy: !!x.isBuy,
             usd: +x.usd || 0, sol: (+x.usd || 0) / SOL_USD, mc: mcOf(token),
@@ -6941,6 +6952,19 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
                 {tr.dev ? "👨‍💻 " : ""}{traderKey === "__mkt__" ? "market" : traderKey}
               </span>
             </span>
+            {(() => {
+              // the real wallet behind this trade — straight to Solscan
+              const w = tr.wallet || (typeof window !== "undefined" && window.__VALO_WALLETS__
+                ? window.__VALO_WALLETS__[traderKey] : null);
+              if (!w) return null;
+              return (
+                <a href={`https://solscan.io/account/${w}`} target="_blank" rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()} title={`${w} on Solscan — every trade they've made`}
+                  style={{ flex: "0 0 auto", display: "grid", placeItems: "center", width: 30, height: 30,
+                    borderRadius: 8, textDecoration: "none", fontSize: 13,
+                    border: `1px solid ${T.amber}77`, background: "rgba(240,185,11,0.12)", color: T.amber }}>🔎</a>
+              );
+            })()}
 
             {/* pin — highlighted while following, neutral grey when not */}
             <button onClick={() => setTraderPref && setTraderPref(traderKey, { following: !following })}
@@ -9278,16 +9302,19 @@ export default function App() {
             // real history: only the newest candle moves — its close tracks the
             // live price and its wick stretches to cover it
             const last = t.candles[t.candles.length - 1];
+            const cx = t.pool && lv.price > 0 ? lv.price : c;   // exact on real pools
             candlesL = [...t.candles.slice(0, -1),
-              { t: last.t, v: last.v, o: last.o, h: Math.max(last.h, c), l: Math.min(last.l, c), c }];
+              { t: last.t, v: last.v, o: last.o, h: Math.max(last.h, cx), l: Math.min(last.l, cx), c: cx }];
           } else {
             const cd = { o: prev, h: Math.max(prev, c) * 1.0004, l: Math.min(prev, c) * 0.9996, c };
             candlesL = [...t.candles.slice(1), cd];
           }
           const driftL = (c - prev) / (prev || 1);
           const supL = lv.mc > 0 && lv.price > 0 ? lv.mc / lv.price : t.supply;
-          return { ...t, candles: candlesL, price: c, supply: supL,
-            mc: supL > 0 ? c * supL : (lv.mc || t.mc),
+          // real pool → the exact reported price, never an eased one
+          const pExact = t.pool && lv.price > 0 ? lv.price : c;
+          return { ...t, candles: candlesL, price: pExact, supply: supL,
+            mc: supL > 0 ? pExact * supL : (lv.mc || t.mc),
             sym: lv.sym, name: lv.name,
             mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
             img: lv.img || t.img, pool: lv.pool || t.pool, liveMint: lv.mint || t.liveMint,
