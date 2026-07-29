@@ -2828,7 +2828,10 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
       const tk = tokens.find((t) => String(t.id) === String(id));
       return tk ? { user: "you", you: true, sym: tk.sym, hue: tk.hue, mcAt: c.mcAt, mult: c.peak } : null;
     }).filter(Boolean);
-    return [...genLeaderboard(period), ...realBoard, ...mine].sort((a, b) => b.mult - a.mult);
+    const liveOn = typeof window !== "undefined" && window.__VALO_LIVE_ON__;
+    // live mode → only real callouts rank; demo mode keeps the simulated field
+    return (liveOn ? [...realBoard, ...mine] : [...genLeaderboard(period), ...realBoard, ...mine])
+      .sort((a, b) => b.mult - a.mult);
   }, [period, myCallouts, tokens, realBoard]);
   const myRank = board.findIndex((e) => e.you) + 1;
   const focusRank = focusUser ? board.findIndex((e) => !e.you && e.user === focusUser) + 1 : 0;
@@ -2915,6 +2918,13 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
                   </div>
                 );
               })}
+            </div>
+          )}
+          {board.length === 0 && (
+            <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center",
+              padding: "26px 12px", lineHeight: 1.8 }}>
+              No callouts in this window yet.<br />
+              <span style={{ fontSize: 9 }}>Arm a callout on any token and you'll be the first name here.</span>
             </div>
           )}
           {board.slice(3, listEnd).map((r, i) => {
@@ -9048,6 +9058,7 @@ export default function App() {
     const iv = setInterval(pull, 20000);
     return () => { stop = true; clearInterval(iv); };
   }, [liveData]);
+  useEffect(() => { if (typeof window !== "undefined") window.__VALO_LIVE_ON__ = liveData; }, [liveData]);
   const liveArrRef = useRef([]);           // DexScreener top pump pairs → token overrides
   const liveBindRef = useRef({ byPool: {}, byTok: {} }); // 🔒 pool ⇄ card bindings — stable all session
   const liveDataRef = useRef(false);
