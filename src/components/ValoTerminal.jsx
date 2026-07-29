@@ -9672,8 +9672,58 @@ export default function App() {
   const realChartTrades = [];
 
 
+  const tapeRef = useRef({});          // rolling per-pool trade tape → candles
+  const [streamOn, setStreamOn] = useState(false);
+  const streamRef = useRef(null);
+  useEffect(() => {
+    const url = typeof window !== "undefined" ? window.__VALO_STREAM__ : null;
+    if (!url || !liveData) { setStreamOn(false); return; }
+    let ws = null, closed = false, retry = 0, timer = null;
+    const connect = () => {
+      try { ws = new WebSocket(url); } catch (e) { return; }
+      streamRef.current = ws;
+      ws.onopen = () => { retry = 0; setStreamOn(true); wantMint(); };
+      ws.onclose = () => {
+        setStreamOn(false);
+        if (closed) return;
+        retry = Math.min(retry + 1, 6);
+        timer = setTimeout(connect, 1000 * retry);      // quietly reconnect
+      };
+      ws.onerror = () => { try { ws.close(); } catch (e) {} };
+      ws.onmessage = (ev) => {
+        let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+        const incoming = m.type === "trade" ? [m.trade] : m.type === "backfill" ? m.trades : null;
+        if (!incoming || !incoming.length) return;
+        const tk = tokensRef.current.find((x) => x.liveMint && x.liveMint === incoming[0].mint);
+        if (!tk || !tk.pool) return;
+        const key = tk.pool;
+        const prev = tapeRef.current[key] || [];
+        const seen = new Set(prev.map((x) => x.tx || x.at));
+        const merged = [...prev, ...incoming.filter((x) => !seen.has(x.tx || x.at))]
+          .sort((a, b) => a.at - b.at).slice(-1200);
+        tapeRef.current[key] = merged;
+        const tape = candlesFromTrades(merged, tf);
+        if (tape.length < 2) return;
+        setTokens((Ts) => Ts.map((x) => (x.id === tk.id
+          ? { ...x, candles: mergeTapeCandles(x.realCandles ? x.candles : [], tape),
+              realCandles: true, price: tape[tape.length - 1].c }
+          : x)));
+      };
+    };
+    connect();
+    return () => { closed = true; clearTimeout(timer); try { ws && ws.close(); } catch (e) {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData, tf]);
+  // tell the worker which token we're watching
+  const wantMint = () => {
+    const ws = streamRef.current;
+    const mint = selected && selected.liveMint;
+    if (ws && ws.readyState === 1 && mint) ws.send(JSON.stringify({ type: "watch", mint }));
+  };
+  useEffect(() => { wantMint(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected && selected.liveMint, streamOn]);
+
   // 🕯 the tape becomes candles: real prints drive the live end of the chart
-  const tapeRef = useRef({});
   useEffect(() => {
     if (!liveData || !selected || !selected.pool) return;
     let stop = false;
@@ -9699,10 +9749,10 @@ export default function App() {
       } catch (e) {}
     };
     pull();
-    const iv = setInterval(pull, 5000);
+    const iv = setInterval(pull, streamOn ? 30000 : 5000);   // socket live → REST just backstops
     return () => { stop = true; clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveData, selected && selected.id, selected && selected.pool, tf]);
+  }, [liveData, selected && selected.id, selected && selected.pool, tf, streamOn]);
 
   const chartTrades = useMemo(() => {
     if (!selected) return [];
