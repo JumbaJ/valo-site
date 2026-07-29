@@ -767,11 +767,20 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       const bw = Math.max(1.5, Math.min(26, step - Math.max(0.6, step * 0.08)));  // near-touching bodies
       for (let s = 0; s < count; s++) {
         const i = idxOf(s); if (!inData(i)) continue;
-        const c = agg[i], up = c.c >= c.o, col = up ? T.green : T.red;
+        const c = agg[i];
+        if (!c || ![c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v))) continue;  // never draw a broken candle
+        const up = c.c >= c.o, col = up ? T.green : T.red;
         ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(x(s), y(c.h)); ctx.lineTo(x(s), y(c.l)); ctx.stroke();
+        const px2 = Math.round(x(s)) + 0.5;                       // crisp 1px wick
+        const yh = y(c.h), yl = y(c.l);
+        if (Number.isFinite(yh) && Number.isFinite(yl)) {
+          ctx.beginPath(); ctx.moveTo(px2, yh); ctx.lineTo(px2, yl); ctx.stroke();
+        }
         const yo = y(c.o), yc = y(c.c);
-        ctx.fillRect(x(s) - bw / 2, Math.min(yo, yc), bw, Math.max(1, Math.abs(yc - yo)));
+        if (!Number.isFinite(yo) || !Number.isFinite(yc)) continue;
+        const top = Math.min(yo, yc);
+        const bodyH = Math.max(1.5, Math.abs(yc - yo));           // a doji still shows
+        ctx.fillRect(Math.round(x(s) - bw / 2), Math.round(top), Math.max(1.5, Math.round(bw)), bodyH);
       }
     } else if (anyVisible) {
       const g = ctx.createLinearGradient(0, padT, 0, padT + chartH);
@@ -5521,7 +5530,7 @@ function CardMiniChart({ candles, hue, mode, tfMin = 15, count = 90, full = fals
   return <canvas ref={ref} style={{ width: full ? "100%" : "128%", height: full ? "100%" : 52, display: "block" }} />;
 }
 
-function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf = 15, isMobile = false }) {
+function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf = 15, isMobile = false, onHover }) {
   const liveEyes = liveViewersOf(t, "pump"); // re-renders ride the price ticks
   const score = scoreToken(t);
   const rug = rugState(t);
@@ -5529,7 +5538,7 @@ function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line",
   const net = t.greenUsd - t.redUsd;
   const cs = calloutStyle(calloutCount);
   return (
-    <div onClick={onOpen} className="token-card" style={{
+    <div onClick={onOpen} onMouseEnter={onHover} className="token-card" style={{
       border: `1px solid ${active ? accent(t.hue, 45) : T.border}`,
       background: cardGrad(t.hue), borderRadius: 18, padding: "14px 18px 0", cursor: "pointer",
       boxShadow: active ? `0 0 0 1px ${accent(t.hue, 45)}` : "none", transition: "border-color .2s",
@@ -5603,7 +5612,7 @@ function TokenRow({ t, active, onOpen, calloutCount = 0, tf = 15 }) {
   const cs = calloutStyle(calloutCount);
   const mc = mcOf(t);
   return (
-    <div onClick={onOpen} className="token-card" style={{
+    <div onClick={onOpen} onMouseEnter={onHover} className="token-card" style={{
       border: `1px solid ${active ? accent(t.hue, 45) : T.border}`,
       background: cardGrad(t.hue), borderRadius: 12, padding: "8px 10px", cursor: "pointer",
       boxShadow: active ? `0 0 0 1px ${accent(t.hue, 45)}` : "none", transition: "border-color .2s",
@@ -8496,6 +8505,28 @@ export default function App() {
 
   // 📜 INFINITE HISTORY — nearing the left edge loads older candles and
   // prepends them, so you can pan back to a pool's very first trade
+  const candleCache = useRef({});      // "pool:tf" → candles, so re-opening is instant
+  const prefetchBusy = useRef({});
+  const prefetchCandles = useCallback(async (tk) => {
+    if (!liveData || !tk || !tk.pool) return;
+    const key = tk.pool + ":" + tf;
+    if (candleCache.current[key] || prefetchBusy.current[key]) return;
+    prefetchBusy.current[key] = true;
+    try {
+      const mintQ = tk.liveMint ? `&mint=${encodeURIComponent(tk.liveMint)}` : "";
+      const r = await fetch(`/api/candles?pool=${encodeURIComponent(tk.pool)}&tf=${tf}${mintQ}`);
+      if (r.ok) {
+        const j = await r.json();
+        if (Array.isArray(j) && j.length >= 5) {
+          candleCache.current[key] = j
+            .map((c) => ({ t: +c.t || undefined, o: +c.o, h: +c.h, l: +c.l, c: +c.c, v: +c.v || 0 }))
+            .filter((c) => [c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v) && v > 0));
+        }
+      }
+    } catch (e) {}
+    prefetchBusy.current[key] = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData, tf]);
   const histBusy = useRef({});
   const histChainRef = useRef({});   // how many pages deep we've gone this session
   const [histShift, setHistShift] = useState(null); // {id, n, k} — keep the view anchored
@@ -8620,17 +8651,30 @@ export default function App() {
   const openAnyToken = useCallback((id) => {
     holdScroll();
     const board = tokensRef.current || [];
+    // paint instantly from cache if we've already seen this pool
+    const paintCached = (tk) => {
+      if (!tk || !tk.pool) return;
+      const hit = candleCache.current[tk.pool + ":" + tf];
+      if (hit && hit.length && (!tk.candles || !tk.candles.length)) {
+        setTokens((Ts) => Ts.map((x) => (x.id === tk.id
+          ? { ...x, candles: hit, realCandles: true, price: hit[hit.length - 1].c } : x)));
+      }
+    };
     const local = board.find((t) => t.id === id);
-    if (local) { setSel(local.id); setClickMode(null); return; }
+    if (local) { paintCached(local); setSel(local.id); setClickMode(null); return; }
     const hit = [...mktHits, ...moreToks].find((t) => t.id === id);
     if (!hit) return;
     // resolve everything BEFORE touching state, so we never select an id that
     // isn't on the board (that mismatch is what froze the chart)
     const dupe = board.find((t) => (hit.pool && String(t.pool || "") === String(hit.pool))
       || (hit.liveMint && String(t.liveMint || "") === String(hit.liveMint)));
-    if (dupe) { setSel(dupe.id); setClickMode(null); return; }
-    setTokens((Ts) => (Ts.some((t) => t.id === hit.id) ? Ts : [...Ts, hit]));
-    setSel(hit.id); setClickMode(null);
+    if (dupe) { paintCached(dupe); setSel(dupe.id); setClickMode(null); return; }
+    const cached = candleCache.current[hit.pool + ":" + tf];
+    const seeded = cached && cached.length
+      ? { ...hit, candles: cached, realCandles: true, price: cached[cached.length - 1].c }
+      : hit;
+    setTokens((Ts) => (Ts.some((t) => t.id === seeded.id) ? Ts : [...Ts, seeded]));
+    setSel(seeded.id); setClickMode(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mktHits, moreToks]);
   // 🚀 new launches stream into the live feed as they happen
@@ -8725,6 +8769,7 @@ export default function App() {
         const med = [...mapped].map((c) => c.c).sort((a, b) => a - b)[Math.floor(mapped.length / 2)];
         mapped = mapped.filter((c) => c.h <= med * 50 && c.l >= med / 50);
         if (mapped.length < 10) return;
+        candleCache.current[pool + ":" + tf] = mapped;
         setTokens((Ts) => Ts.map((x) => (x.id === sel ? { ...x, candles: mapped, realCandles: true, price: mapped[mapped.length - 1].c } : x)));
       } catch (e) { /* keep what's drawn */ }
     };
@@ -10892,7 +10937,8 @@ export default function App() {
               {shown.map((t) => (
                 compactList
                   ? <div key={t.id} data-mslot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 10, transition: "opacity .12s, transform .12s" }} {...tdProps(t)}><TokenRow t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} tf={tf}
-                      onOpen={() => { if (sel === t.id) { holdScroll(); setSel(null); setClickMode(null); } else openAnyToken(t.id); }} /></div>
+                      onOpen={() => { if (sel === t.id) { holdScroll(); setSel(null); setClickMode(null); } else openAnyToken(t.id); }}
+                onHover={() => prefetchCandles(t)} /></div>
                   : <div key={t.id} data-slot={t.id} data-mslot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ position: "relative", opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
                       onDrop={(e) => { e.preventDefault(); const id = dragIdOf(e); if (id == null || id === t.id) return;
                         const base = (scanOrder || shown.map((x) => x.id));
@@ -10901,7 +10947,8 @@ export default function App() {
                         if (already >= 0) { [n[si], n[already]] = [n[already], n[si]]; } else n[si] = id;
                         setScanOrder(n); window.__valoDrag = null; }}>
                     <TokenCard t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf} isMobile={isMobile}
-                      onOpen={() => { if (sel === t.id) { holdScroll(); setSel(null); setClickMode(null); } else openAnyToken(t.id); }} /></div>
+                      onOpen={() => { if (sel === t.id) { holdScroll(); setSel(null); setClickMode(null); } else openAnyToken(t.id); }}
+                onHover={() => prefetchCandles(t)} /></div>
               ))}
             </div>
 
@@ -10965,7 +11012,8 @@ export default function App() {
                   if (already >= 0) { [n[si], n[already]] = [n[already], n[si]]; } else n[si] = id;
                   setScanOrder(n); window.__valoDrag = null; }}>
               <TokenCard t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf} isMobile={isMobile}
-                onOpen={() => { if (sel === t.id) { holdScroll(); setSel(null); setClickMode(null); } else openAnyToken(t.id); }} /></div>
+                onOpen={() => { if (sel === t.id) { holdScroll(); setSel(null); setClickMode(null); } else openAnyToken(t.id); }}
+                onHover={() => prefetchCandles(t)} /></div>
             ))}
           </div>
           )}
