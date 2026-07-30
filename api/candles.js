@@ -16,17 +16,29 @@ const BE_TF = (m) => (m >= 43200 ? "1M" : m >= 10080 ? "1W" : m >= 4320 ? "3D" :
   : m >= 60 ? "1H" : m >= 30 ? "30m" : m >= 15 ? "15m" : m >= 5 ? "5m" : m >= 3 ? "3m" : "1m");
 const GT_TF = (m) => (m >= 1440 ? ["day", 1] : m >= 60 ? ["hour", Math.max(1, Math.round(m / 60))] : ["minute", Math.max(1, m)]);
 
-const clean = (rows) => rows
-  .filter((c) => Number.isFinite(c.t) && [c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v) && v > 0))
-  .sort((a, b) => a.t - b.t);
+const clean = (rows) => {
+  const ok = rows
+    .filter((c) => Number.isFinite(c.t) && [c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v) && v > 0))
+    .filter((c) => c.h / c.l < 50)                        // 50× inside one candle = bad data
+    .sort((a, b) => a.t - b.t);
+  if (ok.length < 5) return ok;
+  // one candle sitting far off the median close is a unit mismatch, not a pump
+  const closes = ok.map((c) => c.c).sort((a, b) => a - b);
+  const med = closes[Math.floor(closes.length / 2)];
+  return med > 0 ? ok.filter((c) => c.c <= med * 25 && c.c >= med / 25) : ok;
+};
 
-async function fromBirdeye(pool, tf, before) {
+async function fromBirdeye(pool, tf, before, mint) {
   const key = (process.env.BIRDEYE_API_KEY || "").trim();
-  if (!key || !pool) return [];
+  if (!key) return [];
   const now = Math.floor(Date.now() / 1000);
   const to = before > 0 ? before : now;
   const from = to - tf * 60 * 300;                       // ~300 candles back
-  const url = `${BE}/defi/ohlcv/pair?address=${pool}&type=${BE_TF(tf)}&time_from=${from}&time_to=${to}`;
+  // TOKEN endpoint = USD prices. PAIR endpoint = base/quote, which is a
+  // different unit entirely — mixing the two is what spiked the last candle.
+  const url = mint
+    ? `${BE}/defi/ohlcv?address=${mint}&type=${BE_TF(tf)}&time_from=${from}&time_to=${to}`
+    : `${BE}/defi/ohlcv/pair?address=${pool}&type=${BE_TF(tf)}&time_from=${from}&time_to=${to}`;
   const r = await fetch(url, { headers: { "X-API-KEY": key, "x-chain": "solana", accept: "application/json" } });
   if (!r.ok) throw new Error(`birdeye ${r.status}`);
   const j = await r.json();
@@ -55,7 +67,8 @@ export default async function handler(req, res) {
   if (!/^[A-Za-z0-9]{20,60}$/.test(pool)) return res.status(400).json({ error: "bad pool" });
 
   let rows = [], src = "none", note = "";
-  try { rows = await fromBirdeye(pool, tf, before); if (rows.length) src = "birdeye"; }
+  const mint = String(req.query.mint || "");
+  try { rows = await fromBirdeye(pool, tf, before, mint); if (rows.length) src = mint ? "birdeye-token" : "birdeye-pair"; }
   catch (e) { note = String(e.message || e); }
   if (rows.length < 3) {
     try { const g = await fromGecko(pool, tf, before); if (g.length > rows.length) { rows = g; src = "geckoterminal"; } }

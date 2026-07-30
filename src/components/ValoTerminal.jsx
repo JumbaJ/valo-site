@@ -485,6 +485,13 @@ function mergeTapeCandles(history, tape) {
   if (!history || !history.length) return tape;
   const last = history[history.length - 1];
   if (!last || !Number.isFinite(last.t)) return history;
+  // SCALE CHECK: history and tape must be quoting the same unit. If the newest
+  // tape close is wildly off the newest history close, they aren't — and
+  // merging them is what produced the giant final candle.
+  const tapeLast = tape[tape.length - 1];
+  if (!tapeLast || !(tapeLast.c > 0) || !(last.c > 0)) return history;
+  const ratio = tapeLast.c / last.c;
+  if (ratio > 3 || ratio < 1 / 3) return history;        // different basis → don't mix
   // the newest bucket the feed knows about — everything before it is untouched
   const edge = last.t;
   const out = history.slice();
@@ -844,6 +851,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
         const i = idxOf(s); if (!inData(i)) continue;
         const c = agg[i];
         if (!c || ![c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v))) continue;  // never draw a broken candle
+        if (c.l > 0 && c.h / c.l > 50) continue;          // 50× inside one bar = bad data, not a move
         const up = c.c >= c.o, col = up ? T.green : T.red;
         ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1;
         const px2 = Math.round(x(s)) + 0.5;                       // crisp 1px wick
