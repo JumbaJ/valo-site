@@ -28,7 +28,7 @@ export default async function handler(req, res) {
           img: (p.info && p.info.imageUrl) || null, hue: hueOf(sym),
           price: +p.priceUsd, mc: p.marketCap || p.fdv || 0,
           tvl: (p.liquidity && p.liquidity.usd) || 0,
-          greenUsd: vol * (buys / tot), redUsd: vol * (sells / tot),
+          greenUsd: vol * (buys / tot), redUsd: vol * (sells / tot), vol24: vol, vol24: vol,
           ch24: (p.priceChange && p.priceChange.h24) || 0,
           traders: tot, buys24: buys, sells24: sells,
           dex: p.dexId || null,

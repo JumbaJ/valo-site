@@ -26,7 +26,7 @@ export default async function handler(req, res) {
         img: m.image_url && m.image_url !== "missing.png" ? m.image_url : null, hue: hueOf(sym),
         price, mc: parseFloat(a.market_cap_usd) || parseFloat(a.fdv_usd) || 0,
         tvl: parseFloat(a.reserve_in_usd) || 0,
-        greenUsd: vol * (buys / tot), redUsd: vol * (sells / tot),
+        greenUsd: vol * (buys / tot), redUsd: vol * (sells / tot), vol24: vol,
         ch24: parseFloat(a.price_change_percentage?.h24) || 0,
         traders: tot, buys24: buys, sells24: sells,
         createdAt: created, ageMin: created ? Math.max(0, Math.round((Date.now() - created) / 60000)) : null,

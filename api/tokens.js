@@ -29,7 +29,7 @@ export default async function handler(req, res) {
         hue: hueOf(sym), price,
         mc: parseFloat(a.market_cap_usd) || parseFloat(a.fdv_usd) || 0,
         tvl: parseFloat(a.reserve_in_usd) || 0,
-        greenUsd: vol24 * (buys / txTotal), redUsd: vol24 * (sells / txTotal),
+        greenUsd: vol24 * (buys / txTotal), redUsd: vol24 * (sells / txTotal), vol24,
         ch24: parseFloat(a.price_change_percentage?.h24) || 0,
         traders: txTotal, buys24: buys, sells24: sells,
         createdAt: created,
