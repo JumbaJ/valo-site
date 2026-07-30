@@ -572,6 +572,8 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
 
   const agg = useMemo(() => aggregate(candles, tfMin), [candles, tfMin]);
   const aggLenRef = useRef(0);
+  const emptySinceRef = useRef(0);
+  useEffect(() => { emptySinceRef.current = agg.length ? 0 : Date.now(); }, [agg.length, sym]);
   useEffect(() => {
     const was = aggLenRef.current; aggLenRef.current = agg.length;
     // first data for this series → fit to it
@@ -629,8 +631,13 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     ctx.clearRect(0, 0, W, H);
     if (!total) {
       // no series yet — never leave the last token's drawing on screen
+      const waited = Date.now() - (emptySinceRef.current || Date.now());
       ctx.fillStyle = T.faint; ctx.font = `11px ${T.mono}`; ctx.textAlign = "center";
-      ctx.fillText("loading chart…", W / 2, H / 2);
+      ctx.fillText(waited > 12000 ? "no chart data for this pool yet" : "loading chart…", W / 2, H / 2 - 6);
+      if (waited > 12000) {
+        ctx.font = `9px ${T.mono}`;
+        ctx.fillText("switch timeframe or reopen to retry", W / 2, H / 2 + 12);
+      }
       ctx.textAlign = "left";
       return;
     }
@@ -10266,7 +10273,11 @@ export default function App() {
         tapeRef.current[key] = merged;
         // publish for the LIVE TRADES feed — it reads this every second
         if (typeof window !== "undefined") {
-          window.__VALO_TAPE__ = { ...(window.__VALO_TAPE__ || {}), [key]: merged };
+          const T0 = window.__VALO_TAPE__ || {};
+          T0[key] = merged;                       // mutate in place — no full copy
+          const keys = Object.keys(T0);
+          if (keys.length > 6) delete T0[keys[0]]; // only the pools in play
+          window.__VALO_TAPE__ = T0;
         }
         const tape = candlesFromTrades(merged, tf);
         if (tape.length < 2) return;
@@ -10329,7 +10340,11 @@ export default function App() {
         tapeRef.current[key] = merged;
         // publish for the LIVE TRADES feed — it reads this every second
         if (typeof window !== "undefined") {
-          window.__VALO_TAPE__ = { ...(window.__VALO_TAPE__ || {}), [key]: merged };
+          const T0 = window.__VALO_TAPE__ || {};
+          T0[key] = merged;                       // mutate in place — no full copy
+          const keys = Object.keys(T0);
+          if (keys.length > 6) delete T0[keys[0]]; // only the pools in play
+          window.__VALO_TAPE__ = T0;
         }
         const tape = candlesFromTrades(merged, tf);
         if (tape.length < 2) return;
