@@ -1866,8 +1866,10 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
           {tpStatsOpen && (() => {
             const durs = ["1H", "4H", "24H", "7D"];
             const k = { "1H": 0.09, "4H": 0.3, "24H": 1, "7D": 5.6 }[tpStatDur];
-            const base = token.candles[Math.max(0, token.candles.length - Math.min(token.candles.length - 1, Math.round(96 * k)))].c;
-            const ch = ((token.price - base) / base) * 100;
+            const cs2 = token.candles || [];
+            const bi = cs2.length ? Math.max(0, cs2.length - Math.min(cs2.length - 1, Math.round(96 * k))) : -1;
+            const base = bi >= 0 && cs2[bi] ? cs2[bi].c : (token.price || 0);
+            const ch = base > 0 ? ((token.price - base) / base) * 100 : 0;
             const st = (l2, v2, c2) => (
               <span style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <span style={{ color: T.faint }}>{l2}</span><b style={{ color: c2 || T.text }}>{v2}</b>
@@ -12020,8 +12022,10 @@ export default function App() {
                 });
                 const row = (t, secId) => {
                   const score = scoreToken(t); const rc = ratingColor(score);
-                  const base = t.candles[Math.max(0, t.candles.length - 96)].c;
-                  const ch = ((t.price - base) / base) * 100;
+                  const cs3 = t.candles || [];
+                  const b3 = cs3.length ? cs3[Math.max(0, cs3.length - 96)] : null;
+                  const base = b3 ? b3.c : (t.price || 0);
+                  const ch = base > 0 ? ((t.price - base) / base) * 100 : 0;
                   const exp = watchExp === t.id;
                   return (
                     <div key={t.id}>
@@ -13198,8 +13202,10 @@ export default function App() {
               const tokOf = (id) => tokens.find((x) => x.id === id);
               const row = (t, secId) => {
                 const score = scoreToken(t); const rc = ratingColor(score);
-                const base = t.candles[Math.max(0, t.candles.length - 96)].c;
-                const ch = ((t.price - base) / base) * 100;
+                const cs4 = t.candles || [];
+                const b4 = cs4.length ? cs4[Math.max(0, cs4.length - 96)] : null;
+                const base = b4 ? b4.c : (t.price || 0);
+                const ch = base > 0 ? ((t.price - base) / base) * 100 : 0;
                 const exp = watchExp === t.id;
                 return (
                   <div key={t.id} style={{ position: "relative", overflow: "hidden", borderRadius: 8 }}
