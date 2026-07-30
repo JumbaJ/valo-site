@@ -481,11 +481,28 @@ function candlesFromTrades(trades, tfMin) {
 // splice the tape-built tail onto whatever history we have, so the newest
 // candles move with real trades instead of an interpolated price
 function mergeTapeCandles(history, tape) {
-  if (!tape.length) return history;
+  if (!tape || !tape.length) return history;
   if (!history || !history.length) return tape;
-  const cut = tape[0].t;
-  const older = history.filter((c) => Number.isFinite(c.t) && c.t < cut);
-  return older.length ? [...older, ...tape] : tape;
+  const last = history[history.length - 1];
+  if (!last || !Number.isFinite(last.t)) return history;
+  // the newest bucket the feed knows about — everything before it is untouched
+  const edge = last.t;
+  const out = history.slice();
+  for (const c of tape) {
+    if (!Number.isFinite(c.t) || c.t < edge) continue;      // never rewrite history
+    if (c.t === edge) {
+      // same bucket: the tape refines the forming candle rather than replacing it
+      const h = out[out.length - 1];
+      out[out.length - 1] = {
+        t: h.t, o: h.o,
+        h: Math.max(h.h, c.h), l: Math.min(h.l, c.l),
+        c: c.c, v: Math.max(h.v || 0, c.v || 0),
+      };
+    } else {
+      out.push(c);                                          // a genuinely new bucket
+    }
+  }
+  return out;
 }
 function scoreToken(t) {
   const g = t.greenUsd / (t.greenUsd + t.redUsd);
