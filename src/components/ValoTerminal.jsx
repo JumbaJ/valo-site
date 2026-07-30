@@ -621,13 +621,19 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   }, [agg.length, count]);
   const winStart = total - count - offset;
   // approaching the left edge of what we have → ask for the previous page
+  const histAskRef = useRef(0);
   useEffect(() => {
     if (!onNeedHistory) return;
-    // near the left edge, OR zoomed out wider than the data we hold
-    const reaching = winStart <= Math.max(8, Math.round(count * 0.35));
-    const wider = count > total - 4;
-    if (reaching || wider) onNeedHistory();
-  }, [winStart, count, total, onNeedHistory]);
+    // only when genuinely near the oldest candle, and at most once every 4s —
+    // firing on every render is what made the chart creep to the left
+    const reaching = winStart <= Math.max(8, Math.round(count * 0.25));
+    if (!reaching) return;
+    const now = Date.now();
+    if (now - histAskRef.current < 4000) return;
+    histAskRef.current = now;
+    onNeedHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [winStart, count, onNeedHistory]);
 
   const geom = useRef({});
 
@@ -673,23 +679,22 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     for (let i = scaleStart; i < Math.min(total, scaleStart + count); i++) {
       const c = agg[i];
       if (!c || !Number.isFinite(c.h) || !Number.isFinite(c.l) || c.h <= 0 || c.l <= 0) continue;
-      if (c.h / c.l > 50) continue;                       // impossible intrabar range
+      if (c.h / c.l > 5000) continue;                     // only genuinely broken data
       scaleWin.push(c);
-    }
-    if (scaleWin.length > 4) {
-      // and drop candles sitting far off the median close before scaling
-      const cl = scaleWin.map((c) => c.c).filter((v) => v > 0).sort((a, b) => a - b);
-      const medC = cl[Math.floor(cl.length / 2)];
-      if (medC > 0) {
-        for (let k = scaleWin.length - 1; k >= 0; k--) {
-          const c = scaleWin[k];
-          if (c.c > medC * 25 || c.c < medC / 25) scaleWin.splice(k, 1);
-        }
-      }
     }
     for (const c of scaleWin) {
       anyVisible = true;
       lo = Math.min(lo, c.l); hi = Math.max(hi, c.h); vMax = Math.max(vMax, c.v || 0);
+    }
+    // a single freak candle shouldn't flatten everything else: if the range is
+    // extreme, scale to the 2nd–98th percentile instead of the absolute extremes.
+    // Nothing is hidden — outliers simply run past the edge.
+    if (scaleWin.length > 12 && lo > 0 && hi / lo > 60) {
+      const lows = scaleWin.map((c) => c.l).sort((a, b) => a - b);
+      const highs = scaleWin.map((c) => c.h).sort((a, b) => a - b);
+      const pLo = lows[Math.floor(lows.length * 0.02)];
+      const pHi = highs[Math.floor(highs.length * 0.98)];
+      if (pLo > 0 && pHi > pLo) { lo = pLo; hi = pHi; }
     }
     // one absurd print can't own the axis: cap the range around the median close
     if (anyVisible && hi / Math.max(lo, 1e-12) > 1e4) {
@@ -873,7 +878,8 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
         const i = idxOf(s); if (!inData(i)) continue;
         const c = agg[i];
         if (!c || ![c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v))) continue;  // never draw a broken candle
-        if (c.l > 0 && c.h / c.l > 50) continue;          // 50× inside one bar = bad data, not a move
+        // NOTE: no range filter here — a 50× candle on a launch is real, and
+        // hiding it left gaps in the series. The axis handles outliers instead.
         const up = c.c >= c.o, col = up ? T.green : T.red;
         ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1;
         const px2 = Math.round(x(s)) + 0.5;                       // crisp 1px wick

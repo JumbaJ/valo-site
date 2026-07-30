@@ -16,17 +16,14 @@ const BE_TF = (m) => (m >= 43200 ? "1M" : m >= 10080 ? "1W" : m >= 4320 ? "3D" :
   : m >= 60 ? "1H" : m >= 30 ? "30m" : m >= 15 ? "15m" : m >= 5 ? "5m" : m >= 3 ? "3m" : "1m");
 const GT_TF = (m) => (m >= 1440 ? ["day", 1] : m >= 60 ? ["hour", Math.max(1, Math.round(m / 60))] : ["minute", Math.max(1, m)]);
 
-const clean = (rows) => {
-  const ok = rows
-    .filter((c) => Number.isFinite(c.t) && [c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v) && v > 0))
-    .filter((c) => c.h / c.l < 50)                        // 50× inside one candle = bad data
-    .sort((a, b) => a.t - b.t);
-  if (ok.length < 5) return ok;
-  // one candle sitting far off the median close is a unit mismatch, not a pump
-  const closes = ok.map((c) => c.c).sort((a, b) => a - b);
-  const med = closes[Math.floor(closes.length / 2)];
-  return med > 0 ? ok.filter((c) => c.c <= med * 25 && c.c >= med / 25) : ok;
-};
+// Keep every candle the market actually produced. A meme coin can legitimately
+// run 1000× from launch, so filtering by "distance from the median" deletes real
+// history and leaves gaps. Only structurally broken rows are dropped here; the
+// chart's axis handles outliers by scaling to percentiles.
+const clean = (rows) => rows
+  .filter((c) => Number.isFinite(c.t) && [c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v) && v > 0))
+  .filter((c) => c.h >= c.l && c.h / c.l < 5000)         // impossible bar = broken data
+  .sort((a, b) => a.t - b.t);
 
 async function fromBirdeye(pool, tf, before, mint) {
   const key = (process.env.BIRDEYE_API_KEY || "").trim();
