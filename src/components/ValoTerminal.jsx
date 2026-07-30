@@ -969,7 +969,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     // last price line
     const lastSlot = slotOf(total - 1);
     const last = agg[total - 1];
-    if (lastSlot >= 0 && lastSlot < count && last.c >= lo && last.c <= hi) {
+    if (last && lastSlot >= 0 && lastSlot < count && last.c >= lo && last.c <= hi) {
       const ly = y(last.c), up = last.c >= last.o;
       ctx.setLineDash([4, 4]); ctx.strokeStyle = up ? T.green : T.red;
       ctx.beginPath(); ctx.moveTo(0, ly); ctx.lineTo(plotW, ly); ctx.stroke();
@@ -9205,7 +9205,9 @@ export default function App() {
   const liveDataRef = useRef(false);
   useEffect(() => {
     liveDataRef.current = liveData;
-    TestLog.on = liveData || /[?&]test=1/.test(window.location.search);
+    // only on a developer machine, and only when asked for explicitly
+    const localHost = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname);
+    TestLog.on = localHost && /[?&]test=1/.test(window.location.search);
     if (!liveData) return;
     let stop = false;
     const load = async () => {
@@ -9592,7 +9594,9 @@ export default function App() {
       setTokens((Ts) => {
         const now = Date.now();
         for (const t of Ts) {
-          const last = t.candles[t.candles.length - 1];
+          const cs5 = t.candles || [];
+          const last = cs5.length ? cs5[cs5.length - 1] : null;
+          if (!last || !(last.o > 0)) continue;      // no series yet → nothing to alert on
           const gain = ((last.c - last.o) / last.o) * 100;
           const cd = alertCooldown.current[t.id] || 0;
           if (now - cd < 60000) continue;
