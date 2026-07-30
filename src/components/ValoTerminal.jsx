@@ -561,15 +561,26 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   const dragRef = useRef(null);
 
   useEffect(() => {
-    setView({ count: 90, offset: 0, priceOff: 0 });
-    scaleRef.current = { key: null, lo: NaN, hi: NaN };   // fresh axis for the new series
+    // open fitted to what this timeframe actually holds — never zoomed out
+    // into empty space, never inheriting the last token's window
+    const n = Math.max(12, Math.min(120, aggLenRef.current || 90));
+    setView({ count: n, offset: 0, priceOff: 0 });
+    scaleRef.current = { key: null, lo: NaN, hi: NaN };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tfMin, sym]);
 
 
   const agg = useMemo(() => aggregate(candles, tfMin), [candles, tfMin]);
+  const aggLenRef = useRef(0);
+  useEffect(() => {
+    const was = aggLenRef.current; aggLenRef.current = agg.length;
+    // first data for this series → fit to it
+    if (!was && agg.length) setView((v) => ({ ...v, count: Math.max(12, Math.min(120, agg.length)), offset: 0 }));
+  }, [agg.length]);
   const total = agg.length;
   // room to zoom past what's loaded — the gap is what pulls older candles in
-  const zoomCap = Math.max(60, Math.min(6000, Math.round(agg.length * 2.5) + 60));
+  // you can frame everything plus ~25% breathing room — not an empty ocean
+  const zoomCap = Math.max(40, Math.min(4000, Math.round(agg.length * 1.25) + 20));
   const count = Math.max(12, Math.min(view.count, zoomCap));
   const PAD_BARS = Math.round(count * 0.85);           // roam most of a screen past either end
   const maxOff = Math.max(0, total - count);           // oldest candle at the left edge
@@ -606,13 +617,20 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
 
   const draw = useCallback(() => {
     const cvs = cvsRef.current, wrap = wrapRef.current;
-    if (!cvs || !wrap || !total) return;
+    if (!cvs || !wrap) return;
     const dpr = window.devicePixelRatio || 1;
     const W = wrap.clientWidth, H = height;
     cvs.width = W * dpr; cvs.height = H * dpr;
     const ctx = cvs.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
+    if (!total) {
+      // no series yet — never leave the last token's drawing on screen
+      ctx.fillStyle = T.faint; ctx.font = `11px ${T.mono}`; ctx.textAlign = "center";
+      ctx.fillText("loading chart…", W / 2, H / 2);
+      ctx.textAlign = "left";
+      return;
+    }
 
     const padR = 74, padB = 26, padT = 12, volH = 42;
     const chartH = H - padB - padT - volH;
@@ -991,6 +1009,22 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       ctx.textAlign = "left";
     }
   }, [agg, total, count, offset, winStart, hue, mode, cross, height, tfMin, trades, clickMode, view.priceOff, highlightTx, pulseTick, traderPrefs, theme, pendingLevels, botRuns, price, axisMC, mcRatio, pinCross]);
+  // a paint error must never leave stale pixels pretending to be a live chart
+  const safeDraw = useCallback(() => {
+    try { draw(); } catch (e) {
+      console.error("[VALO chart]", e);
+      const cvs = cvsRef.current, wrap = wrapRef.current;
+      if (!cvs || !wrap) return;
+      const dpr = window.devicePixelRatio || 1;
+      const W = wrap.clientWidth, H = height;
+      const ctx = cvs.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = T.faint; ctx.font = `11px ${T.mono}`; ctx.textAlign = "center";
+      ctx.fillText("chart reloading…", W / 2, H / 2);
+      ctx.textAlign = "left";
+    }
+  }, [draw, height]);
 
   // keep repainting while a marker is highlighted so its ring pulses
   useEffect(() => {
@@ -1001,12 +1035,12 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     return () => cancelAnimationFrame(raf);
   }, [highlightTx]);
 
-  useEffect(() => { draw(); }, [draw]);
+  useEffect(() => { safeDraw(); }, [safeDraw]);
   useEffect(() => {
     const ro = new ResizeObserver(() => draw());
     if (wrapRef.current) ro.observe(wrapRef.current);
     return () => ro.disconnect();
-  }, [draw]);
+  }, [safeDraw]);
 
   // free wheel-zoom — no upper clamp against data size
   useEffect(() => {
@@ -10827,13 +10861,7 @@ export default function App() {
                     </div>
                   )}
 
-                  <div style={{ position: "absolute", left: 0, bottom: 30, width: 180, height: "100%", overflow: "hidden", pointerEvents: "none", zIndex: 4 }}>
-                    {tape.map((x) => (
-                      <div key={x.id} className="tape-item" style={{ left: x.left, color: x.isBuy ? T.green : T.red, textShadow: `0 0 8px ${x.isBuy ? "rgba(22,199,132,0.7)" : "rgba(234,57,67,0.7)"}` }}>
-                        {x.text}
-                      </div>
-                    ))}
-                  </div>
+          
                 </div>
 
                 {/* metrics — single line, short tags; folds away in pro layout */}
