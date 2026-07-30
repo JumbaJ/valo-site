@@ -573,6 +573,8 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     const n = Math.max(12, Math.min(120, aggLenRef.current || 90));
     setView({ count: n, offset: 0, priceOff: 0, follow: true });   // live edge, right side
     scaleRef.current = { key: null, lo: NaN, hi: NaN };
+    setAxisMC(false);                                   // price axis, fresh ratio
+    setPinCross(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tfMin, sym]);
 
@@ -591,10 +593,12 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   }, [agg.length]);
   const total = agg.length;
   // room to zoom past what's loaded — the gap is what pulls older candles in
-  // you can frame everything plus ~25% breathing room — not an empty ocean
-  const zoomCap = Math.max(40, Math.min(4000, Math.round(agg.length * 1.25) + 20));
+  // frame everything we hold plus a small margin — never more
+  const zoomCap = Math.max(24, Math.min(3000, Math.round(agg.length * 1.1) + 12));
   const count = Math.max(12, Math.min(view.count, zoomCap));
-  const PAD_BARS = Math.round(count * 0.85);           // roam most of a screen past either end
+  // a small, fixed margin rather than most of a screen: enough to feel free,
+  // not enough to strand the candles in a corner
+  const PAD_BARS = Math.max(4, Math.min(20, Math.round(count * 0.12)));
   const maxOff = Math.max(0, total - count);           // oldest candle at the left edge
   const offset = Math.max(-PAD_BARS, Math.min(view.offset, maxOff + PAD_BARS));
   // window of slots: slot s ↔ agg index (total - count - offset + s)
@@ -663,9 +667,27 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     // scale off a full-width window pinned inside the data — overscrolling then
     // moves the candles WITHOUT changing the price range underneath them
     const scaleStart = Math.max(0, Math.min(winStart, Math.max(0, total - count)));
+    // the same sanity rules the draw loop uses — otherwise the axis stretches to
+    // cover candles that are never rendered
+    const scaleWin = [];
     for (let i = scaleStart; i < Math.min(total, scaleStart + count); i++) {
       const c = agg[i];
       if (!c || !Number.isFinite(c.h) || !Number.isFinite(c.l) || c.h <= 0 || c.l <= 0) continue;
+      if (c.h / c.l > 50) continue;                       // impossible intrabar range
+      scaleWin.push(c);
+    }
+    if (scaleWin.length > 4) {
+      // and drop candles sitting far off the median close before scaling
+      const cl = scaleWin.map((c) => c.c).filter((v) => v > 0).sort((a, b) => a - b);
+      const medC = cl[Math.floor(cl.length / 2)];
+      if (medC > 0) {
+        for (let k = scaleWin.length - 1; k >= 0; k--) {
+          const c = scaleWin[k];
+          if (c.c > medC * 25 || c.c < medC / 25) scaleWin.splice(k, 1);
+        }
+      }
+    }
+    for (const c of scaleWin) {
       anyVisible = true;
       lo = Math.min(lo, c.l); hi = Math.max(hi, c.h); vMax = Math.max(vMax, c.v || 0);
     }
