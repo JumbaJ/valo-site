@@ -539,7 +539,11 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   const [view, setView] = useState({ count: 90, offset: 0, priceOff: 0 });
   const dragRef = useRef(null);
 
-  useEffect(() => { setView({ count: 90, offset: 0, priceOff: 0 }); }, [tfMin]);
+  useEffect(() => {
+    setView({ count: 90, offset: 0, priceOff: 0 });
+    scaleRef.current = { key: null, lo: NaN, hi: NaN };   // fresh axis for the new series
+  }, [tfMin, sym]);
+
 
   const agg = useMemo(() => aggregate(candles, tfMin), [candles, tfMin]);
   const total = agg.length;
@@ -557,6 +561,16 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     setView((v) => ({ ...v, offset: (v.offset || 0) + historyShift.n }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [historyShift && historyShift.k]);
+  // safety net: if the view ever ends up past the data (a shorter history, a
+  // trimmed series), snap back to live instead of showing an empty plot
+  useEffect(() => {
+    if (!agg.length) return;
+    const startNow = agg.length - count - (view.offset || 0);
+    if (startNow > agg.length - 2 || startNow < -(count * 2)) {
+      setView((v) => ({ ...v, offset: 0 }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agg.length, count]);
   const winStart = total - count - offset;
   // approaching the left edge of what we have → ask for the previous page
   useEffect(() => {
