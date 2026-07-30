@@ -34,7 +34,7 @@ export default async function handler(req, res) {
       });
     }
     out.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    res.setHeader("Cache-Control", "s-maxage=15, stale-while-revalidate=30");
+    res.setHeader("Cache-Control", "s-maxage=90, stale-while-revalidate=180");
     res.status(200).json(out);
   } catch (e) {
     res.status(502).json({ error: String(e.message || e) });

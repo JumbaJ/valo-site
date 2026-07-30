@@ -9300,7 +9300,9 @@ export default function App() {
     };
     pullWithRetry();
     // keep pulling: short timeframes refresh fast, long ones slowly
-    const every = tf <= 1 ? 15000 : tf <= 15 ? 30000 : 60000;
+    // Birdeye serves history on a 5-minute edge cache; the trade tape keeps the
+    // newest candle live, so polling harder would only burn compute units
+    const every = tf <= 1 ? 60000 : tf <= 15 ? 120000 : 300000;
     const iv = setInterval(pull, every);
     const onVis = () => { if (!document.hidden) pull(); }; // returning to the tab = instant catch-up
     document.addEventListener("visibilitychange", onVis);
@@ -10236,7 +10238,7 @@ export default function App() {
         const j = await r.json();
         // the true wallet count when the RPC could give it; otherwise leave the
         // estimate alone rather than showing "20" for every token
-        const n = j && Number.isFinite(j.count) ? j.count : null;
+        const n = j && Number.isFinite(j.count) && j.countExact ? j.count : null;
         if (n != null) {
           holderCache.current[mint] = n;
           if (typeof window !== "undefined") window.__VALO_HOLDERS__ = { ...(window.__VALO_HOLDERS__ || {}), [mint]: n };

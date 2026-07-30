@@ -37,7 +37,7 @@ export default async function handler(req, res) {
         page,
       });
     }
-    res.setHeader("Cache-Control", "s-maxage=20, stale-while-revalidate=40");
+    res.setHeader("Cache-Control", "s-maxage=60, stale-while-revalidate=120");
     res.status(200).json(out);
   } catch (e) {
     res.status(502).json({ error: String(e.message || e) });

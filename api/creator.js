@@ -1,63 +1,27 @@
 // VALO — /api/creator
-//   ?mint=<token mint>    → who launched this token, and when
-//   ?wallet=<address>     → every token that wallet has launched
+//   ?mint=<mint>     → who launched this token, and when
+//   ?wallet=<addr>   → every token that wallet has launched
 //
-// Source: Bitquery (same account as the stream worker). Set BITQUERY_TOKEN in
-// Vercel's env vars — the key never reaches the browser.
-const EP = "https://streaming.bitquery.io/eap";
+// Helius DAS replaces Bitquery here: getAsset gives the creator, and
+// getAssetsByCreator is purpose-built for a launch history. Free tier, 1 credit
+// per call, no 402s.
+const HELIUS = () => (process.env.HELIUS_API_KEY
+  ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}` : null);
 
-async function gql(query, variables) {
-  const token = (process.env.BITQUERY_TOKEN || "").trim();
-  if (!token) {
-    // report what this function CAN see (names only — never values), so a
-    // missing variable is obvious instead of a guessing game
-    const seen = Object.keys(process.env).filter((k) => /BITQUERY|VITE_|SUPABASE|CRON/i.test(k)).sort();
-    const err = new Error("no BITQUERY_TOKEN");
-    err.envSeen = seen;
-    err.vercelEnv = process.env.VERCEL_ENV || null;
-    throw err;
-  }
-  const r = await fetch(EP, {
-    method: "POST",
-    headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ query, variables }),
+async function das(method, params) {
+  const url = HELIUS();
+  if (!url) throw new Error("no HELIUS_API_KEY");
+  const r = await fetch(url, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: "valo", method, params }),
   });
-  if (!r.ok) throw new Error(`bitquery ${r.status}`);
+  if (!r.ok) throw new Error(`helius ${r.status}`);
   const j = await r.json();
-  if (j.errors && j.errors.length) throw new Error(j.errors[0].message || "query error");
-  return j.data;
+  if (j.error) throw new Error(j.error.message || "das error");
+  return j.result;
 }
 
-// who created this mint (pump.fun writes the creator into the launch instruction)
-const Q_CREATOR = `
-query($mint: String!) {
-  Solana {
-    TokenSupplyUpdates(
-      where: {TokenSupplyUpdate: {Currency: {MintAddress: {is: $mint}}}}
-      orderBy: {ascending: Block_Time}
-      limit: {count: 1}
-    ) {
-      Block { Time }
-      Transaction { Signer Signature }
-      TokenSupplyUpdate { Currency { Name Symbol MintAddress Uri } }
-    }
-  }
-}`;
-
-// everything this wallet has launched
-const Q_LAUNCHES = `
-query($wallet: String!) {
-  Solana {
-    TokenSupplyUpdates(
-      where: {Transaction: {Signer: {is: $wallet}}}
-      orderBy: {descending: Block_Time}
-      limit: {count: 50}
-    ) {
-      Block { Time }
-      TokenSupplyUpdate { Currency { Name Symbol MintAddress } PostBalance }
-    }
-  }
-}`;
+const short = (w) => (w ? `${w.slice(0, 4)}…${w.slice(-4)}` : null);
 
 export default async function handler(req, res) {
   const mint = String(req.query.mint || "");
@@ -65,44 +29,51 @@ export default async function handler(req, res) {
   try {
     if (mint) {
       if (!/^[A-Za-z0-9]{30,50}$/.test(mint)) return res.status(400).json({ error: "bad mint" });
-      const d = await gql(Q_CREATOR, { mint });
-      const row = d?.Solana?.TokenSupplyUpdates?.[0];
-      if (!row) return res.status(200).json({ mint, creator: null });
-      const w = row.Transaction?.Signer || null;
-      res.setHeader("Cache-Control", "s-maxage=86400, stale-while-revalidate=172800"); // never changes
+      const a = await das("getAsset", { id: mint });
+      // pump.fun writes the launcher into the creators array; the update
+      // authority is the fallback when creators is empty
+      const creators = (a && a.creators) || [];
+      const primary = creators.find((c) => c.share > 0) || creators[0] || null;
+      const auth = (a && a.authorities || []).find((x) => (x.scopes || []).includes("full")) || null;
+      const w = (primary && primary.address) || (auth && auth.address) || null;
+      const meta = (a && a.content && a.content.metadata) || {};
+      res.setHeader("Cache-Control", "s-maxage=86400, stale-while-revalidate=172800");
       return res.status(200).json({
-        mint,
-        creator: w,
-        short: w ? `${w.slice(0, 4)}…${w.slice(-4)}` : null,
-        createdAt: row.Block?.Time ? Date.parse(row.Block.Time) : null,
-        name: row.TokenSupplyUpdate?.Currency?.Name || null,
-        sym: row.TokenSupplyUpdate?.Currency?.Symbol || null,
-        tx: row.Transaction?.Signature || null,
+        mint, creator: w, short: short(w),
+        verified: !!(primary && primary.verified),
+        name: meta.name || null, sym: meta.symbol || null,
+        createdAt: null,                       // DAS doesn't carry a mint timestamp
+        source: "helius-das",
       });
     }
     if (wallet) {
       if (!/^[A-Za-z0-9]{30,50}$/.test(wallet)) return res.status(400).json({ error: "bad wallet" });
-      const d = await gql(Q_LAUNCHES, { wallet });
-      const rows = d?.Solana?.TokenSupplyUpdates || [];
+      const r = await das("getAssetsByCreator", {
+        creatorAddress: wallet, onlyVerified: false, page: 1, limit: 100,
+      });
+      const items = (r && r.items) || [];
+      const launches = [];
       const seen = new Set();
-      const out = [];
-      for (const r of rows) {
-        const c = r.TokenSupplyUpdate?.Currency;
-        if (!c || !c.MintAddress || seen.has(c.MintAddress)) continue;
-        seen.add(c.MintAddress);
-        out.push({
-          mint: c.MintAddress, sym: c.Symbol || "???", name: c.Name || c.Symbol || "token",
-          createdAt: r.Block?.Time ? Date.parse(r.Block.Time) : null,
+      for (const it of items) {
+        const id = it.id;
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        const meta = (it.content && it.content.metadata) || {};
+        // fungible tokens only — skip NFTs so a dev's art doesn't pollute the list
+        const iface = String(it.interface || "");
+        if (iface && !/Fungible/i.test(iface)) continue;
+        launches.push({
+          mint: id, sym: meta.symbol || "???", name: meta.name || meta.symbol || "token",
+          createdAt: null,
         });
       }
-      res.setHeader("Cache-Control", "s-maxage=600, stale-while-revalidate=1800");
-      return res.status(200).json({ wallet, launches: out });
+      res.setHeader("Cache-Control", "s-maxage=900, stale-while-revalidate=1800");
+      return res.status(200).json({ wallet, launches, total: launches.length, source: "helius-das" });
     }
     res.status(400).json({ error: "pass ?mint= or ?wallet=" });
   } catch (e) {
-    res.status(502).json({
-      error: String(e.message || e),
-      ...(e.envSeen ? { envVarsThisFunctionSees: e.envSeen, environment: e.vercelEnv } : {}),
-    });
+    // never 502 the UI over this — it degrades to the simulated dev instead
+    res.setHeader("Cache-Control", "s-maxage=60");
+    res.status(200).json({ error: String(e.message || e), creator: null, launches: [] });
   }
 }
