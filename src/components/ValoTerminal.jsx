@@ -636,7 +636,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       ctx.fillText(waited > 12000 ? "no chart data for this pool yet" : "loading chart…", W / 2, H / 2 - 6);
       if (waited > 12000) {
         ctx.font = `9px ${T.mono}`;
-        ctx.fillText("switch timeframe or reopen to retry", W / 2, H / 2 + 12);
+        ctx.fillText("tap to retry · or switch timeframe", W / 2, H / 2 + 12);
       }
       ctx.textAlign = "left";
       return;
@@ -1441,6 +1441,8 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     const slop = isMobile ? 16 : 10;
     return lineHitsRef.current.find((l) => Math.abs(l.y - cy) <= slop) || null;
   };
+  // an empty chart is a retry button
+  const onEmptyTap = () => { if (!total && onNeedHistory) onNeedHistory(); };
   const onCtx = (e) => {
     const { cy } = ptOf(e);
     const hit = lineAt(cy);
@@ -1586,6 +1588,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
         ref={cvsRef}
         style={{ width: "100%", height, display: "block", cursor: clickMode ? "pointer" : "crosshair", touchAction: "pan-y", overscrollBehavior: "contain", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
         onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
+        onClick={onEmptyTap}
         onContextMenu={onCtx}
         onDoubleClick={(e) => {
           const bs = botSetRef.current; if (!bs.on || !bs.arm) return;
@@ -9272,11 +9275,11 @@ export default function App() {
         if (stale || !Array.isArray(j) || j.length < 10) return;
         let mapped = j.slice(-260).map((c) => ({ t: +c.t || undefined, o: +c.o, h: +c.h, l: +c.l, c: +c.c, v: +c.v || 0 }))
           .filter((c) => [c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v) && v > 0));
-        if (mapped.length < 10) return;
+        if (mapped.length < 3) return;      // 3 candles is a chart; 10 was too strict
         // drop wild prints: anything ±50× off the median close distorts the scale
         const med = [...mapped].map((c) => c.c).sort((a, b) => a - b)[Math.floor(mapped.length / 2)];
         mapped = mapped.filter((c) => c.h <= med * 50 && c.l >= med / 50);
-        if (mapped.length < 10) return;
+        if (mapped.length < 3) return;
         candleCache.current[pool + ":" + tf] = mapped;
         setTokens((Ts) => Ts.map((x) => (x.id === sel ? { ...x, candles: mapped, realCandles: true, price: mapped[mapped.length - 1].c } : x)));
       } catch (e) { /* keep what's drawn */ }
@@ -9286,8 +9289,13 @@ export default function App() {
       const before = (tokensRef.current.find((x) => x.id === sel) || {}).candles || [];
       await pull();
       const after = (tokensRef.current.find((x) => x.id === sel) || {}).candles || [];
-      if (!stale && after.length === before.length && after.length < 5 && tries < 3) {
-        tries++; setTimeout(pullWithRetry, 700 * tries);   // the click always wins eventually
+      if (!stale && after.length === before.length && after.length < 3 && tries < 6) {
+        tries++;
+        setTimeout(pullWithRetry, Math.min(8000, 800 * tries));   // ~30s of trying
+      } else if (!stale && after.length < 3 && tries >= 6) {
+        // OHLCV genuinely isn't available for this pool — let the trade tape be
+        // the chart rather than showing nothing at all
+        setTokens((Ts) => Ts.map((x) => (x.id === sel ? { ...x, tapeOk: true } : x)));
       }
     };
     pullWithRetry();
@@ -10290,7 +10298,10 @@ export default function App() {
         // the OHLCV history owns the series; the tape only refines its live edge.
         // Without this the tape would BECOME the chart and history never lands.
         const cur = tokensRef.current.find((x) => x.id === tk.id);
+        // history owns the series — unless the feed has no OHLCV for this pool,
+        // in which case the tape is the only chart there is
         const hasHistory = cur && cur.realCandles && (cur.candles || []).length >= 20;
+        const tapeMayOwn = cur && cur.tapeOk && !hasHistory;
         // live flow: what actually traded in the last 10 minutes
         const since = Date.now() - 600000;
         const win = merged.filter((x) => x.at >= since);
@@ -10302,8 +10313,8 @@ export default function App() {
         const moved = first && first.o > 0 ? ((last.c - first.o) / first.o) * 100 : 0;
         const mom = Math.max(1, Math.min(99, Math.round(50 + moved * 1.5 + ((pressure ?? 50) - 50) * 0.5)));
         setTokens((Ts) => Ts.map((x) => (x.id === tk.id
-          ? { ...x, candles: hasHistory ? mergeTapeCandles(x.candles, tape) : x.candles,
-              realCandles: x.realCandles, price: last.c,
+          ? { ...x, candles: hasHistory ? mergeTapeCandles(x.candles, tape) : (tapeMayOwn ? tape : x.candles),
+              realCandles: x.realCandles || tapeMayOwn, price: last.c,
               // MC follows the trade because supply is the anchor, not mc
               mc: x.supply > 0 ? last.c * x.supply : x.mc,
               greenUsd: buyUsd > 0 ? buyUsd : x.greenUsd,
