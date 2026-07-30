@@ -564,7 +564,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     // open fitted to what this timeframe actually holds — never zoomed out
     // into empty space, never inheriting the last token's window
     const n = Math.max(12, Math.min(120, aggLenRef.current || 90));
-    setView({ count: n, offset: 0, priceOff: 0 });
+    setView({ count: n, offset: 0, priceOff: 0, follow: true });   // live edge, right side
     scaleRef.current = { key: null, lo: NaN, hi: NaN };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tfMin, sym]);
@@ -575,7 +575,10 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   useEffect(() => {
     const was = aggLenRef.current; aggLenRef.current = agg.length;
     // first data for this series → fit to it
-    if (!was && agg.length) setView((v) => ({ ...v, count: Math.max(12, Math.min(120, agg.length)), offset: 0 }));
+    // first data for this series, or history that finally arrived → refit at live
+    if (agg.length && (!was || agg.length > was * 3)) {
+      setView((v) => ({ ...v, count: Math.max(12, Math.min(120, agg.length)), offset: 0 }));
+    }
   }, [agg.length]);
   const total = agg.length;
   // room to zoom past what's loaded — the gap is what pulls older candles in
@@ -10267,6 +10270,10 @@ export default function App() {
         }
         const tape = candlesFromTrades(merged, tf);
         if (tape.length < 2) return;
+        // the OHLCV history owns the series; the tape only refines its live edge.
+        // Without this the tape would BECOME the chart and history never lands.
+        const cur = tokensRef.current.find((x) => x.id === tk.id);
+        const hasHistory = cur && cur.realCandles && (cur.candles || []).length >= 20;
         // live flow: what actually traded in the last 10 minutes
         const since = Date.now() - 600000;
         const win = merged.filter((x) => x.at >= since);
@@ -10278,8 +10285,8 @@ export default function App() {
         const moved = first && first.o > 0 ? ((last.c - first.o) / first.o) * 100 : 0;
         const mom = Math.max(1, Math.min(99, Math.round(50 + moved * 1.5 + ((pressure ?? 50) - 50) * 0.5)));
         setTokens((Ts) => Ts.map((x) => (x.id === tk.id
-          ? { ...x, candles: mergeTapeCandles(x.realCandles ? x.candles : [], tape),
-              realCandles: true, price: last.c,
+          ? { ...x, candles: hasHistory ? mergeTapeCandles(x.candles, tape) : x.candles,
+              realCandles: x.realCandles, price: last.c,
               // MC follows the trade because supply is the anchor, not mc
               mc: x.supply > 0 ? last.c * x.supply : x.mc,
               greenUsd: buyUsd > 0 ? buyUsd : x.greenUsd,
@@ -10326,10 +10333,12 @@ export default function App() {
         }
         const tape = candlesFromTrades(merged, tf);
         if (tape.length < 2) return;
-        setTokens((Ts) => Ts.map((x) => (x.id === selected.id
-          ? { ...x, candles: mergeTapeCandles(x.realCandles ? x.candles : [], tape), realCandles: true,
-              price: tape[tape.length - 1].c }
-          : x)));
+        setTokens((Ts) => Ts.map((x) => {
+          if (x.id !== selected.id) return x;
+          const ok = x.realCandles && (x.candles || []).length >= 20;   // history first
+          return { ...x, candles: ok ? mergeTapeCandles(x.candles, tape) : x.candles,
+            realCandles: x.realCandles, price: tape[tape.length - 1].c };
+        }));
       } catch (e) {}
     };
     pull();
