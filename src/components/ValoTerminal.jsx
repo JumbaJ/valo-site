@@ -174,7 +174,11 @@ const splitFee = (amt, pay) => {
   return { total, burn: total / 2, vault: total / 2 };
 };
 const EPOCH_MS = 60 * 60 * 1000;                 // rolling hourly distribution
-const SOL_USD = 165; // API: live SOL/USD price for $ conversions
+// live SOL/USD — refreshed from /api/solprice, so every $ figure is honest.
+// `let` on purpose: read at call time by ~90 conversions across the terminal.
+let SOL_USD = 165;                       // seed only; replaced within a second of load
+let SOL_USD_AT = 0;                      // when we last confirmed it
+const setSolUsd = (p) => { if (p > 0) { SOL_USD = p; SOL_USD_AT = Date.now(); } };
 const epochOf = (t) => Math.floor(t / EPOCH_MS);
 const fmtDur = (ms) => {
   const s2 = Math.max(0, Math.floor(ms / 1000));
@@ -440,7 +444,7 @@ function adoptMarketToken(x) {
     isNew: ageMin < 60, hasDex: true,
     traders: +x.traders || flow, tvl, greenUsd: green, redUsd: red,
     momentum, buyPressure,
-    liq: tvl * 0.55, vol24: green + red,
+    liq: tvl, vol24: (+x.vol24 || green + red),   // real reserve + real 24h volume
     ageMin, hue: symbolHue(sym), img: x.img || null, ch24: ch,
     candles: [], price, supply: price > 0 && mc > 0 ? mc / price : 1e9,
     ca: x.mint || x.id, socials: {},
@@ -2844,8 +2848,21 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
     }).filter(Boolean);
     const liveOn = typeof window !== "undefined" && window.__VALO_LIVE_ON__;
     // live mode → only real callouts rank; demo mode keeps the simulated field
-    return (liveOn ? [...realBoard, ...mine] : [...genLeaderboard(period), ...realBoard, ...mine])
-      .sort((a, b) => b.mult - a.mult);
+    const all = liveOn ? [...realBoard, ...mine] : [...genLeaderboard(period), ...realBoard, ...mine];
+    // collapse to each trader's best call in this window, and remember how many
+    // calls they landed so the row can show it
+    const best = new Map();
+    for (const e of all) {
+      if (!e) continue;
+      const key = e.you ? "__you__" : String(e.user || "").toLowerCase();
+      const prev = best.get(key);
+      if (!prev) { best.set(key, { ...e, calls: 1 }); continue; }
+      prev.calls += 1;
+      if ((e.mult || 0) > (prev.mult || 0)) {
+        best.set(key, { ...e, calls: prev.calls });   // better call takes the slot
+      }
+    }
+    return [...best.values()].sort((a, b) => b.mult - a.mult);
   }, [period, myCallouts, tokens, realBoard]);
   const myRank = board.findIndex((e) => e.you) + 1;
   const focusRank = focusUser ? board.findIndex((e) => !e.you && e.user === focusUser) + 1 : 0;
@@ -2957,7 +2974,9 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
                 {rk <= 100 && <CalloutRing mult={r.mult} size={19} />}
                 <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, color: r.you ? T.green : isFocus && hl ? VALO_PURPLE : T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {r.real && <span title="Real VALO account" style={{ color: T.blue, marginRight: 3 }}>☁</span>}@{r.user}</span>
-                <span style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>${r.sym}</span>
+                <span style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>${r.sym}
+                  {r.calls > 1 && <span title={`${r.calls} callouts in this window — best one ranks`} style={{ color: VALO_PURPLE, fontWeight: 800 }}> ·{r.calls}</span>}
+                </span>
                 <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: tr.color }}>×{r.mult.toFixed(1)}</span>
                 {lbBonus(rk) > 0 && <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, color: "#ffd54a",
                   background: "rgba(255,213,74,0.1)", border: "1px solid rgba(255,213,74,0.35)", borderRadius: 5, padding: "1px 5px",
@@ -9102,6 +9121,22 @@ export default function App() {
     return () => { stop = true; clearInterval(iv); };
   }, [liveData]);
   useEffect(() => { if (typeof window !== "undefined") window.__VALO_LIVE_ON__ = liveData; }, [liveData]);
+  // 💵 live SOL price — every dollar conversion depends on it
+  const [solTick, setSolTick] = useState(0);
+  useEffect(() => {
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch("/api/solprice");
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop && j && j.price > 0) { setSolUsd(j.price); setSolTick((v) => v + 1); }
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 45000);
+    return () => { stop = true; clearInterval(iv); };
+  }, []);
   const liveArrRef = useRef([]);           // DexScreener top pump pairs → token overrides
   const liveBindRef = useRef({ byPool: {}, byTok: {} }); // 🔒 pool ⇄ card bindings — stable all session
   const liveDataRef = useRef(false);
