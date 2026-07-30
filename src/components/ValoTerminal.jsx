@@ -3446,32 +3446,6 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   const simFols = Math.floor(20 + rand() * 900), simFolg = Math.floor(5 + rand() * 300);
   const fols = cloudProfile ? (cloudProfile.followers || 0) : simFols;
   const folg = cloudProfile ? (cloudProfile.following || 0) : simFolg;
-  const calls = cloudProfile
-    ? (cloudProfile.callouts || []).slice(0, 8).map((c) => {
-        const t = tokens.find((x) => x.sym === c.sym) || { sym: c.sym || "?", hue: symbolHue(c.sym || "?"), img: null, id: null };
-        const mins = Math.max(1, Math.floor((Date.now() - c.ts) / 60000));
-        const liveMult = t && t.price && c.mcAt ? Math.max(0.01, mcOf(t) / c.mcAt) : c.peak || 1;
-        return { t, mcAt: c.mcAt, pk: c.peak || 1, live: +liveMult.toFixed(2), ago: mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago` };
-      })
-    : Array.from({ length: Math.min(4, tokens.length) }, () => {
-    const t = tokens[Math.floor(rand() * tokens.length)];
-    const mcAt = 4000 * Math.pow(10, rand() * 2.4);
-    const pk = +(1 + rand() * Math.max(1, peak - 1)).toFixed(2);
-    const live = +(pk * (0.3 + rand() * 0.9)).toFixed(2);
-    return { t, mcAt, pk, live, ago: `${Math.floor(1 + rand() * 72)}h ago` };
-  }).filter((c) => c.t);
-  const realPeak = cloudProfile
-    ? (cloudProfile.callouts || []).reduce((m, c) => Math.max(m, c.peak || 1), 0) || 0
-    : null;
-  const shownPeak = cloudProfile ? realPeak : peak;
-  const { tier } = calloutTier(shownPeak || 1);
-  const [dmDraft, setDmDraft] = useState("");
-  const [fundAmt, setFundAmt] = useState("");
-  const [holdsOpen, setHoldsOpen] = useState(false); // 💼 all-holdings dropdown
-  const [holdsTab, setHoldsTab] = useState("open");  // open ⇄ closed positions
-  const [holdsView, setHoldsView] = useState("trades"); // trades ⇄ dev (launched/rugged)
-  // every token this person launched, and which of them died
-  // real launches when this profile is a creator wallet, otherwise the sim set
   // does this profile correspond to a real on-chain wallet?
   const devWallet = useMemo(() => {
     for (const t of tokens || []) {
@@ -3508,6 +3482,37 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     return () => { stop = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devWallet]);
+  const calls = (!cloudProfile && chainWallet) ? []       // no VALO account → no callouts
+    : cloudProfile
+    ? (cloudProfile.callouts || []).slice(0, 8).map((c) => {
+        const t = tokens.find((x) => x.sym === c.sym) || { sym: c.sym || "?", hue: symbolHue(c.sym || "?"), img: null, id: null };
+        const mins = Math.max(1, Math.floor((Date.now() - c.ts) / 60000));
+        const liveMult = t && t.price && c.mcAt ? Math.max(0.01, mcOf(t) / c.mcAt) : c.peak || 1;
+        return { t, mcAt: c.mcAt, pk: c.peak || 1, live: +liveMult.toFixed(2), ago: mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago` };
+      })
+    : Array.from({ length: Math.min(4, tokens.length) }, () => {
+    const t = tokens[Math.floor(rand() * tokens.length)];
+    const mcAt = 4000 * Math.pow(10, rand() * 2.4);
+    const pk = +(1 + rand() * Math.max(1, peak - 1)).toFixed(2);
+    const live = +(pk * (0.3 + rand() * 0.9)).toFixed(2);
+    return { t, mcAt, pk, live, ago: `${Math.floor(1 + rand() * 72)}h ago` };
+  }).filter((c) => c.t);
+  // a tier is earned through VALO callouts — an on-chain wallet with no VALO
+  // account has none, and we say zero rather than inventing a rank
+  const realPeak = cloudProfile
+    ? (cloudProfile.callouts || []).reduce((m, c) => Math.max(m, c.peak || 1), 0) || 0
+    : (chainWallet ? 0 : null);
+  const shownPeak = cloudProfile ? realPeak : peak;
+  const { tier } = calloutTier(shownPeak || 1);
+  const [dmDraft, setDmDraft] = useState("");
+  const [fundAmt, setFundAmt] = useState("");
+  const [holdsOpen, setHoldsOpen] = useState(false); // 💼 all-holdings dropdown
+  const [holdsTab, setHoldsTab] = useState("open");  // open ⇄ closed positions
+  const [holdsView, setHoldsView] = useState("trades"); // trades ⇄ dev (launched/rugged)
+  // every token this person launched, and which of them died
+  // real launches when this profile is a creator wallet, otherwise the sim set
+
+
   const [realLaunches, setRealLaunches] = useState(null);
   useEffect(() => {
     setRealLaunches(null);
@@ -6497,7 +6502,31 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
     setHolders(token.traders);
     if (token.pool) {
       let stop = false;
+      // streamed tape first — a new print shows within a second of landing
+      const fromTape = () => {
+        const tape = typeof window !== "undefined" && window.__VALO_TAPE__
+          ? window.__VALO_TAPE__[token.pool] : null;
+        if (!tape || !tape.length) return false;
+        const mapped = tape.slice(-60).map((x) => ({
+          id: x.tx || String(x.at), at: x.at, isBuy: !!x.isBuy,
+          usd: +x.usd || 0, sol: (+x.usd || 0) / SOL_USD, mc: mcOf(token),
+          trader: x.trader || (x.wallet ? `${x.wallet.slice(0, 4)}…${x.wallet.slice(-4)}` : "market"),
+          wallet: x.wallet || null, pnlPct: null,
+          tx: (x.tx || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || String(x.at).slice(-8),
+          txFull: x.tx || null, live: true,
+        }));
+        setRows((R) => {
+          const cur = R.filter((r0) => r0.live);
+          const fresh = mapped.filter((m) => !cur.some((c0) => c0.id === m.id));
+          if (!fresh.length && cur.length) return R;
+          return [...fresh, ...cur].sort((a, b) => b.at - a.at).slice(0, 40);
+        });
+        return true;
+      };
+      const tapeIv = setInterval(fromTape, 1000);
+      fromTape();
       const load = async () => {
+        if (fromTape()) return;                 // stream is feeding us, skip the fetch
         try {
           const r = await fetch(`/api/trades?pool=${encodeURIComponent(token.pool)}`);
           if (!r.ok) return;
@@ -6526,8 +6555,8 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
       };
       setRows([]);
       load();
-      const iv = setInterval(load, 4000);   // trades stay within seconds of the tape
-      return () => { stop = true; clearInterval(iv); };
+      const iv = setInterval(load, 4000);   // REST backstop when no stream is running
+      return () => { stop = true; clearInterval(iv); clearInterval(tapeIv); };
     }
     const seed = Array.from({ length: 14 }, (_, i) => mkRow(token, i * 1400));
     setRows(seed);
@@ -10095,7 +10124,9 @@ export default function App() {
       const r = await fetch(`/api/holders?mint=${encodeURIComponent(mint)}`);
       if (r.ok) {
         const j = await r.json();
-        const n = Array.isArray(j && j.holders) ? j.holders.length : null;
+        // the true wallet count when the RPC could give it; otherwise leave the
+        // estimate alone rather than showing "20" for every token
+        const n = j && Number.isFinite(j.count) ? j.count : null;
         if (n != null) {
           holderCache.current[mint] = n;
           if (typeof window !== "undefined") window.__VALO_HOLDERS__ = { ...(window.__VALO_HOLDERS__ || {}), [mint]: n };
@@ -10144,6 +10175,10 @@ export default function App() {
         const merged = [...prev, ...incoming.filter((x) => !seen.has(x.tx || x.at))]
           .sort((a, b) => a.at - b.at).slice(-1200);
         tapeRef.current[key] = merged;
+        // publish for the LIVE TRADES feed — it reads this every second
+        if (typeof window !== "undefined") {
+          window.__VALO_TAPE__ = { ...(window.__VALO_TAPE__ || {}), [key]: merged };
+        }
         const tape = candlesFromTrades(merged, tf);
         if (tape.length < 2) return;
         // live flow: what actually traded in the last 10 minutes
@@ -10199,6 +10234,10 @@ export default function App() {
         const merged = [...prev, ...j.filter((x) => !seen.has(x.tx || x.at))]
           .sort((a, b) => a.at - b.at).slice(-1200);
         tapeRef.current[key] = merged;
+        // publish for the LIVE TRADES feed — it reads this every second
+        if (typeof window !== "undefined") {
+          window.__VALO_TAPE__ = { ...(window.__VALO_TAPE__ || {}), [key]: merged };
+        }
         const tape = candlesFromTrades(merged, tf);
         if (tape.length < 2) return;
         setTokens((Ts) => Ts.map((x) => (x.id === selected.id
@@ -12730,10 +12769,11 @@ export default function App() {
                           </div>
                         );
                       }
-                      return <div style={{ fontFamily: T.sans, fontSize: 13, color: T.dim, lineHeight: 1.7 }}>{selected.trending.reason}</div>;
+                      return <div style={{ fontFamily: T.sans, fontSize: 13, color: T.dim, lineHeight: 1.7 }}>{(selected.trending && selected.trending.reason) || ""}</div>;
                     })()}
                   </div>
-                  {/* social tweet */}
+                  {/* social tweet — simulated tokens only; real ones have none */}
+                  {selected.trending && selected.trending.tweet && (
                   <div style={{ background: "#0c0f16", border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                       <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: "50%", background: accent(selected.hue), color: "#0a0713", fontFamily: T.mono, fontWeight: 800, fontSize: 12 }}>{selected.sym[0]}</span>
@@ -12749,10 +12789,15 @@ export default function App() {
                       {selected.socials.x && <a href={selected.socials.x} target="_blank" rel="noopener noreferrer" style={{ color: T.blue, textDecoration: "none", marginLeft: "auto" }}>open on 𝕏 →</a>}
                     </div>
                   </div>
+                  )}
                   {/* description */}
                   <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 12, padding: 14 }}>
                     <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: VALO_PURPLE, letterSpacing: 1, marginBottom: 7 }}>DESCRIPTION</div>
-                    <div style={{ fontFamily: T.sans, fontSize: 13, color: T.dim, lineHeight: 1.7 }}>{selected.trending.desc}</div>
+                    <div style={{ fontFamily: T.sans, fontSize: 13, color: T.dim, lineHeight: 1.7 }}>
+                      {(tokLinks && tokLinks.description)
+                        || (selected.trending && selected.trending.desc)
+                        || `$${selected.sym} — live Solana pool. No published description; the numbers above are the token.`}
+                    </div>
                     <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                       {[["𝕏", selected.socials.x], ["✈ TG", selected.socials.tg], ["🌐 Site", selected.socials.site], ["💊 pump", selected.socials.pump]].filter(([, u]) => u).map(([l, u], i) => (
                         <a key={i} href={u} target="_blank" rel="noopener noreferrer" style={{ ...chip(false), textDecoration: "none", fontSize: 10, padding: "5px 9px" }}>{l}</a>
