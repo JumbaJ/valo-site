@@ -575,6 +575,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     scaleRef.current = { key: null, lo: NaN, hi: NaN };
     setAxisMC(false);                                   // price axis, fresh ratio
     setPinCross(null);
+    anchorRef.current = null;                           // a fresh chart follows live
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tfMin, sym]);
 
@@ -586,8 +587,8 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   useEffect(() => {
     const was = aggLenRef.current; aggLenRef.current = agg.length;
     // first data for this series → fit to it
-    // first data for this series, or history that finally arrived → refit at live
-    if (agg.length && (!was || agg.length > was * 3)) {
+    // only the FIRST data sets the frame; after that the camera stays put
+    if (agg.length && !was) {
       setView((v) => ({ ...v, count: Math.max(12, Math.min(120, agg.length)), offset: 0 }));
     }
   }, [agg.length]);
@@ -598,23 +599,37 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   const count = Math.max(12, Math.min(view.count, zoomCap));
   // a small, fixed margin rather than most of a screen: enough to feel free,
   // not enough to strand the candles in a corner
+  // where the camera is pointed. null = follow the live edge.
+  const anchorRef = useRef(null);                       // timestamp at the right edge
   const PAD_BARS = Math.max(4, Math.min(20, Math.round(count * 0.12)));
   const maxOff = Math.max(0, total - count);           // oldest candle at the left edge
-  const offset = Math.max(-PAD_BARS, Math.min(view.offset, maxOff + PAD_BARS));
+  // resolve the anchor to an index every render: candles may have been added on
+  // either side since last time, and the camera must not care
+  const anchoredOffset = (() => {
+    const a = anchorRef.current;
+    if (a == null || !total) return view.offset;
+    let lo2 = 0, hi2 = total - 1, idx = total - 1;
+    while (lo2 <= hi2) {                                 // newest candle at or before the anchor
+      const mid = (lo2 + hi2) >> 1;
+      const t = agg[mid] && agg[mid].t;
+      if (!Number.isFinite(t)) break;
+      if (t <= a) { idx = mid; lo2 = mid + 1; } else hi2 = mid - 1;
+    }
+    return total - 1 - idx;                              // same moment, whatever the length
+  })();
+  const offset = Math.max(-PAD_BARS, Math.min(anchoredOffset, maxOff + PAD_BARS));
   // window of slots: slot s ↔ agg index (total - count - offset + s)
   // older candles just arrived → slide the offset by the same amount so the
   // candles under your cursor stay exactly where they were
-  useEffect(() => {
-    if (!historyShift || !historyShift.n) return;
-    setView((v) => ({ ...v, offset: (v.offset || 0) + historyShift.n }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [historyShift && historyShift.k]);
+  // (history arriving no longer nudges the offset — the time anchor handles it)
   // safety net: if the view ever ends up past the data (a shorter history, a
   // trimmed series), snap back to live instead of showing an empty plot
   useEffect(() => {
     if (!agg.length) return;
+    // rescue only a view that has ended up completely off the data
     const startNow = agg.length - count - (view.offset || 0);
-    if (startNow > agg.length - 2 || startNow < -(count * 2)) {
+    if (startNow > agg.length + count || startNow < -(count * 3)) {
+      anchorRef.current = null;
       setView((v) => ({ ...v, offset: 0 }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1457,11 +1472,13 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
         const vGive = d.touch
           ? Math.max(-WIGGLE, Math.min(WIGGLE, (d.startPriceOff || 0) - (dyTot / (g.chartH || 300))))
           : 0;
-        setView((v) => ({
-          ...v,
-          offset: d.startOffset + Math.round(dx / (g.step || 6)),
-          priceOff: vGive,
-        }));
+        const nextOff = d.startOffset + Math.round(dx / (g.step || 6));
+        // remember WHEN the right edge points at — later candles can't move it
+        const endIdx = total - 1 - nextOff;
+        anchorRef.current = (nextOff <= 0) ? null
+          : (endIdx >= 0 && endIdx < total && agg[endIdx] && Number.isFinite(agg[endIdx].t))
+            ? agg[endIdx].t : anchorRef.current;
+        setView((v) => ({ ...v, offset: nextOff, priceOff: vGive }));
         return;
       }
     }
@@ -1570,10 +1587,10 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
             </div>
           )}
           <div style={{ position: "absolute", top: -15, right: 4, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 14, lineHeight: 1 }}>
-            <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; setView({ count: 18, offset: 0, priceOff: 0, follow: true }); }}
+            <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: 18, offset: 0, priceOff: 0, follow: true }); }}
               style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 7.5, fontWeight: 800, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>◉ LIVE</button>
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
-              <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, follow: false }); }}
+              <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, follow: false }); }}
                 style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.9)", color: T.dim, cursor: "pointer", fontSize: 7.5, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>⤢ fit</button>
             )}
           </div>
@@ -1592,11 +1609,11 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
           </div>
           <div style={{ position: "absolute", top: 8, right: 82, zIndex: 3, display: "flex", gap: 8, alignItems: "center" }}>
             {eyesToken && <ViewerPills token={eyesToken} small />}
-            <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; setView({ count: 18, offset: 0, priceOff: 0, follow: true }); }}
+            <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: 18, offset: 0, priceOff: 0, follow: true }); }}
               title="Zoom to the live edge and follow the price"
               style={{ height: 24, padding: "0 10px", borderRadius: 6, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.15)", color: T.blue, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: T.mono }}>◉ LIVE</button>
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
-              <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, follow: false }); }}
+              <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, follow: false }); }}
                 style={{ height: 24, padding: "0 8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.85)", color: T.dim, cursor: "pointer", fontSize: 10, fontFamily: T.mono }}>⤢ fit</button>
             )}
           </div>
