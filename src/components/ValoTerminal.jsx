@@ -8602,6 +8602,15 @@ export default function App() {
     }
   };
 
+  // web3.js, fetched only when a real order is actually placed
+  const web3Ref = useRef(null);
+  const loadWeb3 = async () => {
+    if (web3Ref.current) return web3Ref.current;
+    const mod = await import(/* @vite-ignore */ "https://esm.sh/@solana/web3.js@1.95.3");
+    web3Ref.current = mod;
+    return mod;
+  };
+
   // build → wallet signs → network. VALO never signs.
   const submitRealOrder = async () => {
     const o = realOrder;
@@ -8614,17 +8623,19 @@ export default function App() {
       const j = await r.json();
       if (!r.ok || j.error || !j.swapTransaction) throw new Error(j.error || "could not build the transaction");
 
-      // hand the unsigned bytes to the wallet — the user sees exactly what they sign
+      // deserialize so Phantom can show the user a real, readable transaction
+      const web3 = await loadWeb3();
       const raw = Uint8Array.from(atob(j.swapTransaction), (c) => c.charCodeAt(0));
-      const signed = await ph.signTransaction
-        ? await ph.signTransaction(await window.solanaWeb3Deserialize?.(raw) ?? raw)
-        : null;
-      // Phantom can also sign+send in one step, which avoids bundling a web3 lib
+      const tx = web3.VersionedTransaction.deserialize(raw);
+
       let sig = null;
       if (ph.signAndSendTransaction) {
-        const out = await ph.signAndSendTransaction({ message: raw });
+        // Phantom signs AND submits — one approval, no key ever leaves the wallet
+        const out = await ph.signAndSendTransaction(tx);
         sig = out && (out.signature || out);
-      } else if (signed && signed.serialize) {
+      } else if (ph.signTransaction) {
+        // older providers: sign here, relay through our RPC
+        const signed = await ph.signTransaction(tx);
         const b64 = btoa(String.fromCharCode(...signed.serialize()));
         const send = await fetch("/api/sendtx", { method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify({ signed: b64 }) });
@@ -8632,6 +8643,7 @@ export default function App() {
         if (!sj.ok) throw new Error(sj.error || "the network rejected it");
         sig = sj.signature;
       } else throw new Error("this wallet can't sign transactions here");
+      if (!sig) throw new Error("no signature returned — nothing was sent");
 
       setRealOrder({ ...o, stage: "done", sig });
       pushNotif({ type: "system", user: null, tokenId: o.token.id,
