@@ -5051,7 +5051,7 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
 }
 
 // PRO LAYOUT order ticket — one wide bar under the chart, buy & sell side by side
-function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, valoBalance = 0, position, onExecute, onPosTrade, clickMode, setClickMode, realized24 = 0, onRealOrder, onChainReady = false, onChainMax = 0}) {
+function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, valoBalance = 0, position, onExecute, onPosTrade, clickMode, setClickMode, realized24 = 0, onRealOrder, onChainReady = false, onChainMax = 0, chainHeld = 0}) {
   const [poPcts, setPoPcts] = useState([25, 50, 75, 100]);      // dbl-click / right-click to retype
   const [poFixed, setPoFixed] = useState([0.5, 1, 2, 5]);
   const [poSellPcts, setPoSellPcts] = useState([10, 25, 50, 75]);
@@ -5116,6 +5116,16 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
             boxShadow: amt > 0 && bal >= amt ? "0 0 16px rgba(22,199,132,0.35)" : "none" }}>
           🔥 BUY<div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>{amt.toFixed(2)} {pay} · ${Math.round(amt * unit$)}</div>
         </button>
+        {onChainReady && chainHeld > 0 && (
+          <button onClick={() => onRealOrder && onRealOrder(token, "sell", chainHeld)}
+            title={`Sell your real ${token.sym} back to SOL`}
+            style={{ flex: "0 0 118px", border: `1.5px solid ${T.red}`, borderRadius: 11,
+              background: "rgba(234,57,67,0.14)", color: T.red, cursor: "pointer",
+              fontFamily: T.mono, fontWeight: 900, fontSize: 11, letterSpacing: 0.5 }}>
+            ⛓ REAL SELL
+            <div style={{ fontSize: 8, fontWeight: 800, opacity: 0.85 }}>{fmtQty(chainHeld)} held</div>
+          </button>
+        )}
         {onChainReady && (
           <button onClick={() => onRealOrder && onRealOrder(token, "buy", Math.min(amt, onChainMax))}
             title={`Spend real SOL from your connected wallet · max ${onChainMax} SOL`}
@@ -5126,6 +5136,16 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
             <div style={{ fontSize: 8, fontWeight: 800, opacity: 0.85 }}>
               {Math.min(amt, onChainMax)} SOL · actual funds
             </div>
+          </button>
+        )}
+        {onChainReady && chainHeld > 0 && (
+          <button onClick={() => onRealOrder && onRealOrder(token, "sell", chainHeld)}
+            title={`Sell your real ${token.sym} back to SOL`}
+            style={{ flex: "0 0 118px", border: `1.5px solid ${T.red}`, borderRadius: 11,
+              background: "rgba(234,57,67,0.14)", color: T.red, cursor: "pointer",
+              fontFamily: T.mono, fontWeight: 900, fontSize: 11, letterSpacing: 0.5 }}>
+            ⛓ REAL SELL
+            <div style={{ fontSize: 8, fontWeight: 800, opacity: 0.85 }}>{fmtQty(chainHeld)} held</div>
           </button>
         )}
         {onChainReady && (
@@ -7248,6 +7268,12 @@ const devOf = (t) => {
     return { name: real.short || real.creator.slice(0, 8), short: real.short,
       wallet: real.creator, real: true, createdAt: real.createdAt || null };
   }
+  // a REAL token whose creator we haven't resolved yet: report it as unknown.
+  // Inventing a handle here would attribute someone else's coin to a fiction.
+  if (t && (t.pool || t.liveMint)) {
+    return { name: "unknown", short: t.liveMint ? `${t.liveMint.slice(0, 4)}…${t.liveMint.slice(-4)}` : "—",
+      wallet: null, real: false, unknown: true };
+  }
   const sd = tokSeed(t);
   const n = CALLERS[Math.abs(sd * 5 + 2) % CALLERS.length] || CALLERS[0];
   const wal = ((sd * 2654435761) >>> 0).toString(16).padStart(8, "0");
@@ -7460,7 +7486,9 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
                 <button onClick={(e) => { e.stopPropagation(); onOpenUser && onOpenUser(dev.name); }}
                   title="Open the dev's VALO profile"
                   style={{ border: "none", background: "none", padding: 0, marginTop: 4, fontFamily: T.mono, fontSize: 7.5, color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
-                  DEV @{dev.name} · {dev.short}
+                  {dev.unknown ? <>DEV <span style={{ opacity: 0.7 }}>unverified</span> · {dev.short}</>
+                    : dev.real ? <>DEV {dev.short} <span style={{ color: T.green }}>✓</span></>
+                    : <>DEV @{dev.name} · {dev.short}</>}
                 </button>
 
               </div>
@@ -8586,21 +8614,47 @@ export default function App() {
   }, []);
 
   // ask for a quote, then let the user decide. Two separate steps, always.
-  const quoteRealOrder = async (token, side, sol) => {
+  // how much of this token does the connected wallet actually hold?
+  const chainHeldOf = (token) => {
+    if (!token || !token.liveMint || !walletChain) return 0;
+    const h = (walletChain.holdings || []).find((x) => x.mint === token.liveMint);
+    return h ? h.qty : 0;
+  };
+
+  const quoteRealOrder = async (token, side, size) => {
     if (!onchain.enabled || !wallet || !wallet.address || !token || !token.liveMint) return;
     const SOLM = "So11111111111111111111111111111111111111112";
-    const inputMint = side === "buy" ? SOLM : token.liveMint;
-    const outputMint = side === "buy" ? token.liveMint : SOLM;
-    const amount = side === "buy" ? Math.floor(sol * 1e9) : null;
-    if (!amount) return;                                    // selling tokens comes later
-    setRealOrder({ stage: "quoting", token, side, sol });
+    const selling = side === "sell";
+    const inputMint = selling ? token.liveMint : SOLM;
+    const outputMint = selling ? SOLM : token.liveMint;
+
+    // buys are sized in SOL; sells are sized in tokens you actually hold
+    let q = "";
+    let label = "";
+    if (selling) {
+      const held = chainHeldOf(token);
+      const qty = Math.min(size, held);
+      if (!(qty > 0)) {
+        setRealOrder({ stage: "error", token, side, msg: `you don't hold any $${token.sym} in this wallet` });
+        return;
+      }
+      q = `&amountUi=${qty}`;
+      label = `${fmtQty(qty)} ${token.sym}`;
+    } else {
+      const amount = Math.floor(size * 1e9);
+      if (!(amount > 0)) return;
+      q = `&amount=${amount}`;
+      label = `${size} SOL`;
+    }
+
+    setRealOrder({ stage: "quoting", token, side, size, label });
     try {
-      const r = await fetch(`/api/swap?mode=quote&inputMint=${inputMint}&outputMint=${outputMint}&amount=${amount}&slippageBps=100`);
+      const r = await fetch(`/api/swap?mode=quote&inputMint=${inputMint}&outputMint=${outputMint}${q}&slippageBps=100`);
       const j = await r.json();
-      if (!r.ok || j.error) { setRealOrder({ stage: "error", token, side, sol, msg: j.error || "no route" }); return; }
-      setRealOrder({ stage: "review", token, side, sol, quote: j.quote, inputMint, outputMint, amount });
+      if (!r.ok || j.error) { setRealOrder({ stage: "error", token, side, size, label, msg: j.error || "no route" }); return; }
+      setRealOrder({ stage: "review", token, side, size, label, quote: j.quote, inputMint, outputMint, q });
     } catch (e) {
-      setRealOrder({ stage: "error", token, side, sol, msg: String(e.message || e) });
+      setRealOrder({ stage: "error", token, side, size, label, msg: String(e.message || e) });
     }
   };
 
@@ -8621,7 +8675,7 @@ export default function App() {
     if (!ph) { setRealOrder({ ...o, stage: "error", msg: "Phantom not found" }); return; }
     setRealOrder({ ...o, stage: "signing" });
     try {
-      const r = await fetch(`/api/swap?mode=build&inputMint=${o.inputMint}&outputMint=${o.outputMint}&amount=${o.amount}&slippageBps=100&user=${wallet.address}`);
+      const r = await fetch(`/api/swap?mode=build&inputMint=${o.inputMint}&outputMint=${o.outputMint}${o.q}&slippageBps=100&user=${wallet.address}`);
       const j = await r.json();
       if (!r.ok || j.error || !j.swapTransaction) throw new Error(j.error || "could not build the transaction");
 
@@ -9468,7 +9522,14 @@ export default function App() {
         if (!r.ok) return;
         const j = await r.json();
         if (stop || !Array.isArray(j)) return;
-        setMktHits(j.map(adoptMarketToken).map((t) => {
+        // collapse pools of the same mint, keeping the deepest liquidity
+        const byMint = new Map();
+        for (const x of j) {
+          const key = x.mint || x.id;
+          const prev = byMint.get(key);
+          if (!prev || (+x.tvl || 0) > (+prev.tvl || 0)) byMint.set(key, x);
+        }
+        setMktHits([...byMint.values()].map(adoptMarketToken).map((t) => {
           // reuse the board's object when we already have this pool, so ids stay stable
           const have = (tokensRef.current || []).find((b) => String(b.pool || "") === String(t.pool));
           return have || t;
@@ -9611,7 +9672,13 @@ export default function App() {
           morePage.current = page;
           setMoreToks((M) => {
             const seen = new Set([...M.map((m) => m.pool), ...(tokensRef.current || []).map((t) => t.pool).filter(Boolean)]);
-            const add = j.filter((x) => !seen.has(x.id)).map(adoptMarketToken)
+            const byMint2 = new Map();
+            for (const x of j) {
+              const key = x.mint || x.id;
+              const prev = byMint2.get(key);
+              if (!prev || (+x.tvl || 0) > (+prev.tvl || 0)) byMint2.set(key, x);
+            }
+            const add = [...byMint2.values()].filter((x) => !seen.has(x.id)).map(adoptMarketToken)
               // never re-create a card the board already holds — that orphaned
               // the current selection and froze the chart
               .filter((t) => !(tokensRef.current || []).some((b) => String(b.pool || "") === String(t.pool)));
@@ -11287,7 +11354,7 @@ export default function App() {
                     {(() => {
                       const d = (() => { try { return devOf(selected); } catch (e) { return null; } })();
                       if (!d) return null;
-                      const label = d.real ? d.short : `@${d.name}`;
+                      const label = d.real ? d.short : (d.unknown ? d.short : `@${d.name}`);
                       return (
                         <button onClick={() => setProfileUser(d.name)}
                           title={d.real ? `Launched by ${d.wallet} — see everything they've launched`
@@ -11299,7 +11366,8 @@ export default function App() {
                             color: d.real ? T.amber : T.dim, borderRadius: 7,
                             padding: isMobile ? "0 8px" : "4px 9px",
                             fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, cursor: "pointer" }}>
-                          👤 DEV {label}{d.real && <span style={{ fontSize: 7.5, opacity: 0.8 }}>✓</span>}
+                          👤 DEV {d.unknown ? "unverified" : label}
+                          {d.real && <span style={{ fontSize: 7.5, opacity: 0.8 }}>✓</span>}
                         </button>
                       );
                     })()}
@@ -12473,9 +12541,11 @@ export default function App() {
                 onRealOrder={quoteRealOrder}
                 onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
                 onChainMax={onchain.maxSol || 0}
+                chainHeld={chainHeldOf(selected)}
                 onRealOrder={quoteRealOrder}
                 onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
-                onChainMax={onchain.maxSol || 0} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
+                onChainMax={onchain.maxSol || 0}
+                chainHeld={chainHeldOf(selected)} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
                         solBalance={solBalance} valoBalance={valoWallet} position={positions[selected.id]}
                         clickMode={clickMode} setClickMode={setClickMode}
                         realized24={realized24For(selected.sym)}
@@ -12586,6 +12656,7 @@ export default function App() {
                 onRealOrder={quoteRealOrder}
                 onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
                 onChainMax={onchain.maxSol || 0}
+                chainHeld={chainHeldOf(selected)}
                 onExecute={(o, tok) => execute(tok || selected, o)}
                 clickMode={clickMode} setClickMode={setClickMode}
                 amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
@@ -12878,10 +12949,14 @@ export default function App() {
                 return (
                   <>
                     <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, color: T.text, marginBottom: 8 }}>
-                      Buy ${realOrder.token.sym} with {realOrder.sol} SOL
+                      {realOrder.side === "sell"
+                        ? `Sell ${realOrder.label} for SOL`
+                        : `Buy $${realOrder.token.sym} with ${realOrder.label}`}
                     </div>
-                    {[["you receive (est.)", `${fmtQty(outUi)} ${realOrder.token.sym}`, T.green],
-                      ["worst case", `${fmtQty(worst)} ${realOrder.token.sym}`, T.dim],
+                    {[["you receive (est.)",
+                        realOrder.side === "sell" ? `${((+q.outAmount || 0) / 1e9).toFixed(5)} SOL` : `${fmtQty(outUi)} ${realOrder.token.sym}`, T.green],
+                      ["worst case",
+                        realOrder.side === "sell" ? `${((+q.otherAmountThreshold || 0) / 1e9).toFixed(5)} SOL` : `${fmtQty(worst)} ${realOrder.token.sym}`, T.dim],
                       ["price impact", impact != null ? `${impact}%` : "—", hot ? T.red : T.dim],
                       ["slippage limit", `${(q.slippageBps / 100).toFixed(2)}%`, T.dim],
                       ["route", q.routeLabels && q.routeLabels.length ? q.routeLabels.join(" → ") : `${q.routeHops} hop(s)`, T.faint]]
