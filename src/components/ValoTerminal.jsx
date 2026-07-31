@@ -343,6 +343,8 @@ function makeToken([sym, name, chain], isNew = false) {
   };
 }
 const mcOf = (t) => t.price * t.supply;
+// pay units → dollars. Every P/L figure must pass through this.
+const payUsd = (amt, pay) => (+amt || 0) * (pay === "SOL" ? SOL_USD : 0.0125);
 const posTokenQty = (t, p) => ((p.pay === "SOL" ? p.amt * SOL_USD : p.amt * 0.0125) / (p.entry || t.price)); // token units held
 const fmtQty = (n) => (n >= 1e9 ? (n / 1e9).toFixed(2) + "B" : n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : n.toFixed(0));
 
@@ -5280,9 +5282,137 @@ function pnlSeries(range, seed, unreal, realized) {
   return pts.map((p) => p * scale);
 }
 
+function ActivityLedger({ acts = [], tokens = [], onClose, isMobile, onOpenToken }) {
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState("recent");     // recent | oldest | biggest | best | worst
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [side, setSide] = useState("all");        // all | buy | sell
+
+  const rows = useMemo(() => {
+    const ql = q.trim().toLowerCase();
+    const a0 = from ? new Date(from + "T00:00:00").getTime() : -Infinity;
+    const b0 = to ? new Date(to + "T23:59:59").getTime() : Infinity;
+    let out = (acts || []).filter((a) => {
+      if (side !== "all" && (side === "buy") !== (a.side === "buy")) return false;
+      const ts = a.ts || 0;
+      if (ts < a0 || ts > b0) return false;
+      if (!ql) return true;
+      return String(a.sym || "").toLowerCase().includes(ql);
+    });
+    const usd = (a) => (a.pnlMoney != null ? a.pnlMoney * SOL_USD : 0);
+    out = out.slice().sort((x, y) => {
+      if (sort === "oldest") return (x.ts || 0) - (y.ts || 0);
+      if (sort === "biggest") return payUsd(y.amt, y.pay) - payUsd(x.amt, x.pay);
+      if (sort === "best") return usd(y) - usd(x);
+      if (sort === "worst") return usd(x) - usd(y);
+      return (y.ts || 0) - (x.ts || 0);           // recent
+    });
+    return out;
+  }, [acts, q, sort, from, to, side]);
+
+  const totalIn = rows.filter((a) => a.side === "buy").reduce((s, a) => s + payUsd(a.amt, a.pay), 0);
+  const totalOut = rows.filter((a) => a.side === "sell").reduce((s, a) => s + payUsd(a.amt, a.pay), 0);
+  const realized = rows.filter((a) => a.side === "sell" && a.pnlMoney != null)
+    .reduce((s, a) => s + a.pnlMoney * SOL_USD, 0);
+
+  const chip2 = (on) => ({
+    border: `1px solid ${on ? VALO_PURPLE : T.border2}`, background: on ? "rgba(125,92,240,0.14)" : "transparent",
+    color: on ? VALO_PURPLE : T.dim, borderRadius: 7, padding: "4px 9px", cursor: "pointer",
+    fontFamily: T.mono, fontSize: 9, fontWeight: 800, whiteSpace: "nowrap",
+  });
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 146, background: "rgba(4,6,10,0.8)",
+      backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 620, maxHeight: "88vh",
+        display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`,
+        borderRadius: 14, overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
+          <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, letterSpacing: 1, color: T.text }}>📜 ALL ACTIVITY</span>
+          <span style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{rows.length} of {acts.length}</span>
+          <button onClick={onClose} style={{ marginLeft: "auto", ...chip2(false), fontSize: 11 }}>✕</button>
+        </div>
+
+        {/* search + filters */}
+        <div style={{ padding: "9px 12px", borderBottom: `1px solid ${T.border}`, display: "grid", gap: 7 }}>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a token…  e.g. WADDLES"
+            style={{ ...inp, padding: "8px 10px", fontSize: 11 }} />
+          <div style={{ display: "flex", gap: 5, overflowX: "auto", scrollbarWidth: "none" }}>
+            {[["recent", "NEWEST"], ["oldest", "OLDEST"], ["biggest", "LARGEST"], ["best", "BEST P/L"], ["worst", "WORST P/L"]]
+              .map(([k, l]) => <button key={k} onClick={() => setSort(k)} style={chip2(sort === k)}>{l}</button>)}
+            <span style={{ width: 6 }} />
+            {[["all", "ALL"], ["buy", "BUYS"], ["sell", "SELLS"]]
+              .map(([k, l]) => <button key={k} onClick={() => setSide(k)} style={chip2(side === k)}>{l}</button>)}
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)}
+              style={{ ...inp, flex: 1, padding: "6px 7px", fontSize: 9.5, colorScheme: "dark" }} />
+            <span style={{ color: T.faint, fontFamily: T.mono, fontSize: 9 }}>→</span>
+            <input type="date" value={to} onChange={(e) => setTo(e.target.value)}
+              style={{ ...inp, flex: 1, padding: "6px 7px", fontSize: 9.5, colorScheme: "dark" }} />
+            {(from || to || q || side !== "all") && (
+              <button onClick={() => { setFrom(""); setTo(""); setQ(""); setSide("all"); }} style={chip2(false)}>CLEAR</button>
+            )}
+          </div>
+        </div>
+
+        {/* totals for whatever is filtered */}
+        <div style={{ display: "flex", gap: 1, background: T.border }}>
+          {[["IN", fmt$(totalIn), T.text], ["OUT", fmt$(totalOut), T.text],
+            ["REALIZED", `${realized >= 0 ? "+" : "−"}$${Math.abs(realized).toFixed(2)}`, realized >= 0 ? T.green : T.red]]
+            .map(([k, v, c]) => (
+              <div key={k} style={{ flex: 1, background: "#0c0f16", padding: "7px 10px" }}>
+                <div style={{ fontFamily: T.mono, fontSize: 7, letterSpacing: 1, color: T.faint }}>{k}</div>
+                <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, color: c }}>{v}</div>
+              </div>
+            ))}
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "6px 10px 12px" }}>
+          {rows.length === 0 && (
+            <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center", padding: "28px 10px" }}>
+              Nothing matches those filters.
+            </div>
+          )}
+          {rows.map((a, i) => {
+            const usd = payUsd(a.amt, a.pay);
+            const pnl = a.pnlMoney != null ? a.pnlMoney * SOL_USD : null;
+            const tk = (tokens || []).find((t) => t.sym === a.sym);
+            const d = new Date(a.ts || Date.now());
+            return (
+              <div key={i} onClick={() => { if (tk && onOpenToken) { onOpenToken(tk.id); onClose && onClose(); } }}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 9px", marginTop: 4,
+                  border: `1px solid ${T.border}`, borderLeft: `2px solid ${a.side === "buy" ? T.green : T.red}`,
+                  background: "#0c0f16", borderRadius: 9, cursor: tk ? "pointer" : "default" }}>
+                <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1,
+                  color: a.side === "buy" ? T.green : T.red, flex: "0 0 30px" }}>{a.side === "buy" ? "BUY" : "SELL"}</span>
+                <span style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: accent(symbolHue(a.sym || "?")), flex: "0 0 auto" }}>${a.sym}</span>
+                <span style={{ fontFamily: T.mono, fontSize: 9, color: T.dim, flex: 1, minWidth: 0 }}>
+                  {(+a.amt || 0).toFixed(2)} {a.pay} · {fmt$(usd)}
+                </span>
+                {pnl != null && (
+                  <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: pnl >= 0 ? T.green : T.red }}>
+                    {pnl >= 0 ? "+" : "−"}${Math.abs(pnl).toFixed(2)}
+                  </span>
+                )}
+                <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, flex: "0 0 auto", textAlign: "right" }}>
+                  {d.toLocaleDateString([], { month: "short", day: "numeric" })}<br />
+                  {d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realizedPnl, unrealizedPnl, extraEquity = 0, walletConnected = true, onConnectWallet,
   tab, setTab, range, setRange, mode, setMode, seed, onDeposit, onWithdraw, onSwap,
   hideBalance, setHideBalance, heldSlot, maxDeposit = 0, maxWithdraw = 0, activity = [], onOpenToken,
+  isMobile = false,
   username, setUsername, isNameTaken, checkHandle,
   nameChangedAt = 0, setNameChangedAt,
   myCallouts = {}, onOpenMyCallouts,
@@ -5313,6 +5443,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
     return a + p.amt * (t.price / p.entry) * (p.pay === "SOL" ? SOL_USD : valoUsd);
   }, 0);
   const walletUsd = solBalance * SOL_USD + valoWallet * valoUsd;
+  const [actAll, setActAll] = useState(false);   // the full, searchable ledger
   const totalPnl = realizedPnl + unrealizedPnl;
   const totalEquity = walletUsd + Math.max(0, liveValue) + (extraEquity || 0); // + live bots & escrowed arms
   const [swapAmt, setSwapAmt] = useState("1");
@@ -5372,6 +5503,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   };
 
   return (
+    <>
     <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14, marginTop: 12, position: "relative", overflow: "hidden" }}>
       {/* PHANTOM GATE — funds stay blurred until the user's own wallet is in */}
       {!walletConnected && (
@@ -5662,7 +5794,12 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           )}
           {/* activity feed — token, amount, PnL if sold, all on one bar, solscan link */}
           <div style={{ marginTop: 10 }}>
-            <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1, marginBottom: 7 }}>📜 ACTIVITY</div>
+            <div onClick={() => setActAll(true)} title="Open every trade — searchable and sortable"
+              style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1, marginBottom: 7 }}>
+              <span style={{ textDecoration: "underline dotted", textUnderlineOffset: 3 }}>📜 ACTIVITY</span>
+              <span style={{ fontSize: 7.5, color: VALO_PURPLE, fontWeight: 900, letterSpacing: 1 }}>VIEW ALL ▸</span>
+            </div>
             {activity.length === 0 ? (
               <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center", padding: "12px 0", border: `1px dashed ${T.border}`, borderRadius: 9 }}>No trades yet — your buys & sells show here.</div>
             ) : (
@@ -5798,6 +5935,11 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
       )}
     </div>
     </div>
+    {actAll && (
+      <ActivityLedger acts={activity} tokens={tokens} isMobile={isMobile}
+        onClose={() => setActAll(false)} onOpenToken={onOpenToken} />
+    )}
+    </>
   );
 }
 
@@ -9921,7 +10063,7 @@ export default function App() {
     // compute PnL $ for sells against average entry
     const posEntry = positions[t.id]?.entry ?? t.price;
     const sellPnlPct = o.side === "sell" ? ((t.price - posEntry) / posEntry) * 100 : 0;
-    const sellPnlMoney = o.side === "sell" ? (o.amt * sellPnlPct) / 100 : 0;
+    const sellPnlMoney = o.side === "sell" ? (payUsd(o.amt, o.pay || pay) * sellPnlPct) / 100 : 0;
     if (o.side === "sell") setRealizedPnl((r) => r + sellPnlMoney);
     // sells credit proceeds back — principal plus the P/L, live
     if (o.side === "sell" && o.amt > 0) {
@@ -10136,8 +10278,9 @@ export default function App() {
   const gNet = tokens.reduce((a, t) => a + t.greenUsd - t.redUsd, 0);
   const unrealizedPnl = Object.entries(positions).reduce((a, [id, p]) => {
     const tk = tokens.find((x) => x.id === +id);
-    if (!tk || !p) return a;
-    return a + p.amt * ((tk.price - p.entry) / p.entry);
+    if (!tk || !p || !(p.entry > 0)) return a;
+    // dollars, not SOL — this is what made it disagree with the bot figure
+    return a + payUsd(p.amt, p.pay) * ((tk.price - p.entry) / p.entry);
   }, 0);
   const botUnrealized = botRuns.reduce((a, r) => {
     if (r.status !== "live") return a;
@@ -12020,7 +12163,7 @@ export default function App() {
             </button>
             <PortfolioPanel big
               solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
@@ -13418,7 +13561,7 @@ export default function App() {
             </div>
             <PortfolioPanel big
               solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
