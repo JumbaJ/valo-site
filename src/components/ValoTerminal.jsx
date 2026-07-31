@@ -5524,7 +5524,7 @@ function ActivityLedger({ acts = [], tokens = [], onClose, isMobile, onJump }) {
 function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realizedPnl, unrealizedPnl, extraEquity = 0, walletConnected = true, onConnectWallet,
   tab, setTab, range, setRange, mode, setMode, seed, onDeposit, onWithdraw, onSwap,
   hideBalance, setHideBalance, heldSlot, maxDeposit = 0, maxWithdraw = 0, activity = [], onOpenToken,
-  isMobile = false, onOpenActivity, wallet = null, walletChain = null, onDisconnectWallet,
+  isMobile = false, onOpenActivity, wallet = null, walletChain = null, onDisconnectWallet, onOpenByMintChain,
   username, setUsername, isNameTaken, checkHandle,
   nameChangedAt = 0, setNameChangedAt,
   myCallouts = {}, onOpenMyCallouts,
@@ -5555,6 +5555,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
     return a + p.amt * (t.price / p.entry) * (p.pay === "SOL" ? SOL_USD : valoUsd);
   }, 0);
   const walletUsd = solBalance * SOL_USD + valoWallet * valoUsd;
+  const [chainOpen, setChainOpen] = useState(false);   // real wallet holdings, expanded
   const totalPnl = realizedPnl + unrealizedPnl;
   const totalEquity = walletUsd + Math.max(0, liveValue) + (extraEquity || 0); // + live bots & escrowed arms
   const [swapAmt, setSwapAmt] = useState("1");
@@ -5644,9 +5645,41 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               <span style={{ color: T.faint }}>{walletChain.holdingsCount || 0} positions</span>
             </div>
           )}
-          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 6, lineHeight: 1.5 }}>
-            Read-only. VALO can't move your funds and never asks for a transaction —
-            trading on this platform is still paper.
+          {walletChain && (walletChain.holdings || []).length > 0 && (
+            <>
+              <div onClick={() => setChainOpen((v) => !v)}
+                style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 7, cursor: "pointer",
+                  fontFamily: T.mono, fontSize: 8, letterSpacing: 1, color: T.faint }}>
+                <span style={{ textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
+                  {chainOpen ? "▴" : "▾"} REAL HOLDINGS · {walletChain.holdingsCount}
+                </span>
+                <span style={{ marginLeft: "auto", color: T.faint }}>live · refreshes every 30s</span>
+              </div>
+              {chainOpen && (
+                <div style={{ maxHeight: 190, overflowY: "auto", marginTop: 5 }}>
+                  {(walletChain.holdings || []).map((h) => (
+                    <div key={h.mint}
+                      onClick={() => { if (onOpenByMintChain) onOpenByMintChain(h.mint); }}
+                      title={h.sym ? `Open the $${h.sym} chart` : h.mint}
+                      style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 7px", marginTop: 3,
+                        border: `1px solid ${T.border}`, borderRadius: 8, background: "#0a0d13",
+                        cursor: onOpenByMintChain ? "pointer" : "default" }}>
+                      <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900,
+                        color: accent(symbolHue(h.sym || "?")) }}>${h.sym || h.mint.slice(0, 4)}</span>
+                      <span style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, flex: 1, minWidth: 0,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtQty(h.qty)}</span>
+                      <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, color: T.text }}>{fmt$(h.usd)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 7, lineHeight: 1.5,
+            borderTop: `1px solid ${T.border}`, paddingTop: 6 }}>
+            <b style={{ color: T.dim }}>These are your real wallet holdings</b>, shown live and read-only.
+            They are separate from your VALO paper balance below — VALO can't move your funds
+            and never asks for a transaction.
           </div>
         </div>
       )}
@@ -9776,6 +9809,16 @@ export default function App() {
     setWallet(null); setWalletChain(null); setWalletConnected(false);
   };
 
+  // keep the connected wallet's real figures current
+  useEffect(() => {
+    if (!wallet || !wallet.address) return;
+    const iv = setInterval(() => loadWalletChain(wallet.address), 30000);
+    const onVis = () => { if (!document.hidden) loadWalletChain(wallet.address); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallet && wallet.address]);
+
   // reconnect silently if Phantom already trusts this site, and follow account changes
   useEffect(() => {
     const ph = getProvider();
@@ -12465,7 +12508,7 @@ export default function App() {
             </button>
             <PortfolioPanel big
               solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
@@ -13873,7 +13916,7 @@ export default function App() {
             </div>
             <PortfolioPanel big
               solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
