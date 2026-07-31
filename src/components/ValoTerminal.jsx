@@ -5291,6 +5291,82 @@ function pnlSeries(range, seed, unreal, realized) {
   return pts.map((p) => p * scale);
 }
 
+// VALO's own wallets — real balances, real Solscan links, no placeholders
+function TreasuryPanel({ isMobile }) {
+  const [d, setD] = useState(null);
+  useEffect(() => {
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch("/api/treasury");
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop && j && !j.error) setD(j);
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 60000);
+    return () => { stop = true; clearInterval(iv); };
+  }, []);
+  if (!d || !d.configured) return null;
+
+  const ROWS = [
+    ["treasury", "🏦 TREASURY", "platform fees collect here", T.green],
+    ["epoch", "🎁 EPOCH VAULT", "rewards paid to callers each epoch", VALO_PURPLE],
+    ["creator", "👤 CREATOR", "the wallet behind VALO", T.blue],
+    ["deployer", "⚙ DEPLOYER", "deployed the contracts", T.amber],
+    ["burn", "🔥 BURN", "tokens removed from supply", T.red],
+  ];
+
+  return (
+    <div style={{ border: `1px solid ${T.border2}`, borderRadius: 12, background: "#0c0f16", overflow: "hidden", marginTop: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: `1px solid ${T.border}` }}>
+        <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, color: T.text }}>⛓ VALO ON-CHAIN</span>
+        <span style={{ fontFamily: T.mono, fontSize: 7.5, color: d.live ? T.green : T.faint, letterSpacing: 1 }}>
+          {d.live ? "● TOKEN LIVE" : "○ TOKEN PENDING"}
+        </span>
+        <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 7, color: T.faint }}>verify every figure on Solscan</span>
+      </div>
+
+      {d.token && (
+        <a href={d.token.solscan} target="_blank" rel="noopener noreferrer"
+          style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px",
+            borderBottom: `1px solid ${T.border}`, textDecoration: "none", background: "rgba(125,92,240,0.06)" }}>
+          <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: VALO_PURPLE }}>$VALO</span>
+          <span style={{ fontFamily: T.mono, fontSize: 8.5, color: T.dim }}>
+            supply {fmtQty(d.token.supply)} · {d.token.mint.slice(0, 4)}…{d.token.mint.slice(-4)}
+          </span>
+          <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 7.5, color: T.amber, fontWeight: 900 }}>SOLSCAN ↗</span>
+        </a>
+      )}
+
+      {ROWS.map(([k, label, blurb, col]) => {
+        const w = d.wallets && d.wallets[k];
+        if (!w) return null;
+        return (
+          <a key={k} href={w.solscan} target="_blank" rel="noopener noreferrer"
+            style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px",
+              borderTop: `1px solid ${T.border}`, textDecoration: "none" }}>
+            <span style={{ flex: "0 0 auto", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: col, minWidth: 92 }}>{label}</span>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: "block", fontFamily: T.mono, fontSize: 9, color: T.text }}>{w.short}</span>
+              {!isMobile && <span style={{ display: "block", fontFamily: T.mono, fontSize: 7, color: T.faint }}>{blurb}</span>}
+            </span>
+            <span style={{ flex: "0 0 auto", textAlign: "right" }}>
+              <span style={{ display: "block", fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: T.text }}>
+                {w.sol != null ? `${w.sol.toFixed(2)} SOL` : "—"}
+              </span>
+              {w.valo != null && (
+                <span style={{ display: "block", fontFamily: T.mono, fontSize: 8, color: VALO_PURPLE }}>{fmtQty(w.valo)} $VALO</span>
+              )}
+            </span>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
 function ActivityLedger({ acts = [], tokens = [], onClose, isMobile, onJump }) {
   const [q, setQ] = useState("");
   const [sort, setSort] = useState("recent");     // recent | oldest | biggest | best | worst
@@ -6782,6 +6858,8 @@ function WhitepaperModal({ onClose, isMobile }) {
                 })}
               </div>
             ))}
+            {/* every wallet behind VALO, read live from the chain */}
+            <TreasuryPanel isMobile={isMobile} />
             {/* jump-to-top */}
             <button onClick={() => go(WP_SECTIONS[0].id)}
               style={{ ...chip(false), fontSize: 10, padding: "6px 12px" }}>↑ back to top</button>
