@@ -8576,9 +8576,11 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch("/api/swap?mode=quote&outputMint=So11111111111111111111111111111111111111112&amount=1000");
+        const r = await fetch("/api/swap?mode=status");
         const j = await r.json();
-        setOnchain({ enabled: !!(j && j.enabled), maxSol: (j && j.quote && j.quote.maxSol) || 0 });
+        // only "on" when the feature is enabled AND Jupiter is actually reachable
+        const ok = !!(j && j.enabled && j.jupiter === "reachable");
+        setOnchain({ enabled: ok, maxSol: (j && j.maxSol) || 0, jupiter: j && j.jupiter });
       } catch (e) { setOnchain({ enabled: false, maxSol: 0 }); }
     })();
   }, []);
