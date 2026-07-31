@@ -10774,9 +10774,47 @@ export default function App() {
     });
   }, [tokens]);
 
-  const shownBase = tokens.filter((t) =>
-    filter === "all" ? true : filter === "new" ? t.isNew :
-    filter === "safe" ? scoreToken(t) >= 66 : filter === "risky" ? scoreToken(t) < 40 : t.chain === filter);
+  const shownBase = useMemo(() => {
+    const flowOf = (t) => (+t.greenUsd || 0) + (+t.redUsd || 0);
+    const tradesOf = (t) => (+t.buys24 || 0) + (+t.sells24 || 0) || (+t.traders || 0);
+    const list = tokens.filter((t) => {
+      if (filter === "all") return true;
+      if (filter === "new") {
+        // launched in the last 6 hours — measured, not flagged
+        const age = +t.ageMin || 0;
+        return t.pool ? (age > 0 && age <= 360) : !!t.isNew;
+      }
+      if (filter === "trending") {
+        // real money moving through it right now
+        return flowOf(t) >= 25000 && tradesOf(t) >= 150;
+      }
+      if (filter === "traders") {
+        // busy AND one-sided: lots of participants leaning hard one way
+        const bp = t.buyPressure != null ? t.buyPressure : 50;
+        return tradesOf(t) >= 300 && (bp >= 62 || bp <= 38);
+      }
+      if (filter === "safe") return scoreToken(t) >= 66;
+      if (filter === "risky") return scoreToken(t) < 40;
+      return true;
+    });
+    // each filter sorts by the thing it claims to measure
+    if (filter === "new") return list.slice().sort((a, b) => (+a.ageMin || 0) - (+b.ageMin || 0));
+    if (filter === "trending") return list.slice().sort((a, b) => flowOf(b) - flowOf(a));
+    if (filter === "traders") return list.slice().sort((a, b) => tradesOf(b) - tradesOf(a));
+    if (filter === "all") {
+      // the main board leads with whatever is actually catching attention:
+      // money through it, trade count, and how one-sided the flow is
+      const heat = (t) => {
+        const flow = flowOf(t), tr = tradesOf(t);
+        const bp = t.buyPressure != null ? Math.abs(t.buyPressure - 50) : 0;
+        const young = (+t.ageMin || 1e9) < 1440 ? 1.35 : 1;   // fresh launches punch up
+        return (Math.log10(1 + flow) * 2 + Math.log10(1 + tr) * 1.6 + bp / 18) * young;
+      };
+      return list.slice().sort((a, b) => heat(b) - heat(a));
+    }
+    return list;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tokens, filter]);
   // curated slots: a dropped token claims that exact position on the left rail
   const shownCore = scanOrder
     ? scanOrder.map((id) => tokens.find((t) => t.id === id)).filter(Boolean)
