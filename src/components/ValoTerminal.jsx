@@ -480,6 +480,28 @@ function candlesFromTrades(trades, tfMin) {
 }
 // splice the tape-built tail onto whatever history we have, so the newest
 // candles move with real trades instead of an interpolated price
+// one gatekeeper for every candle series: no broken rows, no duplicate buckets,
+// always in order. A series that reaches the chart is always dense.
+function sanitizeCandles(arr) {
+  if (!Array.isArray(arr) || !arr.length) return [];
+  const byT = new Map();
+  for (const c of arr) {
+    if (!c) continue;
+    const o = +c.o, h = +c.h, l = +c.l, cl = +c.c;
+    if (![o, h, l, cl].every((v) => Number.isFinite(v) && v > 0)) continue;
+    if (h < l) continue;
+    const t = Number.isFinite(c.t) ? c.t : null;
+    const key = t == null ? `x${byT.size}` : t;
+    const prev = byT.get(key);
+    // later data for the same bucket wins, but keep the wider wick
+    byT.set(key, prev
+      ? { t, o: prev.o, h: Math.max(prev.h, h), l: Math.min(prev.l, l), c: cl, v: Math.max(prev.v || 0, +c.v || 0) }
+      : { t, o, h, l, c: cl, v: +c.v || 0 });
+  }
+  const out = [...byT.values()];
+  out.sort((a, b) => (a.t || 0) - (b.t || 0));
+  return out;
+}
 function mergeTapeCandles(history, tape) {
   if (!tape || !tape.length) return history;
   if (!history || !history.length) return tape;
@@ -509,7 +531,7 @@ function mergeTapeCandles(history, tape) {
       out.push(c);                                          // a genuinely new bucket
     }
   }
-  return out;
+  return sanitizeCandles(out);
 }
 function scoreToken(t) {
   const g = t.greenUsd / (t.greenUsd + t.redUsd);
@@ -9092,7 +9114,7 @@ export default function App() {
       histChainRef.current[key] = (histChainRef.current[key] || 0) + 1;
       setTokens((Ts) => Ts.map((x) => {
         if (x.id !== tokenId) return x;
-        const merged = [...older, ...x.candles];
+        const merged = sanitizeCandles([...older, ...x.candles]);
         const trimmed = merged.slice(-20000);                 // deep enough to reach a token's very first candle
         const added = trimmed.length - x.candles.length;      // what actually survived
         if (added > 0) setHistShift({ id: tokenId, n: added, k: Date.now() });
@@ -9202,7 +9224,7 @@ export default function App() {
       const hit = candleCache.current[tk.pool + ":" + tf];
       if (hit && hit.length && (!tk.candles || !tk.candles.length)) {
         setTokens((Ts) => Ts.map((x) => (x.id === tk.id
-          ? { ...x, candles: hit, realCandles: true, price: hit[hit.length - 1].c } : x)));
+          ? { ...x, candles: sanitizeCandles(hit), realCandles: true, price: hit[hit.length - 1].c } : x)));
       }
     };
     const local = board.find((t) => t.id === id);
@@ -9216,7 +9238,7 @@ export default function App() {
     if (dupe) { paintCached(dupe); setSel(dupe.id); setClickMode(null); return; }
     const cached = candleCache.current[hit.pool + ":" + tf];
     const seeded = cached && cached.length
-      ? { ...hit, candles: cached, realCandles: true, price: cached[cached.length - 1].c }
+      ? { ...hit, candles: sanitizeCandles(cached), realCandles: true, price: cached[cached.length - 1].c }
       : hit;
     setTokens((Ts) => (Ts.some((t) => t.id === seeded.id) ? Ts : [...Ts, seeded]));
     setSel(seeded.id); setClickMode(null);
@@ -9334,7 +9356,7 @@ export default function App() {
         mapped = mapped.filter((c) => c.h <= med * 50 && c.l >= med / 50);
         if (mapped.length < 3) return;
         candleCache.current[pool + ":" + tf] = mapped;
-        setTokens((Ts) => Ts.map((x) => (x.id === sel ? { ...x, candles: mapped, realCandles: true, price: mapped[mapped.length - 1].c } : x)));
+        setTokens((Ts) => Ts.map((x) => (x.id === sel ? { ...x, candles: sanitizeCandles(mapped), realCandles: true, price: mapped[mapped.length - 1].c } : x)));
       } catch (e) { /* keep what's drawn */ }
     };
     let tries = 0;
