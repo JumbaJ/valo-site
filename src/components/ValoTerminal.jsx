@@ -5329,15 +5329,41 @@ function TreasuryPanel({ isMobile }) {
       </div>
 
       {d.token && (
-        <a href={d.token.solscan} target="_blank" rel="noopener noreferrer"
-          style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px",
-            borderBottom: `1px solid ${T.border}`, textDecoration: "none", background: "rgba(125,92,240,0.06)" }}>
-          <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: VALO_PURPLE }}>$VALO</span>
-          <span style={{ fontFamily: T.mono, fontSize: 8.5, color: T.dim }}>
-            supply {fmtQty(d.token.supply)} · {d.token.mint.slice(0, 4)}…{d.token.mint.slice(-4)}
+        <>
+          <a href={d.token.solscan} target="_blank" rel="noopener noreferrer"
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px",
+              borderBottom: `1px solid ${T.border}`, textDecoration: "none", background: "rgba(125,92,240,0.06)" }}>
+            <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: VALO_PURPLE }}>$VALO</span>
+            <span style={{ fontFamily: T.mono, fontSize: 8.5, color: T.dim }}>
+              supply {fmtQty(d.token.supply)} · {d.token.mint.slice(0, 4)}…{d.token.mint.slice(-4)}
+            </span>
+            <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 7.5, color: T.amber, fontWeight: 900 }}>SOLSCAN ↗</span>
+          </a>
+          {d.token.burned != null && d.token.burned > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
+              borderBottom: `1px solid ${T.border}`, background: "rgba(234,57,67,0.06)" }}>
+              <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: T.red, minWidth: 92 }}>🔥 BURNED</span>
+              <span style={{ fontFamily: T.mono, fontSize: 9, color: T.text }}>
+                {fmtQty(d.token.burned)} $VALO
+                <span style={{ color: T.faint }}> of {fmtQty(d.token.launchSupply)} at launch</span>
+              </span>
+              <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: T.red }}>
+                {d.token.burnedPct}%
+              </span>
+            </div>
+          )}
+        </>
+      )}
+      {d.fees && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: `1px solid ${T.border}` }}>
+          <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: T.faint, minWidth: 92 }}>⚖ FEE</span>
+          <span style={{ fontFamily: T.mono, fontSize: 9, color: T.dim }}>
+            <b style={{ color: T.text }}>{d.fees.tradeFeePct}%</b> per fill →
+            <span style={{ color: T.red }}> {d.fees.splits.burn}% burn</span> ·
+            <span style={{ color: VALO_PURPLE }}> {d.fees.splits.epoch}% epoch</span> ·
+            <span style={{ color: T.green }}> {d.fees.splits.treasury}% treasury</span>
           </span>
-          <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 7.5, color: T.amber, fontWeight: 900 }}>SOLSCAN ↗</span>
-        </a>
+        </div>
       )}
 
       {ROWS.map(([k, label, blurb, col]) => {

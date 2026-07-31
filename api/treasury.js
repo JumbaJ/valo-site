@@ -65,21 +65,39 @@ export default async function handler(req, res) {
     // token facts, once the mint exists
     let token = null;
     if (valid(mint)) {
-      const [supplyR] = await Promise.all([rpc("getTokenSupply", [mint]).catch(() => null)]);
+      const supplyR = await rpc("getTokenSupply", [mint]).catch(() => null);
+      const supply = parseFloat(supplyR?.value?.uiAmountString || supplyR?.value?.uiAmount || "0") || 0;
+      const launch = parseFloat(process.env.VALO_LAUNCH_SUPPLY || "0") || 0;
+      // a real SPL burn reduces supply — that difference IS the burn, verifiable
+      const burned = launch > 0 && supply > 0 ? Math.max(0, launch - supply) : null;
       token = {
-        mint,
-        supply: parseFloat(supplyR?.value?.uiAmountString || supplyR?.value?.uiAmount || "0") || 0,
+        mint, supply,
+        launchSupply: launch || null,
+        burned,
+        burnedPct: burned != null && launch > 0 ? +((burned / launch) * 100).toFixed(4) : null,
         decimals: supplyR?.value?.decimals ?? null,
         solscan: `https://solscan.io/token/${mint}`,
         pumpfun: /pump$/i.test(mint) ? `https://pump.fun/coin/${mint}` : null,
       };
     }
 
+    // fee policy lives in config so it can change without a code deploy
+    const num = (k, d) => { const v = parseFloat(process.env[k]); return Number.isFinite(v) ? v : d; };
+    const fees = {
+      tradeFeePct: num("VALO_FEE_PCT", 0.6),          // taken per fill
+      splits: {
+        burn: num("VALO_SPLIT_BURN", 40),             // % of the fee that is burned
+        epoch: num("VALO_SPLIT_EPOCH", 40),           // % into the reward vault
+        treasury: num("VALO_SPLIT_TREASURY", 20),     // % to operations
+      },
+    };
+    fees.splitsTotal = fees.splits.burn + fees.splits.epoch + fees.splits.treasury;
+
     const configured = Object.values(wallets).filter(Boolean).length;
     res.setHeader("Cache-Control", "s-maxage=60, stale-while-revalidate=300");
     res.status(200).json({
       live: !!token,                       // false until VALO_MINT is set
-      token, wallets: out, configured,
+      token, wallets: out, configured, fees,
       note: token ? "token live" : "no VALO_MINT set — wallets shown, token pending launch",
       checkedAt: new Date().toISOString(),
     });
