@@ -595,7 +595,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     // open fitted to what this timeframe actually holds — never zoomed out
     // into empty space, never inheriting the last token's window
     const n = Math.max(12, Math.min(120, aggLenRef.current || 90));
-    setView({ count: n, offset: 0, priceOff: 0, follow: true });   // live edge, right side
+    setView({ count: n, offset: 0, priceOff: 0, priceZoom: 1, follow: true });   // live edge, right side
     scaleRef.current = { key: null, lo: NaN, hi: NaN };
     setAxisMC(false);                                   // price axis, fresh ratio
     setPinCross(null);
@@ -769,6 +769,14 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     const minRange = mid * 0.02;                     // never tighter than ±1%
     if (hi - lo < minRange) { hi = mid + minRange / 2; lo = mid - minRange / 2; }
     const p8 = (hi - lo) * 0.12 || hi * 0.01; lo -= p8; hi += p8;   // breathing room
+    // vertical zoom: stretch the visible price range around its centre. This is
+    // what gives headroom above the candles for placing bot and visual lines.
+    const pz = Math.max(0.15, Math.min(40, view.priceZoom || 1));
+    if (pz !== 1) {
+      const midP = (hi + lo) / 2;
+      const halfP = ((hi - lo) / 2) * pz;
+      lo = Math.max(1e-12, midP - halfP); hi = midP + halfP;
+    }
     // vertical free-drag: shift the visible price window up/down without clamping
     // horizontal panning never moves this; touch may nudge it within ±0.35
     const vShift = Math.max(-0.35, Math.min(0.35, view.priceOff || 0)) * (hi - lo);
@@ -1094,7 +1102,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       ctx.fillText(tl, Math.min(Math.max(tw / 2, sx), plotW - tw / 2), H - 12);
       ctx.textAlign = "left";
     }
-  }, [agg, total, count, offset, winStart, hue, mode, cross, height, tfMin, trades, clickMode, view.priceOff, highlightTx, pulseTick, traderPrefs, theme, pendingLevels, botRuns, price, axisMC, mcRatio, pinCross]);
+  }, [agg, total, count, offset, winStart, hue, mode, cross, height, tfMin, trades, clickMode, view.priceOff, view.priceZoom, highlightTx, pulseTick, traderPrefs, theme, pendingLevels, botRuns, price, axisMC, mcRatio, pinCross]);
   // a paint error must never leave stale pixels pretending to be a live chart
   const safeDraw = useCallback(() => {
     try { draw(); } catch (e) {
@@ -1355,8 +1363,8 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     const g = geom.current;
     // touch/press starting in the right-hand price-number strip = zoom mode:
     // run finger UP to zoom in, DOWN to zoom out. No pinch, no browser fight.
-    if (g.plotW != null && cx >= g.plotW - 4) {
-      axisRef.current = { sy: cy, c0: count, t0: Date.now(), moved: false };
+    if (g.plotW != null && cx >= g.plotW - (isMobile ? 26 : 4)) {
+      axisRef.current = { sy: cy, c0: count, z0: view.priceZoom || 1, t0: Date.now(), moved: false };
       dragRef.current = null;
       setCross(null);
       return;
@@ -1476,8 +1484,9 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       // up (negative dy) → fewer candles (zoom in); down → more (zoom out)
       const dy = cy - ax.sy;
       if (Math.abs(dy) > 4) ax.moved = true;
-      const factor = Math.pow(1.6, dy / 150); // easier travel — ~1.6× per 150px
-      setView((v) => ({ ...v, count: Math.max(12, Math.min(60000, Math.round(ax.c0 * factor))) }));
+      // down = open the range up (see more above and below), up = tighten it
+      const factor = Math.pow(1.9, dy / 160);
+      setView((v) => ({ ...v, priceZoom: Math.max(0.15, Math.min(40, (ax.z0 || 1) * factor)) }));
       return;
     }
     if (pinCross && e.touches) { setPinCross({ cx, cy }); setCross({ cx, cy }); return; }
@@ -1612,10 +1621,10 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
             </div>
           )}
           <div style={{ position: "absolute", top: -15, right: 4, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 14, lineHeight: 1 }}>
-            <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: 18, offset: 0, priceOff: 0, follow: true }); }}
+            <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: 18, offset: 0, priceOff: 0, priceZoom: 1, follow: true }); }}
               style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 7.5, fontWeight: 800, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>◉ LIVE</button>
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
-              <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, follow: false }); }}
+              <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, priceZoom: 1, follow: false }); }}
                 style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.9)", color: T.dim, cursor: "pointer", fontSize: 7.5, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>⤢ fit</button>
             )}
           </div>
@@ -1634,18 +1643,18 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
           </div>
           <div style={{ position: "absolute", top: 8, right: 82, zIndex: 3, display: "flex", gap: 8, alignItems: "center" }}>
             {eyesToken && <ViewerPills token={eyesToken} small />}
-            <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: 18, offset: 0, priceOff: 0, follow: true }); }}
+            <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: 18, offset: 0, priceOff: 0, priceZoom: 1, follow: true }); }}
               title="Zoom to the live edge and follow the price"
               style={{ height: 24, padding: "0 10px", borderRadius: 6, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.15)", color: T.blue, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: T.mono }}>◉ LIVE</button>
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
-              <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, follow: false }); }}
+              <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, priceZoom: 1, follow: false }); }}
                 style={{ height: 24, padding: "0 8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.85)", color: T.dim, cursor: "pointer", fontSize: 10, fontFamily: T.mono }}>⤢ fit</button>
             )}
           </div>
         </>
       )}
       <div style={{ position: "absolute", bottom: 30, right: 84, zIndex: 3, fontFamily: T.mono, fontSize: 9, letterSpacing: 1, color: synthetic ? T.amber : T.faint, pointerEvents: "none" }}>
-        {synthetic ? "⟲ SYNTH" : "DEXSCREENER"} · drag ⇄ pan · drag price axis ↕ zoom
+        {synthetic ? "⟲ SYNTH" : "DEXSCREENER"} · drag ⇄ pan · drag price axis ↕ stretch · scroll ⇱ zoom
       </div>
       {lineMenu && (
         <>
@@ -2924,7 +2933,7 @@ function TierListModal({ onClose, isMobile, myBest = 0, embed = false }) {
     </div>
   );
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 540, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "80vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 13px", borderBottom: `1px solid ${T.border}` }}>
@@ -3162,7 +3171,7 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
   );
   if (embed) return body;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div data-lbscroll="1" onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 620, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "82vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         {body}
@@ -3184,7 +3193,7 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0 }, valoUsd 
     </div>
   );
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 390, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "80vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 13px", borderBottom: `1px solid ${T.border}` }}>
@@ -3223,7 +3232,7 @@ function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 
   }, [focusUser]);
   const [tab, setTab] = useState(inTop250 ? "board" : "tiers");
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 560, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "82vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 3, padding: "11px 13px 0", borderBottom: `1px solid ${T.border}` }}>
@@ -3362,7 +3371,7 @@ function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned =
   );
   const tot = buys + sells || 1;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 116, background: "rgba(4,6,10,0.84)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 116, background: "rgba(4,6,10,0.84)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 380 : 660, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "88vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, padding: "11px 13px 9px", borderBottom: `1px solid ${T.border}` }}>
@@ -3443,7 +3452,7 @@ function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOp
     <button onClick={() => setTab(k)} style={{ ...chip(tab === k), flex: 1, textAlign: "center", padding: "9px", fontSize: 11, fontWeight: 800 }}>{l}</button>
   );
   return (
-    <div onClick={onClose}
+    <div className="valo-fixed-safe" onClick={onClose}
       style={{ position: "fixed", inset: 0, zIndex: 106, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()}
         style={{ width: "100%", maxWidth: 780, maxHeight: "88vh", display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, overflow: "hidden" }}>
@@ -3514,7 +3523,7 @@ function MyCalloutsModal({ onClose, isMobile, myCallouts = {}, tokens = [], user
   }).filter(Boolean).sort((a, b) => (a.ts || 0) - (b.ts || 0)); // very first → latest
   const bestPeak = rows.reduce((m, r) => Math.max(m, r.peak), 0);
   return (
-    <div onClick={onClose}
+    <div className="valo-fixed-safe" onClick={onClose}
       style={{ position: "fixed", inset: 0, zIndex: 106, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()}
         style={{ width: "100%", maxWidth: 620, maxHeight: "86vh", display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, overflow: "hidden" }}>
@@ -3570,7 +3579,7 @@ function randomHandle(rand) {
 }
 function FollowListModal({ kind, list, onClose, isMobile, onOpenUser, ownerHandle = null, loading = false }) {
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 145, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 145, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 400, maxHeight: "80vh", display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
           <div style={{ fontWeight: 800, fontSize: 14, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -3835,7 +3844,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   return (
     <>
     {dmBoard}
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 137, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 137, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "88vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14 }}>
         {/* profile head */}
@@ -4305,7 +4314,7 @@ function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], o
   const icon = (t) => (t === "callout" ? "📣" : t === "follower" ? "👥" : t === "tier" ? "🏆"
     : t === "rank" ? "🥇" : t === "system" ? "⚙" : t === "dm" ? "✉️" : "🤝");
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 107, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 107, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, maxHeight: "84vh", display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
           <div style={{ fontWeight: 800, fontSize: 14 }}>🔔 Notifications</div>
@@ -4462,7 +4471,7 @@ function BotHubModal({ view, setView, orders = [], tokens = [], selectedId, onSa
     </div>
   );
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 110, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 110, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 440, maxHeight: "84vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
           <div style={{ fontWeight: 800, fontSize: 14 }}>🤖 {view && view.mode === "edit" ? "Edit bot" : "Pending bots"}</div>
@@ -4581,7 +4590,7 @@ function BotRunStatsModal({ run, onClose, isMobile }) {
   const pnl = run.exits.reduce((s, e) => s + e.pnlUsd, 0);
   const up = pnl >= 0;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 111, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 111, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 420, maxHeight: "84vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
           <div>
@@ -5282,7 +5291,7 @@ function pnlSeries(range, seed, unreal, realized) {
   return pts.map((p) => p * scale);
 }
 
-function ActivityLedger({ acts = [], tokens = [], onClose, isMobile, onOpenToken }) {
+function ActivityLedger({ acts = [], tokens = [], onClose, isMobile, onJump }) {
   const [q, setQ] = useState("");
   const [sort, setSort] = useState("recent");     // recent | oldest | biggest | best | worst
   const [from, setFrom] = useState("");
@@ -5323,7 +5332,7 @@ function ActivityLedger({ acts = [], tokens = [], onClose, isMobile, onOpenToken
   });
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 146, background: "rgba(4,6,10,0.8)",
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 146, background: "rgba(4,6,10,0.8)",
       backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 20 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 620, maxHeight: "88vh",
         display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`,
@@ -5381,7 +5390,8 @@ function ActivityLedger({ acts = [], tokens = [], onClose, isMobile, onOpenToken
             const tk = (tokens || []).find((t) => t.sym === a.sym);
             const d = new Date(a.ts || Date.now());
             return (
-              <div key={i} onClick={() => { if (tk && onOpenToken) { onOpenToken(tk.id); onClose && onClose(); } }}
+              <div key={i} onClick={() => { if (tk && onJump) onJump(tk.id, a.tx); }}
+                title={tk ? `Jump to this trade on the $${a.sym} chart` : "This token isn't loaded"}
                 style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 9px", marginTop: 4,
                   border: `1px solid ${T.border}`, borderLeft: `2px solid ${a.side === "buy" ? T.green : T.red}`,
                   background: "#0c0f16", borderRadius: 9, cursor: tk ? "pointer" : "default" }}>
@@ -5412,7 +5422,7 @@ function ActivityLedger({ acts = [], tokens = [], onClose, isMobile, onOpenToken
 function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realizedPnl, unrealizedPnl, extraEquity = 0, walletConnected = true, onConnectWallet,
   tab, setTab, range, setRange, mode, setMode, seed, onDeposit, onWithdraw, onSwap,
   hideBalance, setHideBalance, heldSlot, maxDeposit = 0, maxWithdraw = 0, activity = [], onOpenToken,
-  isMobile = false,
+  isMobile = false, onOpenActivity,
   username, setUsername, isNameTaken, checkHandle,
   nameChangedAt = 0, setNameChangedAt,
   myCallouts = {}, onOpenMyCallouts,
@@ -5443,7 +5453,6 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
     return a + p.amt * (t.price / p.entry) * (p.pay === "SOL" ? SOL_USD : valoUsd);
   }, 0);
   const walletUsd = solBalance * SOL_USD + valoWallet * valoUsd;
-  const [actAll, setActAll] = useState(false);   // the full, searchable ledger
   const totalPnl = realizedPnl + unrealizedPnl;
   const totalEquity = walletUsd + Math.max(0, liveValue) + (extraEquity || 0); // + live bots & escrowed arms
   const [swapAmt, setSwapAmt] = useState("1");
@@ -5794,7 +5803,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           )}
           {/* activity feed — token, amount, PnL if sold, all on one bar, solscan link */}
           <div style={{ marginTop: 10 }}>
-            <div onClick={() => setActAll(true)} title="Open every trade — searchable and sortable"
+            <div onClick={() => onOpenActivity && onOpenActivity()} title="Open every trade — searchable and sortable"
               style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
                 fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1, marginBottom: 7 }}>
               <span style={{ textDecoration: "underline dotted", textUnderlineOffset: 3 }}>📜 ACTIVITY</span>
@@ -5935,10 +5944,6 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
       )}
     </div>
     </div>
-    {actAll && (
-      <ActivityLedger acts={activity} tokens={tokens} isMobile={isMobile}
-        onClose={() => setActAll(false)} onOpenToken={onOpenToken} />
-    )}
     </>
   );
 }
@@ -6331,7 +6336,7 @@ function MobileExpanded({ onClose, chartBlock, tradeStrip, ticketBlock, sym, onC
 
   return (
     <>
-      <div style={{ position: "fixed", inset: 0, zIndex: 44, background: "rgba(4,6,10,0.5)", opacity: 1 - progress, pointerEvents: "none" }} />
+      <div className="valo-fixed-safe" style={{ position: "fixed", inset: 0, zIndex: 44, background: "rgba(4,6,10,0.5)", opacity: 1 - progress, pointerEvents: "none" }} />
 
       <div style={{
         position: "fixed", inset: 0, zIndex: 45, background: T.bg,
@@ -6664,7 +6669,7 @@ function WhitepaperModal({ onClose, isMobile }) {
   const activeSec = WP_SECTIONS.find((s) => s.id === active) || WP_SECTIONS[0];
 
   return (
-    <div onClick={onClose}
+    <div className="valo-fixed-safe" onClick={onClose}
       style={{ position: "fixed", inset: 0, zIndex: 106, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex",
         alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
         padding: isMobile ? "max(12px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
@@ -7376,7 +7381,7 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
   }, 0);
 
   return (
-    <div onClick={onClose}
+    <div className="valo-fixed-safe" onClick={onClose}
       style={{ position: "fixed", inset: 0, zIndex: 107, background: "rgba(4,6,10,0.6)", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div onClick={(e) => e.stopPropagation()}
         style={{ width: "min(92vw, 360px)", background: T.panel, border: `1px solid ${col}`, borderRadius: 14, padding: 16, boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
@@ -8102,7 +8107,8 @@ export default function App() {
     }, 340);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile, sel]);
-  const [priceMode, setPriceMode] = useState(0); // header price tap: 0 price · 1 market cap · 2 your tokens
+  const [priceMode, setPriceMode] = useState(0);
+  const priceTapRef = useRef(0);          // separates a tap from a hold on mobile // header price tap: 0 price · 1 market cap · 2 your tokens
   const chartDrag = useRef(null);
   const chartRaf = useRef(0);
   const chartDragStart = (which) => (e) => {
@@ -8357,6 +8363,7 @@ export default function App() {
   const [supplyHeld] = useState(() => rnd(4e7, 9e7));     // circulating held by all claimants
   const [pendingEpochs, setPendingEpochs] = useState([]); // [{epoch, amount, root, weightPct, holdPct, volPct}]
   const [claimOpen, setClaimOpen] = useState(false);
+  const [actAllOpen, setActAllOpen] = useState(false);   // the full, searchable ledger
   const [wpOpen, setWpOpen] = useState(false); // whitepaper modal
   const [claiming, setClaiming] = useState(false);
   const [heldEpochs, setHeldEpochs] = useState(0);        // consecutive epochs held → stacking bonus
@@ -10806,10 +10813,26 @@ export default function App() {
                         userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" }}>
                     <TokenAvatar sym={selected.sym} hue={selected.hue} img={selected.img} size={22} />
                     <span style={{ fontWeight: 800, fontSize: 16 }}>{selected.sym}<span style={{ color: T.faint, fontWeight: 400 }}>/SOL</span></span>
-                    <span onClick={() => setPriceMode((m) => (m + 1) % 3)} title="Tap: price → market cap → your tokens"
-                      style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 3 }}>
+                    <span
+                      onClick={(e) => { e.stopPropagation(); setPriceMode((m) => (m + 1) % 3); }}
+                      onTouchStart={(e) => { e.stopPropagation(); priceTapRef.current = Date.now(); }}
+                      onTouchEnd={(e) => {
+                        e.stopPropagation();
+                        // a quick tap cycles; a long press belongs to the watchlist gesture
+                        if (Date.now() - (priceTapRef.current || 0) < 400) {
+                          e.preventDefault();
+                          setPriceMode((m) => (m + 1) % 3);
+                        }
+                      }}
+                      title="Tap: price → market cap → your tokens"
+                      style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700, cursor: "pointer",
+                        textDecoration: "underline dotted", textUnderlineOffset: 3,
+                        WebkitTapHighlightColor: "transparent", touchAction: "manipulation",
+                        padding: "2px 0" }}>
                       {priceMode === 1 ? `MC ${fmt$(mcOf(selected))}`
-                        : priceMode === 2 ? `${positions[selected.id] && positions[selected.id].amt > 0 ? fmtQty(posTokenQty(selected, positions[selected.id])) : "0"} ${selected.sym}`
+                        : priceMode === 2 ? (positions[selected.id] && positions[selected.id].amt > 0
+                            ? `${fmtQty(posTokenQty(selected, positions[selected.id]))} ${selected.sym}`
+                            : `no ${selected.sym} held`)
                         : `$${fmtP(selected.price)}`}
                     </span>
                     </span>
@@ -12227,7 +12250,7 @@ export default function App() {
             </button>
             <PortfolioPanel big
               solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
@@ -12433,6 +12456,16 @@ export default function App() {
       )}
 
       {/* WHITEPAPER MODAL — interactive reader with expandable TOC sidebar */}
+      {actAllOpen && (
+        <ActivityLedger acts={myActivity} tokens={tokens} isMobile={isMobile}
+          onClose={() => setActAllOpen(false)}
+          onJump={(tokenId, tx) => {
+            // land on that chart with the marker lit, but don't open its receipt
+            setActAllOpen(false);
+            openAnyToken(tokenId);
+            if (tx) { setHighlightTx(tx); setTimeout(() => setHighlightTx(null), 6000); }
+          }} />
+      )}
       {wpOpen && <WhitepaperModal onClose={() => setWpOpen(false)} isMobile={isMobile} />}
       {calloutHubOpen && <CalloutHubModal onClose={closeAllPages} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
         onOpenUser={(u) => { setCalloutHubOpen(false); setProfileUser(u); }} />}
@@ -12536,7 +12569,7 @@ export default function App() {
       {/* rail tabs — one row so they can never overlap each other, parked
           clear of the FULLSCREEN button that owns the corner */}
       {!isMobile && (
-        <div style={{ position: "fixed", top: 0, right: 172, zIndex: 56, display: "flex", alignItems: "flex-start", gap: 8 }}>
+        <div className="valo-fixed-safe" style={{ position: "fixed", top: 0, right: 172, zIndex: 56, display: "flex", alignItems: "flex-start", gap: 8 }}>
       {sb && !isMobile && (
         <button onClick={() => setCloudOpen(true)}
           title={cloudUser ? `Signed in as ${cloudUser.email} — portfolio syncs to the cloud` : "Sign in — your paper portfolio, watchlist and bots follow you across devices"}
@@ -12615,7 +12648,7 @@ export default function App() {
         </button>
       )}
       {ecoFull && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 102, background: T.bg, display: "flex", flexDirection: "column",
+        <div className="valo-fixed-safe" style={{ position: "fixed", inset: 0, zIndex: 102, background: T.bg, display: "flex", flexDirection: "column",
           opacity: ecoDim ? 0.06 : 1, pointerEvents: ecoDim ? "none" : "auto", transition: "opacity .22s ease" }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "max(10px, env(safe-area-inset-top)) 10px 8px", borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
             <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.04)", border: `1px solid ${VALO_PURPLE}`, borderRadius: 9, padding: "8px 10px" }}>
@@ -12689,7 +12722,7 @@ export default function App() {
         return (
           <>
             <div onClick={() => setPosDrawer(false)} style={{ position: "fixed", inset: 0, zIndex: 135, background: "rgba(4,6,10,0.55)" }} />
-            <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 136, width: "min(92vw, 380px)", background: "rgba(12,15,22,0.98)",
+            <div className="valo-fixed-safe" style={{ position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 136, width: "min(92vw, 380px)", background: "rgba(12,15,22,0.98)",
               boxShadow: "-12px 0 40px rgba(0,0,0,0.6)", overflowY: "auto", padding: "max(10px, env(safe-area-inset-top)) 12px 16px",
               animation: "posSlide .28s cubic-bezier(.22,.8,.3,1)" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
@@ -12994,7 +13027,7 @@ export default function App() {
                 realized24={realized24For(selected.sym)} />}
       {/* MOBILE AUTO-TRADER PAGE — chart + bot metrics on one screen */}
       {isMobile && mobileBotScreen && selected && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 66, background: T.bg, display: "flex", flexDirection: "column",
+        <div className="valo-fixed-safe" style={{ position: "fixed", inset: 0, zIndex: 66, background: T.bg, display: "flex", flexDirection: "column",
           userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", borderBottom: `1px solid ${T.border}` }}>
             <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 800 }}>🤖 AUTO-TRADER · <span style={{ color: accent(selected.hue) }}>${selected.sym}</span></div>
@@ -13611,7 +13644,7 @@ export default function App() {
             style={{ position: "fixed", inset: 0, zIndex: 102, background: "rgba(4,6,10,0.55)", backdropFilter: "blur(2px)",
               opacity: portfolioDrawer ? 1 : 0, pointerEvents: portfolioDrawer ? "auto" : "none", transition: "opacity .28s ease" }} />
 
-          <div style={{
+          <div className="valo-fixed-safe" style={{
             position: "fixed", top: 0, right: 0, bottom: 0, left: 0, zIndex: 103,
             width: "100vw", background: "rgba(12,15,22,0.98)",
             boxShadow: "-12px 0 40px rgba(0,0,0,0.6)",
@@ -13625,7 +13658,7 @@ export default function App() {
             </div>
             <PortfolioPanel big
               solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
@@ -13718,6 +13751,13 @@ export default function App() {
         @media (hover: none), (pointer: coarse) {
           *{ scrollbar-width: none; }
           ::-webkit-scrollbar{ width:0; height:0; background: transparent; }
+        }
+        /* 📱 nothing sits under the status bar. Fixed overlays don't inherit the
+           root inset, so they're padded here — otherwise taps near the top of a
+           modal land on the clock/wifi/battery instead of the button. */
+        @media (hover: none), (pointer: coarse) {
+          .valo-fixed-safe { padding-top: env(safe-area-inset-top, 0px) !important; }
+          .valo-sheet-safe { padding-bottom: env(safe-area-inset-bottom, 0px) !important; }
         }
         /* the page scroller itself stays invisible on every device — panels keep theirs */
         html, body { scrollbar-width: none; -ms-overflow-style: none; }
