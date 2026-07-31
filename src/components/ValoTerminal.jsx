@@ -617,7 +617,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   const total = agg.length;
   // room to zoom past what's loaded — the gap is what pulls older candles in
   // frame everything we hold plus a small margin — never more
-  const zoomCap = Math.max(24, Math.min(3000, Math.round(agg.length * 1.1) + 12));
+  const zoomCap = Math.max(60, Math.min(4000, Math.round(agg.length * 1.5) + 20));
   const count = Math.max(12, Math.min(view.count, zoomCap));
   // a small, fixed margin rather than most of a screen: enough to feel free,
   // not enough to strand the candles in a corner
@@ -726,7 +726,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     // a single freak candle shouldn't flatten everything else: if the range is
     // extreme, scale to the 2nd–98th percentile instead of the absolute extremes.
     // Nothing is hidden — outliers simply run past the edge.
-    if (scaleWin.length > 12 && lo > 0 && hi / lo > 60) {
+    if (scaleWin.length > 12 && lo > 0 && hi / lo > 400) {
       const lows = scaleWin.map((c) => c.l).sort((a, b) => a - b);
       const highs = scaleWin.map((c) => c.h).sort((a, b) => a - b);
       const pLo = lows[Math.floor(lows.length * 0.02)];
@@ -752,12 +752,13 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     const sKey = `${sym || ""}|${tfMin}|${count}`;
     const sc = scaleRef.current;
     if (sc.key === sKey && Number.isFinite(sc.lo) && Number.isFinite(sc.hi) && sc.hi > sc.lo) {
-      // hold the locked axis; only the newest candle may stretch it, so a live
-      // breakout stays visible while old history scrolling by changes nothing
+      // hold the locked range, but always grow to fit what's actually visible —
+      // a candle on screen is never allowed to run off the top or bottom
+      lo = Math.min(sc.lo, lo);
+      hi = Math.max(sc.hi, hi);
       const last = agg[total - 1];
-      const growLo = last && Number.isFinite(last.l) ? Math.min(sc.lo, last.l) : sc.lo;
-      const growHi = last && Number.isFinite(last.h) ? Math.max(sc.hi, last.h) : sc.hi;
-      lo = growLo; hi = growHi;
+      if (last && Number.isFinite(last.l)) lo = Math.min(lo, last.l);
+      if (last && Number.isFinite(last.h)) hi = Math.max(hi, last.h);
     }
     scaleRef.current = { key: sKey, lo, hi };
     // floor the range: a series that barely moves stays a flat line instead of
@@ -765,7 +766,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     const mid = (hi + lo) / 2 || hi || 1;
     const minRange = mid * 0.02;                     // never tighter than ±1%
     if (hi - lo < minRange) { hi = mid + minRange / 2; lo = mid - minRange / 2; }
-    const p8 = (hi - lo) * 0.1 || hi * 0.01; lo -= p8; hi += p8;
+    const p8 = (hi - lo) * 0.12 || hi * 0.01; lo -= p8; hi += p8;   // breathing room
     // vertical free-drag: shift the visible price window up/down without clamping
     // horizontal panning never moves this; touch may nudge it within ±0.35
     const vShift = Math.max(-0.35, Math.min(0.35, view.priceOff || 0)) * (hi - lo);
