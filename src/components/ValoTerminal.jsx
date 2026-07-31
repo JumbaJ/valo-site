@@ -8533,6 +8533,77 @@ export default function App() {
   const [supplyHeld] = useState(() => rnd(4e7, 9e7));     // circulating held by all claimants
   const [pendingEpochs, setPendingEpochs] = useState([]); // [{epoch, amount, root, weightPct, holdPct, volPct}]
   const [claimOpen, setClaimOpen] = useState(false);
+  // ⛓ real trading (off unless the server enables it)
+  const [onchain, setOnchain] = useState({ enabled: false, maxSol: 0 });
+  const [realOrder, setRealOrder] = useState(null);   // the order awaiting confirmation
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/swap?mode=quote&outputMint=So11111111111111111111111111111111111111112&amount=1000");
+        const j = await r.json();
+        setOnchain({ enabled: !!(j && j.enabled), maxSol: (j && j.quote && j.quote.maxSol) || 0 });
+      } catch (e) { setOnchain({ enabled: false, maxSol: 0 }); }
+    })();
+  }, []);
+
+  // ask for a quote, then let the user decide. Two separate steps, always.
+  const quoteRealOrder = async (token, side, sol) => {
+    if (!onchain.enabled || !wallet || !wallet.address || !token || !token.liveMint) return;
+    const SOLM = "So11111111111111111111111111111111111111112";
+    const inputMint = side === "buy" ? SOLM : token.liveMint;
+    const outputMint = side === "buy" ? token.liveMint : SOLM;
+    const amount = side === "buy" ? Math.floor(sol * 1e9) : null;
+    if (!amount) return;                                    // selling tokens comes later
+    setRealOrder({ stage: "quoting", token, side, sol });
+    try {
+      const r = await fetch(`/api/swap?mode=quote&inputMint=${inputMint}&outputMint=${outputMint}&amount=${amount}&slippageBps=100`);
+      const j = await r.json();
+      if (!r.ok || j.error) { setRealOrder({ stage: "error", token, side, sol, msg: j.error || "no route" }); return; }
+      setRealOrder({ stage: "review", token, side, sol, quote: j.quote, inputMint, outputMint, amount });
+    } catch (e) {
+      setRealOrder({ stage: "error", token, side, sol, msg: String(e.message || e) });
+    }
+  };
+
+  // build → wallet signs → network. VALO never signs.
+  const submitRealOrder = async () => {
+    const o = realOrder;
+    if (!o || o.stage !== "review" || !wallet) return;
+    const ph = getProvider();
+    if (!ph) { setRealOrder({ ...o, stage: "error", msg: "Phantom not found" }); return; }
+    setRealOrder({ ...o, stage: "signing" });
+    try {
+      const r = await fetch(`/api/swap?mode=build&inputMint=${o.inputMint}&outputMint=${o.outputMint}&amount=${o.amount}&slippageBps=100&user=${wallet.address}`);
+      const j = await r.json();
+      if (!r.ok || j.error || !j.swapTransaction) throw new Error(j.error || "could not build the transaction");
+
+      // hand the unsigned bytes to the wallet — the user sees exactly what they sign
+      const raw = Uint8Array.from(atob(j.swapTransaction), (c) => c.charCodeAt(0));
+      const signed = await ph.signTransaction
+        ? await ph.signTransaction(await window.solanaWeb3Deserialize?.(raw) ?? raw)
+        : null;
+      // Phantom can also sign+send in one step, which avoids bundling a web3 lib
+      let sig = null;
+      if (ph.signAndSendTransaction) {
+        const out = await ph.signAndSendTransaction({ message: raw });
+        sig = out && (out.signature || out);
+      } else if (signed && signed.serialize) {
+        const b64 = btoa(String.fromCharCode(...signed.serialize()));
+        const send = await fetch("/api/sendtx", { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ signed: b64 }) });
+        const sj = await send.json();
+        if (!sj.ok) throw new Error(sj.error || "the network rejected it");
+        sig = sj.signature;
+      } else throw new Error("this wallet can't sign transactions here");
+
+      setRealOrder({ ...o, stage: "done", sig });
+      pushNotif({ type: "system", user: null, tokenId: o.token.id,
+        text: `⛓ real order sent — ${o.sol} SOL into $${o.token.sym}. Track it on Solscan.` });
+    } catch (e) {
+      setRealOrder({ ...o, stage: "error", msg: String(e.message || e) });
+    }
+  };
+
   const [actAllOpen, setActAllOpen] = useState(false);   // the full, searchable ledger
   const [wpOpen, setWpOpen] = useState(false); // whitepaper modal
   const [claiming, setClaiming] = useState(false);
@@ -12714,6 +12785,116 @@ export default function App() {
       )}
 
       {/* WHITEPAPER MODAL — interactive reader with expandable TOC sidebar */}
+      {realOrder && (
+        <div onClick={() => realOrder.stage !== "signing" && setRealOrder(null)}
+          className="valo-fixed-safe"
+          style={{ position: "fixed", inset: 0, zIndex: 160, background: "rgba(4,6,10,0.86)",
+            backdropFilter: "blur(5px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 14 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 400, background: T.panel,
+            border: `1.5px solid ${T.amber}77`, borderRadius: 14, overflow: "hidden" }}>
+            <div style={{ padding: "10px 13px", borderBottom: `1px solid ${T.border}`, background: "rgba(240,185,11,0.08)" }}>
+              <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1, color: T.amber }}>
+                ⛓ REAL ORDER · ON-CHAIN
+              </div>
+              <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 3 }}>
+                This spends actual funds from your wallet. It is not paper trading.
+              </div>
+            </div>
+
+            <div style={{ padding: "12px 13px" }}>
+              {realOrder.stage === "quoting" && (
+                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.dim, textAlign: "center", padding: "18px 0" }}>
+                  finding the best route…
+                </div>
+              )}
+
+              {realOrder.stage === "review" && realOrder.quote && (() => {
+                const q = realOrder.quote;
+                const outUi = (+q.outAmount || 0) / 1e6;         // most SPL memes use 6 decimals
+                const worst = (+q.otherAmountThreshold || 0) / 1e6;
+                const impact = q.priceImpactPct;
+                const hot = impact != null && impact > 3;
+                return (
+                  <>
+                    <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, color: T.text, marginBottom: 8 }}>
+                      Buy ${realOrder.token.sym} with {realOrder.sol} SOL
+                    </div>
+                    {[["you receive (est.)", `${fmtQty(outUi)} ${realOrder.token.sym}`, T.green],
+                      ["worst case", `${fmtQty(worst)} ${realOrder.token.sym}`, T.dim],
+                      ["price impact", impact != null ? `${impact}%` : "—", hot ? T.red : T.dim],
+                      ["slippage limit", `${(q.slippageBps / 100).toFixed(2)}%`, T.dim],
+                      ["route", q.routeLabels && q.routeLabels.length ? q.routeLabels.join(" → ") : `${q.routeHops} hop(s)`, T.faint]]
+                      .map(([k, v, c]) => (
+                        <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 10,
+                          fontFamily: T.mono, fontSize: 9.5, padding: "4px 0", borderTop: `1px solid ${T.border}` }}>
+                          <span style={{ color: T.faint }}>{k}</span>
+                          <span style={{ color: c, fontWeight: 800, textAlign: "right" }}>{v}</span>
+                        </div>
+                      ))}
+                    {hot && (
+                      <div style={{ marginTop: 8, padding: "7px 9px", borderRadius: 8,
+                        border: `1px solid ${T.red}66`, background: "rgba(234,57,67,0.1)",
+                        fontFamily: T.mono, fontSize: 8.5, color: T.red, lineHeight: 1.5 }}>
+                        ⚠ Price impact above 3% — this pool is thin and you will lose value on the fill.
+                      </div>
+                    )}
+                    <button onClick={submitRealOrder}
+                      style={{ width: "100%", marginTop: 11, border: "none", borderRadius: 11, padding: "13px",
+                        background: T.amber, color: "#0a0713", fontFamily: T.mono, fontSize: 11.5,
+                        fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>
+                      REVIEW IN WALLET →
+                    </button>
+                    <button onClick={() => setRealOrder(null)}
+                      style={{ width: "100%", marginTop: 6, border: `1px solid ${T.border2}`, borderRadius: 10,
+                        padding: "9px", background: "transparent", color: T.dim, fontFamily: T.mono,
+                        fontSize: 10, cursor: "pointer" }}>Cancel</button>
+                    <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 8, lineHeight: 1.5 }}>
+                      Phantom will show you the exact transaction. Nothing moves until you approve it there.
+                    </div>
+                  </>
+                );
+              })()}
+
+              {realOrder.stage === "signing" && (
+                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.amber, textAlign: "center", padding: "18px 0", lineHeight: 1.7 }}>
+                  waiting for your wallet…<br />
+                  <span style={{ fontSize: 8.5, color: T.faint }}>approve or reject it in Phantom</span>
+                </div>
+              )}
+
+              {realOrder.stage === "done" && (
+                <div style={{ textAlign: "center", padding: "10px 0" }}>
+                  <div style={{ fontSize: 26 }}>✓</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: T.green, marginTop: 4 }}>ORDER SENT</div>
+                  {realOrder.sig && (
+                    <a href={`https://solscan.io/tx/${realOrder.sig}`} target="_blank" rel="noopener noreferrer"
+                      style={{ display: "inline-block", marginTop: 8, fontFamily: T.mono, fontSize: 9,
+                        color: T.amber, textDecoration: "underline" }}>view on Solscan ↗</a>
+                  )}
+                  <button onClick={() => { setRealOrder(null); if (wallet) loadWalletChain(wallet.address); }}
+                    style={{ width: "100%", marginTop: 12, border: `1px solid ${T.border2}`, borderRadius: 10,
+                      padding: "10px", background: "transparent", color: T.dim, fontFamily: T.mono, fontSize: 10, cursor: "pointer" }}>
+                    Done
+                  </button>
+                </div>
+              )}
+
+              {realOrder.stage === "error" && (
+                <div style={{ padding: "6px 0" }}>
+                  <div style={{ fontFamily: T.mono, fontSize: 10, color: T.red, lineHeight: 1.6 }}>
+                    Nothing was sent.<br /><span style={{ color: T.faint, fontSize: 9 }}>{realOrder.msg}</span>
+                  </div>
+                  <button onClick={() => setRealOrder(null)}
+                    style={{ width: "100%", marginTop: 10, border: `1px solid ${T.border2}`, borderRadius: 10,
+                      padding: "10px", background: "transparent", color: T.dim, fontFamily: T.mono, fontSize: 10, cursor: "pointer" }}>
+                    Close
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {actAllOpen && (
         <ActivityLedger acts={myActivity} tokens={tokens} isMobile={isMobile}
           onClose={() => setActAllOpen(false)}
