@@ -2336,7 +2336,7 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
   );
 }
 
-function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, setAmount, pay, setPay, position, solBalance, valoBalance, positions, tokens, onOpenToken, onCloseAll, bestMult, pctSel, setPctSel, pendingOrders = [], onOpenBot, onCancelBot, onPosTrade, onDraftLevel, realized24 = 0, botRuns = [] }) {
+function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, setAmount, pay, setPay, position, solBalance, valoBalance, positions, tokens, onOpenToken, onCloseAll, bestMult, pctSel, setPctSel, pendingOrders = [], onOpenBot, onCancelBot, onPosTrade, onDraftLevel, realized24 = 0, botRuns = [], onRealOrder, onChainReady = false, onChainMax = 0}) {
   const [dtBuyPcts, setDtBuyPcts] = useState([10, 25, 50, 75, 100]);  // dbl-click / right-click a chip to retype it
   const [dtSellPcts, setDtSellPcts] = useState([10, 25, 50, 75, 100]);
   const [dtFixed, setDtFixed] = useState([0.5, 1, 2, 5]);
@@ -2470,6 +2470,19 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
                   style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "4px 0", fontSize: 9, fontWeight: 800, color: T.green }}>{v}</button>
               ))}
             </div>
+            {onChainReady && (
+              <button onClick={() => onRealOrder && onRealOrder(token, "buy", Math.min(amt, onChainMax))}
+                title={`Spend real SOL from your connected wallet (max ${onChainMax} SOL)`}
+                style={{ width: "100%", marginBottom: 7, border: `1.5px solid ${T.amber}`,
+                  background: "rgba(240,185,11,0.12)", color: T.amber, borderRadius: 11,
+                  padding: "10px", cursor: "pointer", fontFamily: T.mono, fontSize: 10.5,
+                  fontWeight: 900, letterSpacing: 1 }}>
+                ⛓ REAL BUY · {Math.min(amt, onChainMax)} SOL
+                <span style={{ display: "block", fontSize: 7.5, fontWeight: 700, opacity: 0.85, letterSpacing: 0 }}>
+                  actual funds · max {onChainMax} SOL while testing
+                </span>
+              </button>
+            )}
             <button onClick={() => onExecute({ side: "buy", pay, amt, mode: "instant", tax: taxFor(pay), burn: fee.total, legs: [] })}
               style={{ width: "100%", border: "none", borderRadius: 9, padding: "10px 6px", fontFamily: T.mono, fontWeight: 900, cursor: "pointer", background: T.green, color: "#07130d", boxShadow: "0 0 16px rgba(22,199,132,0.25)", lineHeight: 1.25 }}>
               <div style={{ fontSize: 12.5 }}>⚡ BUY</div>
@@ -12525,7 +12538,11 @@ export default function App() {
                 onCancelBot={cancelBot} onSellRun={sellRun} onOpenBotRun={(id) => setBotRunOpen(id)}
                 onOpenTokenAuto={(tid, botId) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(botId || null); }} />
             ) : selected ? (
-              <DesktopTradePanel token={selected} botRuns={botRuns} onExecute={(o, tok) => execute(tok || selected, o)}
+              <DesktopTradePanel token={selected} botRuns={botRuns}
+                onRealOrder={quoteRealOrder}
+                onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
+                onChainMax={onchain.maxSol || 0}
+                onExecute={(o, tok) => execute(tok || selected, o)}
                 clickMode={clickMode} setClickMode={setClickMode}
                 amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
                 pctSel={pctSel} setPctSel={setPctSel}
