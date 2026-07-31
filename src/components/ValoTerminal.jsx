@@ -774,9 +774,10 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     const p8 = (hi - lo) * 0.12 || hi * 0.01;
     // never let padding drive the floor to (or below) zero: on a wide range that
     // both breaks log scaling and squashes everything into a hairline
-    lo = Math.max(trueLo * 0.55, trueLo - p8);
+    // a log axis wants proportional headroom, not a flat subtraction
+    lo = trueLo > 0 ? trueLo * 0.82 : Math.max(1e-15, trueHi * 1e-6);
     if (!(lo > 0)) lo = Math.max(1e-15, trueHi * 1e-6);
-    hi += p8;
+    hi = trueHi > 0 ? trueHi * 1.18 : hi + p8;
     // vertical zoom: stretch the visible price range around its centre. This is
     // what gives headroom above the candles for placing bot and visual lines.
     const pz = Math.max(0.15, Math.min(40, view.priceZoom || 1));
@@ -830,7 +831,12 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     ctx.fillText("↕", plotW + padR / 2, padT + 8);
     ctx.font = `10px ${T.mono}`; ctx.textAlign = "left";
     for (let i = 0; i <= 5; i++) {
-      const p = lo + ((hi - lo) * i) / 5, yy = y(p);
+      // even steps in LOG space when the axis is logarithmic, so every decade
+      // gets a line and the lower range stays readable
+      const p = logOn
+        ? Math.exp(lgLo + ((lgHi - lgLo) * i) / 5)
+        : lo + ((hi - lo) * i) / 5;
+      const yy = y(p);
       ctx.strokeStyle = "rgba(255,255,255,0.045)";
       ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(plotW, yy); ctx.stroke();
       ctx.fillStyle = T.faint; ctx.fillText(fmtAxis(p), plotW + 8, yy);
