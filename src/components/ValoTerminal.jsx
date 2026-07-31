@@ -5524,7 +5524,7 @@ function ActivityLedger({ acts = [], tokens = [], onClose, isMobile, onJump }) {
 function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realizedPnl, unrealizedPnl, extraEquity = 0, walletConnected = true, onConnectWallet,
   tab, setTab, range, setRange, mode, setMode, seed, onDeposit, onWithdraw, onSwap,
   hideBalance, setHideBalance, heldSlot, maxDeposit = 0, maxWithdraw = 0, activity = [], onOpenToken,
-  isMobile = false, onOpenActivity,
+  isMobile = false, onOpenActivity, wallet = null, walletChain = null, onDisconnectWallet,
   username, setUsername, isNameTaken, checkHandle,
   nameChangedAt = 0, setNameChangedAt,
   myCallouts = {}, onOpenMyCallouts,
@@ -5617,6 +5617,39 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
     <>
     <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14, marginTop: 12, position: "relative", overflow: "hidden" }}>
       {/* PHANTOM GATE — funds stay blurred until the user's own wallet is in */}
+      {walletConnected && wallet && (
+        <div style={{ border: `1px solid ${wallet.verified ? T.green + "66" : T.border2}`, borderRadius: 11,
+          background: wallet.verified ? "rgba(22,199,132,0.06)" : "rgba(255,255,255,0.02)",
+          padding: "9px 11px", marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 13 }}>👻</span>
+            <a href={`https://solscan.io/account/${wallet.address}`} target="_blank" rel="noopener noreferrer"
+              style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: T.text, textDecoration: "none" }}>
+              {wallet.address.slice(0, 4)}…{wallet.address.slice(-4)}
+            </a>
+            {wallet.verified && (
+              <span title="You signed a message proving you hold this wallet"
+                style={{ fontFamily: T.mono, fontSize: 7, fontWeight: 900, letterSpacing: 1, color: T.green,
+                  border: `1px solid ${T.green}66`, borderRadius: 5, padding: "1px 5px" }}>✓ VERIFIED</span>
+            )}
+            <button onClick={onDisconnectWallet}
+              style={{ marginLeft: "auto", border: `1px solid ${T.border2}`, background: "transparent",
+                color: T.faint, borderRadius: 7, padding: "3px 8px", cursor: "pointer",
+                fontFamily: T.mono, fontSize: 8.5 }}>DISCONNECT</button>
+          </div>
+          {walletChain && (
+            <div style={{ display: "flex", gap: 12, marginTop: 6, fontFamily: T.mono, fontSize: 9, color: T.dim }}>
+              <span>ON-CHAIN <b style={{ color: T.text }}>{walletChain.sol != null ? walletChain.sol.toFixed(3) : "—"} SOL</b></span>
+              <span>TOKENS <b style={{ color: T.text }}>{fmt$(walletChain.tokensUsd || 0)}</b></span>
+              <span style={{ color: T.faint }}>{walletChain.holdingsCount || 0} positions</span>
+            </div>
+          )}
+          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 6, lineHeight: 1.5 }}>
+            Read-only. VALO can't move your funds and never asks for a transaction —
+            trading on this platform is still paper.
+          </div>
+        </div>
+      )}
       {!walletConnected && (
         <div style={{ position: "absolute", inset: 0, zIndex: 6, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: 20,
           background: "rgba(10,13,19,0.35)", backdropFilter: "blur(2px)" }}>
@@ -9676,14 +9709,92 @@ export default function App() {
     document.addEventListener("fullscreenchange", on);
     return () => document.removeEventListener("fullscreenchange", on);
   }, []);
-  const connectPhantom = async () => {
-    try {
-      const ph = typeof window !== "undefined" && window.solana;
-      if (ph && ph.isPhantom) { await ph.connect(); setWalletConnected(true); return; }
-    } catch (e) { /* user dismissed — stay locked */ return; }
-    // no extension (or mobile in-app) — pre-mainnet demo unlock
-    setWalletConnected(true);
+  const [wallet, setWallet] = useState(null);        // { address, verified }
+  const [walletBusy, setWalletBusy] = useState(false);
+  const [walletChain, setWalletChain] = useState(null); // real on-chain balances
+
+  const getProvider = () => {
+    if (typeof window === "undefined") return null;
+    const p = window.phantom?.solana || window.solana;
+    return p && p.isPhantom ? p : null;
   };
+
+  // read the connected wallet's real holdings (never its keys)
+  const loadWalletChain = useCallback(async (addr) => {
+    if (!addr) return;
+    try {
+      const r = await fetch(`/api/wallet?address=${encodeURIComponent(addr)}`);
+      if (!r.ok) return;
+      const j = await r.json();
+      if (j && !j.error) setWalletChain(j);
+    } catch (e) {}
+  }, []);
+
+  const connectPhantom = async () => {
+    const ph = getProvider();
+    if (!ph) {
+      // no extension: send them to Phantom rather than pretending it worked
+      if (typeof window !== "undefined") {
+        const isPhone = /iPhone|iPad|Android/i.test(navigator.userAgent);
+        window.open(isPhone
+          ? `https://phantom.app/ul/browse/${encodeURIComponent(window.location.href)}`
+          : "https://phantom.app/download", "_blank", "noopener");
+      }
+      return;
+    }
+    setWalletBusy(true);
+    try {
+      const res = await ph.connect();                       // user approves in Phantom
+      const addr = (res && res.publicKey ? res.publicKey : ph.publicKey)?.toString();
+      if (!addr) throw new Error("no public key");
+
+      // prove they hold the key — a signature, not a transaction. Nothing moves.
+      let verified = false;
+      try {
+        const nonce = Math.random().toString(36).slice(2, 10);
+        const msg = `VALO — verify wallet ownership\n\nwallet: ${addr}\nnonce: ${nonce}\n\nThis signature proves you hold this wallet.\nIt authorises nothing and moves no funds.`;
+        const sig = await ph.signMessage(new TextEncoder().encode(msg), "utf8");
+        verified = !!(sig && (sig.signature || sig));
+      } catch (e) { /* they declined the signature — still connected, just unverified */ }
+
+      setWallet({ address: addr, verified });
+      setWalletConnected(true);
+      loadWalletChain(addr);
+      pushNotif({ type: "system", user: null, tokenId: null,
+        text: verified
+          ? `Wallet ${addr.slice(0, 4)}…${addr.slice(-4)} connected and verified — trading stays on paper.`
+          : `Wallet ${addr.slice(0, 4)}…${addr.slice(-4)} connected. Sign the message any time to verify ownership.` });
+    } catch (e) {
+      // user dismissed the Phantom prompt — leave everything as it was
+    }
+    setWalletBusy(false);
+  };
+
+  const disconnectWallet = async () => {
+    const ph = getProvider();
+    try { if (ph && ph.disconnect) await ph.disconnect(); } catch (e) {}
+    setWallet(null); setWalletChain(null); setWalletConnected(false);
+  };
+
+  // reconnect silently if Phantom already trusts this site, and follow account changes
+  useEffect(() => {
+    const ph = getProvider();
+    if (!ph) return;
+    ph.connect({ onlyIfTrusted: true })
+      .then((res) => {
+        const addr = (res && res.publicKey ? res.publicKey : ph.publicKey)?.toString();
+        if (addr) { setWallet({ address: addr, verified: false }); setWalletConnected(true); loadWalletChain(addr); }
+      })
+      .catch(() => {});
+    const onAcc = (pk) => {
+      const addr = pk && pk.toString ? pk.toString() : null;
+      if (addr) { setWallet({ address: addr, verified: false }); loadWalletChain(addr); }
+      else { setWallet(null); setWalletChain(null); setWalletConnected(false); }
+    };
+    ph.on && ph.on("accountChanged", onAcc);
+    return () => { ph.off && ph.off("accountChanged", onAcc); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [valoStatsOpen, setValoStatsOpen] = useState(false); // ◆ $VALO token stats pop-out
   // the SITE burn keeps climbing with everyone else's trades, live
   useEffect(() => {
@@ -12354,7 +12465,7 @@ export default function App() {
             </button>
             <PortfolioPanel big
               solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
@@ -13762,7 +13873,7 @@ export default function App() {
             </div>
             <PortfolioPanel big
               solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
