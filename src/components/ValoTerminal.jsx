@@ -5051,7 +5051,7 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
 }
 
 // PRO LAYOUT order ticket — one wide bar under the chart, buy & sell side by side
-function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, valoBalance = 0, position, onExecute, onPosTrade, clickMode, setClickMode, realized24 = 0 }) {
+function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, valoBalance = 0, position, onExecute, onPosTrade, clickMode, setClickMode, realized24 = 0, onRealOrder, onChainReady = false, onChainMax = 0}) {
   const [poPcts, setPoPcts] = useState([25, 50, 75, 100]);      // dbl-click / right-click to retype
   const [poFixed, setPoFixed] = useState([0.5, 1, 2, 5]);
   const [poSellPcts, setPoSellPcts] = useState([10, 25, 50, 75]);
@@ -5116,6 +5116,30 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
             boxShadow: amt > 0 && bal >= amt ? "0 0 16px rgba(22,199,132,0.35)" : "none" }}>
           🔥 BUY<div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>{amt.toFixed(2)} {pay} · ${Math.round(amt * unit$)}</div>
         </button>
+        {onChainReady && (
+          <button onClick={() => onRealOrder && onRealOrder(token, "buy", Math.min(amt, onChainMax))}
+            title={`Spend real SOL from your connected wallet · max ${onChainMax} SOL`}
+            style={{ flex: "0 0 128px", border: `1.5px solid ${T.amber}`, borderRadius: 11,
+              background: "rgba(240,185,11,0.14)", color: T.amber, cursor: "pointer",
+              fontFamily: T.mono, fontWeight: 900, fontSize: 11, letterSpacing: 0.5 }}>
+            ⛓ REAL BUY
+            <div style={{ fontSize: 8, fontWeight: 800, opacity: 0.85 }}>
+              {Math.min(amt, onChainMax)} SOL · actual funds
+            </div>
+          </button>
+        )}
+        {onChainReady && (
+          <button onClick={() => onRealOrder && onRealOrder(token, "buy", Math.min(amt, onChainMax))}
+            title={`Spend real SOL from your connected wallet · max ${onChainMax} SOL`}
+            style={{ flex: "0 0 128px", border: `1.5px solid ${T.amber}`, borderRadius: 11,
+              background: "rgba(240,185,11,0.14)", color: T.amber, cursor: "pointer",
+              fontFamily: T.mono, fontWeight: 900, fontSize: 11, letterSpacing: 0.5 }}>
+            ⛓ REAL BUY
+            <div style={{ fontSize: 8, fontWeight: 800, opacity: 0.85 }}>
+              {Math.min(amt, onChainMax)} SOL · actual funds
+            </div>
+          </button>
+        )}
         <button disabled={!held} onClick={() => fire("sell", held)}
           style={{ flex: 1, border: "none", borderRadius: 11, fontFamily: T.mono, fontWeight: 900, fontSize: 14, letterSpacing: 1.2,
             background: held ? T.red : "#1a2030", color: held ? "#170808" : T.faint, cursor: held ? "pointer" : "not-allowed",
@@ -12431,7 +12455,13 @@ export default function App() {
                         onCancelBot={cancelBot} onSellRun={sellRun} onOpenBotRun={(id) => setBotRunOpen(id)}
                         onOpenTokenAuto={(tid, botId) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(botId || null); }} />
                     ) : (
-                      <ProOrderBar token={selected} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
+                      <ProOrderBar token={selected}
+                onRealOrder={quoteRealOrder}
+                onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
+                onChainMax={onchain.maxSol || 0}
+                onRealOrder={quoteRealOrder}
+                onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
+                onChainMax={onchain.maxSol || 0} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
                         solBalance={solBalance} valoBalance={valoWallet} position={positions[selected.id]}
                         clickMode={clickMode} setClickMode={setClickMode}
                         realized24={realized24For(selected.sym)}

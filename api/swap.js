@@ -6,7 +6,39 @@
 // VALO never holds a key, never signs, and never submits without the user.
 // The server only asks Jupiter for a route and returns the bytes Phantom will
 // show them. Every guard below exists because this moves real money.
-const JUP = process.env.JUPITER_API || "https://quote-api.jup.ag/v6";
+// Jupiter endpoints, newest first. JUPITER_API overrides the list entirely.
+const JUP_HOSTS = (process.env.JUPITER_API
+  ? [process.env.JUPITER_API]
+  : ["https://lite-api.jup.ag/swap/v1", "https://api.jup.ag/swap/v1", "https://quote-api.jup.ag/v6"]);
+const JUP_KEY = (process.env.JUPITER_API_KEY || "").trim();
+const jupHeaders = () => (JUP_KEY ? { accept: "application/json", "x-api-key": JUP_KEY } : { accept: "application/json" });
+
+// try each host until one answers; carry the errors so failures are legible
+async function jupGet(path) {
+  const errs = [];
+  for (const host of JUP_HOSTS) {
+    try {
+      const r = await fetch(`${host}${path}`, { headers: jupHeaders() });
+      if (r.ok) return { json: await r.json(), host };
+      errs.push(`${host} → ${r.status}`);
+    } catch (e) { errs.push(`${host} → ${String(e.message || e)}`); }
+  }
+  throw new Error(`no Jupiter endpoint answered (${errs.join(" | ")})`);
+}
+async function jupPost(path, body) {
+  const errs = [];
+  for (const host of JUP_HOSTS) {
+    try {
+      const r = await fetch(`${host}${path}`, {
+        method: "POST", headers: { ...jupHeaders(), "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (r.ok) return { json: await r.json(), host };
+      errs.push(`${host} → ${r.status}`);
+    } catch (e) { errs.push(`${host} → ${String(e.message || e)}`); }
+  }
+  throw new Error(`no Jupiter endpoint answered (${errs.join(" | ")})`);
+}
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
 // hard ceiling, in SOL, per order. Set VALO_MAX_ORDER_SOL to raise it.
@@ -25,6 +57,16 @@ export default async function handler(req, res) {
     });
   }
   const mode = String(req.query.mode || "quote");
+  if (mode === "status") {
+    // is on-chain live, and can we reach Jupiter at all?
+    try {
+      const { host } = await jupGet("/quote?inputMint=So11111111111111111111111111111111111111112"
+        + "&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=100000&slippageBps=100");
+      return res.status(200).json({ enabled: true, jupiter: "reachable", via: host, maxSol: MAX_SOL });
+    } catch (e) {
+      return res.status(200).json({ enabled: true, jupiter: "unreachable", error: String(e.message || e), maxSol: MAX_SOL });
+    }
+  }
   const inputMint = String(req.query.inputMint || SOL_MINT);
   const outputMint = String(req.query.outputMint || "");
   const amountLamports = Math.floor(parseFloat(req.query.amount || "0"));
@@ -43,11 +85,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    const qUrl = `${JUP}/quote?inputMint=${inputMint}&outputMint=${outputMint}`
+    if (inputMint === outputMint) return res.status(400).json({ error: "input and output are the same token" });
+    const qPath = `/quote?inputMint=${inputMint}&outputMint=${outputMint}`
       + `&amount=${amountLamports}&slippageBps=${slippageBps}&onlyDirectRoutes=false`;
-    const qr = await fetch(qUrl, { headers: { accept: "application/json" } });
-    if (!qr.ok) throw new Error(`jupiter quote ${qr.status}`);
-    const quote = await qr.json();
+    const { json: quote, host } = await jupGet(qPath);
     if (!quote || !quote.outAmount) throw new Error("no route for this pair");
 
     const summary = {
@@ -58,7 +99,7 @@ export default async function handler(req, res) {
       slippageBps,
       routeHops: (quote.routePlan || []).length,
       routeLabels: (quote.routePlan || []).map((r) => r?.swapInfo?.label).filter(Boolean),
-      maxSol: MAX_SOL,
+      maxSol: MAX_SOL, via: host,
     };
 
     if (mode === "quote") {
@@ -68,19 +109,13 @@ export default async function handler(req, res) {
 
     // build: return an UNSIGNED transaction. Signing happens in the wallet.
     if (!isMint(userPublicKey)) return res.status(400).json({ error: "bad user pubkey" });
-    const sr = await fetch(`${JUP}/swap`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        quoteResponse: quote,
-        userPublicKey,
-        wrapAndUnwrapSol: true,
-        dynamicComputeUnitLimit: true,
-        prioritizationFeeLamports: "auto",
-      }),
+    const { json: sj } = await jupPost("/swap", {
+      quoteResponse: quote,
+      userPublicKey,
+      wrapAndUnwrapSol: true,
+      dynamicComputeUnitLimit: true,
+      prioritizationFeeLamports: "auto",
     });
-    if (!sr.ok) throw new Error(`jupiter swap ${sr.status}`);
-    const sj = await sr.json();
     if (!sj || !sj.swapTransaction) throw new Error("no transaction returned");
 
     res.setHeader("Cache-Control", "no-store");
