@@ -10101,6 +10101,31 @@ export default function App() {
 
     // marker always stamps the LATEST candle at the executed price, and carries
     // its full receipt so it can be clicked open later
+    // your order moves a simulated market (never a real one)
+    if (!t.pool) {
+      const usdIn = payUsd(o.amt, o.pay);
+      const depth = Math.max(1000, (t.tvl || 0) * 0.9);       // effective liquidity
+      const raw = usdIn / depth;                              // fraction of the pool
+      const impact = Math.max(-0.12, Math.min(0.12, (o.side === "buy" ? raw : -raw) * 0.8));
+      if (Math.abs(impact) > 0.0002) {
+        setTokens((Ts) => Ts.map((x) => {
+          if (x.id !== t.id) return x;
+          const np = Math.max(1e-12, x.price * (1 + impact));
+          const cs = x.candles || [];
+          const last = cs.length ? cs[cs.length - 1] : null;
+          // the current candle absorbs the move, wick and all
+          const candles = last
+            ? [...cs.slice(0, -1), { ...last, c: np, h: Math.max(last.h, np), l: Math.min(last.l, np) }]
+            : cs;
+          return { ...x, price: np, candles,
+            mc: x.supply > 0 ? np * x.supply : x.mc,
+            greenUsd: o.side === "buy" ? (x.greenUsd || 0) + usdIn : x.greenUsd,
+            redUsd: o.side === "sell" ? (x.redUsd || 0) + usdIn : x.redUsd,
+            buyPressure: Math.max(1, Math.min(99, (x.buyPressure || 50) + (o.side === "buy" ? 2 : -2))),
+            momentum: Math.max(1, Math.min(99, (x.momentum || 50) + (o.side === "buy" ? 3 : -3))) };
+        }));
+      }
+    }
     setTradesByToken((M) => ({
       ...M,
       [t.id]: [...(M[t.id] || []), {
@@ -10144,7 +10169,32 @@ export default function App() {
           const gain = (l.mult - 1) * 100 * rnd(0.85, 1);
           const money = (o.amt * l.alloc / 100) * (gain / 100);
           const legAmt = o.amt * l.alloc / 100;
-          setTradesByToken((M) => ({ ...M, [t.id]: [...(M[t.id] || []), {
+          // your order moves a simulated market (never a real one)
+    if (!t.pool) {
+      const usdIn = payUsd(o.amt, o.pay);
+      const depth = Math.max(1000, (t.tvl || 0) * 0.9);       // effective liquidity
+      const raw = usdIn / depth;                              // fraction of the pool
+      const impact = Math.max(-0.12, Math.min(0.12, (o.side === "buy" ? raw : -raw) * 0.8));
+      if (Math.abs(impact) > 0.0002) {
+        setTokens((Ts) => Ts.map((x) => {
+          if (x.id !== t.id) return x;
+          const np = Math.max(1e-12, x.price * (1 + impact));
+          const cs = x.candles || [];
+          const last = cs.length ? cs[cs.length - 1] : null;
+          // the current candle absorbs the move, wick and all
+          const candles = last
+            ? [...cs.slice(0, -1), { ...last, c: np, h: Math.max(last.h, np), l: Math.min(last.l, np) }]
+            : cs;
+          return { ...x, price: np, candles,
+            mc: x.supply > 0 ? np * x.supply : x.mc,
+            greenUsd: o.side === "buy" ? (x.greenUsd || 0) + usdIn : x.greenUsd,
+            redUsd: o.side === "sell" ? (x.redUsd || 0) + usdIn : x.redUsd,
+            buyPressure: Math.max(1, Math.min(99, (x.buyPressure || 50) + (o.side === "buy" ? 2 : -2))),
+            momentum: Math.max(1, Math.min(99, (x.momentum || 50) + (o.side === "buy" ? 3 : -3))) };
+        }));
+      }
+    }
+    setTradesByToken((M) => ({ ...M, [t.id]: [...(M[t.id] || []), {
             t: Date.now(), side: "sell", p: null,
             amt: legAmt, unit, price: t.price, mc: mcOf(t),
             pnlPct: gain, pnlMoney: money, entry: o.limitBuy || t.price, sym: t.sym, bot: true,
@@ -10962,7 +11012,21 @@ export default function App() {
                         {p.icon
                           ? <img src={p.icon} alt="" style={{ width: 14, height: 14, borderRadius: 4, objectFit: "cover" }} />
                           : <span style={{ width: 10, height: 10, borderRadius: "50%", background: p.color }} />}
-                        <span style={{ fontFamily: T.mono, fontSize: 9, color: T.text, maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k === "__dev__" ? "developer" : k}</span>
+                        <span onClick={() => {
+                            // same stats panel as tapping one of their markers
+                            const theirs = (chartTrades || []).filter((tr) => {
+                              const key = tr.market ? "__mkt__" : (tr.trader || (tr.dev ? "__dev__" : "__me__"));
+                              return key === k;
+                            });
+                            if (!theirs.length) return;
+                            const buys = theirs.filter((tr) => tr.side === "buy");
+                            setMarkerInfo({ side: buys.length >= theirs.length - buys.length ? "buy" : "sell",
+                              list: theirs, sym: selected && selected.sym, trader: k });
+                          }}
+                          title={`See every ${k === "__dev__" ? "developer" : k} trade on $${selected ? selected.sym : ""}`}
+                          style={{ fontFamily: T.mono, fontSize: 9, color: T.text, maxWidth: 110, overflow: "hidden",
+                            textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer",
+                            textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{k === "__dev__" ? "developer" : k}</span>
                         <button onClick={() => setTraderPref(k, { following: false })} title="Unpin"
                           style={{ border: "none", background: "none", color: T.faint, cursor: "pointer", fontSize: 10, padding: 0, lineHeight: 1 }}>✕</button>
                       </span>
