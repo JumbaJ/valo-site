@@ -577,6 +577,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   const [cross, setCross] = useState(null);
   const [hover, setHover] = useState(null);
   const scaleRef = useRef({ key: null, lo: NaN, hi: NaN }); // locked price axis
+  const [logMode, setLogMode] = useState("auto");  // auto | log | linear
   const [axisMC, setAxisMC] = useState(false);   // right axis shows market cap instead of price
   const fmtAxis = (v) => (axisMC && mcRatio > 0 ? fmt$(v * mcRatio) : fmtP(v));
   const [pinCross, setPinCross] = useState(null); // mobile: held crosshair {cx, cy}
@@ -768,7 +769,14 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     const mid = (hi + lo) / 2 || hi || 1;
     const minRange = mid * 0.02;                     // never tighter than ±1%
     if (hi - lo < minRange) { hi = mid + minRange / 2; lo = mid - minRange / 2; }
-    const p8 = (hi - lo) * 0.12 || hi * 0.01; lo -= p8; hi += p8;   // breathing room
+    // remember the true range before padding — the log decision depends on it
+    const trueLo = lo, trueHi = hi;
+    const p8 = (hi - lo) * 0.12 || hi * 0.01;
+    // never let padding drive the floor to (or below) zero: on a wide range that
+    // both breaks log scaling and squashes everything into a hairline
+    lo = Math.max(trueLo * 0.55, trueLo - p8);
+    if (!(lo > 0)) lo = Math.max(1e-15, trueHi * 1e-6);
+    hi += p8;
     // vertical zoom: stretch the visible price range around its centre. This is
     // what gives headroom above the candles for placing bot and visual lines.
     const pz = Math.max(0.15, Math.min(40, view.priceZoom || 1));
@@ -781,7 +789,15 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     // horizontal panning never moves this; touch may nudge it within ±0.35
     const vShift = Math.max(-0.35, Math.min(0.35, view.priceOff || 0)) * (hi - lo);
     lo -= vShift; hi -= vShift;
-    const y = (p) => padT + (1 - (p - lo) / (hi - lo)) * chartH;
+    // switch to log automatically once the range is too wide to read linearly
+    const logOn = logMode === "log"
+      || (logMode === "auto" && trueLo > 0 && trueHi / trueLo > 12);
+    const lgLo = logOn ? Math.log(Math.max(lo, 1e-15)) : 0;
+    const lgHi = logOn ? Math.log(Math.max(hi, 1e-14)) : 0;
+    const lgSpan = logOn ? Math.max(1e-9, lgHi - lgLo) : 1;
+    const y = logOn
+      ? (p) => padT + (1 - (Math.log(Math.max(p, 1e-15)) - lgLo) / lgSpan) * chartH
+      : (p) => padT + (1 - (p - lo) / (hi - lo)) * chartH;
     const tfMs = tfMin * 60000;
     // candles may arrive without timestamps (simulated series) — anchor the
     // axis so the newest candle is "now" and step backwards by the timeframe
@@ -800,7 +816,8 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       const lt = lastC && Number.isFinite(lastC.t) ? lastC.t : baseT + Math.max(0, total - 1) * tfMs;
       return lt + (i - (total - 1)) * tfMs;
     };
-    geom.current = { y, x, step, lo, hi, padT, chartH, plotW, slotOf, idxOf, inData, timeAtSlot, hiLoRange: hi - lo };
+    geom.current = { y, x, step, lo, hi, padT, chartH, plotW, slotOf, idxOf, inData, timeAtSlot,
+      hiLoRange: hi - lo, logOn, lgLo, lgSpan };
 
     ctx.font = `10px ${T.mono}`; ctx.textBaseline = "middle";
     // zoom strip: tint the price-axis gutter so it reads as a draggable control
@@ -1102,7 +1119,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       ctx.fillText(tl, Math.min(Math.max(tw / 2, sx), plotW - tw / 2), H - 12);
       ctx.textAlign = "left";
     }
-  }, [agg, total, count, offset, winStart, hue, mode, cross, height, tfMin, trades, clickMode, view.priceOff, view.priceZoom, highlightTx, pulseTick, traderPrefs, theme, pendingLevels, botRuns, price, axisMC, mcRatio, pinCross]);
+  }, [agg, total, count, offset, winStart, hue, mode, cross, height, tfMin, trades, clickMode, view.priceOff, view.priceZoom, logMode, highlightTx, pulseTick, traderPrefs, theme, pendingLevels, botRuns, price, axisMC, mcRatio, pinCross]);
   // a paint error must never leave stale pixels pretending to be a live chart
   const safeDraw = useCallback(() => {
     try { draw(); } catch (e) {
@@ -1203,7 +1220,12 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     }
     return priceAtY(clampY(yy + ((st && st.off) || 0)));
   };
-  const priceAtY = (cy) => { const g = geom.current; return g.hi - ((cy - g.padT) / g.chartH) * (g.hi - g.lo); };
+  const priceAtY = (cy) => {
+    const g = geom.current;
+    const f = 1 - (cy - g.padT) / g.chartH;              // 0 at the bottom, 1 at the top
+    if (g.logOn) return Math.exp(g.lgLo + f * g.lgSpan); // inverse of the log mapping
+    return g.lo + f * (g.hi - g.lo);
+  };
   useEffect(() => {
     const cvs = cvsRef.current; if (!cvs) return;
     // SCROLL-FRIENDLY TOUCH: the first ~7px of movement decides the gesture.
@@ -6177,6 +6199,7 @@ function PerfChart({ series, mode, height = 130 }) {
   const ref = useRef(null);
   const [hover, setHover] = useState(null);
   const scaleRef = useRef({ key: null, lo: NaN, hi: NaN }); // locked price axis
+  const [logMode, setLogMode] = useState("auto");  // auto | log | linear
   const [axisMC, setAxisMC] = useState(false);   // right axis shows market cap instead of price
   const fmtAxis = (v) => (axisMC && mcRatio > 0 ? fmt$(v * mcRatio) : fmtP(v));
   const [pinCross, setPinCross] = useState(null); // mobile: held crosshair {cx, cy} // {i, x, y, v}
