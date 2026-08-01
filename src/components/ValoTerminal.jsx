@@ -5113,25 +5113,75 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
 // Sits under the BUY/SELL pair whenever on-chain execution is armed. The buttons
 // no longer shout "REAL" at you, so this is what tells you which mode you're in.
 function LiveFundsNotice({ sol = 0, compact = false }) {
+  const [tipOpen, setTipOpen] = useState(false);
+  // once someone says "got it", stay quiet forever — a tip that keeps coming
+  // back next to a money button stops being a tip
+  const [tipDone, setTipDone] = useState(() => {
+    try { return localStorage.getItem("valo-ac-tip") === "1"; } catch (e) { return false; }
+  });
+  const dismiss = () => {
+    setTipOpen(false); setTipDone(true);
+    try { localStorage.setItem("valo-ac-tip", "1"); } catch (e) {}
+  };
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
-      border: `1px solid ${T.amber}44`, background: "rgba(240,185,11,0.07)", borderRadius: 9,
-      padding: compact ? "5px 8px" : "6px 10px" }}>
-      <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-        <span style={{ width: 6, height: 6, borderRadius: 6, background: T.amber, flex: "0 0 auto",
-          boxShadow: `0 0 7px ${T.amber}` }} />
-        <span style={{ fontFamily: T.mono, fontSize: compact ? 7.5 : 8.5, fontWeight: 800,
-          letterSpacing: 0.6, color: T.amber, whiteSpace: "nowrap" }}>
-          LIVE · REAL FUNDS
+    <div style={{ position: "relative" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+        border: `1px solid ${T.amber}44`, background: "rgba(240,185,11,0.07)", borderRadius: 9,
+        padding: compact ? "5px 8px" : "6px 10px" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+          <span style={{ width: 6, height: 6, borderRadius: 6, background: T.amber, flex: "0 0 auto",
+            boxShadow: `0 0 7px ${T.amber}` }} />
+          <span style={{ fontFamily: T.mono, fontSize: compact ? 7.5 : 8.5, fontWeight: 800,
+            letterSpacing: 0.6, color: T.amber, whiteSpace: "nowrap" }}>
+            LIVE · REAL FUNDS
+          </span>
+          <span style={{ fontFamily: T.mono, fontSize: compact ? 7 : 7.5, color: T.dim,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            settles on-chain from your wallet · final once approved
+          </span>
         </span>
-        <span style={{ fontFamily: T.mono, fontSize: compact ? 7 : 7.5, color: T.dim,
-          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          settles on-chain from your wallet · final once approved
+        <span style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto" }}>
+          {sol > 0 && (
+            <span style={{ fontFamily: T.mono, fontSize: compact ? 7.5 : 8.5, fontWeight: 800,
+              color: T.dim }}>{sol.toFixed(3)} SOL</span>
+          )}
+          <button onClick={() => setTipOpen((v) => !v)}
+            title="Make orders instant"
+            style={{ border: `1px solid ${tipOpen ? T.amber : `${T.amber}55`}`, borderRadius: 6,
+              background: tipOpen ? "rgba(240,185,11,0.18)" : "rgba(240,185,11,0.06)",
+              color: T.amber, cursor: "pointer", fontFamily: T.mono, fontWeight: 900,
+              fontSize: compact ? 7 : 7.5, letterSpacing: 0.4, padding: compact ? "2px 6px" : "3px 7px",
+              boxShadow: !tipDone && !tipOpen ? `0 0 8px ${T.amber}66` : "none" }}>
+            ⚡ {compact ? "" : "INSTANT"}
+          </button>
         </span>
-      </span>
-      {sol > 0 && (
-        <span style={{ fontFamily: T.mono, fontSize: compact ? 7.5 : 8.5, fontWeight: 800,
-          color: T.dim, flex: "0 0 auto" }}>{sol.toFixed(3)} SOL</span>
+      </div>
+      {tipOpen && (
+        <div onClick={(e) => e.stopPropagation()}
+          style={{ position: "absolute", right: 0, bottom: "calc(100% + 6px)", zIndex: 400, width: 230,
+            background: T.panel, border: `1.5px solid ${T.amber}66`, borderRadius: 11, padding: "10px 12px",
+            boxShadow: "0 8px 28px rgba(0,0,0,0.55), 0 0 18px rgba(240,185,11,0.12)" }}>
+          <div style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 0.8, color: T.amber, marginBottom: 6 }}>
+            ⚡ MAKE ORDERS INSTANT
+          </div>
+          <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.dim, lineHeight: 1.65 }}>
+            Skip Phantom's approval popup on every order — Phantom itself has an <b style={{ color: T.text }}>Auto-Confirm</b> setting you control:
+          </div>
+          <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.text, lineHeight: 1.8, margin: "6px 0" }}>
+            1 · Open <b>Phantom</b> while on VALO<br />
+            2 · <b>Settings ⚙</b> → <b>Auto-Confirm</b><br />
+            3 · Enable it for <b>valotrading.app</b>
+          </div>
+          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, lineHeight: 1.6 }}>
+            Your wallet, your call — it's per-site, only for sites you trust, and you can switch it off in Phantom anytime.
+          </div>
+          <button onClick={dismiss}
+            style={{ width: "100%", marginTop: 8, border: "none", borderRadius: 8, padding: "7px",
+              background: T.amber, color: "#0a0713", fontFamily: T.mono, fontSize: 9,
+              fontWeight: 900, letterSpacing: 0.6, cursor: "pointer" }}>
+            GOT IT
+          </button>
+        </div>
       )}
     </div>
   );
