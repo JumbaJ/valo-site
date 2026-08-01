@@ -5675,7 +5675,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   botsSlot = null,
   onPosTrade,
   epochLastHour = 0, epochTotalEarned = 0, valoUsdForEpoch = 0.0125, onOpenClaim,
-  liveMode = false }) {
+  liveMode = false, chainFills = [], chainLedger = { byMint: {}, realizedSol: 0 } }) {
   const bestCalloutPeak = Object.values(myCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0);
   const mask = (s) => (hideBalance ? "••••••" : s);
   // ⛓/📝 equity view — chain view exists only when live mode is on AND a wallet
@@ -5688,6 +5688,20 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   const chTokensUsd = (walletChain && walletChain.tokensUsd) || 0;
   const chCount = (walletChain && walletChain.holdingsCount) || 0;
   const chEquity = chSol * SOL_USD + chTokensUsd;
+  // ⛓ PnL — from fills placed through VALO. Coins bought elsewhere have no
+  // basis here, so they're valued but not scored; that's stated, not hidden.
+  const chPnl = useMemo(() => {
+    const holds = (walletChain && walletChain.holdings) || [];
+    let unrealUsd = 0, tracked = 0;
+    for (const h of holds) {
+      const led = chainLedger.byMint[h.mint];
+      if (!led || !(led.qty > 0)) continue;
+      const q = Math.min(h.qty, led.qty);
+      unrealUsd += (h.price || 0) * q - led.costSol * SOL_USD * (q / led.qty);
+      tracked++;
+    }
+    return { unrealUsd, realUsd: chainLedger.realizedSol * SOL_USD, tracked, total: holds.length };
+  }, [walletChain, chainLedger]);
   // any movement anywhere on the site — manual, bots, exits — flashes the wallet
   const [balFlash, setBalFlash] = useState(0);
   const prevBalRef = useRef({ s: solBalance, v: valoWallet });
@@ -5919,6 +5933,15 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           <button key={k} onClick={() => setTab(k)}
             style={{ ...chip(tab === k), flex: 1, textAlign: "center", padding: "7px", fontSize: 11 }}>{l}</button>
         ))}
+        {chainAvail && (
+          <button onClick={() => setEqView((v) => (v === "paper" ? "chain" : "paper"))}
+            title={chainOn ? "Showing your on-chain wallet — tap for paper" : "Showing paper — tap for your on-chain wallet"}
+            style={{ ...chip(chainOn), flex: "0 0 auto", padding: "7px 10px", fontSize: 11,
+              color: chainOn ? T.amber : T.faint, borderColor: chainOn ? `${T.amber}66` : T.border,
+              background: chainOn ? "rgba(240,185,11,0.1)" : "transparent" }}>
+            {chainOn ? "⛓ LIVE" : "⛓"}
+          </button>
+        )}
       </div>
 
       {tab === "wallet" ? (
@@ -6009,6 +6032,52 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               </div>
             </div>
           </div>
+          {chainOn ? (
+            <div style={{ background: "#0c0f16", border: `1px solid ${T.amber}44`, borderRadius: 9, padding: "8px 10px", marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 10.5 }}>
+                <span style={{ color: T.amber }}>⛓ ON-CHAIN POSITIONS · {chCount}</span>
+                <b style={{ color: T.text }}>{mask(`$${chTokensUsd.toFixed(0)}`)}</b>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 10.5, marginTop: 4 }}>
+                <span style={{ color: T.faint }}>UNREALIZED · est.</span>
+                <b style={{ color: chPnl.tracked === 0 ? T.faint : chPnl.unrealUsd >= 0 ? T.green : T.red }}>
+                  {mask(chPnl.tracked === 0 ? "—" : `${chPnl.unrealUsd >= 0 ? "+" : "−"}$${Math.abs(chPnl.unrealUsd).toFixed(2)}`)}
+                </b>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 10.5, marginTop: 4 }}>
+                <span style={{ color: T.faint }}>REALIZED · est.</span>
+                <b style={{ color: chainFills.length === 0 ? T.faint : chPnl.realUsd >= 0 ? T.green : T.red }}>
+                  {mask(chainFills.length === 0 ? "—" : `${chPnl.realUsd >= 0 ? "+" : "−"}$${Math.abs(chPnl.realUsd).toFixed(2)}`)}
+                </b>
+              </div>
+              {((walletChain && walletChain.holdings) || []).slice(0, 10).map((h) => {
+                const led = chainLedger.byMint[h.mint];
+                const hasBasis = led && led.qty > 0;
+                const q = hasBasis ? Math.min(h.qty, led.qty) : 0;
+                const pnl = hasBasis ? (h.price || 0) * q - led.costSol * SOL_USD * (q / led.qty) : null;
+                return (
+                  <div key={h.mint} onClick={() => onOpenByMintChain && onOpenByMintChain(h.mint)}
+                    title="Open this token"
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8,
+                      fontFamily: T.mono, fontSize: 9.5, marginTop: 6, paddingTop: 6, borderTop: `1px solid ${T.border}`,
+                      cursor: onOpenByMintChain ? "pointer" : "default" }}>
+                    <span style={{ color: T.text, fontWeight: 700, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {h.sym || h.mint.slice(0, 5)} <span style={{ color: T.faint, fontWeight: 400 }}>{fmtQty(h.qty)}</span>
+                    </span>
+                    <span style={{ flex: "0 0 auto", display: "flex", gap: 8 }}>
+                      {pnl != null && <b style={{ color: pnl >= 0 ? T.green : T.red }}>{mask(`${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}`)}</b>}
+                      <b style={{ color: T.dim }}>{mask(`$${(h.usd || 0).toFixed(0)}`)}</b>
+                    </span>
+                  </div>
+                );
+              })}
+              {chPnl.tracked < chPnl.total && (
+                <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 6, lineHeight: 1.5 }}>
+                  PnL is estimated from orders placed through VALO. Coins acquired elsewhere show value only — VALO has no cost basis for them.
+                </div>
+              )}
+            </div>
+          ) : (
           <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: "8px 10px", marginBottom: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 10.5 }}>
               <span style={{ color: T.faint }}>IN LIVE TRADES · {fmtQty(Object.entries(positions || {}).reduce((s, [id, p]) => { const t = (tokens || []).find((x) => String(x.id) === String(id)); return t && p.amt > 0 ? s + posTokenQty(t, p) : s; }, 0))} tokens</span>
@@ -6023,6 +6092,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               <b style={{ color: realizedPnl >= 0 ? T.green : T.red }}>{mask(`${realizedPnl >= 0 ? "+" : "−"}$${Math.abs(realizedPnl).toFixed(2)}`)}</b>
             </div>
           </div>
+          )}
       {botsSlot}
       {heldSlot}
           {/* deposit / withdraw — clicking fills the max you can do, then confirm */}
@@ -6205,6 +6275,47 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                 })}
               </div>
             )}
+          </div>
+        </>
+      ) : chainOn ? (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+            <div>
+              <div style={{ fontFamily: T.mono, fontSize: 9, color: T.amber }}>⛓ REAL PnL · est. from VALO fills</div>
+              <div style={{ fontFamily: T.mono, fontSize: 20, fontWeight: 800,
+                color: chainFills.length === 0 ? T.faint : (chPnl.realUsd + chPnl.unrealUsd) >= 0 ? T.green : T.red }}>
+                {mask(chainFills.length === 0 ? "$—" : `${(chPnl.realUsd + chPnl.unrealUsd) >= 0 ? "+" : "−"}$${Math.abs(chPnl.realUsd + chPnl.unrealUsd).toFixed(2)}`)}
+              </div>
+              <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.dim }}>
+                {mask(`realized ${chPnl.realUsd >= 0 ? "+" : "−"}$${Math.abs(chPnl.realUsd).toFixed(2)} · unrealized ${chPnl.unrealUsd >= 0 ? "+" : "−"}$${Math.abs(chPnl.unrealUsd).toFixed(2)}`)}
+              </div>
+            </div>
+            <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, textAlign: "right" }}>
+              {chainFills.length} fill{chainFills.length === 1 ? "" : "s"}<br />through VALO
+            </div>
+          </div>
+          {chainFills.length === 0 && (
+            <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center", padding: "18px 0", lineHeight: 1.7 }}>
+              No real orders through VALO yet.<br />Fills will appear here the moment one confirms on-chain.
+            </div>
+          )}
+          {[...chainFills].reverse().slice(0, 40).map((f, i) => (
+            <div key={f.sig || i} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8,
+              fontFamily: T.mono, fontSize: 9.5, padding: "7px 2px", borderBottom: `1px solid ${T.border}` }}>
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <b style={{ color: f.side === "buy" ? T.green : T.red }}>{f.side === "buy" ? "▲ BUY" : "▼ SELL"}</b>
+                <span style={{ color: T.text, fontWeight: 700 }}> {f.sym}</span>
+                <span style={{ color: T.faint }}> · {fmtQty(f.qty)} · {f.sol.toFixed(4)} SOL</span>
+              </span>
+              <span style={{ flex: "0 0 auto", display: "flex", gap: 8, alignItems: "baseline" }}>
+                <span style={{ color: T.faint, fontSize: 8 }}>{new Date(f.at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                {f.sig && <a href={`https://solscan.io/tx/${f.sig}`} target="_blank" rel="noopener noreferrer"
+                  style={{ color: T.amber, fontSize: 8, textDecoration: "underline" }}>tx ↗</a>}
+              </span>
+            </div>
+          ))}
+          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 8, lineHeight: 1.5 }}>
+            Amounts are the quoted fill at order time; the exact on-chain figure can differ slightly with slippage — the Solscan link is authoritative. Recorded on this device only.
           </div>
         </>
       ) : (
@@ -8738,6 +8849,32 @@ export default function App() {
   const [claimOpen, setClaimOpen] = useState(false);
   // ⛓ real trading (off unless the server enables it)
   const [onchain, setOnchain] = useState({ enabled: false, maxSol: 0 });
+  // every confirmed real order, recorded from the quote at fill time.
+  // Quote ≠ exact fill (slippage), so everything derived is labeled estimated.
+  const [realFills, setRealFills] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("valo-real-fills-v1") || "[]"); } catch (e) { return []; }
+  });
+  const recordRealFill = (f) => setRealFills((F) => {
+    const next = [...F, f].slice(-500);
+    try { localStorage.setItem("valo-real-fills-v1", JSON.stringify(next)); } catch (e) {}
+    return next;
+  });
+  // avg-cost ledger per mint, SOL-denominated
+  const chainLedger = useMemo(() => {
+    const byMint = {};
+    let realizedSol = 0;
+    for (const f of realFills) {
+      const m = byMint[f.mint] || (byMint[f.mint] = { qty: 0, costSol: 0, realizedSol: 0, sym: f.sym });
+      if (f.side === "buy") { m.qty += f.qty; m.costSol += f.sol; }
+      else if (m.qty > 0) {
+        const p = Math.min(1, f.qty / m.qty);
+        const basis = m.costSol * p;
+        m.realizedSol += f.sol - basis; realizedSol += f.sol - basis;
+        m.costSol -= basis; m.qty = Math.max(0, m.qty - f.qty);
+      } else { m.realizedSol += f.sol; realizedSol += f.sol; } // sold coins bought outside VALO — all proceeds count
+    }
+    return { byMint, realizedSol };
+  }, [realFills]);
   const [realOrder, setRealOrder] = useState(null);   // the order awaiting confirmation
   useEffect(() => {
     (async () => {
@@ -8870,6 +9007,17 @@ export default function App() {
       }
 
       setRealOrder({ ...o, stage: "done", sig, confirmed: !!(landed && landed.ok) });
+      // record it — quote amounts, decimals from the quote itself
+      try {
+        const q2 = o.quote || {};
+        const oDec = Number.isInteger(q2.outDecimals) ? q2.outDecimals : 6;
+        const fill = selling
+          ? { at: Date.now(), side: "sell", mint: o.token.liveMint, sym: o.token.sym,
+              qty: +o.size || 0, sol: (+q2.outAmount || 0) / 1e9, sig }
+          : { at: Date.now(), side: "buy", mint: o.token.liveMint, sym: o.token.sym,
+              qty: (+q2.outAmount || 0) / Math.pow(10, oDec), sol: +o.size || 0, sig };
+        if (fill.mint && fill.qty > 0 && fill.sol > 0) recordRealFill(fill);
+      } catch (e) {}
       pushNotif({ type: "system", user: null, tokenId: o.token.id,
         text: landed
           ? `⛓ real order confirmed — ${what}. Track it on Solscan.`
@@ -12983,7 +13131,7 @@ export default function App() {
             </button>
             <PortfolioPanel big
               solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
@@ -14525,7 +14673,7 @@ export default function App() {
             </div>
             <PortfolioPanel big
               solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
