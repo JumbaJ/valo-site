@@ -2364,7 +2364,7 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
   );
 }
 
-function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, setAmount, pay, setPay, position, solBalance, valoBalance, positions, tokens, onOpenToken, onCloseAll, bestMult, pctSel, setPctSel, pendingOrders = [], onOpenBot, onCancelBot, onPosTrade, onDraftLevel, realized24 = 0, botRuns = [], onRealOrder, onChainReady = false, onChainMax = 0}) {
+function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, setAmount, pay, setPay, position, solBalance, valoBalance, positions, tokens, onOpenToken, onCloseAll, bestMult, pctSel, setPctSel, pendingOrders = [], onOpenBot, onCancelBot, onPosTrade, onDraftLevel, realized24 = 0, botRuns = [], onRealOrder, onChainReady = false, onChainMax = 0, chainHeld = 0}) {
   const [dtBuyPcts, setDtBuyPcts] = useState([10, 25, 50, 75, 100]);  // dbl-click / right-click a chip to retype it
   const [dtSellPcts, setDtSellPcts] = useState([10, 25, 50, 75, 100]);
   const [dtFixed, setDtFixed] = useState([0.5, 1, 2, 5]);
@@ -2508,6 +2508,19 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
                 ⛓ REAL BUY · {Math.min(amt, onChainMax)} SOL
                 <span style={{ display: "block", fontSize: 7.5, fontWeight: 700, opacity: 0.85, letterSpacing: 0 }}>
                   actual funds · max {onChainMax} SOL while testing
+                </span>
+              </button>
+            )}
+            {onChainReady && chainHeld > 0 && (
+              <button onClick={() => onRealOrder && onRealOrder(token, "sell", chainHeld)}
+                title={`Sell your real ${token.sym} back to SOL`}
+                style={{ width: "100%", marginBottom: 7, border: `1.5px solid ${T.red}`,
+                  background: "rgba(234,57,67,0.12)", color: T.red, borderRadius: 11,
+                  padding: "10px", cursor: "pointer", fontFamily: T.mono, fontSize: 10.5,
+                  fontWeight: 900, letterSpacing: 1 }}>
+                ⛓ REAL SELL · ALL
+                <span style={{ display: "block", fontSize: 7.5, fontWeight: 700, opacity: 0.85, letterSpacing: 0 }}>
+                  {fmtQty(chainHeld)} {token.sym} held · back to SOL
                 </span>
               </button>
             )}
@@ -5144,28 +5157,6 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
             boxShadow: amt > 0 && bal >= amt ? "0 0 16px rgba(22,199,132,0.35)" : "none" }}>
           🔥 BUY<div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>{amt.toFixed(2)} {pay} · ${Math.round(amt * unit$)}</div>
         </button>
-        {onChainReady && chainHeld > 0 && (
-          <button onClick={() => onRealOrder && onRealOrder(token, "sell", chainHeld)}
-            title={`Sell your real ${token.sym} back to SOL`}
-            style={{ flex: "0 0 118px", border: `1.5px solid ${T.red}`, borderRadius: 11,
-              background: "rgba(234,57,67,0.14)", color: T.red, cursor: "pointer",
-              fontFamily: T.mono, fontWeight: 900, fontSize: 11, letterSpacing: 0.5 }}>
-            ⛓ REAL SELL
-            <div style={{ fontSize: 8, fontWeight: 800, opacity: 0.85 }}>{fmtQty(chainHeld)} held</div>
-          </button>
-        )}
-        {onChainReady && (
-          <button onClick={() => onRealOrder && onRealOrder(token, "buy", Math.min(amt, onChainMax))}
-            title={`Spend real SOL from your connected wallet · max ${onChainMax} SOL`}
-            style={{ flex: "0 0 128px", border: `1.5px solid ${T.amber}`, borderRadius: 11,
-              background: "rgba(240,185,11,0.14)", color: T.amber, cursor: "pointer",
-              fontFamily: T.mono, fontWeight: 900, fontSize: 11, letterSpacing: 0.5 }}>
-            ⛓ REAL BUY
-            <div style={{ fontSize: 8, fontWeight: 800, opacity: 0.85 }}>
-              {Math.min(amt, onChainMax)} SOL · actual funds
-            </div>
-          </button>
-        )}
         {onChainReady && chainHeld > 0 && (
           <button onClick={() => onRealOrder && onRealOrder(token, "sell", chainHeld)}
             title={`Sell your real ${token.sym} back to SOL`}
@@ -8644,9 +8635,12 @@ export default function App() {
 
   // ask for a quote, then let the user decide. Two separate steps, always.
   // how much of this token does the connected wallet actually hold?
+  const chainHoldingOf = (token) => {
+    if (!token || !token.liveMint || !walletChain) return null;
+    return (walletChain.holdings || []).find((x) => x.mint === token.liveMint) || null;
+  };
   const chainHeldOf = (token) => {
-    if (!token || !token.liveMint || !walletChain) return 0;
-    const h = (walletChain.holdings || []).find((x) => x.mint === token.liveMint);
+    const h = chainHoldingOf(token);
     return h ? h.qty : 0;
   };
 
@@ -8661,14 +8655,17 @@ export default function App() {
     let q = "";
     let label = "";
     if (selling) {
-      const held = chainHeldOf(token);
+      const h = chainHoldingOf(token);
+      const held = h ? h.qty : 0;
       const qty = Math.min(size, held);
       if (!(qty > 0)) {
         setRealOrder({ stage: "error", token, side, msg: `you don't hold any $${token.sym} in this wallet` });
         return;
       }
-      q = `&amountUi=${qty}`;
-      label = `${fmtQty(qty)} ${token.sym}`;
+      // full exit → send the chain's exact integer, so no dust is left stranded
+      const fullExit = qty >= held && h && h.raw;
+      q = fullExit ? `&amountRaw=${h.raw}` : `&amountUi=${qty}`;
+      label = `${fmtQty(qty)} ${token.sym}${fullExit ? " (all)" : ""}`;
     } else {
       const amount = Math.floor(size * 1e9);
       if (!(amount > 0)) return;
@@ -8730,9 +8727,45 @@ export default function App() {
       } else throw new Error("this wallet can't sign transactions here");
       if (!sig) throw new Error("no signature returned — nothing was sent");
 
-      setRealOrder({ ...o, stage: "done", sig });
+      // submitted — but nothing is true yet. Wait for the chain to say so.
+      setRealOrder({ ...o, stage: "sent", sig });
+      const selling = o.side === "sell";
+      const what = selling
+        ? `sold ${o.label} back to SOL`
+        : `bought $${o.token.sym} with ${o.label}`;
+
+      let landed = null;
+      for (let i = 0; i < 30; i++) {                 // ~45s, then hand it over
+        await new Promise((r) => setTimeout(r, 1500));
+        try {
+          const cr = await fetch(`/api/sendtx?sig=${sig}`);
+          const cj = await cr.json();
+          if (cj.status === "failed") { landed = { ok: false, err: cj.err }; break; }
+          if (cj.confirmed) { landed = { ok: true }; break; }
+        } catch (e) { /* keep waiting — a failed poll is not a failed trade */ }
+      }
+
+      if (landed && !landed.ok) {
+        setRealOrder({ ...o, stage: "error", sig,
+          msg: `the transaction was submitted but reverted on-chain — your funds did not move. ${landed.err || ""}` });
+        return;
+      }
+
+      setRealOrder({ ...o, stage: "done", sig, confirmed: !!(landed && landed.ok) });
       pushNotif({ type: "system", user: null, tokenId: o.token.id,
-        text: `⛓ real order sent — ${o.sol} SOL into $${o.token.sym}. Track it on Solscan.` });
+        text: landed
+          ? `⛓ real order confirmed — ${what}. Track it on Solscan.`
+          : `⛓ real order sent — ${what}. Still confirming; check Solscan.` });
+
+      // the wallet's holdings just changed. Refresh past the CDN cache, or the
+      // next sell will size itself off the balance from before this one.
+      try {
+        if (wallet && wallet.address) {
+          const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(wallet.address)}&t=${Date.now()}`);
+          const j2 = await r2.json();
+          if (j2 && !j2.error) setWalletChain(j2);
+        }
+      } catch (e) {}
     } catch (e) {
       setRealOrder({ ...o, stage: "error", msg: String(e.message || e) });
     }
@@ -12719,7 +12752,7 @@ export default function App() {
                 onCancelBot={cancelBot} onSellRun={sellRun} onOpenBotRun={(id) => setBotRunOpen(id)}
                 onOpenTokenAuto={(tid, botId) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(botId || null); }} />
             ) : selected ? (
-              <DesktopTradePanel token={selected} botRuns={botRuns}
+              <DesktopTradePanel token={selected} botRuns={botRuns} chainHeld={chainHeldOf(selected)}
                 onRealOrder={quoteRealOrder}
                 onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
                 onChainMax={onchain.maxSol || 0}
@@ -12985,7 +13018,7 @@ export default function App() {
 
       {/* WHITEPAPER MODAL — interactive reader with expandable TOC sidebar */}
       {realOrder && (
-        <div onClick={() => realOrder.stage !== "signing" && setRealOrder(null)}
+        <div onClick={() => !["signing", "sent"].includes(realOrder.stage) && setRealOrder(null)}
           className="valo-fixed-safe"
           style={{ position: "fixed", inset: 0, zIndex: 160, background: "rgba(4,6,10,0.86)",
             backdropFilter: "blur(5px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 14 }}>
@@ -13009,8 +13042,10 @@ export default function App() {
 
               {realOrder.stage === "review" && realOrder.quote && (() => {
                 const q = realOrder.quote;
-                const outUi = (+q.outAmount || 0) / 1e6;         // most SPL memes use 6 decimals
-                const worst = (+q.otherAmountThreshold || 0) / 1e6;
+                const oDec = Number.isInteger(q.outDecimals) ? q.outDecimals : 6;
+                const oUnit = Math.pow(10, oDec);
+                const outUi = (+q.outAmount || 0) / oUnit;
+                const worst = (+q.otherAmountThreshold || 0) / oUnit;
                 const impact = q.priceImpactPct;
                 const hot = impact != null && impact > 3;
                 return (
@@ -13065,10 +13100,28 @@ export default function App() {
                 </div>
               )}
 
+              {realOrder.stage === "sent" && (
+                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.amber, textAlign: "center", padding: "18px 0", lineHeight: 1.7 }}>
+                  submitted — waiting for the chain to confirm…<br />
+                  <span style={{ fontSize: 8.5, color: T.faint }}>
+                    don't close this. It usually lands in a few seconds.
+                  </span>
+                  {realOrder.sig && (
+                    <div>
+                      <a href={`https://solscan.io/tx/${realOrder.sig}`} target="_blank" rel="noopener noreferrer"
+                        style={{ display: "inline-block", marginTop: 8, fontFamily: T.mono, fontSize: 9,
+                          color: T.amber, textDecoration: "underline" }}>follow it on Solscan ↗</a>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {realOrder.stage === "done" && (
                 <div style={{ textAlign: "center", padding: "10px 0" }}>
                   <div style={{ fontSize: 26 }}>✓</div>
-                  <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: T.green, marginTop: 4 }}>ORDER SENT</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: T.green, marginTop: 4 }}>
+                    {realOrder.confirmed ? "CONFIRMED ON-CHAIN" : "SENT · STILL CONFIRMING"}
+                  </div>
                   {realOrder.sig && (
                     <a href={`https://solscan.io/tx/${realOrder.sig}`} target="_blank" rel="noopener noreferrer"
                       style={{ display: "inline-block", marginTop: 8, fontFamily: T.mono, fontSize: 9,

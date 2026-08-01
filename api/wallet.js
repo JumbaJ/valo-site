@@ -57,14 +57,20 @@ export default async function handler(req, res) {
       const info = a?.account?.data?.parsed?.info;
       const amt = parseFloat(info?.tokenAmount?.uiAmountString || info?.tokenAmount?.uiAmount || "0") || 0;
       if (!info?.mint || !(amt > 0)) continue;
-      holdings.push({ mint: info.mint, qty: amt });
+      holdings.push({
+        mint: info.mint,
+        qty: amt,
+        raw: String(info?.tokenAmount?.amount ?? ""),          // exact base units
+        decimals: Number(info?.tokenAmount?.decimals ?? 0),
+      });
     }
     const px = await priceMap(holdings.slice(0, 60).map((h) => h.mint));
     holdings = holdings.map((h) => {
       const p = px[h.mint];
       return { ...h, sym: p?.sym || null, name: p?.name || null, img: p?.img || null,
         pool: p?.pool || null, price: p?.price || 0, usd: (p?.price || 0) * h.qty };
-    }).filter((h) => h.usd >= 1).sort((a, b) => b.usd - a.usd).slice(0, 40);
+    }).filter((h) => h.usd >= 0.05 || (h.price === 0 && h.qty > 0))
+      .sort((a, b) => b.usd - a.usd).slice(0, 60);
 
     // recent activity, newest first — signatures are cheap and always available
     const trades = ((sigs || []).slice(0, 24)).map((s) => ({

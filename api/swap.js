@@ -49,6 +49,54 @@ const ENABLED = String(process.env.VALO_ONCHAIN || "").trim() === "1";
 
 const isMint = (m) => /^[A-Za-z0-9]{32,50}$/.test(String(m || ""));
 
+const RPC = () => (process.env.HELIUS_API_KEY
+  ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`
+  : "https://api.mainnet-beta.solana.com");
+
+// How many decimals does this mint use? Read from the chain, cached for the
+// life of the lambda. Never guessed: being wrong by one place is a 10x order.
+const decCache = new Map();
+async function mintDecimals(mint) {
+  if (decCache.has(mint)) return decCache.get(mint);
+  const r = await fetch(RPC(), {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getAccountInfo",
+      params: [mint, { encoding: "jsonParsed" }] }),
+  });
+  if (!r.ok) throw new Error(`rpc ${r.status} while reading decimals`);
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message || "rpc error while reading decimals");
+  const d = j?.result?.value?.data?.parsed?.info?.decimals;
+  if (!Number.isInteger(d)) throw new Error("could not read decimals for this mint");
+  decCache.set(mint, d);
+  return d;
+}
+
+// The order size in base units, from whichever form the client sent:
+//   amountRaw — exact base units. Used for full exits, so a float round-trip
+//               can never strand unsellable dust in the account.
+//   amountUi  — human units, converted here using the mint's real decimals.
+//   amount    — base units already (what buys have always sent).
+// BigInt throughout: a 9-decimal token with a large balance exceeds what a
+// double can hold exactly, and it fails silently when it does.
+async function resolveAmount(q, inputMint) {
+  const raw = String(q.amountRaw || "").trim();
+  if (raw) {
+    if (!/^\d+$/.test(raw)) throw new Error("bad amountRaw");
+    return BigInt(raw);
+  }
+  const ui = String(q.amountUi || "").trim();
+  if (ui) {
+    if (!/^\d+(\.\d+)?$/.test(ui)) throw new Error("bad amountUi");
+    const d = await mintDecimals(inputMint);
+    const [whole, frac = ""] = ui.split(".");
+    return BigInt(whole + (d > 0 ? (frac + "0".repeat(d)).slice(0, d) : ""));
+  }
+  const legacy = String(q.amount || "").trim();
+  if (!/^\d+(\.\d+)?$/.test(legacy)) throw new Error("bad amount");
+  return BigInt(Math.floor(parseFloat(legacy)));
+}
+
 export default async function handler(req, res) {
   if (!ENABLED) {
     return res.status(200).json({
@@ -69,25 +117,42 @@ export default async function handler(req, res) {
   }
   const inputMint = String(req.query.inputMint || SOL_MINT);
   const outputMint = String(req.query.outputMint || "");
-  const amountLamports = Math.floor(parseFloat(req.query.amount || "0"));
   const slippageBps = Math.min(1000, Math.max(10, parseInt(req.query.slippageBps || "100", 10)));
   const userPublicKey = String(req.query.user || "");
 
   if (!isMint(inputMint) || !isMint(outputMint)) return res.status(400).json({ error: "bad mint" });
-  if (!(amountLamports > 0)) return res.status(400).json({ error: "bad amount" });
+  if (inputMint === outputMint) return res.status(400).json({ error: "input and output are the same token" });
 
-  // size ceiling — enforced server-side so a tampered client can't exceed it
-  if (inputMint === SOL_MINT) {
-    const sol = amountLamports / 1e9;
+  const selling = inputMint !== SOL_MINT;
+  let amountBase;
+  try {
+    amountBase = await resolveAmount(req.query, inputMint);
+  } catch (e) {
+    return res.status(400).json({ error: String(e.message || e) });
+  }
+  if (!(amountBase > 0n)) return res.status(400).json({ error: "bad amount" });
+
+  // Size ceiling — enforced server-side so a tampered client can't exceed it.
+  // It caps BUYS only. A cap on selling would mean someone whose position grew
+  // past the limit could not fully exit through VALO, which is the one-way door
+  // this whole path exists to avoid. Sells are surfaced to the user instead:
+  // the quote reports the SOL coming back and flags when it is unusually large.
+  if (!selling) {
+    const sol = Number(amountBase) / 1e9;
     if (sol > MAX_SOL) {
       return res.status(400).json({ error: `order too large: ${sol} SOL exceeds the ${MAX_SOL} SOL limit`, maxSol: MAX_SOL });
     }
   }
 
+  // what the receiving side counts in — SOL is 9, every token is its own
+  let outDecimals = 9;
   try {
-    if (inputMint === outputMint) return res.status(400).json({ error: "input and output are the same token" });
+    if (outputMint !== SOL_MINT) outDecimals = await mintDecimals(outputMint);
+  } catch (e) { /* fall back to the display default rather than blocking a trade */ }
+
+  try {
     const qPath = `/quote?inputMint=${inputMint}&outputMint=${outputMint}`
-      + `&amount=${amountLamports}&slippageBps=${slippageBps}&onlyDirectRoutes=false`;
+      + `&amount=${amountBase.toString()}&slippageBps=${slippageBps}&onlyDirectRoutes=false`;
     const { json: quote, host } = await jupGet(qPath);
     if (!quote || !quote.outAmount) throw new Error("no route for this pair");
 
@@ -100,6 +165,13 @@ export default async function handler(req, res) {
       routeHops: (quote.routePlan || []).length,
       routeLabels: (quote.routePlan || []).map((r) => r?.swapInfo?.label).filter(Boolean),
       maxSol: MAX_SOL, via: host,
+      side: selling ? "sell" : "buy",
+      outDecimals,
+      // on a sell, what actually lands back in the wallet
+      solOut: selling ? Number(quote.outAmount) / 1e9 : null,
+      solOutMin: selling ? Number(quote.otherAmountThreshold) / 1e9 : null,
+      // not a block — a flag, so the UI can say "this is bigger than your test size"
+      aboveTestSize: selling ? (Number(quote.outAmount) / 1e9) > MAX_SOL : false,
     };
 
     if (mode === "quote") {
