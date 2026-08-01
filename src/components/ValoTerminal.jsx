@@ -2364,7 +2364,7 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
   );
 }
 
-function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, setAmount, pay, setPay, position, solBalance, valoBalance, positions, tokens, onOpenToken, onCloseAll, bestMult, pctSel, setPctSel, pendingOrders = [], onOpenBot, onCancelBot, onPosTrade, onDraftLevel, realized24 = 0, botRuns = [], onRealOrder, onChainReady = false, onChainMax = 0, chainHeld = 0}) {
+function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, setAmount, pay, setPay, position, solBalance, valoBalance, positions, tokens, onOpenToken, onCloseAll, bestMult, pctSel, setPctSel, pendingOrders = [], onOpenBot, onCancelBot, onPosTrade, onDraftLevel, realized24 = 0, botRuns = [], onRealOrder, onChainReady = false, onChainMax = 0, chainHeld = 0, chainSol = 0}) {
   const [dtBuyPcts, setDtBuyPcts] = useState([10, 25, 50, 75, 100]);  // dbl-click / right-click a chip to retype it
   const [dtSellPcts, setDtSellPcts] = useState([10, 25, 50, 75, 100]);
   const [dtFixed, setDtFixed] = useState([0.5, 1, 2, 5]);
@@ -2468,6 +2468,9 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
         const bidSol = pay === "SOL" ? amt : (amt * token.price) / SOL_USD;
         const sellCol = !position ? T.red : pnlPct > 0.05 ? T.green : pnlPct < -0.05 ? T.red : "#4a5266";
         const sellAllSol = pay === "SOL" ? held : (held * token.price) / SOL_USD;
+        // live sells follow the same % chips as paper ones
+        const dtSellPct = pctSel && pctSel.side === "sell" ? pctSel.p : 100;
+        const dtSellQty = chainHeld > 0 ? chainHeld * (dtSellPct / 100) : 0;
         return (<>
           {/* BUY block — % of your wallet balance */}
           <div style={{ background: "rgba(22,199,132,0.05)", border: "1px solid rgba(22,199,132,0.25)", borderRadius: 10, padding: 10, marginBottom: 8 }}>
@@ -2498,37 +2501,31 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
                   style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "4px 0", fontSize: 9, fontWeight: 800, color: T.green }}>{v}</button>
               ))}
             </div>
-            {onChainReady && (
-              <button onClick={() => onRealOrder && onRealOrder(token, "buy", Math.min(amt, onChainMax))}
-                title={`Spend real SOL from your connected wallet (max ${onChainMax} SOL)`}
-                style={{ width: "100%", marginBottom: 7, border: `1.5px solid ${T.amber}`,
-                  background: "rgba(240,185,11,0.12)", color: T.amber, borderRadius: 11,
-                  padding: "10px", cursor: "pointer", fontFamily: T.mono, fontSize: 10.5,
-                  fontWeight: 900, letterSpacing: 1 }}>
-                ⛓ REAL BUY · {Math.min(amt, onChainMax)} SOL
-                <span style={{ display: "block", fontSize: 7.5, fontWeight: 700, opacity: 0.85, letterSpacing: 0 }}>
-                  actual funds · max {onChainMax} SOL while testing
-                </span>
+            {onChainReady ? (() => {
+              const size = Math.min(amt, onChainMax);
+              const wrongUnit = pay !== "SOL";
+              const shortSol = chainSol > 0 && size > chainSol;
+              const ok = size > 0 && !wrongUnit && !shortSol;
+              return (
+                <button disabled={!ok} onClick={() => ok && onRealOrder && onRealOrder(token, "buy", size)}
+                  style={{ width: "100%", border: "none", borderRadius: 9, padding: "10px 6px", fontFamily: T.mono, fontWeight: 900,
+                    cursor: ok ? "pointer" : "not-allowed", background: ok ? T.green : "#1a2030", color: ok ? "#07130d" : T.faint,
+                    boxShadow: ok ? "0 0 16px rgba(22,199,132,0.25)" : "none", lineHeight: 1.25 }}>
+                  <div style={{ fontSize: 12.5 }}>⚡ BUY</div>
+                  <div style={{ fontSize: 8.5, opacity: 0.85 }}>
+                    {wrongUnit ? "switch unit to SOL"
+                      : shortSol ? `wallet holds ${chainSol.toFixed(3)} SOL`
+                      : `${size} SOL · $${(size * SOL_USD).toFixed(0)}${amt > onChainMax ? ` · capped at ${onChainMax}` : ""}`}
+                  </div>
+                </button>
+              );
+            })() : (
+              <button onClick={() => onExecute({ side: "buy", pay, amt, mode: "instant", tax: taxFor(pay), burn: fee.total, legs: [] })}
+                style={{ width: "100%", border: "none", borderRadius: 9, padding: "10px 6px", fontFamily: T.mono, fontWeight: 900, cursor: "pointer", background: T.green, color: "#07130d", boxShadow: "0 0 16px rgba(22,199,132,0.25)", lineHeight: 1.25 }}>
+                <div style={{ fontSize: 12.5 }}>⚡ BUY</div>
+                <div style={{ fontSize: 8.5, opacity: 0.85 }}>{bidSol.toFixed(2)} SOL · ${(bidSol * SOL_USD).toFixed(0)}</div>
               </button>
             )}
-            {onChainReady && chainHeld > 0 && (
-              <button onClick={() => onRealOrder && onRealOrder(token, "sell", chainHeld)}
-                title={`Sell your real ${token.sym} back to SOL`}
-                style={{ width: "100%", marginBottom: 7, border: `1.5px solid ${T.red}`,
-                  background: "rgba(234,57,67,0.12)", color: T.red, borderRadius: 11,
-                  padding: "10px", cursor: "pointer", fontFamily: T.mono, fontSize: 10.5,
-                  fontWeight: 900, letterSpacing: 1 }}>
-                ⛓ REAL SELL · ALL
-                <span style={{ display: "block", fontSize: 7.5, fontWeight: 700, opacity: 0.85, letterSpacing: 0 }}>
-                  {fmtQty(chainHeld)} {token.sym} held · back to SOL
-                </span>
-              </button>
-            )}
-            <button onClick={() => onExecute({ side: "buy", pay, amt, mode: "instant", tax: taxFor(pay), burn: fee.total, legs: [] })}
-              style={{ width: "100%", border: "none", borderRadius: 9, padding: "10px 6px", fontFamily: T.mono, fontWeight: 900, cursor: "pointer", background: T.green, color: "#07130d", boxShadow: "0 0 16px rgba(22,199,132,0.25)", lineHeight: 1.25 }}>
-              <div style={{ fontSize: 12.5 }}>⚡ BUY</div>
-              <div style={{ fontSize: 8.5, opacity: 0.85 }}>{bidSol.toFixed(2)} SOL · ${(bidSol * SOL_USD).toFixed(0)}</div>
-            </button>
           </div>
 
           {/* SELL block — % of your current holdings */}
@@ -2553,17 +2550,38 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
               })}
             </div>
             <div style={{ display: "flex", gap: 6 }}>
-              <button onClick={() => onExecute({ side: "sell", pay, amt, mode: "instant", tax: taxFor(pay), burn: fee.total, legs: [] })}
-                style={{ flex: 1.4, border: "none", borderRadius: 9, padding: "10px 6px", fontFamily: T.mono, fontWeight: 900, cursor: "pointer", background: sellCol, color: "#170808", lineHeight: 1.25, transition: "background .3s" }}>
-                <div style={{ fontSize: 12.5 }}>⚡ SELL {position ? (pnlPct >= 0 ? "▲" : "▼") : ""}</div>
-                <div style={{ fontSize: 8.5, opacity: 0.85 }}>{bidSol.toFixed(2)} SOL · ${(bidSol * SOL_USD).toFixed(0)}</div>
-              </button>
-              <button onClick={() => { if (held > 0) onExecute({ side: "sell", pay, amt: held, mode: "instant", tax: taxFor(pay), burn: splitFee(held, pay).total, legs: [] }); }}
-                disabled={held <= 0}
-                style={{ flex: 1, border: `1px solid ${sellCol}`, borderRadius: 9, padding: "10px 4px", fontFamily: T.mono, fontSize: 10, fontWeight: 800, background: `${sellCol}22`, color: sellCol, cursor: held > 0 ? "pointer" : "not-allowed", opacity: held > 0 ? 1 : 0.5, lineHeight: 1.2 }}>
-                <div>SELL ALL</div>
-                <div style={{ fontSize: 8, opacity: 0.9 }}>{held > 0 ? `${sellAllSol.toFixed(2)} SOL` : "—"}</div>
-              </button>
+              {onChainReady ? (
+                <button disabled={!(dtSellQty > 0)} onClick={() => dtSellQty > 0 && onRealOrder && onRealOrder(token, "sell", dtSellQty)}
+                  style={{ flex: 1.4, border: "none", borderRadius: 9, padding: "10px 6px", fontFamily: T.mono, fontWeight: 900,
+                    cursor: dtSellQty > 0 ? "pointer" : "not-allowed", background: dtSellQty > 0 ? sellCol : "#1a2030",
+                    color: dtSellQty > 0 ? "#170808" : T.faint, lineHeight: 1.25, transition: "background .3s" }}>
+                  <div style={{ fontSize: 12.5 }}>⚡ SELL</div>
+                  <div style={{ fontSize: 8.5, opacity: 0.85 }}>
+                    {dtSellQty > 0 ? `${dtSellPct}% · ${fmtQty(dtSellQty)} ${token.sym}` : "no position"}
+                  </div>
+                </button>
+              ) : (
+                <button onClick={() => onExecute({ side: "sell", pay, amt, mode: "instant", tax: taxFor(pay), burn: fee.total, legs: [] })}
+                  style={{ flex: 1.4, border: "none", borderRadius: 9, padding: "10px 6px", fontFamily: T.mono, fontWeight: 900, cursor: "pointer", background: sellCol, color: "#170808", lineHeight: 1.25, transition: "background .3s" }}>
+                  <div style={{ fontSize: 12.5 }}>⚡ SELL {position ? (pnlPct >= 0 ? "▲" : "▼") : ""}</div>
+                  <div style={{ fontSize: 8.5, opacity: 0.85 }}>{bidSol.toFixed(2)} SOL · ${(bidSol * SOL_USD).toFixed(0)}</div>
+                </button>
+              )}
+              {onChainReady ? (
+                <button onClick={() => chainHeld > 0 && onRealOrder && onRealOrder(token, "sell", chainHeld)}
+                  disabled={!(chainHeld > 0)}
+                  style={{ flex: 1, border: `1px solid ${sellCol}`, borderRadius: 9, padding: "10px 4px", fontFamily: T.mono, fontSize: 10, fontWeight: 800, background: `${sellCol}22`, color: sellCol, cursor: chainHeld > 0 ? "pointer" : "not-allowed", opacity: chainHeld > 0 ? 1 : 0.5, lineHeight: 1.2 }}>
+                  <div>SELL ALL</div>
+                  <div style={{ fontSize: 8, opacity: 0.9 }}>{chainHeld > 0 ? fmtQty(chainHeld) : "—"}</div>
+                </button>
+              ) : (
+                <button onClick={() => { if (held > 0) onExecute({ side: "sell", pay, amt: held, mode: "instant", tax: taxFor(pay), burn: splitFee(held, pay).total, legs: [] }); }}
+                  disabled={held <= 0}
+                  style={{ flex: 1, border: `1px solid ${sellCol}`, borderRadius: 9, padding: "10px 4px", fontFamily: T.mono, fontSize: 10, fontWeight: 800, background: `${sellCol}22`, color: sellCol, cursor: held > 0 ? "pointer" : "not-allowed", opacity: held > 0 ? 1 : 0.5, lineHeight: 1.2 }}>
+                  <div>SELL ALL</div>
+                  <div style={{ fontSize: 8, opacity: 0.9 }}>{held > 0 ? `${sellAllSol.toFixed(2)} SOL` : "—"}</div>
+                </button>
+              )}
             </div>
           </div>
         </>);
@@ -2582,6 +2600,7 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
         <button onClick={() => setClickMode(clickMode === "sell" ? null : "sell")}
           style={{ ...chip(clickMode === "sell"), flex: 1, textAlign: "center", color: clickMode === "sell" ? T.red : T.dim, borderColor: clickMode === "sell" ? T.red : T.border }}>▼ ARM SELL</button>
       </div>
+      {onChainReady && <div style={{ marginBottom: 12 }}><LiveFundsNotice sol={chainSol} compact /></div>}
       {clickMode && <div style={{ fontFamily: T.mono, fontSize: 9.5, color: clickMode === "buy" ? T.green : T.red, marginBottom: 12 }}>
         Armed — click the chart to fill instantly & stamp the spot.
       </div>}
@@ -5091,8 +5110,35 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
   );
 }
 
+// Sits under the BUY/SELL pair whenever on-chain execution is armed. The buttons
+// no longer shout "REAL" at you, so this is what tells you which mode you're in.
+function LiveFundsNotice({ sol = 0, compact = false }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+      border: `1px solid ${T.amber}44`, background: "rgba(240,185,11,0.07)", borderRadius: 9,
+      padding: compact ? "5px 8px" : "6px 10px" }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+        <span style={{ width: 6, height: 6, borderRadius: 6, background: T.amber, flex: "0 0 auto",
+          boxShadow: `0 0 7px ${T.amber}` }} />
+        <span style={{ fontFamily: T.mono, fontSize: compact ? 7.5 : 8.5, fontWeight: 800,
+          letterSpacing: 0.6, color: T.amber, whiteSpace: "nowrap" }}>
+          LIVE · REAL FUNDS
+        </span>
+        <span style={{ fontFamily: T.mono, fontSize: compact ? 7 : 7.5, color: T.dim,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          settles on-chain from your wallet · final once approved
+        </span>
+      </span>
+      {sol > 0 && (
+        <span style={{ fontFamily: T.mono, fontSize: compact ? 7.5 : 8.5, fontWeight: 800,
+          color: T.dim, flex: "0 0 auto" }}>{sol.toFixed(3)} SOL</span>
+      )}
+    </div>
+  );
+}
+
 // PRO LAYOUT order ticket — one wide bar under the chart, buy & sell side by side
-function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, valoBalance = 0, position, onExecute, onPosTrade, clickMode, setClickMode, realized24 = 0, onRealOrder, onChainReady = false, onChainMax = 0, chainHeld = 0}) {
+function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, valoBalance = 0, position, onExecute, onPosTrade, clickMode, setClickMode, realized24 = 0, onRealOrder, onChainReady = false, onChainMax = 0, chainHeld = 0, chainSol = 0}) {
   const [poPcts, setPoPcts] = useState([25, 50, 75, 100]);      // dbl-click / right-click to retype
   const [poFixed, setPoFixed] = useState([0.5, 1, 2, 5]);
   const [poSellPcts, setPoSellPcts] = useState([10, 25, 50, 75]);
@@ -5149,42 +5195,62 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
           <span style={{ fontSize: 9.5, opacity: 0.85 }}>≈ ${(bal * unit$).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD</span>
         </div>
       </div>
-      {/* BUY | SELL side by side */}
-      <div style={{ flex: "2 1 340px", minWidth: 300, display: "flex", gap: 8 }}>
-        <button disabled={!(amt > 0) || bal < amt} onClick={() => fire("buy", amt)}
-          style={{ flex: 1, border: "none", borderRadius: 11, fontFamily: T.mono, fontWeight: 900, fontSize: 14, letterSpacing: 1.2,
-            background: amt > 0 && bal >= amt ? T.green : "#1a2030", color: amt > 0 && bal >= amt ? "#07130d" : T.faint, cursor: amt > 0 && bal >= amt ? "pointer" : "not-allowed",
-            boxShadow: amt > 0 && bal >= amt ? "0 0 16px rgba(22,199,132,0.35)" : "none" }}>
-          🔥 BUY<div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>{amt.toFixed(2)} {pay} · ${Math.round(amt * unit$)}</div>
-        </button>
-        {onChainReady && chainHeld > 0 && (
-          <button onClick={() => onRealOrder && onRealOrder(token, "sell", chainHeld)}
-            title={`Sell your real ${token.sym} back to SOL`}
-            style={{ flex: "0 0 118px", border: `1.5px solid ${T.red}`, borderRadius: 11,
-              background: "rgba(234,57,67,0.14)", color: T.red, cursor: "pointer",
-              fontFamily: T.mono, fontWeight: 900, fontSize: 11, letterSpacing: 0.5 }}>
-            ⛓ REAL SELL
-            <div style={{ fontSize: 8, fontWeight: 800, opacity: 0.85 }}>{fmtQty(chainHeld)} held</div>
-          </button>
-        )}
-        {onChainReady && (
-          <button onClick={() => onRealOrder && onRealOrder(token, "buy", Math.min(amt, onChainMax))}
-            title={`Spend real SOL from your connected wallet · max ${onChainMax} SOL`}
-            style={{ flex: "0 0 128px", border: `1.5px solid ${T.amber}`, borderRadius: 11,
-              background: "rgba(240,185,11,0.14)", color: T.amber, cursor: "pointer",
-              fontFamily: T.mono, fontWeight: 900, fontSize: 11, letterSpacing: 0.5 }}>
-            ⛓ REAL BUY
-            <div style={{ fontSize: 8, fontWeight: 800, opacity: 0.85 }}>
-              {Math.min(amt, onChainMax)} SOL · actual funds
-            </div>
-          </button>
-        )}
-        <button disabled={!held} onClick={() => fire("sell", held)}
-          style={{ flex: 1, border: "none", borderRadius: 11, fontFamily: T.mono, fontWeight: 900, fontSize: 14, letterSpacing: 1.2,
-            background: held ? T.red : "#1a2030", color: held ? "#170808" : T.faint, cursor: held ? "pointer" : "not-allowed",
-            boxShadow: held ? "0 0 16px rgba(234,57,67,0.3)" : "none" }}>
-          SELL ALL<div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>{held ? `${held.toFixed(2)} ${((position && position.pay) || pay)}` : "no position"}</div>
-        </button>
+      {/* BUY | SELL side by side — the same two controls in both modes */}
+      <div style={{ flex: "2 1 340px", minWidth: 300, display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ display: "flex", gap: 8, flex: 1 }}>
+          {onChainReady ? (() => {
+            // live: sized in SOL, capped server-side, spendable only up to what
+            // the wallet actually holds — so the button can't promise a fill the
+            // chain will reject.
+            const size = Math.min(amt, onChainMax);
+            const wrongUnit = pay !== "SOL";
+            const shortSol = chainSol > 0 && size > chainSol;
+            const ok = size > 0 && !wrongUnit && !shortSol;
+            return (
+              <button disabled={!ok} onClick={() => ok && onRealOrder && onRealOrder(token, "buy", size)}
+                title={wrongUnit ? "Live orders are priced in SOL — switch the unit to SOL"
+                  : shortSol ? "More than this wallet holds"
+                  : `Spend ${size} SOL from your connected wallet`}
+                style={{ flex: 1, border: "none", borderRadius: 11, fontFamily: T.mono, fontWeight: 900, fontSize: 14, letterSpacing: 1.2,
+                  background: ok ? T.green : "#1a2030", color: ok ? "#07130d" : T.faint, cursor: ok ? "pointer" : "not-allowed",
+                  boxShadow: ok ? "0 0 16px rgba(22,199,132,0.35)" : "none" }}>
+                🔥 BUY
+                <div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>
+                  {wrongUnit ? "switch unit to SOL"
+                    : shortSol ? `wallet holds ${chainSol.toFixed(3)} SOL`
+                    : `${size} SOL · $${Math.round(size * SOL_USD)}${amt > onChainMax ? ` · capped at ${onChainMax}` : ""}`}
+                </div>
+              </button>
+            );
+          })() : (
+            <button disabled={!(amt > 0) || bal < amt} onClick={() => fire("buy", amt)}
+              style={{ flex: 1, border: "none", borderRadius: 11, fontFamily: T.mono, fontWeight: 900, fontSize: 14, letterSpacing: 1.2,
+                background: amt > 0 && bal >= amt ? T.green : "#1a2030", color: amt > 0 && bal >= amt ? "#07130d" : T.faint, cursor: amt > 0 && bal >= amt ? "pointer" : "not-allowed",
+                boxShadow: amt > 0 && bal >= amt ? "0 0 16px rgba(22,199,132,0.35)" : "none" }}>
+              🔥 BUY<div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>{amt.toFixed(2)} {pay} · ${Math.round(amt * unit$)}</div>
+            </button>
+          )}
+          {onChainReady ? (
+            <button disabled={!(chainHeld > 0)} onClick={() => chainHeld > 0 && onRealOrder && onRealOrder(token, "sell", chainHeld)}
+              title={chainHeld > 0 ? `Sell your ${token.sym} back to SOL` : "Nothing held in this wallet"}
+              style={{ flex: 1, border: "none", borderRadius: 11, fontFamily: T.mono, fontWeight: 900, fontSize: 14, letterSpacing: 1.2,
+                background: chainHeld > 0 ? T.red : "#1a2030", color: chainHeld > 0 ? "#170808" : T.faint, cursor: chainHeld > 0 ? "pointer" : "not-allowed",
+                boxShadow: chainHeld > 0 ? "0 0 16px rgba(234,57,67,0.3)" : "none" }}>
+              SELL
+              <div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>
+                {chainHeld > 0 ? `${fmtQty(chainHeld)} ${token.sym} → SOL` : "no position"}
+              </div>
+            </button>
+          ) : (
+            <button disabled={!held} onClick={() => fire("sell", held)}
+              style={{ flex: 1, border: "none", borderRadius: 11, fontFamily: T.mono, fontWeight: 900, fontSize: 14, letterSpacing: 1.2,
+                background: held ? T.red : "#1a2030", color: held ? "#170808" : T.faint, cursor: held ? "pointer" : "not-allowed",
+                boxShadow: held ? "0 0 16px rgba(234,57,67,0.3)" : "none" }}>
+              SELL ALL<div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>{held ? `${held.toFixed(2)} ${((position && position.pay) || pay)}` : "no position"}</div>
+            </button>
+          )}
+        </div>
+        {onChainReady && <LiveFundsNotice sol={chainSol} />}
       </div>
       {/* partial sells + arm */}
       <div style={{ ...seg, flex: "1 1 190px", minWidth: 180 }}>
@@ -5608,9 +5674,20 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   pendingOrders = [], onEditBot, onCancelBot, botTokens = [], botHistory = [], onOpenBotRun,
   botsSlot = null,
   onPosTrade,
-  epochLastHour = 0, epochTotalEarned = 0, valoUsdForEpoch = 0.0125, onOpenClaim }) {
+  epochLastHour = 0, epochTotalEarned = 0, valoUsdForEpoch = 0.0125, onOpenClaim,
+  liveMode = false }) {
   const bestCalloutPeak = Object.values(myCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0);
   const mask = (s) => (hideBalance ? "••••••" : s);
+  // ⛓/📝 equity view — chain view exists only when live mode is on AND a wallet
+  // is actually connected with data. On the demo site this stays paper, always.
+  const chainAvail = !!(liveMode && wallet && wallet.address && walletChain);
+  const [eqView, setEqView] = useState("paper");
+  const chainOn = chainAvail && eqView === "chain";
+  useEffect(() => { if (!chainAvail && eqView !== "paper") setEqView("paper"); }, [chainAvail]);
+  const chSol = (walletChain && walletChain.sol) || 0;
+  const chTokensUsd = (walletChain && walletChain.tokensUsd) || 0;
+  const chCount = (walletChain && walletChain.holdingsCount) || 0;
+  const chEquity = chSol * SOL_USD + chTokensUsd;
   // any movement anywhere on the site — manual, bots, exits — flashes the wallet
   const [balFlash, setBalFlash] = useState(0);
   const prevBalRef = useRef({ s: solBalance, v: valoWallet });
@@ -5852,28 +5929,65 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               style={{ position: "absolute", right: 0, top: 0, ...chip(false), padding: "3px 8px", fontSize: 11 }}>
               {hideBalance ? "🙈" : "👁"}
             </button>
-            <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1 }}>TOTAL EQUITY</div>
-            <div style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 800,
-              color: balFlash > 0 ? T.green : balFlash < 0 ? T.red : T.text,
-              textShadow: balFlash ? `0 0 14px ${balFlash > 0 ? "rgba(22,199,132,0.7)" : "rgba(234,57,67,0.7)"}` : "none",
-              transition: "color .25s ease, text-shadow .25s ease" }}>{mask(`$${totalEquity.toLocaleString(undefined, { maximumFractionDigits: 0 })}`)}</div>
-            <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 700, color: gain ? T.green : T.red }}>
-              {mask(`${gain ? "▲ +" : "▼ −"}$${Math.abs(totalPnl).toFixed(2)} all-time PnL`)}
+            <div onClick={() => chainAvail && setEqView((v) => (v === "paper" ? "chain" : "paper"))}
+              title={chainAvail ? "Tap to switch between VALO paper equity and your on-chain wallet" : undefined}
+              style={{ cursor: chainAvail ? "pointer" : "default", userSelect: "none", WebkitTapHighlightColor: "transparent" }}>
+              <div style={{ fontFamily: T.mono, fontSize: 9, color: chainOn ? T.amber : T.faint, letterSpacing: 1,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                {chainOn ? "⛓ ON-CHAIN WALLET" : "TOTAL EQUITY"}
+                {chainAvail && (
+                  <span style={{ fontSize: 7, color: T.faint, border: `1px solid ${T.border}`, borderRadius: 5,
+                    padding: "1px 5px" }}>{chainOn ? "tap for paper" : "tap for on-chain"}</span>
+                )}
+              </div>
+              {chainOn ? (
+                <>
+                  <div style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 800, color: T.amber }}>
+                    {mask(`$${chEquity.toLocaleString(undefined, { maximumFractionDigits: 0 })}`)}
+                  </div>
+                  <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 700, color: T.dim }}>
+                    {mask(`${chSol.toFixed(3)} SOL + ${chCount} token${chCount === 1 ? "" : "s"} · read-only`)}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 800,
+                    color: balFlash > 0 ? T.green : balFlash < 0 ? T.red : T.text,
+                    textShadow: balFlash ? `0 0 14px ${balFlash > 0 ? "rgba(22,199,132,0.7)" : "rgba(234,57,67,0.7)"}` : "none",
+                    transition: "color .25s ease, text-shadow .25s ease" }}>{mask(`$${totalEquity.toLocaleString(undefined, { maximumFractionDigits: 0 })}`)}</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 700, color: gain ? T.green : T.red }}>
+                    {mask(`${gain ? "▲ +" : "▼ −"}$${Math.abs(totalPnl).toFixed(2)} all-time PnL`)}
+                  </div>
+                </>
+              )}
             </div>
           </div>
           {/* balance breakdown */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-            <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: "8px 10px" }}>
-              <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>SOL BALANCE</div>
-              <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>{mask(solBalance.toFixed(2))}</div>
-              <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{mask(`$${(solBalance * SOL_USD).toFixed(0)}`)}</div>
+            <div style={{ background: "#0c0f16", border: `1px solid ${chainOn ? `${T.amber}55` : T.border}`, borderRadius: 9, padding: "8px 10px" }}>
+              <div style={{ fontFamily: T.mono, fontSize: 8.5, color: chainOn ? T.amber : T.faint }}>{chainOn ? "⛓ SOL · ON-CHAIN" : "SOL BALANCE"}</div>
+              <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>{mask(chainOn ? chSol.toFixed(3) : solBalance.toFixed(2))}</div>
+              <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{mask(`$${((chainOn ? chSol : solBalance) * SOL_USD).toFixed(0)}`)}</div>
             </div>
-            <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: "8px 10px" }}>
-              <div style={{ fontFamily: T.mono, fontSize: 8.5, color: VALO_PURPLE }}>$VALO BALANCE</div>
-              <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>{mask(Math.round(valoWallet).toLocaleString())}</div>
-              <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{mask(`$${(valoWallet * valoUsd).toFixed(0)}`)}</div>
-            </div>
+            {chainOn ? (
+              <div style={{ background: "#0c0f16", border: `1px solid ${T.amber}55`, borderRadius: 9, padding: "8px 10px" }}>
+                <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.amber }}>⛓ TOKENS · ON-CHAIN</div>
+                <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>{mask(`$${chTokensUsd.toFixed(0)}`)}</div>
+                <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{mask(`${chCount} position${chCount === 1 ? "" : "s"}`)}</div>
+              </div>
+            ) : (
+              <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: "8px 10px" }}>
+                <div style={{ fontFamily: T.mono, fontSize: 8.5, color: VALO_PURPLE }}>$VALO BALANCE</div>
+                <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>{mask(Math.round(valoWallet).toLocaleString())}</div>
+                <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{mask(`$${(valoWallet * valoUsd).toFixed(0)}`)}</div>
+              </div>
+            )}
           </div>
+          {chainOn && (
+            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, margin: "-4px 0 10px", lineHeight: 1.5 }}>
+              Live from your connected wallet, read-only. Deposits, withdrawals, swaps and rewards below are paper features — they never touch these funds.
+            </div>
+          )}
 
           {/* epoch rewards banner — last hour + all-time earned + jump to claim */}
           <div style={{ background: "linear-gradient(120deg, rgba(240,185,11,0.08), rgba(125,92,240,0.06))", border: "1px solid rgba(240,185,11,0.3)", borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
@@ -6418,10 +6532,13 @@ function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line",
             <span style={{ color: T.dim }}>MC {fmt$(mcOf(t))}</span>
             <span style={{ color: T.dim }}>TVL {fmt$(t.tvl)}</span>
           </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 3, fontFamily: T.mono, fontSize: 9.5 }}>
+          <div style={{ display: "flex", gap: 8, marginTop: 3, fontFamily: T.mono, fontSize: 9.5, alignItems: "baseline" }}>
             <span style={{ color: T.green }}>▲{fmt$(t.greenUsd)}</span>
             <span style={{ color: T.red }}>▼{fmt$(t.redUsd)}</span>
             <span style={{ color: net >= 0 ? T.green : T.red, fontWeight: 700 }}>{net >= 0 ? "+" : "−"}{fmt$(Math.abs(net))}</span>
+            {t.statWin && t.market !== false && (t.pool || t.market) && (
+              <span style={{ color: T.faint, fontSize: 7.5, letterSpacing: 0.5 }}>{t.statWin}</span>
+            )}
           </div>
         </div>
         <div title={rug.rugged ? `Rugged — down ${(rug.drawdown * 100).toFixed(0)}% from peak with no recovery` : `Score ${score} · ${rating(score)}`}
@@ -6488,6 +6605,7 @@ function TokenRow({ t, active, onOpen, calloutCount = 0, tf = 15 }) {
           <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.dim }}>MC {fmt$(mc)}</div>
           <div style={{ fontFamily: T.mono, fontSize: 9 }}>
             <span style={{ color: T.green }}>▲{fmt$(t.greenUsd)}</span> <span style={{ color: T.red }}>▼{fmt$(t.redUsd)}</span>
+            {t.statWin && (t.pool || t.market) && <span style={{ color: T.faint, fontSize: 7 }}> {t.statWin}</span>}
           </div>
         </div>
         <div style={{ flexShrink: 0, textAlign: "center", background: `${rc}18`, border: `1px solid ${rc}`, borderRadius: 7, padding: "2px 6px", minWidth: 30 }}>
@@ -9872,6 +9990,8 @@ export default function App() {
               img: x.img || null, pool: x.id, mint: x.mint || null,
               greenUsd: +x.greenUsd || 0, redUsd: +x.redUsd || 0,
               traders: +x.traders || 0, ch24: +x.ch24 || 0,
+              statWin: x.statWin || "24h", ch: +x.ch || 0,
+              buys: +x.buys || 0, sells: +x.sells || 0, vol24: +x.vol24 || 0,
             }));
             liveArrRef.current = mapped;
             // 🔒 bind each pool to ONE card, permanently for this session
@@ -10313,6 +10433,18 @@ export default function App() {
             supply: lv.mc > 0 && lv.price > 0 ? lv.mc / lv.price : t.supply,
             greenUsd: lv.greenUsd > 0 ? lv.greenUsd : Math.max(0, t.greenUsd * (1 + driftL * 2)),
             redUsd: lv.redUsd > 0 ? lv.redUsd : Math.max(1, t.redUsd * (1 - driftL * 1.2)),
+            statWin: lv.statWin || t.statWin || "24h",
+            vol24: lv.vol24 > 0 ? lv.vol24 : t.vol24,
+            // real short-window inputs → real momentum/pressure → real score
+            ...(() => {
+              const flow = (lv.buys || 0) + (lv.sells || 0);
+              if (!(flow > 0)) return {};
+              const bp = Math.max(1, Math.min(99, Math.round((lv.buys / flow) * 100)));
+              const chW = +lv.ch || 0;
+              const chCoef = lv.statWin === "5m" ? 6 : lv.statWin === "1h" ? 2 : 0.5;
+              const mo = Math.max(1, Math.min(99, Math.round(50 + chW * chCoef + (bp - 50) * 0.4)));
+              return { buyPressure: bp, momentum: mo };
+            })(),
             ageMin: t.ageMin + 0.04 };
         }
         const candles = tickCandles(t.candles, t.momentum, t.buyPressure);
@@ -11966,6 +12098,17 @@ export default function App() {
     const sellCol = !pos ? T.red : pnlPct > 0.05 ? T.green : pnlPct < -0.05 ? T.red : "#4a5266";
     const bidSol = pay === "SOL" ? a : (a * selected.price) / SOL_USD;
     const sellAllSol = pay === "SOL" ? held : (held * selected.price) / SOL_USD;
+    // live mode, mobile
+    const mLive = !!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint);
+    const mChainHeld = mLive ? chainHeldOf(selected) : 0;
+    const mChainSol = (walletChain && walletChain.sol) || 0;
+    const mBuySize = Math.min(a, onchain.maxSol || 0);
+    const mBuyBad = pay !== "SOL" ? "switch unit to SOL"
+      : !(mBuySize > 0) ? "set an amount"
+      : (mChainSol > 0 && mBuySize > mChainSol) ? `wallet holds ${mChainSol.toFixed(3)} SOL` : null;
+    // the sell chips set a %; live sells apply it to the real balance
+    const mSellPct = pctSel && pctSel.side === "sell" ? pctSel.p : 100;
+    const mSellQty = mChainHeld > 0 ? mChainHeld * (mSellPct / 100) : 0;
     const bestMult = bestMultByToken[selected.id];
     const confirmTap = (side, fire) => {
       if (hbConfirmRef.current && hbConfirmRef.current.side === side) {
@@ -12050,6 +12193,15 @@ export default function App() {
                 style={{ flex: 1, ...chip(parseFloat(amount) === v), padding: "5px 0", fontSize: 8, textAlign: "center", fontWeight: 800, color: T.green }}>{v}</button>
             ))}
           </div>
+          {mLive ? (
+            <button disabled={!!mBuyBad} onClick={() => !mBuyBad && quoteRealOrder(selected, "buy", mBuySize)}
+              style={{ width: "100%", border: "none", borderRadius: 8, padding: "10px 4px", fontFamily: T.mono, fontWeight: 900,
+                background: mBuyBad ? "#1a2030" : T.green, color: mBuyBad ? T.faint : "#07130d", cursor: mBuyBad ? "not-allowed" : "pointer",
+                boxShadow: mBuyBad ? "none" : "0 0 12px rgba(22,199,132,0.28)", lineHeight: 1.15 }}>
+              <div style={{ fontSize: 13 }}>⚡ BUY</div>
+              <div style={{ fontSize: 8, opacity: 0.9 }}>{mBuyBad || `${mBuySize} SOL`}</div>
+            </button>
+          ) : (
           <button onClick={() => confirmTap("buy", () => execute(selected, { side: "buy", pay, amt: a, mode: "instant", tax: taxFor(pay), burn: splitFee(a, pay).total, legs: [] }))}
             style={{ width: "100%", border: "none", borderRadius: 8, padding: "10px 4px", fontFamily: T.mono, fontWeight: 900,
               background: hbConfirm === "buy" ? T.amber : T.green, color: hbConfirm === "buy" ? "#1d1503" : "#07130d", cursor: "pointer",
@@ -12057,6 +12209,7 @@ export default function App() {
             <div style={{ fontSize: hbConfirm === "buy" ? 11.5 : 13 }}>{hbConfirm === "buy" ? "⚠ CONFIRM BUY" : "⚡ BUY"}</div>
             <div style={{ fontSize: 8, opacity: 0.9 }}>{hbConfirm === "buy" ? "tap again to fire" : `${bidSol.toFixed(2)} SOL`}</div>
           </button>
+          )}
         </div>
         {/* SELL side */}
         <div style={{ flex: 1, background: "rgba(234,57,67,0.06)", border: "1px solid rgba(234,57,67,0.28)", borderRadius: 10, padding: 6 }}>
@@ -12077,6 +12230,27 @@ export default function App() {
             })}
           </div>
           <div style={{ display: "flex", gap: 4 }}>
+            {mLive ? (
+              <>
+                <button disabled={!(mSellQty > 0)} onClick={() => mSellQty > 0 && quoteRealOrder(selected, "sell", mSellQty)}
+                  style={{ flex: 1.5, border: "none", borderRadius: 8, padding: "10px 2px", fontFamily: T.mono, fontWeight: 900,
+                    background: mSellQty > 0 ? sellCol : "#1a2030", color: mSellQty > 0 ? "#170808" : T.faint,
+                    cursor: mSellQty > 0 ? "pointer" : "not-allowed", lineHeight: 1.15 }}>
+                  <div style={{ fontSize: 12 }}>⚡ SELL</div>
+                  <div style={{ fontSize: 7.5, opacity: 0.9 }}>
+                    {mSellQty > 0 ? `${mSellPct}% · ${fmtQty(mSellQty)}` : "no position"}
+                  </div>
+                </button>
+                <button disabled={!(mChainHeld > 0)} onClick={() => mChainHeld > 0 && quoteRealOrder(selected, "sell", mChainHeld)}
+                  style={{ flex: 1, border: `1px solid ${sellCol}`, borderRadius: 8, padding: "10px 2px", fontFamily: T.mono, fontWeight: 800,
+                    background: `${sellCol}22`, color: sellCol, cursor: mChainHeld > 0 ? "pointer" : "not-allowed",
+                    opacity: mChainHeld > 0 ? 1 : 0.5, lineHeight: 1.1 }}>
+                  <div style={{ fontSize: 9 }}>ALL</div>
+                  <div style={{ fontSize: 7, opacity: 0.85 }}>{mChainHeld > 0 ? fmtQty(mChainHeld) : "—"}</div>
+                </button>
+              </>
+            ) : (
+              <>
             <button onClick={() => confirmTap("sell", () => execute(selected, { side: "sell", pay, amt: a, mode: "instant", tax: taxFor(pay), burn: splitFee(a, pay).total, legs: [] }))}
               style={{ flex: 1.5, border: "none", borderRadius: 8, padding: "10px 2px", fontFamily: T.mono, fontWeight: 900,
                 background: hbConfirm === "sell" ? T.amber : sellCol, color: hbConfirm === "sell" ? "#1d1503" : "#170808", cursor: "pointer", lineHeight: 1.15,
@@ -12091,9 +12265,12 @@ export default function App() {
               <div style={{ fontSize: 9 }}>{hbConfirm === "sellall" ? "⚠2×" : "ALL"}</div>
               <div style={{ fontSize: 7, opacity: 0.85 }}>{held > 0 ? `${sellAllSol.toFixed(1)}◎` : "—"}</div>
             </button>
+              </>
+            )}
           </div>
         </div>
       </div>
+      {mLive && <div style={{ marginTop: 6 }}><LiveFundsNotice sol={mChainSol} compact /></div>}
     </div>
     );
   })();
@@ -12638,14 +12815,10 @@ export default function App() {
                         onOpenTokenAuto={(tid, botId) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(botId || null); }} />
                     ) : (
                       <ProOrderBar token={selected}
-                onRealOrder={quoteRealOrder}
-                onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
-                onChainMax={onchain.maxSol || 0}
-                chainHeld={chainHeldOf(selected)}
-                onRealOrder={quoteRealOrder}
-                onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
-                onChainMax={onchain.maxSol || 0}
-                chainHeld={chainHeldOf(selected)} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
+                        onRealOrder={quoteRealOrder}
+                        onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
+                        onChainMax={onchain.maxSol || 0}
+                        chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
                         solBalance={solBalance} valoBalance={valoWallet} position={positions[selected.id]}
                         clickMode={clickMode} setClickMode={setClickMode}
                         realized24={realized24For(selected.sym)}
@@ -12752,11 +12925,10 @@ export default function App() {
                 onCancelBot={cancelBot} onSellRun={sellRun} onOpenBotRun={(id) => setBotRunOpen(id)}
                 onOpenTokenAuto={(tid, botId) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(botId || null); }} />
             ) : selected ? (
-              <DesktopTradePanel token={selected} botRuns={botRuns} chainHeld={chainHeldOf(selected)}
+              <DesktopTradePanel token={selected} botRuns={botRuns} chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0}
                 onRealOrder={quoteRealOrder}
                 onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
                 onChainMax={onchain.maxSol || 0}
-                chainHeld={chainHeldOf(selected)}
                 onExecute={(o, tok) => execute(tok || selected, o)}
                 clickMode={clickMode} setClickMode={setClickMode}
                 amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
@@ -12811,7 +12983,7 @@ export default function App() {
             </button>
             <PortfolioPanel big
               solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
@@ -14353,7 +14525,7 @@ export default function App() {
             </div>
             <PortfolioPanel big
               solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
