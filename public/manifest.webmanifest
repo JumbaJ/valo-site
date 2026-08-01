@@ -2,7 +2,7 @@
   "name": "VALO Terminal",
   "short_name": "VALO",
   "description": "Visual trading terminal for Solana meme coins — live market data, paper trading.",
-  "start_url": "/?live=1",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",

@@ -9833,9 +9833,11 @@ export default function App() {
 
   const [liveData, setLiveData] = useState(() => {
     if (typeof window === "undefined") return false;
-    const url = /[?&](live|test)=1/.test(window.location.search);
-    return url || window.__VALO_LIVE__ === true; // env bridge set by main.jsx (VITE_LIVE_DATA=1)
-  }); // 🛰 real tokens, simulated wallet
+    const q = window.location.search;
+    if (/[?&](live|test)=0/.test(q) || /[?&]demo=1/.test(q)) return false;  // demo, explicitly — beats env
+    if (/[?&](live|test)=1/.test(q)) return true;                            // live, explicitly
+    return window.__VALO_LIVE__ === true;  // otherwise the deployment decides (VITE_LIVE_DATA)
+  }); // 🛰 real tokens, simulated wallet — URL wins in both directions
   // 🔎 market-wide search: every Solana / pump.fun token DexScreener
   // indexes, merged in behind whatever is already on screen
   const [mktHits, setMktHits] = useState([]);
@@ -13396,18 +13398,23 @@ export default function App() {
                         ⚠ Price impact above 3% — this pool is thin and you will lose value on the fill.
                       </div>
                     )}
-                    <button onClick={submitRealOrder}
-                      style={{ width: "100%", marginTop: 11, border: "none", borderRadius: 11, padding: "13px",
-                        background: T.amber, color: "#0a0713", fontFamily: T.mono, fontSize: 11.5,
-                        fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>
-                      REVIEW IN WALLET →
-                    </button>
-                    <button onClick={() => setRealOrder(null)}
-                      style={{ width: "100%", marginTop: 6, border: `1px solid ${T.border2}`, borderRadius: 10,
-                        padding: "9px", background: "transparent", color: T.dim, fontFamily: T.mono,
-                        fontSize: 10, cursor: "pointer" }}>Cancel</button>
+                    <div style={{ display: "flex", gap: 8, marginTop: 11 }}>
+                      <button onClick={() => setRealOrder(null)}
+                        style={{ flex: 1, border: `1.5px solid ${T.red}66`, borderRadius: 11, padding: "13px 6px",
+                          background: "rgba(234,57,67,0.08)", color: T.red, fontFamily: T.mono, fontSize: 11.5,
+                          fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>
+                        ✕ CANCEL
+                      </button>
+                      <button onClick={submitRealOrder}
+                        style={{ flex: 1.6, border: "none", borderRadius: 11, padding: "13px 6px",
+                          background: realOrder.side === "sell" ? T.red : T.green, color: realOrder.side === "sell" ? "#170808" : "#07130d",
+                          fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, letterSpacing: 1, cursor: "pointer",
+                          boxShadow: realOrder.side === "sell" ? "0 0 18px rgba(234,57,67,0.4)" : "0 0 18px rgba(22,199,132,0.4)" }}>
+                        ✓ CONFIRM {realOrder.side === "sell" ? "SELL" : "BUY"}
+                      </button>
+                    </div>
                     <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 8, lineHeight: 1.5 }}>
-                      Phantom will show you the exact transaction. Nothing moves until you approve it there.
+                      Phantom does one final key check after this — that step belongs to your wallet, not to any website. Tip: Phantom's settings let you enable auto-confirm for trusted sites if you want true one-tap orders.
                     </div>
                   </>
                 );
@@ -13415,8 +13422,10 @@ export default function App() {
 
               {realOrder.stage === "signing" && (
                 <div style={{ fontFamily: T.mono, fontSize: 10, color: T.amber, textAlign: "center", padding: "18px 0", lineHeight: 1.7 }}>
-                  waiting for your wallet…<br />
-                  <span style={{ fontSize: 8.5, color: T.faint }}>approve or reject it in Phantom</span>
+                  order confirmed — Phantom is doing its key check…<br />
+                  <span style={{ fontSize: 8.5, color: T.faint }}>
+                    approve it there (or enable auto-confirm for VALO in Phantom's settings to skip this step next time)
+                  </span>
                 </div>
               )}
 
