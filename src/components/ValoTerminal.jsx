@@ -5191,7 +5191,7 @@ function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phanto
         <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 0.8, color: active ? T.green : T.amber }}>
           ⚡ TURBO WALLET {active ? "· ARMED" : turbo ? "· LOCKED" : ""}
         </span>
-        {turbo && <span style={{ fontFamily: T.mono, fontSize: 8, color: T.dim }}>{turboSol.toFixed(4)} SOL</span>}
+        {turbo && <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, color: turboSol > 0 ? T.green : T.dim }}>◎ {turboSol.toFixed(4)} SOL</span>}
       </div>
       {!turbo && (
         <>
@@ -5208,12 +5208,17 @@ function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phanto
         </>
       )}
       {turbo && !active && (
+        <div>
+        <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.amber, lineHeight: 1.6, marginBottom: 6 }}>
+          Your positions &amp; SOL below are this turbo wallet's — visible while locked, tradeable after you unlock.
+        </div>
         <div style={{ display: "flex", gap: 6 }}>
           <input value={pin} onChange={(e) => setPin(e.target.value)} type="password" inputMode="numeric" placeholder="PIN to unlock"
             style={{ ...inp, flex: 1, padding: "8px", fontSize: 11 }} />
           <button disabled={busy || !pin} onClick={() => run(async () => { const ok = await onUnlock(pin); if (!ok) throw new Error("wrong PIN"); setPin(""); })}
             style={{ border: "none", borderRadius: 8, padding: "8px 14px", background: T.green, color: "#07130d",
               fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, cursor: "pointer" }}>UNLOCK</button>
+        </div>
         </div>
       )}
       {active && (
@@ -9242,6 +9247,11 @@ export default function App() {
   };
   const quoteRealOrder = async (token, side, size) => {
     if (!onchain.enabled || !wallet || !wallet.address || !token || !token.liveMint) return;
+    if (turboLockedButPresent) {
+      setRealOrder({ stage: "error", token, side, msg:
+        "⚡ your TURBO wallet is locked — these funds live there. Enter your PIN in the portfolio's TURBO panel to trade." });
+      return;
+    }
     const SOLM = "So11111111111111111111111111111111111111112";
     const selling = side === "sell";
     const inputMint = selling ? token.liveMint : SOLM;
@@ -9348,6 +9358,7 @@ export default function App() {
   };
   const turboLock = () => { turboKpRef.current = null; setTurbo((t) => t ? { ...t, unlocked: false } : t); };
 
+
   // 🏦 site fee → treasury, turbo-signed, after a confirmed fill. Skipped when
   // Jupiter already collected in-swap (feeVia "jupiter"). From the treasury,
     // the epoch-rewards / VALO-burn split is the operator's move.
@@ -9416,6 +9427,13 @@ export default function App() {
         lamports: Math.floor(sol * 1e9),
       }));
       const out = await ph.signAndSendTransaction(tx);
+      // give the transfer a moment to land, then refresh the panel's number
+      setTimeout(async () => {
+        try {
+          const j = await (await fetch(`/api/wallet?address=${turbo.pubkey}&t=${Date.now()}`)).json();
+          if (j && !j.error) setTurboSolBal(j.sol || 0);
+        } catch (e) {}
+      }, 4000);
       return { ok: true, sig: out && (out.signature || out) };
     } catch (e) { return { ok: false, err: String(e.message || e) }; }
   };
@@ -9456,6 +9474,7 @@ export default function App() {
     const job = async () => {
       if (!onchain.enabled || !wallet || !wallet.address || !token || !token.liveMint)
         return { ok: false, err: "live trading not armed" };
+      if (turboLockedButPresent) return { ok: false, err: "⚡ turbo wallet locked — unlock with your PIN in the portfolio" };
       const SOLM = "So11111111111111111111111111111111111111112";
       const selling = side === "sell";
       const inputMint = selling ? token.liveMint : SOLM;
@@ -9538,6 +9557,10 @@ export default function App() {
   // 🗑 burn a dead token + close its account → rent comes back as SOL.
   const burnAndReclaim = async (h) => {
     if (!h || !h.mint || !h.account || !wallet || !wallet.address) return;
+    if (turboLockedButPresent) {
+      pushNotif({ type: "system", user: null, tokenId: null, text: "⚡ TURBO is locked — unlock with your PIN to burn from it." });
+      return;
+    }
     const ph = getProvider();
     if (!ph && !turboActive) return;
     try {
@@ -9620,6 +9643,11 @@ export default function App() {
   const realSellAllHoldings = async (holds) => {
     const list = (holds || []).filter((h) => h && h.mint && h.qty > 0 && !h.spam);
     if (!list.length) return;
+    if (turboLockedButPresent) {
+      pushNotif({ type: "system", user: null, tokenId: null,
+        text: "⚡ TURBO is locked — these positions live in your turbo wallet. Unlock with your PIN (portfolio → TURBO panel) to sell." });
+      return;
+    }
     const ph = getProvider();
     if (!ph) { pushNotif({ type: "system", user: null, tokenId: null, text: "⚠ Phantom not found" }); return; }
     pushNotif({ type: "system", user: null, tokenId: null,
@@ -11085,9 +11113,29 @@ export default function App() {
   // never appear — connected shows the real wallet, unconnected shows zero.
   const dispSol = liveData ? ((wallet && wallet.address && walletChain && walletChain.sol) || 0) : solBalance;
   const dispValo = liveData ? 0 : valoWallet;
-  // ⚡ turbo armed state + the address every trade routes through
+  // ⚡ signing needs an UNLOCKED turbo; viewing needs only that one EXISTS.
+  // Once created, the turbo wallet IS the trading wallet — positions, balances
+  // and P/L all track it, locked or not. The PIN gates signatures, not sight.
   const turboActive = !!(liveData && turbo && turbo.unlocked && turboKpRef.current);
-  const tradeAddr = turboActive ? turbo.pubkey : (wallet && wallet.address) || null;
+  const turboLockedButPresent = !!(liveData && turbo && !turboActive);
+  const tradeAddr = (liveData && turbo && turbo.pubkey) ? turbo.pubkey : (wallet && wallet.address) || null;
+  // ⚡ the turbo wallet's own SOL balance — polled whenever a turbo exists,
+  // locked or not, so the panel always shows what's in it
+  const [turboSolBal, setTurboSolBal] = useState(0);
+  useEffect(() => {
+    if (!turbo || !turbo.pubkey || !liveData) { setTurboSolBal(0); return; }
+    let stop = false;
+    const pull = async () => {
+      try {
+        const j = await (await fetch(`/api/wallet?address=${turbo.pubkey}&t=${Date.now()}`)).json();
+        if (!stop && j && !j.error) setTurboSolBal(j.sol || 0);
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 30000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [turbo && turbo.pubkey, liveData]);
+
   // ⛓ holdings enriched with live P/L — avg cost from the fills ledger, price
   // from the live card when the token is loaded (ticks every 2.2s), else the
   // wallet snapshot. This one list feeds every positions surface.
@@ -11171,15 +11219,17 @@ export default function App() {
     setWallet(null); setWalletChain(null); setWalletConnected(false);
   };
 
-  // keep the connected wallet's real figures current
+  // keep the TRADING wallet's real figures current — Phantom normally, the
+  // turbo wallet the moment it's armed (that's where positions live then)
   useEffect(() => {
-    if (!wallet || !wallet.address) return;
-    const iv = setInterval(() => loadWalletChain(wallet.address), 30000);
-    const onVis = () => { if (!document.hidden) loadWalletChain(wallet.address); };
+    if (!tradeAddr) return;
+    loadWalletChain(tradeAddr);                       // immediate on arm/switch
+    const iv = setInterval(() => loadWalletChain(tradeAddr), 30000);
+    const onVis = () => { if (!document.hidden) loadWalletChain(tradeAddr); };
     document.addEventListener("visibilitychange", onVis);
     return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wallet && wallet.address]);
+  }, [tradeAddr]);
 
   // reconnect silently if Phantom already trusts this site, and follow account changes
   useEffect(() => {
@@ -14145,7 +14195,7 @@ export default function App() {
               realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger} chainHoldingsLive2={chainHoldingsLive}
               turboState={turbo} onTurboCreate={turboCreate} onTurboUnlock={turboUnlock} onTurboLock={turboLock}
               onTurboFund={turboFund} onTurboSweep={turboSweep} phantomOk={!!(wallet && wallet.address)}
-              turboSol={turboActive ? ((walletChain && walletChain.sol) || 0) : 0}
+              turboSol={turboSolBal}
               valoMint={valoMint}
               onRealSwap={() => {
                 if (!valoMint) return;
@@ -14505,7 +14555,7 @@ export default function App() {
                       style={{ display: "inline-block", marginTop: 8, fontFamily: T.mono, fontSize: 9,
                         color: T.amber, textDecoration: "underline" }}>view on Solscan ↗</a>
                   )}
-                  <button onClick={() => { setRealOrder(null); if (wallet) loadWalletChain(wallet.address); }}
+                  <button onClick={() => { setRealOrder(null); if (tradeAddr) loadWalletChain(tradeAddr); }}
                     style={{ width: "100%", marginTop: 12, border: `1px solid ${T.border2}`, borderRadius: 10,
                       padding: "10px", background: "transparent", color: T.dim, fontFamily: T.mono, fontSize: 10, cursor: "pointer" }}>
                     Done
@@ -15771,7 +15821,7 @@ export default function App() {
               realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger} chainHoldingsLive2={chainHoldingsLive}
               turboState={turbo} onTurboCreate={turboCreate} onTurboUnlock={turboUnlock} onTurboLock={turboLock}
               onTurboFund={turboFund} onTurboSweep={turboSweep} phantomOk={!!(wallet && wallet.address)}
-              turboSol={turboActive ? ((walletChain && walletChain.sol) || 0) : 0}
+              turboSol={turboSolBal}
               valoMint={valoMint}
               onRealSwap={() => {
                 if (!valoMint) return;
