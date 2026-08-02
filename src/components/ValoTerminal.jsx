@@ -5029,11 +5029,10 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
 // PC MY POSITIONS — bots and order tickets under one collapsible roof
 function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrders = [], pay = "SOL",
   onOpenToken, onSellPos, onCloseTickets, onSellRun, onSellAllBots, onCancelBot,
-  liveMode = false, chainHoldings = [], onRealSellOne = null, onRealSellAll = null, onOpenMint = null }) {
+  liveMode = false, chainHoldings = [], onRealSellOne = null, onRealSellAll = null, onOpenMint = null, onBurn = null }) {
   const [open, setOpen] = useState(true);
   const [tab, setTab] = useState("both"); // bots | both | tickets
-  const [saConfirm, setSaConfirm] = useState(false);
-  useEffect(() => { if (!saConfirm) return; const t2 = setTimeout(() => setSaConfirm(false), 4000); return () => clearTimeout(t2); }, [saConfirm]);
+  const [showSpam, setShowSpam] = useState(false);
   const unit$ = (p) => (p === "SOL" ? SOL_USD : 0.0125);
   const tickets = Object.entries(positions).map(([id, p]) => {
     const t = tokens.find((x) => String(x.id) === String(id));
@@ -5060,7 +5059,8 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
       <button onClick={() => setOpen((v) => !v)}
         style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", border: "none", background: "transparent", cursor: "pointer", padding: 0, fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: T.text }}>
         <span>{open ? "▾" : "▸"} MY POSITIONS · {liveMode ? chainHoldings.length + runsLive.length : tickets.length + runsLive.length}</span>
-        <span style={{ color: ticketPnl + botPnl >= 0 ? T.green : T.red, fontWeight: 900 }}>{ticketPnl + botPnl >= 0 ? "+" : "−"}${Math.abs(ticketPnl + botPnl).toFixed(2)}</span>
+        {(() => { const v = liveMode ? chainHoldings.reduce((s, h) => s + (h.pnlUsd || 0), 0) : ticketPnl + botPnl;
+          return <span style={{ color: v >= 0 ? T.green : T.red, fontWeight: 900 }}>{v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}</span>; })()}
       </button>
       {open && (
         <div style={{ marginTop: 9 }}>
@@ -5071,22 +5071,32 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
           </div>
           {liveMode && tab !== "bots" && chainHoldings.length > 0 && (
             <>
-              <button onClick={() => { if (saConfirm) { onRealSellAll && onRealSellAll(chainHoldings); setSaConfirm(false); } else setSaConfirm(true); }}
+              <button onClick={() => onRealSellAll && onRealSellAll(chainHoldings)}
                 style={{ width: "100%", boxSizing: "border-box", border: "none", borderRadius: 9, padding: "9px", marginBottom: 8,
                   fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
-                  background: saConfirm ? T.amber : T.red, color: saConfirm ? "#1d1503" : "#170808", cursor: "pointer",
-                  boxShadow: saConfirm ? "0 0 16px rgba(240,185,11,0.5)" : "none", transition: "background .15s" }}>
-                {saConfirm ? `⚠ CONFIRM — SELL ${chainHoldings.length} POSITION${chainHoldings.length === 1 ? "" : "S"} FOR REAL` : `⛓ SELL ALL · ${chainHoldings.length} on-chain`}
+                  background: T.red, color: "#170808", cursor: "pointer" }}>
+                ⛓ SELL ALL · {chainHoldings.filter((x) => !x.spam).length} on-chain · one approval
               </button>
-              {chainHoldings.map((h) => (
+              {chainHoldings.filter((h) => !h.spam || showSpam).map((h) => (
                 <div key={h.mint} style={{ display: "flex", alignItems: "center", gap: 8, background: "#0c0f16",
                   border: `1px solid ${T.amber}33`, borderLeft: `2px solid ${T.amber}`, borderRadius: 9, padding: "8px 9px", marginBottom: 5 }}>
                   <div onClick={() => onOpenMint && onOpenMint(h.mint)} style={{ minWidth: 0, flex: 1, cursor: onOpenMint ? "pointer" : "default" }}>
                     <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: T.text }}>
                       ${h.sym || h.name || h.mint.slice(0, 5)} <span style={{ color: T.amber, fontSize: 7.5 }}>⛓</span>
                     </div>
-                    <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>{fmtQty(h.qty)} · ${(h.usd || 0).toFixed(2)}</div>
+                    <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>
+                      {fmtQty(h.qty)} · ${((h.livePrice || h.price || 0) * h.qty).toFixed(2)}
+                      {h.pnlUsd != null && (
+                        <b style={{ color: h.pnlUsd >= 0 ? T.green : T.red, marginLeft: 6 }}>
+                          {h.pnlUsd >= 0 ? "▲+" : "▼−"}${Math.abs(h.pnlUsd).toFixed(2)}{h.pnlPct != null ? ` (${h.pnlPct >= 0 ? "+" : "−"}${Math.abs(h.pnlPct).toFixed(1)}%)` : ""}
+                        </b>
+                      )}
+                      {h.pnlUsd == null && <span style={{ color: T.faint, marginLeft: 6, fontSize: 7.5 }}>no VALO basis</span>}
+                    </div>
                   </div>
+                  <button onClick={() => onBurn && onBurn(h)} title="Burn this token & close its account — reclaims the ~0.002 SOL rent. For dead/spam tokens nobody will buy."
+                    style={{ border: `1px solid ${T.border2}`, background: "transparent", color: T.faint,
+                      borderRadius: 8, padding: "6px 8px", cursor: "pointer", fontFamily: T.mono, fontSize: 10 }}>🗑</button>
                   <button onClick={() => onRealSellOne && onRealSellOne(h)}
                     style={{ border: `1px solid ${T.red}`, background: "rgba(234,57,67,0.12)", color: T.red,
                       borderRadius: 8, padding: "6px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900 }}>
@@ -5094,6 +5104,13 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
                   </button>
                 </div>
               ))}
+              {chainHoldings.some((h) => h.spam) && (
+                <button onClick={() => setShowSpam((v) => !v)}
+                  style={{ width: "100%", border: `1px dashed ${T.border}`, background: "transparent", color: T.faint,
+                    borderRadius: 8, padding: "6px", cursor: "pointer", fontFamily: T.mono, fontSize: 8, fontWeight: 800, marginBottom: 4 }}>
+                  {showSpam ? "hide" : "show"} {chainHoldings.filter((h) => h.spam).length} spam airdrop{chainHoldings.filter((h) => h.spam).length === 1 ? "" : "s"} 🗑
+                </button>
+              )}
             </>
           )}
           {(tab === "tickets" ? tickets.length : tab === "bots" ? runsLive.length : tickets.length + runsLive.length) > 0 && (
@@ -5814,7 +5831,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   onPosTrade,
   epochLastHour = 0, epochTotalEarned = 0, valoUsdForEpoch = 0.0125, onOpenClaim,
   liveMode = false, chainFills = [], chainLedger = { byMint: {}, realizedSol: 0 }, onOpenChainFill = null,
-  valoMint = null, onRealSwap = null }) {
+  valoMint = null, onRealSwap = null, chainHoldingsLive2 = null }) {
   const bestCalloutPeak = Object.values(myCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0);
   const mask = (s) => (hideBalance ? "••••••" : s);
   // ⛓/📝 the SITE decides the wallet. Live mode = on-chain, demo = paper.
@@ -6166,11 +6183,13 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                     {mask(chainFills.length === 0 ? "—" : `${v >= 0 ? "+" : "−"}$${Math.abs(v).toFixed(2)}`)}
                   </b>; })()}
               </div>
-              {((walletChain && walletChain.holdings) || []).slice(0, 10).map((h) => {
-                const led = chainLedger.byMint[h.mint];
-                const hasBasis = led && led.qty > 0;
-                const q = hasBasis ? Math.min(h.qty, led.qty) : 0;
-                const pnl = hasBasis ? (h.price || 0) * q - led.costSol * SOL_USD * (q / led.qty) : null;
+              {(chainHoldingsLive2 || ((walletChain && walletChain.holdings) || [])).filter((h) => !h.spam).slice(0, 10).map((h) => {
+                const pnl = h.pnlUsd != null ? h.pnlUsd : (() => {
+                  const led = chainLedger.byMint[h.mint];
+                  const hasBasis = led && led.qty > 0;
+                  const q = hasBasis ? Math.min(h.qty, led.qty) : 0;
+                  return hasBasis ? (h.price || 0) * q - led.costSol * SOL_USD * (q / led.qty) : null;
+                })();
                 return (
                   <div key={h.mint} onClick={() => onOpenByMintChain && onOpenByMintChain(h.mint)}
                     title="Open this token"
@@ -8612,6 +8631,8 @@ export default function App() {
   const [buyChipMode, setBuyChipMode] = useState("pct");           // hotbar buy chips: % of wallet ⇄ fixed amounts
   const [buyPcts, setBuyPcts] = useState([10, 25, 50, 75, 100]);   // hold a chip to retype its number
   const [buyFixed, setBuyFixed] = useState([0.5, 1, 2, 5]);
+  const [sellChipMode, setSellChipMode] = useState("pct");         // sell chips: % of bag ⇄ SOL-value
+  const [sellFixed, setSellFixed] = useState([0.5, 1, 2, 5]);
   const [chipEditCfg, setChipEditCfg] = useState(null);            // in-app chip editor (prompt is blocked in iframes)
   const [chipEditVal, setChipEditVal] = useState("");
   const [chipEditErr, setChipEditErr] = useState(false);
@@ -9071,6 +9092,8 @@ export default function App() {
   const [realFills, setRealFills] = useState(() => {
     try { return JSON.parse(localStorage.getItem("valo-real-fills-v1") || "[]"); } catch (e) { return []; }
   });
+  const realFillsRef = useRef([]);
+  useEffect(() => { realFillsRef.current = realFills; }, [realFills]);
   const recordRealFill = (f) => setRealFills((F) => {
     const next = [...F, f].slice(-500);
     try { localStorage.setItem("valo-real-fills-v1", JSON.stringify(next)); } catch (e) {}
@@ -9246,26 +9269,158 @@ export default function App() {
     return run;
   };
 
+  // 🗑 burn a dead token + close its account → rent comes back as SOL.
+  const burnAndReclaim = async (h) => {
+    if (!h || !h.mint || !h.account || !wallet || !wallet.address) return;
+    const ph = getProvider();
+    if (!ph) return;
+    try {
+      pushNotif({ type: "system", user: null, tokenId: null,
+        text: `🗑 burning ${h.sym || h.mint.slice(0, 5)} and closing its account — the ~0.002 SOL rent comes back to you…` });
+      const web3 = await loadWeb3();
+      const bh = await (await fetch("/api/sendtx?blockhash=1")).json();
+      if (!bh.blockhash) throw new Error("couldn't fetch a blockhash");
+      const owner = new web3.PublicKey(wallet.address);
+      const acct = new web3.PublicKey(h.account);
+      const mint = new web3.PublicKey(h.mint);
+      const prog = new web3.PublicKey(h.program || "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+      // burn: tag 8 + u64 amount (LE) — burn the EXACT raw balance
+      const amt = BigInt(h.raw || "0");
+      const data8 = new Uint8Array(9); data8[0] = 8;
+      new DataView(data8.buffer).setBigUint64(1, amt, true);
+      const ins = [];
+      if (amt > 0n) ins.push(new web3.TransactionInstruction({
+        programId: prog, data: data8,
+        keys: [
+          { pubkey: acct, isSigner: false, isWritable: true },
+          { pubkey: mint, isSigner: false, isWritable: true },
+          { pubkey: owner, isSigner: true, isWritable: false },
+        ],
+      }));
+      // closeAccount: tag 9 — rent → owner
+      ins.push(new web3.TransactionInstruction({
+        programId: prog, data: new Uint8Array([9]),
+        keys: [
+          { pubkey: acct, isSigner: false, isWritable: true },
+          { pubkey: owner, isSigner: false, isWritable: true },
+          { pubkey: owner, isSigner: true, isWritable: false },
+        ],
+      }));
+      const tx = new web3.Transaction({ feePayer: owner, recentBlockhash: bh.blockhash });
+      tx.add(...ins);
+      let sig = null;
+      if (ph.signAndSendTransaction) {
+        const out = await ph.signAndSendTransaction(tx);
+        sig = out && (out.signature || out);
+      } else {
+        const signed = await ph.signTransaction(tx);
+        const b64 = btoa(String.fromCharCode(...signed.serialize()));
+        const sj = await (await fetch("/api/sendtx", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ signed: b64 }) })).json();
+        if (!sj.ok) throw new Error(sj.error || "network rejected it");
+        sig = sj.signature;
+      }
+      if (!sig) throw new Error("not signed");
+      for (let k = 0; k < 30; k++) {
+        await new Promise((r2) => setTimeout(r2, 1500));
+        try { const cj = await (await fetch(`/api/sendtx?sig=${sig}`)).json();
+          if (cj.status === "failed") throw new Error(cj.err || "reverted");
+          if (cj.confirmed) break; } catch (e) { if (String(e.message).includes("reverted")) throw e; }
+      }
+      setWalletChain((W) => W ? { ...W, holdings: (W.holdings || []).filter((x) => x.mint !== h.mint), holdingsCount: Math.max(0, (W.holdingsCount || 1) - 1) } : W);
+      pushNotif({ type: "system", user: null, tokenId: null,
+        text: `🗑✓ ${h.sym || h.mint.slice(0, 5)} burned, account closed — rent reclaimed. Gone from your wallet for good.` });
+      try {
+        const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(wallet.address)}&t=${Date.now()}`);
+        const j2 = await r2.json();
+        if (j2 && !j2.error) setWalletChain(j2);
+      } catch (e) {}
+    } catch (e) {
+      pushNotif({ type: "system", user: null, tokenId: null,
+        text: `⚠🗑 burn failed for ${h.sym || h.mint.slice(0, 5)} — ${String(e.message || e)}. Nothing changed.` });
+    }
+  };
+
   // sell ONE real holding — human-tapped, so it goes through the review flow
   const realSellHolding = (h) => {
     if (!h || !h.mint) return;
     quoteRealOrder({ id: "chain-" + h.mint, sym: h.sym || h.mint.slice(0, 5), name: h.name || h.sym || "token",
       liveMint: h.mint, price: h.price || 0, hue: symbolHue(h.sym || "?") }, "sell", h.qty);
   };
-  // sell EVERYTHING — confirm already happened in the UI (two-tap). Serialized
-  // real sells, one per holding, each confirmed on-chain before the next.
+  // sell EVERYTHING — one click, ONE Phantom approval. Every sell tx is built
+  // first, signed together via signAllTransactions, then landed in sequence.
+  // (One literal transaction isn't possible non-custodially: a single swap
+  // route already fills most of Solana's 1232-byte tx limit.)
   const realSellAllHoldings = async (holds) => {
-    const list = (holds || []).filter((h) => h && h.mint && h.qty > 0);
+    const list = (holds || []).filter((h) => h && h.mint && h.qty > 0 && !h.spam);
     if (!list.length) return;
+    const ph = getProvider();
+    if (!ph) { pushNotif({ type: "system", user: null, tokenId: null, text: "⚠ Phantom not found" }); return; }
     pushNotif({ type: "system", user: null, tokenId: null,
-      text: `⛓ selling ALL ${list.length} on-chain position${list.length === 1 ? "" : "s"} — orders run one at a time…` });
+      text: `⛓ SELL ALL — building ${list.length} sell${list.length === 1 ? "" : "s"}, one approval for the whole batch…` });
+    // 1 · build every unsigned tx (serial — the swap API is rate-limited)
+    const web3 = await loadWeb3();
+    const built = [];
     for (const h of list) {
-      const tk = { id: "chain-" + h.mint, sym: h.sym || h.mint.slice(0, 5), liveMint: h.mint, price: h.price || 0, hue: 200 };
-      const res = await fireRealOrderDirect(tk, "sell", h.qty);
-      if (res.ok) sayPrivate({ type: "note", text: `⛓ sold ${fmtQty(h.qty)} ${tk.sym} → ${res.sol.toFixed(4)} SOL` });
-      else pushNotif({ type: "system", user: null, tokenId: null, text: `⚠⛓ SELL ALL: ${tk.sym} failed (${res.err}) — still held. Continuing with the rest.` });
+      try {
+        const fullExit = h.raw ? `&amountRaw=${h.raw}` : `&amountUi=${h.qty}`;
+        const r = await fetch(`/api/swap?mode=build&inputMint=${h.mint}&outputMint=So11111111111111111111111111111111111111112${fullExit}&slippageBps=200&user=${wallet.address}`);
+        const j = await r.json();
+        if (!r.ok || j.error || !j.swapTransaction) throw new Error(j.error || "no route");
+        const raw = Uint8Array.from(atob(j.swapTransaction), (ch) => ch.charCodeAt(0));
+        built.push({ h, tx: web3.VersionedTransaction.deserialize(raw), quote: j.quote || null });
+      } catch (e) {
+        pushNotif({ type: "system", user: null, tokenId: null,
+          text: `⚠⛓ SELL ALL: couldn't build the ${h.sym || h.mint.slice(0, 5)} sell (${String(e.message || e)}) — skipping it, the rest continue.` });
+      }
     }
-    pushNotif({ type: "system", user: null, tokenId: null, text: "⛓ SELL ALL finished — check your activity for each fill." });
+    if (!built.length) { pushNotif({ type: "system", user: null, tokenId: null, text: "⚠⛓ SELL ALL: nothing could be built — nothing was sold." }); return; }
+    // 2 · ONE approval for everything
+    let signed;
+    try {
+      if (ph.signAllTransactions) signed = await ph.signAllTransactions(built.map((b) => b.tx));
+      else { // very old wallets: fall back to per-tx signing
+        signed = [];
+        for (const b of built) signed.push(await ph.signTransaction(b.tx));
+      }
+    } catch (e) {
+      pushNotif({ type: "system", user: null, tokenId: null, text: "⛓ SELL ALL cancelled in the wallet — nothing was sold." });
+      return;
+    }
+    // 3 · land + confirm each, record fills
+    let okCount = 0;
+    for (let i2 = 0; i2 < signed.length; i2++) {
+      const b = built[i2], h = b.h;
+      try {
+        const b64 = btoa(String.fromCharCode(...signed[i2].serialize()));
+        const send = await fetch("/api/sendtx", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ signed: b64 }) });
+        const sj = await send.json();
+        if (!sj.ok) throw new Error(sj.error || "network rejected it");
+        const sig = sj.signature;
+        let landed = null;
+        for (let k = 0; k < 30; k++) {
+          await new Promise((r2) => setTimeout(r2, 1500));
+          try { const cj = await (await fetch(`/api/sendtx?sig=${sig}`)).json();
+            if (cj.status === "failed") { landed = { ok: false, err: cj.err }; break; }
+            if (cj.confirmed) { landed = { ok: true }; break; } } catch (e) {}
+        }
+        if (landed && !landed.ok) throw new Error(`reverted on-chain (${landed.err || ""})`);
+        const q2 = b.quote || {};
+        const sol = (+q2.outAmount || 0) / 1e9 || h.qty * ((h.price || 0) / SOL_USD);
+        recordRealFill({ at: Date.now(), side: "sell", mint: h.mint, sym: h.sym || h.mint.slice(0, 5), qty: h.qty, sol, est: !q2.outAmount, sig, px: h.price || 0 });
+        // the row vanishes NOW — the wallet refresh confirms it a moment later
+        setWalletChain((W) => W ? { ...W, holdings: (W.holdings || []).filter((x) => x.mint !== h.mint), holdingsCount: Math.max(0, (W.holdingsCount || 1) - 1) } : W);
+        okCount++;
+        sayPrivate({ type: "note", text: `⛓ sold ${fmtQty(h.qty)} ${h.sym || h.mint.slice(0, 5)} → ${sol.toFixed(4)} SOL` });
+      } catch (e) {
+        pushNotif({ type: "system", user: null, tokenId: null, text: `⚠⛓ SELL ALL: ${h.sym || h.mint.slice(0, 5)} failed (${String(e.message || e)}) — still held.` });
+      }
+    }
+    try {
+      const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(wallet.address)}&t=${Date.now()}`);
+      const j2 = await r2.json();
+      if (j2 && !j2.error) setWalletChain(j2);
+    } catch (e) {}
+    pushNotif({ type: "system", user: null, tokenId: null, text: `⛓ SELL ALL done — ${okCount}/${built.length} sold. Each fill is in your activity with its Solscan link.` });
   };
 
   // web3.js, fetched only when a real order is actually placed
@@ -9336,6 +9491,14 @@ export default function App() {
       }
 
       setRealOrder({ ...o, stage: "done", sig, confirmed: !!(landed && landed.ok) });
+      if (selling && landed && landed.ok) {
+        // full exit? the position leaves MY POSITIONS immediately — the wallet
+        // refresh below re-confirms from the chain a moment later
+        const hh = chainHoldingOf(o.token);
+        if (hh && (+o.size || 0) >= hh.qty * 0.999) {
+          setWalletChain((W) => W ? { ...W, holdings: (W.holdings || []).filter((x) => x.mint !== o.token.liveMint), holdingsCount: Math.max(0, (W.holdingsCount || 1) - 1) } : W);
+        }
+      }
       // record it — quote amounts, decimals from the quote itself
       try {
         const q2 = o.quote || {};
@@ -9461,6 +9624,20 @@ export default function App() {
             filledTs: r.filled_ts ? new Date(r.filled_ts).getTime() : Date.now(),
           };
         }));
+        // ⛓ real-fill history — union with local by signature, oldest first
+        try {
+          const { data: rf } = await sb.from("real_fills").select("fills").eq("user_id", uid).maybeSingle();
+          const remote = (rf && Array.isArray(rf.fills)) ? rf.fills : [];
+          if (remote.length) {
+            setRealFills((local) => {
+              const seen = new Set(local.map((f) => f.sig).filter(Boolean));
+              const merged = [...local, ...remote.filter((f) => f && f.sig && !seen.has(f.sig))]
+                .sort((a, b) => (a.at || 0) - (b.at || 0)).slice(-500);
+              try { localStorage.setItem("valo-real-fills-v1", JSON.stringify(merged)); } catch (e) {}
+              return merged;
+            });
+          }
+        } catch (e) { /* fills table may not exist yet — local keeps working */ }
         cloudLoaded.current = true; setCloudSynced(true);
       } catch (e) { console.warn("[VALO ☁] load failed", e); }
     })();
@@ -9475,6 +9652,7 @@ export default function App() {
       try {
         setCloudSynced(false);
         await sb.from("wallets").upsert({ user_id: uid, sol_balance: solBalance, valo_balance: valoWallet, updated_at: new Date().toISOString() });
+        try { await sb.from("real_fills").upsert({ user_id: uid, fills: realFillsRef.current || [], updated_at: new Date().toISOString() }); } catch (e) {}
         await sb.from("watchlists").upsert({ user_id: uid, sections: watchSections, loose: watchLoose, updated_at: new Date().toISOString() });
         await sb.from("positions").delete().eq("user_id", uid);
         const posRows = Object.entries(positions).filter(([, p]) => p && p.amt > 0).map(([k, p]) => {
@@ -9508,7 +9686,7 @@ export default function App() {
     }, 2000);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [solBalance, valoWallet, positions, watchSections, watchLoose, botRuns, cloudUser && cloudUser.id]);
+  }, [solBalance, valoWallet, positions, watchSections, watchLoose, botRuns, realFills, cloudUser && cloudUser.id]);
   // ☁ SOCIAL GRAPH — real follows & friend requests. Acting on a profile that
   // belongs to a REAL account writes the cloud row; the other user's client
   // hears the INSERT/UPDATE live and drops it into their notification feed.
@@ -10105,7 +10283,6 @@ export default function App() {
   const [walletPop, setWalletPop] = useState(null);         // hold the stats bar → open-wallet popup
   const [quickWatch, setQuickWatch] = useState(false);      // watchlist opened from the trader tabs
   const [posDrawer, setPosDrawer] = useState(false);        // MY POSITIONS slide-over
-  const [posSaConfirm, setPosSaConfirm] = useState(false);  // two-tap real SELL ALL in the drawer
   const [posTab, setPosTab] = useState("both");
   const [sellArm2, setSellArm2] = useState(null);   // mobile: sell button awaiting its confirm tap
   const [sellFlash2, setSellFlash2] = useState(null); // just-confirmed pop
@@ -10626,6 +10803,25 @@ export default function App() {
   // never appear — connected shows the real wallet, unconnected shows zero.
   const dispSol = liveData ? ((wallet && wallet.address && walletChain && walletChain.sol) || 0) : solBalance;
   const dispValo = liveData ? 0 : valoWallet;
+  // ⛓ holdings enriched with live P/L — avg cost from the fills ledger, price
+  // from the live card when the token is loaded (ticks every 2.2s), else the
+  // wallet snapshot. This one list feeds every positions surface.
+  const chainHoldingsLive = useMemo(() => {
+    const holds = (walletChain && walletChain.holdings) || [];
+    return holds.map((h) => {
+      const card = (tokens || []).find((t) => t.liveMint === h.mint);
+      const price = (card && card.price > 0) ? card.price : (h.price || 0);
+      const led = chainLedger.byMint[h.mint];
+      if (!led || !(led.qty > 0) || !(price > 0)) return { ...h, livePrice: price, pnlUsd: null, pnlPct: null };
+      const q = Math.min(h.qty, led.qty);
+      const basisUsd = led.costSol * SOL_USD * (q / led.qty);
+      const pnlUsd = price * q - basisUsd;
+      return { ...h, livePrice: price,
+        avgCostUsd: q > 0 ? basisUsd / q : null,
+        pnlUsd, pnlPct: basisUsd > 0 ? (pnlUsd / basisUsd) * 100 : null };
+    });
+  }, [walletChain, tokens, chainLedger]);
+
 
   const getProvider = () => {
     if (typeof window === "undefined") return null;
@@ -12787,9 +12983,14 @@ export default function App() {
       {/* settlement flip (shows your live balance of each) + amount */}
       <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
         <button onClick={() => setPay(pay === "SOL" ? "VALO" : "SOL")}
-          title="Tap to swap settlement — the label is your live balance"
-          style={{ ...chip(true), padding: "6px 8px", fontSize: 9, minWidth: 62, lineHeight: 1.3 }}>
-          {pay === "SOL" ? `${solBalance.toFixed(1)} SOL` : `${fmtQty(valoWallet)} $VALO`}
+          title="Tap to switch between $SOL and $VALO"
+          style={{ ...chip(true), padding: "4px 8px", fontSize: 9, minWidth: 62, lineHeight: 1.25, textAlign: "center" }}>
+          <span style={{ display: "block", fontWeight: 900, fontSize: 10.5, color: pay === "SOL" ? T.blue : VALO_PURPLE }}>
+            {pay === "SOL" ? "$SOL" : "$VALO"} ⇅
+          </span>
+          <span style={{ display: "block", fontSize: 7, color: T.faint }}>
+            {pay === "SOL" ? `${solBalance.toFixed(1)}` : fmtQty(valoWallet)} held
+          </span>
         </button>
         <input value={amount} onChange={(e) => { setAmount(e.target.value); setPctSel(null); }}
           style={{ ...inp, flex: 1, minWidth: 0, padding: "6px 6px", fontSize: 12.5, textAlign: "center" }} />
@@ -12805,12 +13006,18 @@ export default function App() {
       <div style={{ display: "flex", gap: 6 }}>
         {/* BUY side */}
         <div style={{ flex: 1, background: "rgba(22,199,132,0.06)", border: "1px solid rgba(22,199,132,0.28)", borderRadius: 10, padding: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, letterSpacing: 0.8, color: T.green }}>BUY</span>
+            <span style={{ display: "inline-flex", border: `1px solid rgba(22,199,132,0.35)`, borderRadius: 6, overflow: "hidden" }}>
+              {[["pct", "%"], ["fix", "◎"]].map(([m, l]) => (
+                <button key={m} onClick={() => setBuyChipMode(m)}
+                  style={{ border: "none", padding: "2px 8px", fontFamily: T.mono, fontSize: 7.5, fontWeight: 900,
+                    cursor: "pointer", background: buyChipMode === m ? T.green : "transparent",
+                    color: buyChipMode === m ? "#07130d" : T.faint }}>{l}</button>
+              ))}
+            </span>
+          </div>
           <div style={{ display: "flex", gap: 3, marginBottom: 5 }}>
-            <button onClick={() => setBuyChipMode((m) => (m === "pct" ? "fix" : "pct"))}
-              title="Switch between % of wallet and fixed amounts"
-              style={{ flex: "0 0 auto", ...chip(false), padding: "5px 5px", fontSize: 7.5, fontWeight: 900, color: T.green, borderColor: "rgba(22,199,132,0.4)" }}>
-              {buyChipMode === "pct" ? "%" : pay === "SOL" ? "◎" : "$V"}
-            </button>
             {buyChipMode === "pct" ? buyPcts.map((p, ci) => {
               const on = pctSel && pctSel.side === "buy" && pctSel.p === p;
               return (
@@ -12849,8 +13056,36 @@ export default function App() {
         </div>
         {/* SELL side */}
         <div style={{ flex: 1, background: "rgba(234,57,67,0.06)", border: "1px solid rgba(234,57,67,0.28)", borderRadius: 10, padding: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, letterSpacing: 0.8, color: T.red }}>SELL</span>
+            <span style={{ display: "inline-flex", border: `1px solid rgba(234,57,67,0.35)`, borderRadius: 6, overflow: "hidden" }}>
+              {[["pct", "%"], ["fix", "◎"]].map(([m, l]) => (
+                <button key={m} onClick={() => setSellChipMode(m)}
+                  style={{ border: "none", padding: "2px 8px", fontFamily: T.mono, fontSize: 7.5, fontWeight: 900,
+                    cursor: "pointer", background: sellChipMode === m ? T.red : "transparent",
+                    color: sellChipMode === m ? "#170808" : T.faint }}>{l}</button>
+              ))}
+            </span>
+          </div>
           <div style={{ display: "flex", gap: 3, marginBottom: 5 }}>
-            {sellPcts.map((p, ci) => {
+            {sellChipMode === "fix" ? sellFixed.map((v, ci) => {
+              // sell tokens WORTH v SOL — converted to the equivalent % of the
+              // bag so every existing paper/live sell path applies unchanged
+              const bagQty = mLive ? mChainHeld : held;
+              const px = selected.price || 0;
+              const bagSolValue = px > 0 ? (bagQty * px) / SOL_USD : 0;
+              const eq = bagSolValue > 0 ? Math.min(100, (v / bagSolValue) * 100) : 0;
+              const on = pctSel && pctSel.side === "sell" && Math.abs(pctSel.p - eq) < 0.01 && eq > 0;
+              return (
+                <button className="qchip" key={"sf" + ci} disabled={!(eq > 0)}
+                  onClick={() => { if (eq > 0) { setPct(eq, true); setPctSel({ side: "sell", p: eq }); } }}
+                  {...chipEditProps(() => { askAmt(v, (nv) => setSellFixed((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
+                  style={{ flex: 1, ...chip(false), padding: "5px 0", fontSize: 8, textAlign: "center",
+                    fontWeight: on ? 900 : 800, color: on ? "#170808" : eq > 0 ? T.red : T.faint,
+                    background: on ? T.red : "transparent", borderColor: on ? T.red : T.border,
+                    opacity: eq > 0 ? 1 : 0.45 }}>{v}◎</button>
+              );
+            }) : sellPcts.map((p, ci) => {
               const on = pctSel && pctSel.side === "sell" && pctSel.p === p;
               return (
                 <button className="qchip" key={ci} onClick={() => { setPct(p, true); setPctSel({ side: "sell", p }); }} disabled={held <= 0}
@@ -13454,7 +13689,7 @@ export default function App() {
                         onRealOrder={quoteRealOrder}
                         onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
                         onChainMax={onchain.maxSol || 0}
-                        chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0} autoOn={liveAuto} onToggleAuto={setLiveAuto} liveMode={liveData} chainHoldings={(walletChain && walletChain.holdings) || []} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
+                        chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0} autoOn={liveAuto} onToggleAuto={setLiveAuto} liveMode={liveData} chainHoldings={chainHoldingsLive} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
                         solBalance={dispSol} valoBalance={dispValo} position={positions[selected.id]}
                         clickMode={clickMode} setClickMode={setClickMode}
                         realized24={realized24For(selected.sym)}
@@ -13514,7 +13749,7 @@ export default function App() {
             </div>
             {selected && (
               <div style={{ marginTop: -10 }}>
-                <MyPositionsHub liveMode={liveData} chainHoldings={(walletChain && walletChain.holdings) || []} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
+                <MyPositionsHub liveMode={liveData} chainHoldings={chainHoldingsLive} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} onBurn={burnAndReclaim} tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
                   onOpenToken={(id) => { setSel(id); setClickMode(null); }} onSellPos={sellPos} onCloseTickets={closeAllTickets}
                   onSellRun={sellRun} onSellAllBots={sellAllRuns} onCancelBot={cancelBot} />
               </div>
@@ -13561,7 +13796,7 @@ export default function App() {
                 onCancelBot={cancelBot} onSellRun={sellRun} onOpenBotRun={(id) => setBotRunOpen(id)}
                 onOpenTokenAuto={(tid, botId) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(botId || null); }} />
             ) : selected ? (
-              <DesktopTradePanel token={selected} botRuns={botRuns} chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0} autoOn={liveAuto} onToggleAuto={setLiveAuto} liveMode={liveData} chainHoldings={(walletChain && walletChain.holdings) || []} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint}
+              <DesktopTradePanel token={selected} botRuns={botRuns} chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0} autoOn={liveAuto} onToggleAuto={setLiveAuto} liveMode={liveData} chainHoldings={chainHoldingsLive} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint}
                 onRealOrder={quoteRealOrder}
                 onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
                 onChainMax={onchain.maxSol || 0}
@@ -13590,7 +13825,7 @@ export default function App() {
             )}
             {/* MY POSITIONS — bots + tickets, visible on every tab */}
             {selected && (
-              <MyPositionsHub liveMode={liveData} chainHoldings={(walletChain && walletChain.holdings) || []} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
+              <MyPositionsHub liveMode={liveData} chainHoldings={chainHoldingsLive} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} onBurn={burnAndReclaim} tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
                 onOpenToken={(id) => { setSel(id); setClickMode(null); }} onSellPos={sellPos} onCloseTickets={closeAllTickets}
                 onSellRun={sellRun} onSellAllBots={sellAllRuns} onCancelBot={cancelBot} />
             )}
@@ -13619,7 +13854,7 @@ export default function App() {
             </button>
             <PortfolioPanel big
               solBalance={dispSol} valoWallet={dispValo} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger} chainHoldingsLive2={chainHoldingsLive}
               valoMint={valoMint}
               onRealSwap={() => {
                 if (!valoMint) return;
@@ -14236,6 +14471,7 @@ export default function App() {
         const botRealAll = botRuns.reduce((s, r) => s + r.exits.reduce((a, e) => a + e.pnlUsd, 0), 0);
         const tickReal = realizedPnl - botRealAll;
         const showBots = posTab !== "tickets", showTix = posTab !== "bots";
+        const drawerHolds = liveData ? chainHoldingsLive.filter((h) => !h.spam) : [];
         const unreal = (showTix ? tix.reduce((s, x) => s + x.pnl, 0) : 0) + (showBots ? runsL.reduce((s, x) => s + x.pnl, 0) : 0);
         const real = (showTix ? tickReal : 0) + (showBots ? botRealAll : 0);
         const scoped = unreal;
@@ -14297,11 +14533,11 @@ export default function App() {
               </div>
               {drawerHolds.length > 0 && posTab !== "bots" && (
                 <>
-                  <button onClick={() => { if (posSaConfirm) { realSellAllHoldings(drawerHolds); setPosSaConfirm(false); setPosDrawer(false); } else setPosSaConfirm(true); }}
+                  <button onClick={() => { realSellAllHoldings(drawerHolds); setPosDrawer(false); }}
                     style={{ width: "100%", boxSizing: "border-box", border: "none", borderRadius: 9, padding: "10px", margin: "8px 0",
                       fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
-                      background: posSaConfirm ? T.amber : T.red, color: posSaConfirm ? "#1d1503" : "#170808", cursor: "pointer" }}>
-                    {posSaConfirm ? `⚠ CONFIRM — SELL ${drawerHolds.length} FOR REAL` : `⛓ SELL ALL · ${drawerHolds.length} on-chain`}
+                      background: T.red, color: "#170808", cursor: "pointer" }}>
+                    ⛓ SELL ALL · {drawerHolds.filter((x) => !x.spam).length} on-chain · one approval
                   </button>
                   {drawerHolds.map((h) => (
                     <div key={h.mint} style={{ display: "flex", alignItems: "center", gap: 8, background: "#0c0f16",
@@ -14310,8 +14546,18 @@ export default function App() {
                         <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: T.text }}>
                           ${h.sym || h.name || h.mint.slice(0, 5)} <span style={{ color: T.amber, fontSize: 8 }}>⛓</span>
                         </div>
-                        <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>{fmtQty(h.qty)} · ${(h.usd || 0).toFixed(2)}</div>
+                        <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>
+                          {fmtQty(h.qty)} · ${((h.livePrice || h.price || 0) * h.qty).toFixed(2)}
+                          {h.pnlUsd != null && (
+                            <b style={{ color: h.pnlUsd >= 0 ? T.green : T.red, marginLeft: 6 }}>
+                              {h.pnlUsd >= 0 ? "▲+" : "▼−"}${Math.abs(h.pnlUsd).toFixed(2)}
+                            </b>
+                          )}
+                        </div>
                       </div>
+                      <button onClick={() => burnAndReclaim(h)} title="Burn & reclaim rent"
+                        style={{ border: `1px solid ${T.border2}`, background: "transparent", color: T.faint,
+                          borderRadius: 8, padding: "7px 9px", cursor: "pointer", fontFamily: T.mono, fontSize: 11 }}>🗑</button>
                       <button onClick={() => { realSellHolding(h); setPosDrawer(false); }}
                         style={{ border: `1px solid ${T.red}`, background: "rgba(234,57,67,0.12)", color: T.red,
                           borderRadius: 8, padding: "7px 13px", cursor: "pointer", fontFamily: T.mono, fontSize: 10, fontWeight: 900 }}>
@@ -15231,7 +15477,7 @@ export default function App() {
             </div>
             <PortfolioPanel big
               solBalance={dispSol} valoWallet={dispValo} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger} chainHoldingsLive2={chainHoldingsLive}
               valoMint={valoMint}
               onRealSwap={() => {
                 if (!valoMint) return;
