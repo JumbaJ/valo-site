@@ -2402,7 +2402,8 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
     if (editBot && onRelaunch) onRelaunch(editBot.id, payload);
     else onExecute(payload);
   };
-  const held = position?.amt || 0;
+  const chainHold = (liveMode && token) ? (chainHoldings || []).find((h) => h.mint === token.liveMint && !h.spam && !h.dust) : null;
+  const held = chainHold ? chainHold.qty : (position?.amt || 0);
   const pnlPct = position ? ((token.price - position.entry) / position.entry) * 100 : 0;
   const heldSol = pay === "SOL" ? held : (held * token.price) / SOL_USD;
   const livePnlUsd = position ? (heldSol * pnlPct / 100) * SOL_USD : 0;
@@ -5429,10 +5430,16 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
   const amt = parseFloat(amount) || 0;
   const bal = pay === "SOL" ? solBalance : valoBalance;
   const unit$ = pay === "SOL" ? SOL_USD : 0.0125;
-  const held = position && position.amt > 0 ? position.amt : 0;
-  const livePct = held ? ((token.price / (position.entry || token.price)) - 1) * 100 : 0;
-  const livePnlUsd = held ? (held * (token.price / (position.entry || token.price)) - held) * (position.pay === "SOL" ? SOL_USD : 0.0125) : 0;
+  // live site → the on-chain holding of THIS token drives P/L; demo → paper
+  const chainHold = (liveMode && token) ? (chainHoldings || []).find((h) => h.mint === token.liveMint && !h.spam && !h.dust) : null;
+  const held = chainHold ? chainHold.qty
+    : (position && position.amt > 0 ? position.amt : 0);
+  const livePct = chainHold ? (chainHold.pnlPct != null ? chainHold.pnlPct : 0)
+    : (position && position.amt > 0 ? ((token.price / (position.entry || token.price)) - 1) * 100 : 0);
+  const livePnlUsd = chainHold ? (chainHold.pnlUsd || 0)
+    : (position && position.amt > 0 ? (position.amt * (token.price / (position.entry || token.price)) - position.amt) * (position.pay === "SOL" ? SOL_USD : 0.0125) : 0);
   const gain = livePnlUsd >= 0;
+  const chainAvgEntry = chainHold && chainHold.avgCostUsd ? chainHold.avgCostUsd : null;
   const fire = (side, a) => onExecute({ side, pay: side === "sell" ? (position && position.pay) || pay : pay, amt: a, mode: "instant", tax: taxFor(pay), burn: splitFee(a, pay).total, legs: [] });
   const seg = { border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 11px", background: "rgba(255,255,255,0.015)" };
   return (
@@ -5556,11 +5563,16 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
       <div style={{ ...seg, flex: "1 1 200px", minWidth: 190,
         ...(held ? { border: `1.5px solid ${gain ? T.green : T.red}66`, background: gain ? "rgba(22,199,132,0.07)" : "rgba(234,57,67,0.07)", boxShadow: `0 0 16px ${gain ? "rgba(22,199,132,0.25)" : "rgba(234,57,67,0.25)"}` } : {}) }}>
         <div style={{ ...lbl }}>Live P/L · {token.sym}</div>
-        {held ? (
+        {chainHold && chainHold.pnlUsd == null ? (
+          <>
+            <div style={{ fontFamily: T.mono, fontSize: 15, fontWeight: 900, color: T.text, marginTop: 4 }}>{fmtQty(chainHold.qty)} {token.sym}</div>
+            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, marginTop: 3 }}>holding on-chain · no VALO cost basis to price P/L</div>
+          </>
+        ) : held ? (
           <>
             <div style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 900, lineHeight: 1.05, color: gain ? T.green : T.red, textShadow: `0 0 14px ${gain ? "rgba(22,199,132,0.5)" : "rgba(234,57,67,0.5)"}` }}>{gain ? "+" : "−"}${Math.abs(livePnlUsd).toFixed(2)} <span style={{ fontSize: 11 }}>({gain ? "+" : ""}{livePct.toFixed(1)}%)</span></div>
             <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 3 }}>
-              {fmtQty(posTokenQty(token, position))} tokens · avg ${fmtP(position.entry)}
+              {chainHold ? `${fmtQty(chainHold.qty)} ${token.sym}` : `${fmtQty(posTokenQty(token, position))} tokens`} · avg ${chainAvgEntry ? fmtP(chainAvgEntry) : fmtP(position && position.entry)}
               <span style={{ color: (realized24 || 0) >= 0 ? T.green : T.red }}> · R24H {(realized24 || 0) >= 0 ? "+" : "−"}${Math.abs(realized24 || 0).toFixed(2)}</span>
             </div>
           </>
@@ -10860,6 +10872,35 @@ export default function App() {
   // 📜 INFINITE HISTORY — nearing the left edge loads older candles and
   // prepends them, so you can pan back to a pool's very first trade
   const candleCache = useRef({});      // "pool:tf" → candles, so re-opening is instant
+  const adoptBusy = useRef({});
+  const ensureCardsForHoldings = useCallback((holds) => {
+    for (const h of (holds || [])) {
+      if (!h || !h.mint || h.spam || h.dust) continue;
+      if (adoptBusy.current[h.mint]) continue;
+      // already have a card for this mint?
+      if (tokensRef.current && tokensRef.current.some((t) => t.liveMint === h.mint)) continue;
+      adoptBusy.current[h.mint] = true;
+      (async () => {
+        try {
+          const r = await fetch(`/api/tokens?search=${encodeURIComponent(h.mint)}`);
+          const j = await r.json();
+          const hit = Array.isArray(j) ? (j.find((x) => x.mint === h.mint) || j[0]) : null;
+          if (hit) {
+            const card = adoptMarketToken(hit);
+            setTokens((Ts) => Ts.some((t) => t.liveMint === h.mint || String(t.pool || "") === String(card.pool)) ? Ts : [...Ts, card]);
+          } else {
+            // no pool/market data — a minimal card so the position still renders
+            setTokens((Ts) => Ts.some((t) => t.liveMint === h.mint) ? Ts : [...Ts, {
+              id: "hold-" + h.mint, sym: h.sym || h.mint.slice(0, 5), name: h.name || h.sym || "token",
+              liveMint: h.mint, pool: null, price: h.price || 0, mc: 0, tvl: 0, hue: symbolHue(h.sym || h.mint),
+              candles: [], greenUsd: 0, redUsd: 0, traders: 0, market: true, chartless: true,
+            }]);
+          }
+        } catch (e) {}
+        adoptBusy.current[h.mint] = false;
+      })();
+    }
+  }, []);
   const prefetchBusy = useRef({});
   const preState = useRef({ inFlight: 0, stamps: [], cooldownUntil: 0, timer: null });
   const prefetchCandles = useCallback(async (tk) => {
@@ -11317,7 +11358,12 @@ export default function App() {
       const r = await fetch(`/api/wallet?address=${encodeURIComponent(addr)}`);
       if (!r.ok) return;
       const j = await r.json();
-      if (j && !j.error) setWalletChain(j);
+      if (j && !j.error) {
+        setWalletChain(j);
+        // adopt a card for every non-spam holding so MY POSITIONS + its chart
+        // are complete on load, without needing a click to hydrate them
+        try { ensureCardsForHoldings(j.holdings || []); } catch (e) {}
+      }
     } catch (e) {}
   }, []);
 
