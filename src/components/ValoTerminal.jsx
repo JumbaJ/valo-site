@@ -787,9 +787,9 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       const halfP = ((hi - lo) / 2) * pz;
       lo = Math.max(1e-12, midP - halfP); hi = midP + halfP;
     }
-    // vertical free-drag: shift the visible price window up/down without clamping
-    // horizontal panning never moves this; touch may nudge it within ±0.35
-    const vShift = Math.max(-0.35, Math.min(0.35, view.priceOff || 0)) * (hi - lo);
+    // vertical free-drag: the visible price window rides view.priceOff —
+    // mouse or finger, up to ±4 ranges of travel (RESET snaps back)
+    const vShift = Math.max(-4, Math.min(4, view.priceOff || 0)) * (hi - lo);
     lo -= vShift; hi -= vShift;
     // switch to log automatically once the range is too wide to read linearly
     const logOn = logMode === "log"
@@ -1528,13 +1528,10 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       else if (Math.abs(dyTot) > thr) clearTimeout(holdRef.current);
       if (d.moved) {
         const g = geom.current;
-        // lock the gesture to one axis: sideways pans time, up/down pans price.
-        // (mixing them made a horizontal drag drag the price scale with it)
-        // ⇄ time on both platforms; ↕ a small amount of give on touch only
-        const WIGGLE = 0.35;                                   // ~a third of the visible range
-        const vGive = d.touch
-          ? Math.max(-WIGGLE, Math.min(WIGGLE, (d.startPriceOff || 0) - (dyTot / (g.chartH || 300))))
-          : 0;
+        // free 2D pan: ⇄ drags time, ↕ drags price — mouse and touch alike.
+        // ±4 visible ranges of vertical travel: real freedom, bounded lostness.
+        const V_LIMIT = 4;
+        const vGive = Math.max(-V_LIMIT, Math.min(V_LIMIT, (d.startPriceOff || 0) - (dyTot / (g.chartH || 300))));
         const nextOff = d.startOffset + Math.round(dx / (g.step || 6));
         // remember WHEN the right edge points at — later candles can't move it
         const endIdx = total - 1 - nextOff;
