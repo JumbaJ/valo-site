@@ -69,7 +69,30 @@ export default async function handler(req, res) {
       const p = px[h.mint];
       return { ...h, sym: p?.sym || null, name: p?.name || null, img: p?.img || null,
         pool: p?.pool || null, price: p?.price || 0, usd: (p?.price || 0) * h.qty };
-    }).filter((h) => h.usd >= 0.05 || (h.price === 0 && h.qty > 0))
+    });
+    // fill in names DexScreener doesn't know — straight from on-chain metadata
+    const unnamed = holdings.filter((h) => !h.sym && !h.name).map((h) => h.mint).slice(0, 50);
+    if (unnamed.length && process.env.HELIUS_API_KEY) {
+      try {
+        const dr = await fetch(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: "das", method: "getAssetBatch", params: { ids: unnamed } }),
+        });
+        const dj = await dr.json();
+        const meta = {};
+        for (const a of (dj && dj.result) || []) {
+          if (!a || !a.id) continue;
+          const m = a.content && a.content.metadata;
+          const links = a.content && a.content.links;
+          meta[a.id] = { sym: (m && m.symbol) || null, name: (m && m.name) || null, img: (links && links.image) || null };
+        }
+        holdings = holdings.map((h) => {
+          const d = meta[h.mint];
+          return d ? { ...h, sym: h.sym || d.sym, name: h.name || d.name, img: h.img || d.img } : h;
+        });
+      } catch (e) { /* names are a nicety — never block balances on them */ }
+    }
+    holdings = holdings.filter((h) => h.usd >= 0.05 || (h.price === 0 && h.qty > 0))
       .sort((a, b) => b.usd - a.usd).slice(0, 60);
 
     // recent activity, newest first — signatures are cheap and always available

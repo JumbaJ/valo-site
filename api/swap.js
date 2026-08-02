@@ -15,7 +15,7 @@ const jupHeaders = () => (JUP_KEY ? { accept: "application/json", "x-api-key": J
 
 // try each host until one answers; carry the errors so failures are legible
 const NO_ROUTE = "NOROUTE";
-const looksNoRoute = (t) => /route|ROUTE_NOT_FOUND|COULD_NOT_FIND/i.test(String(t || ""));
+const looksNoRoute = (t) => /route|ROUTE_NOT_FOUND|COULD_NOT_FIND|not tradable|TOKEN_NOT_TRADABLE|NOT_SUPPORTED/i.test(String(t || ""));
 async function jupGet(path) {
   const errs = [];
   for (const host of JUP_HOSTS) {
