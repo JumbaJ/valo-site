@@ -9176,6 +9176,7 @@ export default function App() {
   // ⛓ real trading (off unless the server enables it)
   const [onchain, setOnchain] = useState({ enabled: false, maxSol: 0 });
   const [valoMint, setValoMint] = useState(null);   // real $VALO mint, once launched
+  const [valoTreasury, setValoTreasury] = useState(null);   // fee destination
   // every confirmed real order, recorded from the quote at fill time.
   // Quote ≠ exact fill (slippage), so everything derived is labeled estimated.
   const [realFills, setRealFills] = useState(() => {
@@ -9212,7 +9213,7 @@ export default function App() {
         const j = await r.json();
         // only "on" when the feature is enabled AND Jupiter is actually reachable
         const ok = !!(j && j.enabled && j.jupiter === "reachable");
-        setOnchain({ enabled: ok, maxSol: (j && j.maxSol) || 0, jupiter: j && j.jupiter });
+        setOnchain({ enabled: ok, maxSol: (j && j.maxSol) || 0, jupiter: j && j.jupiter, feeBps: (j && j.feeBps) || 0, feeVia: (j && j.feeVia) || "none" });
       } catch (e) { setOnchain({ enabled: false, maxSol: 0 }); }
     })();
   }, []);
@@ -9325,6 +9326,48 @@ export default function App() {
   };
   const turboLock = () => { turboKpRef.current = null; setTurbo((t) => t ? { ...t, unlocked: false } : t); };
 
+  // 🏦 site fee → treasury, turbo-signed, after a confirmed fill. Skipped when
+  // Jupiter already collected in-swap (feeVia "jupiter"). From the treasury,
+    // the epoch-rewards / VALO-burn split is the operator's move.
+  const payTurboFee = async (notionalSol, feeMeta) => {
+    try {
+      if (!turboActive || !valoTreasury) return;
+      const bps = (feeMeta && feeMeta.feeBps) || (onchain && onchain.feeBps) || 0;
+      const via = (feeMeta && feeMeta.feeVia) || (onchain && onchain.feeVia) || "none";
+      if (!(bps > 0) || via === "jupiter") return;   // none configured, or already taken in-swap
+      const lam = Math.floor(notionalSol * 1e9 * (bps / 10000));
+      if (lam < 1000) return;                        // dust isn't worth a tx fee
+      const web3 = await loadWeb3();
+      const bhx = await getBlockhash();
+      const tx = new web3.Transaction({ feePayer: new web3.PublicKey(turbo.pubkey), recentBlockhash: bhx });
+      tx.add(web3.SystemProgram.transfer({
+        fromPubkey: new web3.PublicKey(turbo.pubkey),
+        toPubkey: new web3.PublicKey(valoTreasury),
+        lamports: lam,
+      }));
+      await turboSignSend(tx);
+      sayPrivate({ type: "note", text: `🏦 site fee ${(lam / 1e9).toFixed(6)} SOL → VALO treasury (${bps / 100}%)` });
+    } catch (e) { /* the trade already succeeded — a fee hiccup never surfaces as a failure */ }
+  };
+
+  // a recent blockhash from wherever answers first — our API, else public RPC
+  const getBlockhash = async () => {
+    try {
+      const j = await (await fetch("/api/sendtx?blockhash=1")).json();
+      if (j && j.blockhash) return j.blockhash;
+    } catch (e) {}
+    try {
+      const r = await fetch("https://api.mainnet-beta.solana.com", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getLatestBlockhash", params: [{ commitment: "finalized" }] }),
+      });
+      const j = await r.json();
+      const v = j && j.result && j.result.value;
+      if (v && v.blockhash) return v.blockhash;
+    } catch (e) {}
+    throw new Error("couldn't fetch a recent blockhash — check your connection");
+  };
+
   // sign with the turbo key + send — the popup-free path everything routes to
   const turboSignSend = async (txLike) => {
     const kp = turboKpRef.current;
@@ -9343,8 +9386,8 @@ export default function App() {
     if (!ph || !wallet || !wallet.address || !turbo) return { ok: false, err: "connect Phantom first" };
     try {
       const web3 = await loadWeb3();
-      const bh = await (await fetch("/api/sendtx?blockhash=1")).json();
-      const tx = new web3.Transaction({ feePayer: new web3.PublicKey(wallet.address), recentBlockhash: bh.blockhash });
+      const bhx = await getBlockhash();
+      const tx = new web3.Transaction({ feePayer: new web3.PublicKey(wallet.address), recentBlockhash: bhx });
       tx.add(web3.SystemProgram.transfer({
         fromPubkey: new web3.PublicKey(wallet.address),
         toPubkey: new web3.PublicKey(turbo.pubkey),
@@ -9363,8 +9406,8 @@ export default function App() {
       const bal = await (await fetch(`/api/wallet?address=${turbo.pubkey}&t=${Date.now()}`)).json();
       const lam = Math.floor(((bal && bal.sol) || 0) * 1e9) - 6000;   // keep the fee
       if (lam <= 0) return { ok: false, err: "nothing to sweep" };
-      const bh = await (await fetch("/api/sendtx?blockhash=1")).json();
-      const tx = new web3.Transaction({ feePayer: new web3.PublicKey(turbo.pubkey), recentBlockhash: bh.blockhash });
+      const bhx = await getBlockhash();
+      const tx = new web3.Transaction({ feePayer: new web3.PublicKey(turbo.pubkey), recentBlockhash: bhx });
       tx.add(web3.SystemProgram.transfer({
         fromPubkey: new web3.PublicKey(turbo.pubkey),
         toPubkey: new web3.PublicKey(wallet.address),
@@ -9452,6 +9495,7 @@ export default function App() {
         const qty = selling ? size : (estOutQty || (token.price > 0 ? (Math.min(size, onchain.maxSol || size) * SOL_USD) / token.price : 0));
         const sol = selling ? ((+q2.outAmount || 0) / 1e9 || size * ((token.price || 0) / SOL_USD)) : Math.min(size, onchain.maxSol || size);
         try { if (qty > 0 && sol > 0) recordRealFill({ at: Date.now(), side, mint: token.liveMint, sym: token.sym, qty, sol, sig, px: (sol * SOL_USD) / qty }); } catch (e) {}
+        try { if (landed && landed.ok && sol > 0) payTurboFee(sol, j.quote || j); } catch (e) {}
         try {
           const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(tradeAddr || wallet.address)}&t=${Date.now()}`);
           const j2 = await r2.json();
@@ -9478,8 +9522,7 @@ export default function App() {
       pushNotif({ type: "system", user: null, tokenId: null,
         text: `🗑 burning ${h.sym || h.mint.slice(0, 5)} and closing its account — the ~0.002 SOL rent comes back to you…` });
       const web3 = await loadWeb3();
-      const bh = await (await fetch("/api/sendtx?blockhash=1")).json();
-      if (!bh.blockhash) throw new Error("couldn't fetch a blockhash");
+      const bh = { blockhash: await getBlockhash() };
       const owner = new web3.PublicKey(tradeAddr || wallet.address);
       const acct = new web3.PublicKey(h.account);
       const mint = new web3.PublicKey(h.mint);
@@ -9613,6 +9656,7 @@ export default function App() {
         const q2 = b.quote || {};
         const sol = (+q2.outAmount || 0) / 1e9 || h.qty * ((h.price || 0) / SOL_USD);
         recordRealFill({ at: Date.now(), side: "sell", mint: h.mint, sym: h.sym || h.mint.slice(0, 5), qty: h.qty, sol, est: !q2.outAmount, sig, px: h.price || 0 });
+        try { if (sol > 0) payTurboFee(sol, q2); } catch (e) {}
         // the row vanishes NOW — the wallet refresh confirms it a moment later
         setWalletChain((W) => W ? { ...W, holdings: (W.holdings || []).filter((x) => x.mint !== h.mint), holdingsCount: Math.max(0, (W.holdingsCount || 1) - 1) } : W);
         okCount++;
@@ -9708,6 +9752,12 @@ export default function App() {
           setWalletChain((W) => W ? { ...W, holdings: (W.holdings || []).filter((x) => x.mint !== o.token.liveMint), holdingsCount: Math.max(0, (W.holdingsCount || 1) - 1) } : W);
         }
       }
+      // 🏦 site fee — SOL notional of the fill (spend on buys, proceeds on sells)
+      try {
+        const qf = o.quote || {};
+        const notional = selling ? ((+qf.outAmount || 0) / 1e9 || (+o.size || 0) * ((o.token.price || 0) / SOL_USD)) : (+o.size || 0);
+        if (landed && landed.ok) payTurboFee(notional, qf);
+      } catch (e) {}
       // record it — quote amounts, decimals from the quote itself
       try {
         const q2 = o.quote || {};
@@ -10563,6 +10613,7 @@ export default function App() {
         const r = await fetch("/api/treasury");
         const j = await r.json();
         if (!stop && j && j.token && j.token.mint) setValoMint(j.token.mint);
+        if (!stop && j && j.wallets && j.wallets.treasury && j.wallets.treasury.address) setValoTreasury(j.wallets.treasury.address);
       } catch (e) {}
     })();
     return () => { stop = true; };

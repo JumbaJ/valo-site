@@ -64,6 +64,9 @@ const MAX_SOL = Math.max(0.001, parseFloat(process.env.VALO_MAX_ORDER_SOL || "0.
 const ENABLED = String(process.env.VALO_ONCHAIN || "").trim() === "1";
 
 const isMint = (m) => /^[A-Za-z0-9]{32,50}$/.test(String(m || ""));
+const FEE_BPS = Math.max(0, Math.min(500, parseInt(process.env.VALO_FEE_BPS || "0", 10) || 0));
+const FEE_ACCT = (process.env.VALO_FEE_ACCOUNT || "").trim();
+const feeViaJup = FEE_BPS > 0 && isMint(FEE_ACCT);
 
 const RPC = () => (process.env.HELIUS_API_KEY
   ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`
@@ -126,7 +129,7 @@ export default async function handler(req, res) {
     try {
       const { host } = await jupGet("/quote?inputMint=So11111111111111111111111111111111111111112"
         + "&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=100000&slippageBps=100");
-      return res.status(200).json({ enabled: true, jupiter: "reachable", via: host, maxSol: MAX_SOL });
+      return res.status(200).json({ enabled: true, feeBps: FEE_BPS, feeVia: feeViaJup ? "jupiter" : (FEE_BPS > 0 ? "client" : "none"), jupiter: "reachable", via: host, maxSol: MAX_SOL });
     } catch (e) {
       return res.status(200).json({ enabled: true, jupiter: "unreachable", error: String(e.message || e), maxSol: MAX_SOL });
     }
@@ -196,7 +199,8 @@ export default async function handler(req, res) {
     };
 
     const qPath = `/quote?inputMint=${inputMint}&outputMint=${outputMint}`
-      + `&amount=${amountBase.toString()}&slippageBps=${slippageBps}&onlyDirectRoutes=false`;
+      + `&amount=${amountBase.toString()}&slippageBps=${slippageBps}&onlyDirectRoutes=false`
+      + (feeViaJup ? `&platformFeeBps=${FEE_BPS}` : "");
     let quoteRes = null, curveMode = false;
     try { quoteRes = await jupGet(qPath); }
     catch (e) {
@@ -217,6 +221,7 @@ export default async function handler(req, res) {
           otherAmountThreshold: null, priceImpactPct: null, slippageBps,
           routeHops: 1, routeLabels: ["pump.fun bonding curve"], maxSol: MAX_SOL,
           via: "pump.fun-curve", side: selling ? "sell" : "buy", outDecimals,
+          feeBps: FEE_BPS, feeVia: FEE_BPS > 0 ? "client" : "none",
           solOut: null, solOutMin: null, aboveTestSize: false, curve: true,
         }});
       }
@@ -236,6 +241,7 @@ export default async function handler(req, res) {
       routeHops: (quote.routePlan || []).length,
       routeLabels: (quote.routePlan || []).map((r) => r?.swapInfo?.label).filter(Boolean),
       maxSol: MAX_SOL, via: host,
+      feeBps: FEE_BPS, feeVia: feeViaJup ? "jupiter" : (FEE_BPS > 0 ? "client" : "none"),
       side: selling ? "sell" : "buy",
       outDecimals,
       // on a sell, what actually lands back in the wallet
@@ -255,6 +261,7 @@ export default async function handler(req, res) {
     const { json: sj } = await jupPost("/swap", {
       quoteResponse: quote,
       userPublicKey,
+      ...(feeViaJup ? { feeAccount: FEE_ACCT } : {}),
       wrapAndUnwrapSol: true,
       dynamicComputeUnitLimit: true,
       prioritizationFeeLamports: "auto",

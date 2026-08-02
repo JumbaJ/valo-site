@@ -54,13 +54,19 @@ export default async function handler(req, res) {
     const sol = bal && bal.value != null ? bal.value / 1e9 : null;
 
     let holdings = [];
-    const allAccounts = [...(((accountsV1 && accountsV1.value) || [])), ...(((accountsV2 && accountsV2.value) || []))];
+    const TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+    const allAccounts = [
+      ...((((accountsV1 && accountsV1.value) || [])).map((a) => ({ ...a, _prog: TOKEN_PROGRAM }))),
+      ...((((accountsV2 && accountsV2.value) || [])).map((a) => ({ ...a, _prog: TOKEN_2022 }))),
+    ];
     for (const a of allAccounts) {
       const info = a?.account?.data?.parsed?.info;
       const amt = parseFloat(info?.tokenAmount?.uiAmountString || info?.tokenAmount?.uiAmount || "0") || 0;
       if (!info?.mint || !(amt > 0)) continue;
       holdings.push({
         mint: info.mint,
+        account: a.pubkey || null,          // the token account itself — burn/close needs it
+        program: a._prog,
         qty: amt,
         raw: String(info?.tokenAmount?.amount ?? ""),          // exact base units
         decimals: Number(info?.tokenAmount?.decimals ?? 0),
@@ -94,8 +100,14 @@ export default async function handler(req, res) {
         });
       } catch (e) { /* names are a nicety — never block balances on them */ }
     }
+    const spamRe = /https?:|www\.|\.(io|com|net|xyz|fun|app|gg)\b|claim|airdrop|reward|visit |free |t\.me|discord|\||➡|→|swap to|switch to/i;
     holdings = holdings.filter((h) => h.qty > 0)
-      .sort((a, b) => b.usd - a.usd).slice(0, 80);
+      .map((h) => {
+        const label = `${h.sym || ""} ${h.name || ""}`;
+        const spam = spamRe.test(label) || (h.name || "").length > 40 || (h.sym || "").length > 15;
+        return spam ? { ...h, spam: true } : h;
+      })
+      .sort((a, b) => (a.spam ? 1 : 0) - (b.spam ? 1 : 0) || b.usd - a.usd).slice(0, 80);
 
     // recent activity, newest first — signatures are cheap and always available
     const trades = ((sigs || []).slice(0, 24)).map((s) => ({
