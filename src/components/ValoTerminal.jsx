@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
 
 /* ================================================================
    VALO TERMINAL — $VALO
@@ -5156,11 +5157,14 @@ function LiveFundsNotice({ sol = 0, compact = false }) {
           </button>
         </span>
       </div>
-      {tipOpen && (
+      {tipOpen && typeof document !== "undefined" && createPortal(
+        <div onClick={() => setTipOpen(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(5,7,12,0.55)",
+            backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
         <div onClick={(e) => e.stopPropagation()}
-          style={{ position: "absolute", right: 0, bottom: "calc(100% + 6px)", zIndex: 400, width: 230,
-            background: T.panel, border: `1.5px solid ${T.amber}66`, borderRadius: 11, padding: "10px 12px",
-            boxShadow: "0 8px 28px rgba(0,0,0,0.55), 0 0 18px rgba(240,185,11,0.12)" }}>
+          style={{ width: "100%", maxWidth: 270,
+            background: T.panel, border: `1.5px solid ${T.amber}66`, borderRadius: 13, padding: "12px 14px",
+            boxShadow: "0 12px 40px rgba(0,0,0,0.6), 0 0 22px rgba(240,185,11,0.14)" }}>
           <div style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 0.8, color: T.amber, marginBottom: 6 }}>
             ⚡ MAKE ORDERS INSTANT
           </div>
@@ -5182,6 +5186,8 @@ function LiveFundsNotice({ sol = 0, compact = false }) {
             GOT IT
           </button>
         </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -12246,15 +12252,24 @@ export default function App() {
       onContextMenu={(e) => e.preventDefault()}
       style={{ display: "flex", gap: 0, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, overflow: "hidden", marginBottom: 8, fontFamily: T.mono,
         userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" }}>
-      {[
-        [posArm ? "TAP TO OPEN" : "SOL", posArm
+      {(() => {
+        const sbLive = !!(liveData && wallet && wallet.address && walletChain);
+        const sbSol = sbLive ? ((walletChain && walletChain.sol) || 0) : solBalance;
+        return [
+        [posArm ? "TAP TO OPEN" : sbLive ? "⛓ SOL" : "SOL", posArm
           ? <b data-poscell="1" onClick={() => { setPosArm(false); setPosDrawer(true); }}
               style={{ color: VALO_PURPLE, cursor: "pointer", textShadow: `0 0 8px ${VALO_PURPLE}` }}>📊 MY POSITIONS</b>
-          : <b data-poscell="1" onClick={() => { setPay("SOL"); setAmount(String(feeSafe(solBalance, "SOL"))); }}
+          : <b data-poscell="1" onClick={() => { setPay("SOL");
+                setAmount(String(sbLive ? Math.min(sbSol, onchain.maxSol || sbSol) : feeSafe(solBalance, "SOL"))); }}
               {...chipEditProps(() => setPosArm(true))}
-              style={{ color: T.blue, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{solBalance.toFixed(2)}</b>],
-        ["$VALO", <b onClick={() => { setPay("VALO"); setAmount(String(feeSafe(valoWallet, "VALO"))); }}
-          style={{ color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(valoWallet)}</b>],
+              style={{ color: sbLive ? T.amber : T.blue, cursor: "pointer", textDecoration: "underline dotted",
+                textUnderlineOffset: 2 }}>{sbLive ? sbSol.toFixed(3) : solBalance.toFixed(2)}</b>],
+        sbLive
+          ? ["⛓ TOKENS", <b onClick={() => setPortfolioDrawer(true)}
+              style={{ color: T.amber, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
+              ${((walletChain && walletChain.tokensUsd) || 0).toFixed(0)}</b>]
+          : ["$VALO", <b onClick={() => { setPay("VALO"); setAmount(String(feeSafe(valoWallet, "VALO"))); }}
+              style={{ color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(valoWallet)}</b>],
         [mobPnlMode === "live" ? "LIVE BOT PNL" : `BOT PNL · ${mobPnlMode}`, (() => {
           const v = mobPnlMode === "live" ? botUnrealized : botPnlWindow(mobPnlMode);
           const onDur = mobPnlMode !== "live";
@@ -12275,8 +12290,8 @@ export default function App() {
               transition: "background .15s, border-color .15s, box-shadow .15s" }}>
             {v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}</button>;
         })()],
-        ["TOTAL", <b style={{ color: T.text }}>${(solBalance * SOL_USD + valoWallet * 0.0125 + strategyEquityUsd).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b>],
-      ].map(([k, v], i) => (
+        ["TOTAL", <b style={{ color: T.text }}>${((sbLive ? sbSol * SOL_USD + ((walletChain && walletChain.tokensUsd) || 0) : solBalance * SOL_USD + valoWallet * 0.0125) + (sbLive ? 0 : strategyEquityUsd)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b>],
+      ]; })().map(([k, v], i) => (
         <div key={i} data-wtotal={k === "TOTAL" ? "1" : undefined} style={{ flex: 1, textAlign: "center", padding: "6px 2px", borderLeft: i ? `1px solid ${T.border}` : "none", minWidth: 0 }}>
           <div style={{ color: T.faint, fontSize: 6.5, letterSpacing: 0.8, marginBottom: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k}</div>
           <div style={{ fontSize: 9.5, fontWeight: 800 }}>{v}</div>
