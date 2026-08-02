@@ -107,15 +107,16 @@ const holdersOf = (t, fallback) => {
   return Number.isFinite(real) && real > 0 ? real : fallback;
 };
 const liveViewersOf = (t, mode) => {
-  // real count first: how many VALO users are on this exact token right now
-  const real = typeof window !== "undefined" && window.__VALO_VIEWERS__
-    && t && t.liveMint ? window.__VALO_VIEWERS__[t.liveMint] : null;
-  if (Number.isFinite(real) && real > 0) return real;
-  const sd = typeof t?.id === "number" ? t.id : hashStr(String((t && (t.id || t.sym)) || "x"));
-  const seed = (sd * 9301 + 11) % 233;
-  const base = mode === "valo" ? 7 + (seed % 21) : 24 + (seed % 150);
-  const w = Math.sin(Date.now() / 9000 + seed) * base * 0.22 + Math.sin(Date.now() / 2400 + seed * 3) * 2.6;
-  return Math.max(1, Math.round(base + w));
+  if (mode === "valo") {
+    // TRUE count of VALO users on this token now — 1 when it's only you
+    const real = typeof window !== "undefined" && window.__VALO_VIEWERS__
+      && t && t.liveMint ? window.__VALO_VIEWERS__[t.liveMint] : null;
+    return Number.isFinite(real) && real > 0 ? real : 1;
+  }
+  // pump.fun side → REAL engagement (reply count) when we have it; null hides it
+  const rep = typeof window !== "undefined" && window.__VALO_PUMP_REPLIES__
+    && t && t.liveMint ? window.__VALO_PUMP_REPLIES__[t.liveMint] : null;
+  return Number.isFinite(rep) && rep >= 0 ? rep : null;
 };
 const totalViewsOf = (t, mode) => {
   const seed = ((t && t.id) * 7919 + 5) % 997;
@@ -145,20 +146,30 @@ function ViewerPills({ token, small = false }) {
   useEffect(() => { const iv = setInterval(() => setTick((x) => x + 1), 1400); return () => clearInterval(iv); }, []);
   if (!token) return null;
   const live = liveViewersOf(token, mode);
-  const total = totalViewsOf(token, mode);
   const col = mode === "valo" ? VALO_PURPLE : T.green;
   const fs = small ? 8.5 : 9.5;
+  // pump.fun engagement unknown for this token → show only the VALO presence,
+  // never a made-up number
+  if (mode === "pump" && live == null) {
+    const vp = typeof window !== "undefined" && window.__VALO_VIEWERS__ && token.liveMint ? window.__VALO_VIEWERS__[token.liveMint] : null;
+    const here = Number.isFinite(vp) && vp > 0 ? vp : 1;
+    return (
+      <span onClick={() => setMode("valo")} title="VALO viewers here now — tap for more"
+        style={{ display: "inline-flex", gap: 4, alignItems: "center", cursor: "pointer", fontFamily: T.mono, userSelect: "none" }}>
+        <EyeOpenIcon c={VALO_PURPLE} s={small ? 12 : 14} />
+        <b style={{ color: VALO_PURPLE, fontSize: fs }}>{here}</b>
+        <span style={{ color: T.faint, fontSize: fs - 1.5 }}>here</span>
+      </span>
+    );
+  }
   return (
     <span onClick={() => setMode((m) => (m === "pump" ? "valo" : "pump"))}
-      title={`${mode === "pump" ? "pump.fun" : "VALO terminal"} viewers — tap to flip to ${mode === "pump" ? "VALO" : "pump.fun"}`}
+      title={mode === "pump" ? "pump.fun replies (live engagement) — tap for VALO viewers" : "VALO users viewing this now — tap for pump.fun activity"}
       style={{ display: "inline-flex", gap: small ? 8 : 11, alignItems: "center", cursor: "pointer", fontFamily: T.mono, userSelect: "none" }}>
       <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-        <EyeOpenIcon c={col} s={small ? 12 : 14} />
-        <b style={{ color: col, fontSize: fs, minWidth: small ? 26 : 32, textAlign: "left" }}>{live.toLocaleString()}</b>
-      </span>
-      <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-        <EyeClosedIcon c={mode === "valo" ? "#9d8df0" : T.dim} s={small ? 12 : 14} />
-        <b style={{ color: mode === "valo" ? "#9d8df0" : T.dim, fontSize: fs, minWidth: small ? 34 : 40, textAlign: "left" }}>{fmtQty(total)}</b>
+        {mode === "valo" ? <EyeOpenIcon c={col} s={small ? 12 : 14} /> : <span style={{ fontSize: small ? 11 : 13 }}>💬</span>}
+        <b style={{ color: col, fontSize: fs, textAlign: "left" }}>{(live || 0).toLocaleString()}</b>
+        <span style={{ color: T.faint, fontSize: fs - 1.5 }}>{mode === "valo" ? "here" : "replies"}</span>
       </span>
     </span>
   );
@@ -2013,7 +2024,18 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
                   {st("MC", fmt$(mcOf(token)))}
                   {st("TVL", fmt$(token.tvl))}
                   {st("MOMENTUM", Math.round(token.momentum), token.momentum > 60 ? T.green : T.dim)}
-                  {st("HOLDERS", token.traders.toLocaleString())}
+                  {(() => {
+                    const real = liveData && token.liveMint && window.__VALO_HOLDERS__ ? window.__VALO_HOLDERS__[token.liveMint] : null;
+                    if (Number.isFinite(real) && real > 0) {
+                      const prev = prevHolders.current[token.liveMint];
+                      const delta = Number.isFinite(prev) ? real - prev : 0;
+                      return st("HOLDERS", <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        {real.toLocaleString()}
+                        {delta !== 0 && <span style={{ fontSize: 8, fontWeight: 900, color: delta > 0 ? T.green : T.red }}>{delta > 0 ? `▲${delta}` : `▼${Math.abs(delta)}`}</span>}
+                      </span>);
+                    }
+                    return st("HOLDERS", token.traders.toLocaleString());
+                  })()}
                   {st("TOP 10 HOLD", `${(16 + ((token.id * 7) % 26)).toFixed(1)}%`, T.amber)}
                   {st("SAFETY", scoreToken(token), ratingColor(scoreToken(token)))}
                 </div>
@@ -8075,8 +8097,7 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
                   <span style={{ color: T.red }}>S {fmt$(t.redUsd)}</span>
                   <span>M {Math.round(t.momentum)}</span>
                   <span title={holdersOf(t, null) ? "real on-chain holders" : "estimated"}>👥{holdersOf(t, t.traders)}</span>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}><EyeOpenIcon c={T.green} s={9} />{liveViewersOf(t, "pump")}</span>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}><EyeClosedIcon c={T.dim} s={9} />{fmtQty(totalViewsOf(t, "pump"))}</span>
+                  {(() => { const v = liveViewersOf(t, "pump"); return v != null ? <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>💬{v}</span> : null; })()}
                   <span style={{ fontSize: 6.5, fontWeight: 800, color: platOf(t) === "pump" ? T.green : "#c6f24e", marginLeft: "auto" }}>{platOf(t) === "pump" ? "PUMP" : "RH"}</span>
                 </div>
                 <button onClick={(e) => { e.stopPropagation(); onOpenUser && onOpenUser(dev.name); }}
@@ -12570,29 +12591,53 @@ export default function App() {
 
 
   const [liveViewers, setLiveViewers] = useState({});  // mint → real VALO viewers
-  // real on-chain holder counts, one lookup per token, kept for the session
-  const holderCache = useRef({});
+  const holderCache = useRef({});      // mint → { holders, replies, at }
   const holderBusy = useRef({});
-  const fetchHolders = useCallback(async (mint) => {
-    if (!mint || holderCache.current[mint] != null || holderBusy.current[mint]) return;
-    holderBusy.current[mint] = true;
+  // batch fetch real holder counts (+ pump.fun engagement). Re-pulls on a
+  // timer so "holders coming & going" is a LIVE number, not a one-shot.
+  const fetchHoldersBatch = useCallback(async (mints) => {
+    const want = (mints || []).filter((m) => m && !holderBusy.current[m] &&
+      (!holderCache.current[m] || Date.now() - (holderCache.current[m].at || 0) > 20000)).slice(0, 30);
+    if (!want.length) return;
+    want.forEach((m) => { holderBusy.current[m] = true; });
     try {
-      const r = await fetch(`/api/holders?mint=${encodeURIComponent(mint)}`);
+      const r = await fetch(`/api/holders?mints=${encodeURIComponent(want.join(","))}`);
       if (r.ok) {
         const j = await r.json();
-        // the true wallet count when the RPC could give it; otherwise leave the
-        // estimate alone rather than showing "20" for every token
-        const n = j && Number.isFinite(j.count) && j.countExact ? j.count : null;
-        if (n != null) {
-          holderCache.current[mint] = n;
-          if (typeof window !== "undefined") window.__VALO_HOLDERS__ = { ...(window.__VALO_HOLDERS__ || {}), [mint]: n };
-          setHolderTick((v) => v + 1);
+        let changed = false;
+        for (const m of want) {
+          const d = j && j[m];
+          if (d && Number.isFinite(d.holders) && d.holders > 0) {
+            holderCache.current[m] = { holders: d.holders, replies: d.replies, at: Date.now() };
+            if (typeof window !== "undefined") {
+              window.__VALO_HOLDERS__ = { ...(window.__VALO_HOLDERS__ || {}), [m]: d.holders };
+              if (Number.isFinite(d.replies)) window.__VALO_PUMP_REPLIES__ = { ...(window.__VALO_PUMP_REPLIES__ || {}), [m]: d.replies };
+            }
+            changed = true;
+          }
         }
+        if (changed) setHolderTick((v) => v + 1);
       }
     } catch (e) {}
-    holderBusy.current[mint] = false;
+    want.forEach((m) => { holderBusy.current[m] = false; });
   }, []);
+  const fetchHolders = useCallback((mint) => { if (mint) fetchHoldersBatch([mint]); }, [fetchHoldersBatch]);
   const [holderTick, setHolderTick] = useState(0);
+  const prevHolders = useRef({});     // mint → last count, for ↑/↓ arrows
+  useEffect(() => {
+    if (!liveData) return;
+    const pull = () => {
+      const mints = (tokens || []).map((t) => t.liveMint).filter(Boolean).slice(0, 30);
+      if (mints.length) {
+        for (const m of mints) { const c = holderCache.current[m]; if (c) prevHolders.current[m] = c.holders; }
+        fetchHoldersBatch(mints);
+      }
+    };
+    pull();
+    const iv = setInterval(pull, 25000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData, tokens.length]);
   const tapeRef = useRef({});          // rolling per-pool trade tape → candles
   const [streamOn, setStreamOn] = useState(false);
   const streamRef = useRef(null);
