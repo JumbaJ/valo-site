@@ -44,16 +44,18 @@ export default async function handler(req, res) {
   const address = String(req.query.address || "");
   if (!/^[A-Za-z0-9]{32,50}$/.test(address)) return res.status(400).json({ error: "bad address" });
   try {
-    const [bal, accounts, sigs] = await Promise.all([
+    const [bal, accountsV1, accountsV2, sigs] = await Promise.all([
       rpc("getBalance", [address]).catch(() => null),
       rpc("getTokenAccountsByOwner", [address, { programId: TOKEN_PROGRAM }, { encoding: "jsonParsed" }]).catch(() => null),
+      rpc("getTokenAccountsByOwner", [address, { programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" }, { encoding: "jsonParsed" }]).catch(() => null),
       rpc("getSignaturesForAddress", [address, { limit: 100 }]).catch(() => null),
     ]);
 
     const sol = bal && bal.value != null ? bal.value / 1e9 : null;
 
     let holdings = [];
-    for (const a of (accounts && accounts.value) || []) {
+    const allAccounts = [...(((accountsV1 && accountsV1.value) || [])), ...(((accountsV2 && accountsV2.value) || []))];
+    for (const a of allAccounts) {
       const info = a?.account?.data?.parsed?.info;
       const amt = parseFloat(info?.tokenAmount?.uiAmountString || info?.tokenAmount?.uiAmount || "0") || 0;
       if (!info?.mint || !(amt > 0)) continue;
@@ -92,8 +94,8 @@ export default async function handler(req, res) {
         });
       } catch (e) { /* names are a nicety — never block balances on them */ }
     }
-    holdings = holdings.filter((h) => h.usd >= 0.05 || (h.price === 0 && h.qty > 0))
-      .sort((a, b) => b.usd - a.usd).slice(0, 60);
+    holdings = holdings.filter((h) => h.qty > 0)
+      .sort((a, b) => b.usd - a.usd).slice(0, 80);
 
     // recent activity, newest first — signatures are cheap and always available
     const trades = ((sigs || []).slice(0, 24)).map((s) => ({

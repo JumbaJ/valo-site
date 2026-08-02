@@ -10918,16 +10918,49 @@ export default function App() {
               traders: lv.traders || t.traders, ageMin: t.ageMin + 0.04 };
           }
           let candlesL;
+          if (!(prev > 0) && target > 0) {
+            // first real price for a card born at 0 — SEED, never draw a bar
+            // from the floor. That bar was the "giant green candle from
+            // nowhere" and it crushed the whole axis.
+            candlesL = (t.candles && t.candles.length)
+              ? t.candles
+              : [{ t: Date.now(), v: 0, o: target, h: target, l: target, c: target }];
+            return { ...t, candles: candlesL, price: target,
+              sym: lv.sym || t.sym, name: lv.name || t.name, mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
+              img: lv.img || t.img, pool: lv.pool || t.pool, liveMint: lv.mint || t.liveMint,
+              supply: lv.mc > 0 && lv.price > 0 ? lv.mc / lv.price : t.supply, ageMin: t.ageMin + 0.04 };
+          }
           if (t.pool && t.candles && t.candles.length) {
-            // real history: only the newest candle moves — its close tracks the
-            // live price and its wick stretches to cover it
-            const last = t.candles[t.candles.length - 1];
-            const cx = t.pool && lv.price > 0 ? lv.price : c;   // exact on real pools
-            candlesL = [...t.candles.slice(0, -1),
-              { t: last.t, v: last.v, o: last.o, h: Math.max(last.h, cx), l: Math.min(last.l, cx), c: cx }];
+            // real history: the newest candle tracks the live price — and when
+            // its time bucket closes, a NEW candle opens instead of one bar
+            // silently absorbing hours of movement between history refreshes.
+            const cs = t.candles;
+            const last = cs[cs.length - 1];
+            const cx = lv.price > 0 ? lv.price : c;   // exact on real pools
+            const dt = cs.length > 1 ? Math.max(15000, cs[cs.length - 1].t - cs[cs.length - 2].t) : 60000;
+            if (Date.now() >= last.t + dt * 1.5) {
+              // bucket rolled over → open a fresh candle at the last close
+              candlesL = [...cs.slice(-599),
+                { t: last.t + dt, v: 0, o: last.c, h: Math.max(last.c, cx), l: Math.min(last.c, cx), c: cx }];
+            } else {
+              candlesL = [...cs.slice(0, -1),
+                { t: last.t, v: last.v, o: last.o, h: Math.max(last.h, cx), l: Math.min(last.l, cx), c: cx }];
+            }
           } else {
-            const cd = { o: prev, h: Math.max(prev, c) * 1.0004, l: Math.min(prev, c) * 0.9996, c };
-            candlesL = [...t.candles.slice(1), cd];
+            // no real pool → NOTHING is traded, so nothing is invented. The
+            // chart shows a flat tick at the reported price, rolled by time —
+            // honest emptiness instead of fabricated volatility.
+            const now = Date.now();
+            const cs = t.candles || [];
+            const last = cs[cs.length - 1];
+            if (last && now < (last.t || 0) + 60000) {
+              const cx = target > 0 ? target : c;
+              candlesL = [...cs.slice(0, -1),
+                { t: last.t, v: 0, o: last.o, h: Math.max(last.h, cx), l: Math.min(last.l, cx), c: cx }];
+            } else {
+              const cx = target > 0 ? target : c;
+              candlesL = [...cs.slice(-599), { t: now, v: 0, o: cx, h: cx, l: cx, c: cx }];
+            }
           }
           const driftL = (c - prev) / (prev || 1);
           const supL = lv.mc > 0 && lv.price > 0 ? lv.mc / lv.price : t.supply;
