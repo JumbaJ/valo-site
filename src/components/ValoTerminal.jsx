@@ -5086,7 +5086,7 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
                   border: `1px solid ${T.amber}33`, borderLeft: `2px solid ${T.amber}`, borderRadius: 9, padding: "8px 9px", marginBottom: 5 }}>
                   <div onClick={() => onOpenMint && onOpenMint(h.mint)} style={{ minWidth: 0, flex: 1, cursor: onOpenMint ? "pointer" : "default" }}>
                     <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: T.text }}>
-                      ${h.sym || h.name || h.mint.slice(0, 5)} <span style={{ color: T.amber, fontSize: 7.5 }}>⛓</span>
+                      ${h.sym || h.name || h.mint.slice(0, 5)} <span style={{ color: T.amber, fontSize: 7.5 }}>{h.src === "phantom" ? "👻" : "⚡"}</span>
                     </div>
                     <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>
                       {fmtQty(h.qty)} · ${((h.livePrice || h.price || 0) * h.qty).toFixed(2)}
@@ -6216,6 +6216,11 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                   <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 700, color: T.dim }}>
                     {mask(`${chSol.toFixed(3)} SOL + ${chCount} token${chCount === 1 ? "" : "s"} · read-only`)}
                   </div>
+                  {walletChain && walletChain.dual && (
+                    <div style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 700, color: T.faint }}>
+                      {mask(`⚡ ${((walletChain.solTrading) || 0).toFixed(4)} ◎ turbo · 👻 ${((walletChain.solVault) || 0).toFixed(4)} ◎ phantom`)}
+                    </div>
+                  )}
                 </>
               ) : liveMode ? (
                 <>
@@ -9287,9 +9292,10 @@ export default function App() {
       return "not enough SOL in this wallet for that size + fees.";
     return s;
   };
-  const quoteRealOrder = async (token, side, size) => {
+  const quoteRealOrder = async (token, side, size, opts = {}) => {
+    const owner = opts.owner || tradeAddr;
     if (!onchain.enabled || !walletReady || !token || !token.liveMint) return;
-    if (turboLockedButPresent) {
+    if (turboLockedButPresent && (!opts.owner || (turbo && opts.owner === turbo.pubkey))) {
       setRealOrder({ stage: "error", token, side, msg:
         "⚡ your TURBO wallet is locked — these funds live there. Enter your PIN in the portfolio's TURBO panel to trade." });
       return;
@@ -9303,7 +9309,7 @@ export default function App() {
     let q = "";
     let label = "";
     if (selling) {
-      const h = chainHoldingOf(token);
+      const h = (opts.heldQty != null) ? { qty: opts.heldQty, raw: opts.raw } : chainHoldingOf(token);
       const held = h ? h.qty : 0;
       const qty = Math.min(size, held);
       if (!(qty > 0)) {
@@ -9332,12 +9338,12 @@ export default function App() {
       label = `${size} SOL`;
     }
 
-    setRealOrder({ stage: "quoting", token, side, size, label });
+    setRealOrder({ stage: "quoting", token, side, size, label, owner });
     try {
       const r = await fetch(`/api/swap?mode=quote&inputMint=${inputMint}&outputMint=${outputMint}${q}&slippageBps=100`);
       const j = await r.json();
       if (!r.ok || j.error) { setRealOrder({ stage: "error", token, side, size, label, msg: j.error || "no route" }); return; }
-      setRealOrder({ stage: "review", token, side, size, label, quote: j.quote, inputMint, outputMint, q });
+      setRealOrder({ stage: "review", token, side, size, label, quote: j.quote, inputMint, outputMint, q, owner });
     } catch (e) {
       setRealOrder({ stage: "error", token, side, size, label, msg: String(e.message || e) });
     }
@@ -9639,7 +9645,9 @@ export default function App() {
         text: `🗑 burning ${h.sym || h.mint.slice(0, 5)} and closing its account — the ~0.002 SOL rent comes back to you…` });
       const web3 = await loadWeb3();
       const bh = { blockhash: await getBlockhash() };
-      const owner = new web3.PublicKey(tradeAddr || wallet.address);
+      const hOwner = h.owner || tradeAddr || wallet.address;
+      const hOwnerIsTurbo = !!(turbo && hOwner === turbo.pubkey);
+      const owner = new web3.PublicKey(hOwner);
       const acct = new web3.PublicKey(h.account);
       const mint = new web3.PublicKey(h.mint);
       const prog = new web3.PublicKey(h.program || "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -9668,9 +9676,12 @@ export default function App() {
       const tx = new web3.Transaction({ feePayer: owner, recentBlockhash: bh.blockhash });
       tx.add(...ins);
       let sig = null;
-      if (turboActive) {
+      if (hOwnerIsTurbo && turboActive) {
         sig = await turboSignSend(tx);
-      } else if (ph.signAndSendTransaction) {
+      } else if (hOwnerIsTurbo && !turboActive) {
+        pushNotif({ type: "system", user: null, tokenId: null, text: "⚡ unlock TURBO (PIN) to burn from it." });
+        return;
+      } else if (ph && ph.signAndSendTransaction) {
         const out = await ph.signAndSendTransaction(tx);
         sig = out && (out.signature || out);
       } else {
@@ -9705,14 +9716,16 @@ export default function App() {
   const realSellHolding = (h) => {
     if (!h || !h.mint) return;
     quoteRealOrder({ id: "chain-" + h.mint, sym: h.sym || h.mint.slice(0, 5), name: h.name || h.sym || "token",
-      liveMint: h.mint, price: h.price || 0, hue: symbolHue(h.sym || "?") }, "sell", h.qty);
+      liveMint: h.mint, price: h.price || 0, hue: symbolHue(h.sym || "?") }, "sell", h.qty,
+      { owner: h.owner || tradeAddr, raw: h.raw, heldQty: h.qty });
   };
   // sell EVERYTHING — one click, ONE Phantom approval. Every sell tx is built
   // first, signed together via signAllTransactions, then landed in sequence.
   // (One literal transaction isn't possible non-custodially: a single swap
   // route already fills most of Solana's 1232-byte tx limit.)
   const realSellAllHoldings = async (holds) => {
-    const list = (holds || []).filter((h) => h && h.mint && h.qty > 0 && !h.spam && !h.dust);
+    const list = (holds || []).filter((h) => h && h.mint && h.qty > 0 && !h.spam && !h.dust)
+      .map((h) => ({ ...h, owner: h.owner || tradeAddr }));
     if (!list.length) return;
     if (turboLockedButPresent) {
       pushNotif({ type: "system", user: null, tokenId: null,
@@ -9729,7 +9742,7 @@ export default function App() {
     for (const h of list) {
       try {
         const fullExit = h.raw ? `&amountRaw=${h.raw}` : `&amountUi=${h.qty}`;
-        const r = await fetch(`/api/swap?mode=build&inputMint=${h.mint}&outputMint=So11111111111111111111111111111111111111112${fullExit}&slippageBps=200&user=${tradeAddr}`);
+        const r = await fetch(`/api/swap?mode=build&inputMint=${h.mint}&outputMint=So11111111111111111111111111111111111111112${fullExit}&slippageBps=200&user=${h.owner}`);
         const j = await r.json();
         if (!r.ok || j.error || !j.swapTransaction) throw new Error(j.error || "no route");
         const raw = Uint8Array.from(atob(j.swapTransaction), (ch) => ch.charCodeAt(0));
@@ -9743,17 +9756,26 @@ export default function App() {
     // 2 · ONE approval for everything
     let signed;
     try {
-      if (turboActive) {
-        // ⚡ each tx signs on-device — a true one-tap wallet-wide liquidation
-        const kp = turboKpRef.current;
-        signed = built.map((b) => { b.tx.sign([kp]); return b.tx; });
-      } else if (ph.signAllTransactions) signed = await ph.signAllTransactions(built.map((b) => b.tx));
-      else { // very old wallets: fall back to per-tx signing
-        signed = [];
-        for (const b of built) signed.push(await ph.signTransaction(b.tx));
+      const kp = turboActive ? turboKpRef.current : null;
+      const turboTx = built.filter((b) => turbo && b.h.owner === turbo.pubkey);
+      const phTx = built.filter((b) => !(turbo && b.h.owner === turbo.pubkey));
+      if (turboTx.length && !kp) throw new Error("turbo locked");
+      // ⚡ turbo-owned: sign on-device; 👻 phantom-owned: ONE batch approval
+      turboTx.forEach((b) => b.tx.sign([kp]));
+      let phSigned = [];
+      if (phTx.length) {
+        if (!ph) throw new Error("Phantom needed for vault positions");
+        phSigned = ph.signAllTransactions
+          ? await ph.signAllTransactions(phTx.map((b) => b.tx))
+          : await (async () => { const out = []; for (const b of phTx) out.push(await ph.signTransaction(b.tx)); return out; })();
       }
+      // reassemble in build order
+      const phMap = new Map(phTx.map((b, i2) => [b, phSigned[i2]]));
+      signed = built.map((b) => phMap.has(b) ? phMap.get(b) : b.tx);
     } catch (e) {
-      pushNotif({ type: "system", user: null, tokenId: null, text: "⛓ SELL ALL cancelled in the wallet — nothing was sold." });
+      pushNotif({ type: "system", user: null, tokenId: null,
+        text: /turbo locked/.test(String(e.message)) ? "⚡ unlock TURBO (PIN) first — some positions live there. Nothing was sold."
+          : "⛓ SELL ALL cancelled in the wallet — nothing was sold." });
       return;
     }
     // 3 · land + confirm each, record fills
@@ -9779,7 +9801,8 @@ export default function App() {
         recordRealFill({ at: Date.now(), side: "sell", mint: h.mint, sym: h.sym || h.mint.slice(0, 5), qty: h.qty, sol, est: !q2.outAmount, sig, px: h.price || 0 });
         try { if (sol > 0) payTurboFee(sol, q2); } catch (e) {}
         // the row vanishes NOW — the wallet refresh confirms it a moment later
-        setWalletChain((W) => W ? { ...W, holdings: (W.holdings || []).filter((x) => x.mint !== h.mint), holdingsCount: Math.max(0, (W.holdingsCount || 1) - 1) } : W);
+        const rmSetter = (h.owner === tradeAddr) ? setWalletChain : setWalletVault;
+        rmSetter((W) => W ? { ...W, holdings: (W.holdings || []).filter((x) => x.mint !== h.mint), holdingsCount: Math.max(0, (W.holdingsCount || 1) - 1) } : W);
         okCount++;
         sayPrivate({ type: "note", text: `⛓ sold ${fmtQty(h.qty)} ${h.sym || h.mint.slice(0, 5)} → ${sol.toFixed(4)} SOL` });
       } catch (e) {
@@ -9790,6 +9813,11 @@ export default function App() {
       const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(tradeAddr || wallet.address)}&t=${Date.now()}`);
       const j2 = await r2.json();
       if (j2 && !j2.error) setWalletChain(j2);
+      if (vaultAddr) {
+        const r3 = await fetch(`/api/wallet?address=${encodeURIComponent(vaultAddr)}&t=${Date.now()}`);
+        const j3 = await r3.json();
+        if (j3 && !j3.error) setWalletVault(j3);
+      }
     } catch (e) {}
     pushNotif({ type: "system", user: null, tokenId: null, text: `⛓ SELL ALL done — ${okCount}/${built.length} sold. Each fill is in your activity with its Solscan link.` });
   };
@@ -9811,7 +9839,9 @@ export default function App() {
     if (!ph && !turboActive) { setRealOrder({ ...o, stage: "error", msg: "Phantom not found" }); return; }
     setRealOrder({ ...o, stage: "signing" });
     try {
-      const r = await fetch(`/api/swap?mode=build&inputMint=${o.inputMint}&outputMint=${o.outputMint}${o.q}&slippageBps=100&user=${tradeAddr}`);
+      const ordOwner = o.owner || tradeAddr;
+      const ownerIsTurbo = !!(turbo && ordOwner === turbo.pubkey);
+      const r = await fetch(`/api/swap?mode=build&inputMint=${o.inputMint}&outputMint=${o.outputMint}${o.q}&slippageBps=100&user=${ordOwner}`);
       const j = await r.json();
       if (!r.ok || j.error || !j.swapTransaction) throw new Error(j.error || "could not build the transaction");
 
@@ -9821,10 +9851,13 @@ export default function App() {
       const tx = web3.VersionedTransaction.deserialize(raw);
 
       let sig = null;
-      if (turboActive) {
-        // ⚡ turbo — signed on-device with the session key. No prompt exists.
+      if (ownerIsTurbo && turboActive) {
+        // ⚡ turbo-owned — signed on-device with the session key. No prompt.
         sig = await turboSignSend(tx);
-      } else if (ph.signAndSendTransaction) {
+      } else if (ownerIsTurbo && !turboActive) {
+        setRealOrder({ ...o, stage: "error", msg: "⚡ unlock TURBO (PIN) — this position lives in your turbo wallet." });
+        return;
+      } else if (ph && ph.signAndSendTransaction) {
         // Phantom signs AND submits — one approval, no key ever leaves the wallet
         const out = await ph.signAndSendTransaction(tx);
         sig = out && (out.signature || out);
@@ -9869,10 +9902,12 @@ export default function App() {
       if (selling && landed && landed.ok) {
         // near-full exit → the row leaves MY POSITIONS NOW (chain refresh
         // re-confirms). Partial sells shrink the qty so P/L stays honest.
-        const hh = chainHoldingOf(o.token);
+        const hh = chainHoldingsLive.find((x) => x.mint === o.token.liveMint && x.owner === (o.owner || tradeAddr))
+          || chainHoldingOf(o.token);
         if (hh) {
           const full = (+o.size || 0) >= hh.qty * 0.95;
-          setWalletChain((W) => {
+          const setter = ((o.owner || tradeAddr) === tradeAddr) ? setWalletChain : setWalletVault;
+          setter((W) => {
             if (!W) return W;
             const holds = (W.holdings || []);
             const nextHolds = full
@@ -9908,11 +9943,11 @@ export default function App() {
       // the wallet's holdings just changed. Refresh past the CDN cache, or the
       // next sell will size itself off the balance from before this one.
       try {
-        if (tradeAddr) {
-          const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(tradeAddr)}&t=${Date.now()}`);
+        if (ordOwner) {
+          const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(ordOwner)}&t=${Date.now()}`);
           const j2 = await r2.json();
           if (j2 && !j2.error) {
-            setWalletChain(j2);
+            if (ordOwner === tradeAddr) setWalletChain(j2); else setWalletVault(j2);
             // curve buys promise no output qty — the chain's delta says what
             // actually arrived, and THAT becomes the cost basis for live P/L
             if (!selling && landed && landed.ok) {
@@ -11307,15 +11342,27 @@ export default function App() {
 
   // keep the TRADING wallet's real figures current — Phantom normally, the
   // turbo wallet the moment it's armed (that's where positions live then)
+  const [walletVault, setWalletVault] = useState(null);   // the non-trading wallet (Phantom while turbo trades)
+  const vaultAddr = (liveData && turbo && turbo.pubkey && wallet && wallet.address && wallet.address !== turbo.pubkey)
+    ? wallet.address : null;
   useEffect(() => {
     if (!tradeAddr) return;
-    loadWalletChain(tradeAddr);                       // immediate on arm/switch
-    const iv = setInterval(() => loadWalletChain(tradeAddr), 30000);
-    const onVis = () => { if (!document.hidden) loadWalletChain(tradeAddr); };
+    const pull = async () => {
+      loadWalletChain(tradeAddr);
+      if (vaultAddr) {
+        try {
+          const j = await (await fetch(`/api/wallet?address=${encodeURIComponent(vaultAddr)}&t=${Date.now()}`)).json();
+          if (j && !j.error) setWalletVault(j);
+        } catch (e) {}
+      } else setWalletVault(null);
+    };
+    pull();                                           // immediate on arm/switch
+    const iv = setInterval(pull, 30000);
+    const onVis = () => { if (!document.hidden) pull(); };
     document.addEventListener("visibilitychange", onVis);
     return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tradeAddr]);
+  }, [tradeAddr, vaultAddr]);
 
   // reconnect silently if Phantom already trusts this site, and follow account changes
   useEffect(() => {
@@ -11828,7 +11875,11 @@ export default function App() {
         sym: f.sym, tx: f.sig, real: true }));
   }, [realFills, selected && selected.liveMint]);
   const chainHoldingsLive = useMemo(() => {
-    const holds = (walletChain && walletChain.holdings) || [];
+    const tHolds = ((walletChain && walletChain.holdings) || []).map((h) => ({ ...h,
+      owner: tradeAddr, src: (turbo && tradeAddr === turbo.pubkey) ? "turbo" : "phantom" }));
+    const vHolds = ((walletVault && walletVault.holdings) || []).map((h) => ({ ...h,
+      owner: vaultAddr, src: "phantom" }));
+    const holds = [...tHolds, ...vHolds];
     return holds.map((h) => {
       const card = (tokens || []).find((t) => t.liveMint === h.mint);
       const price = (card && card.price > 0) ? card.price : (h.price || 0);
@@ -11841,7 +11892,22 @@ export default function App() {
         avgCostUsd: q > 0 ? basisUsd / q : null,
         pnlUsd, pnlPct: basisUsd > 0 ? (pnlUsd / basisUsd) * 100 : null };
     });
-  }, [walletChain, tokens, chainLedger]);
+  }, [walletChain, walletVault, tokens, chainLedger, tradeAddr, vaultAddr]);
+  // 🧾 combined chain — the portfolio's truth: both wallets, one book
+  const combinedChain = useMemo(() => {
+    if (!walletChain) return null;
+    const v = walletVault;
+    return {
+      ...walletChain,
+      sol: (walletChain.sol || 0) + ((v && v.sol) || 0),
+      solTrading: walletChain.sol || 0,
+      solVault: (v && v.sol) || 0,
+      tokensUsd: (walletChain.tokensUsd || 0) + ((v && v.tokensUsd) || 0),
+      holdingsCount: ((walletChain.holdings || []).length) + (((v && v.holdings) || []).length),
+      holdings: chainHoldingsLive,
+      dual: !!v,
+    };
+  }, [walletChain, walletVault, chainHoldingsLive]);
 
   selRef.current = sel;
   const selPoolRef = useRef(null);
@@ -14308,7 +14374,7 @@ export default function App() {
             </button>
             <PortfolioPanel big
               solBalance={dispSol} valoWallet={dispValo} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger} chainHoldingsLive2={chainHoldingsLive}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={combinedChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger} chainHoldingsLive2={chainHoldingsLive}
               turboState={turbo} onTurboCreate={turboCreate} onTurboUnlock={turboUnlock} onTurboLock={turboLock}
               onTurboFund={turboFund} onTurboSweep={turboSweep} phantomOk={!!(wallet && wallet.address)}
               turboSol={turboSolBal}
@@ -15934,7 +16000,7 @@ export default function App() {
             </div>
             <PortfolioPanel big
               solBalance={dispSol} valoWallet={dispValo} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger} chainHoldingsLive2={chainHoldingsLive}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={combinedChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger} chainHoldingsLive2={chainHoldingsLive}
               turboState={turbo} onTurboCreate={turboCreate} onTurboUnlock={turboUnlock} onTurboLock={turboLock}
               onTurboFund={turboFund} onTurboSweep={turboSweep} phantomOk={!!(wallet && wallet.address)}
               turboSol={turboSolBal}
