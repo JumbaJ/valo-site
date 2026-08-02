@@ -14,14 +14,23 @@ const JUP_KEY = (process.env.JUPITER_API_KEY || "").trim();
 const jupHeaders = () => (JUP_KEY ? { accept: "application/json", "x-api-key": JUP_KEY } : { accept: "application/json" });
 
 // try each host until one answers; carry the errors so failures are legible
+const NO_ROUTE = "NOROUTE";
+const looksNoRoute = (t) => /route|ROUTE_NOT_FOUND|COULD_NOT_FIND/i.test(String(t || ""));
 async function jupGet(path) {
   const errs = [];
   for (const host of JUP_HOSTS) {
     try {
       const r = await fetch(`${host}${path}`, { headers: jupHeaders() });
       if (r.ok) return { json: await r.json(), host };
-      errs.push(`${host} → ${r.status}`);
-    } catch (e) { errs.push(`${host} → ${String(e.message || e)}`); }
+      const body = await r.text().catch(() => "");
+      if (r.status === 400 && looksNoRoute(body)) {
+        const e2 = new Error(NO_ROUTE); e2.noRoute = true; throw e2;   // definitive — stop asking
+      }
+      errs.push(`${host} → ${r.status}${body ? ` (${body.slice(0, 120)})` : ""}`);
+    } catch (e) {
+      if (e && e.noRoute) throw e;
+      errs.push(`${host} → ${String(e.message || e)}`);
+    }
   }
   throw new Error(`no Jupiter endpoint answered (${errs.join(" | ")})`);
 }
@@ -34,8 +43,15 @@ async function jupPost(path, body) {
         body: JSON.stringify(body),
       });
       if (r.ok) return { json: await r.json(), host };
-      errs.push(`${host} → ${r.status}`);
-    } catch (e) { errs.push(`${host} → ${String(e.message || e)}`); }
+      const bt = await r.text().catch(() => "");
+      if (r.status === 400 && looksNoRoute(bt)) {
+        const e2 = new Error(NO_ROUTE); e2.noRoute = true; throw e2;
+      }
+      errs.push(`${host} → ${r.status}${bt ? ` (${bt.slice(0, 120)})` : ""}`);
+    } catch (e) {
+      if (e && e.noRoute) throw e;
+      errs.push(`${host} → ${String(e.message || e)}`);
+    }
   }
   throw new Error(`no Jupiter endpoint answered (${errs.join(" | ")})`);
 }
@@ -151,10 +167,65 @@ export default async function handler(req, res) {
   } catch (e) { /* fall back to the display default rather than blocking a trade */ }
 
   try {
+    // curve fallback — builds the unsigned tx from pump.fun's own curve
+    const pumpLocal = async () => {
+      const selling2 = inputMint !== SOL_MINT;
+      const mint2 = selling2 ? inputMint : outputMint;
+      let amount2;
+      if (selling2) {
+        const d = await mintDecimals(mint2);
+        amount2 = Number(amountBase) / Math.pow(10, d);   // token UI units
+      } else {
+        amount2 = Number(amountBase) / 1e9;               // SOL
+      }
+      const r2 = await fetch("https://pumpportal.fun/api/trade-local", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          publicKey: userPublicKey, action: selling2 ? "sell" : "buy", mint: mint2,
+          amount: amount2, denominatedInSol: selling2 ? "false" : "true",
+          slippage: Math.max(1, Math.round(slippageBps / 100)), priorityFee: 0.00008, pool: "auto",
+        }),
+      });
+      if (!r2.ok) {
+        const bt = await r2.text().catch(() => "");
+        throw new Error(`no Jupiter route, and the pump.fun curve refused it too (${r2.status}${bt ? `: ${bt.slice(0, 140)}` : ""})`);
+      }
+      const buf = Buffer.from(await r2.arrayBuffer());
+      if (!buf.length) throw new Error("pump.fun curve returned an empty transaction");
+      return buf.toString("base64");
+    };
+
     const qPath = `/quote?inputMint=${inputMint}&outputMint=${outputMint}`
       + `&amount=${amountBase.toString()}&slippageBps=${slippageBps}&onlyDirectRoutes=false`;
-    const { json: quote, host } = await jupGet(qPath);
-    if (!quote || !quote.outAmount) throw new Error("no route for this pair");
+    let quoteRes = null, curveMode = false;
+    try { quoteRes = await jupGet(qPath); }
+    catch (e) {
+      if (!(e && e.noRoute)) throw e;
+      curveMode = true;   // pre-migration pump coin — the curve is the venue
+    }
+    const quote = quoteRes ? quoteRes.json : null;
+    const host = quoteRes ? quoteRes.host : "pump.fun-curve";
+    if (!curveMode && (!quote || !quote.outAmount)) throw new Error("no route for this pair");
+
+    if (curveMode) {
+      // honest curve summary: pump.fun's curve prices at execution, so there's
+      // no pre-trade outAmount to promise — the client shows this plainly.
+      if (mode === "quote") {
+        res.setHeader("Cache-Control", "no-store");
+        return res.status(200).json({ enabled: true, quote: {
+          inputMint, outputMint, inAmount: amountBase.toString(), outAmount: null,
+          otherAmountThreshold: null, priceImpactPct: null, slippageBps,
+          routeHops: 1, routeLabels: ["pump.fun bonding curve"], maxSol: MAX_SOL,
+          via: "pump.fun-curve", side: selling ? "sell" : "buy", outDecimals,
+          solOut: null, solOutMin: null, aboveTestSize: false, curve: true,
+        }});
+      }
+      if (!isMint(userPublicKey)) return res.status(400).json({ error: "bad user pubkey" });
+      const b64 = await pumpLocal();
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).json({ enabled: true, curve: true, via: "pump.fun-curve",
+        swapTransaction: b64, quote: { inAmount: amountBase.toString(), outAmount: null, outDecimals, curve: true } });
+    }
 
     const summary = {
       inputMint, outputMint,

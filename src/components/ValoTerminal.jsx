@@ -9225,8 +9225,9 @@ export default function App() {
         if (landed && !landed.ok) return { ok: false, sig, err: `reverted on-chain — funds did not move. ${landed.err || ""}` };
         const q2 = j.quote || {};
         const oDec = Number.isInteger(q2.outDecimals) ? q2.outDecimals : 6;
-        const qty = selling ? size : (+q2.outAmount || 0) / Math.pow(10, oDec);
-        const sol = selling ? (+q2.outAmount || 0) / 1e9 : Math.min(size, onchain.maxSol || size);
+        const estOutQty = (+q2.outAmount || 0) / Math.pow(10, oDec);
+        const qty = selling ? size : (estOutQty || (token.price > 0 ? (Math.min(size, onchain.maxSol || size) * SOL_USD) / token.price : 0));
+        const sol = selling ? ((+q2.outAmount || 0) / 1e9 || size * ((token.price || 0) / SOL_USD)) : Math.min(size, onchain.maxSol || size);
         try { if (qty > 0 && sol > 0) recordRealFill({ at: Date.now(), side, mint: token.liveMint, sym: token.sym, qty, sol, sig, px: (sol * SOL_USD) / qty }); } catch (e) {}
         try {
           const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(wallet.address)}&t=${Date.now()}`);
@@ -9339,9 +9340,10 @@ export default function App() {
       try {
         const q2 = o.quote || {};
         const oDec = Number.isInteger(q2.outDecimals) ? q2.outDecimals : 6;
+        const estSellSol = (+o.size || 0) * ((o.token.price || 0) / SOL_USD);
         const fill = selling
           ? { at: Date.now(), side: "sell", mint: o.token.liveMint, sym: o.token.sym,
-              qty: +o.size || 0, sol: (+q2.outAmount || 0) / 1e9, sig }
+              qty: +o.size || 0, sol: (+q2.outAmount || 0) / 1e9 || estSellSol, est: !q2.outAmount, sig }
           : { at: Date.now(), side: "buy", mint: o.token.liveMint, sym: o.token.sym,
               qty: (+q2.outAmount || 0) / Math.pow(10, oDec), sol: +o.size || 0, sig };
         if (fill.mint && fill.qty > 0 && fill.sol > 0) recordRealFill({ ...fill, px: (fill.sol * SOL_USD) / fill.qty });
@@ -10389,9 +10391,22 @@ export default function App() {
       if (!r.ok) return;
       const j = await r.json();
       const hit = Array.isArray(j) ? j.find((x) => x.mint === mint) || j[0] : null;
-      if (!hit) return;                       // no live pool — nothing to chart
-      const card = adoptMarketToken(hit);
-      setTokens((Ts) => (Ts.some((t) => String(t.pool || "") === String(card.pool)) ? Ts : [...Ts, card]));
+      if (hit) {
+        const card = adoptMarketToken(hit);
+        setTokens((Ts) => (Ts.some((t) => String(t.pool || "") === String(card.pool)) ? Ts : [...Ts, card]));
+        setSel(card.id); setClickMode(null);
+        return;
+      }
+      // no pool anywhere — still open a card from the wallet's own record so
+      // the order ticket (and its SELL) works on a token you already hold
+      const h = ((walletChain && walletChain.holdings) || []).find((x) => x.mint === mint);
+      const card = {
+        id: "mint-" + mint, sym: h && (h.sym || h.name) ? (h.sym || h.name) : mint.slice(0, 5),
+        name: (h && (h.name || h.sym)) || "wallet token", liveMint: mint, pool: null,
+        price: (h && h.price) || 0, mc: 0, tvl: 0, hue: symbolHue((h && h.sym) || mint),
+        candles: [], greenUsd: 0, redUsd: 0, traders: 0, market: true, chartless: true,
+      };
+      setTokens((Ts) => (Ts.some((t) => t.liveMint === mint) ? Ts : [...Ts, card]));
       setSel(card.id); setClickMode(null);
     } catch (e) {}
   }, []);
@@ -13815,7 +13830,29 @@ export default function App() {
                 </div>
               )}
 
-              {realOrder.stage === "review" && realOrder.quote && (() => {
+              {realOrder.stage === "review" && realOrder.quote && realOrder.quote.curve && (
+                <>
+                  <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, color: T.text, marginBottom: 8 }}>
+                    {realOrder.side === "sell" ? `Sell ${realOrder.label} on the pump.fun curve` : `Buy $${realOrder.token.sym} with ${realOrder.label} on the pump.fun curve`}
+                  </div>
+                  <div style={{ fontFamily: T.mono, fontSize: 9, color: T.dim, lineHeight: 1.7, marginBottom: 4 }}>
+                    This token hasn't migrated to a DEX yet, so the trade runs against pump.fun's bonding curve — the exact output is set by the curve at execution, protected by your slippage setting. Phantom will show the final transaction before anything moves.
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 11 }}>
+                    <button onClick={() => setRealOrder(null)}
+                      style={{ flex: 1, border: `1.5px solid ${T.red}66`, borderRadius: 11, padding: "13px 6px",
+                        background: "rgba(234,57,67,0.08)", color: T.red, fontFamily: T.mono, fontSize: 11.5,
+                        fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>✕ CANCEL</button>
+                    <button onClick={submitRealOrder}
+                      style={{ flex: 1.6, border: "none", borderRadius: 11, padding: "13px 6px",
+                        background: realOrder.side === "sell" ? T.red : T.green, color: realOrder.side === "sell" ? "#170808" : "#07130d",
+                        fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>
+                      ✓ CONFIRM {realOrder.side === "sell" ? "SELL" : "BUY"}
+                    </button>
+                  </div>
+                </>
+              )}
+              {realOrder.stage === "review" && realOrder.quote && !realOrder.quote.curve && (() => {
                 const q = realOrder.quote;
                 const oDec = Number.isInteger(q.outDecimals) ? q.outDecimals : 6;
                 const oUnit = Math.pow(10, oDec);
