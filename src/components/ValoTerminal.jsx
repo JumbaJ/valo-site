@@ -764,17 +764,20 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     }
     // ⚓ hold the axis still while panning: the range is locked per
     // token · timeframe · zoom level, and only grows if price runs past it
-    const sKey = `${sym || ""}|${tfMin}|${count}`;
+    // the visible window's TRUE extremes — the axis must always contain these
+    const visLo = lo, visHi = hi;
+    const sKey = `${sym || ""}|${tfMin}|${count}|${scaleStart}`;
     const sc = scaleRef.current;
-    if (sc.key === sKey && Number.isFinite(sc.lo) && Number.isFinite(sc.hi) && sc.hi > sc.lo) {
-      // hold the locked range, but always grow to fit what's actually visible —
-      // a candle on screen is never allowed to run off the top or bottom
-      lo = Math.min(sc.lo, lo);
-      hi = Math.max(sc.hi, hi);
-      const last = agg[total - 1];
-      if (last && Number.isFinite(last.l)) lo = Math.min(lo, last.l);
-      if (last && Number.isFinite(last.h)) hi = Math.max(hi, last.h);
+    // only reuse a locked range when it still fully frames the current view;
+    // the moment the visible candles exceed it (panned to a new region), refit
+    if (sc.key && sc.key.startsWith(`${sym || ""}|${tfMin}|${count}|`)
+        && Number.isFinite(sc.lo) && Number.isFinite(sc.hi) && sc.hi > sc.lo
+        && sc.lo <= visLo && sc.hi >= visHi
+        && (visHi - visLo) > (sc.hi - sc.lo) * 0.4) {
+      // the locked range still comfortably contains the view → keep it steady
+      lo = sc.lo; hi = sc.hi;
     }
+    // else: lo/hi stay the freshly-computed visible extremes (auto-refit)
     scaleRef.current = { key: sKey, lo, hi };
     // floor the range: a series that barely moves stays a flat line instead of
     // stretching every candle across the whole plot
@@ -798,10 +801,8 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       const halfP = ((hi - lo) / 2) * pz;
       lo = Math.max(1e-12, midP - halfP); hi = midP + halfP;
     }
-    // vertical free-drag: the visible price window rides view.priceOff —
-    // mouse or finger, up to ±4 ranges of travel (RESET snaps back)
-    const vShift = Math.max(-4, Math.min(4, view.priceOff || 0)) * (hi - lo);
-    lo -= vShift; hi -= vShift;
+    // NO vertical drag — the axis always auto-fits the visible candles so the
+    // chart is fully on-screen wherever you pan left/right (DexScreener-style).
     // switch to log automatically once the range is too wide to read linearly
     const logOn = logMode === "log"
       || (logMode === "auto" && trueLo > 0 && trueHi / trueLo > 12);
@@ -1545,17 +1546,16 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       else if (Math.abs(dyTot) > thr) clearTimeout(holdRef.current);
       if (d.moved) {
         const g = geom.current;
-        // free 2D pan: ⇄ drags time, ↕ drags price — mouse and touch alike.
-        // ±4 visible ranges of vertical travel: real freedom, bounded lostness.
-        const V_LIMIT = 4;
-        const vGive = Math.max(-V_LIMIT, Math.min(V_LIMIT, (d.startPriceOff || 0) - (dyTot / (g.chartH || 300))));
+        // horizontal pan ONLY — up/down does nothing; the axis auto-fits so
+        // the visible candles are always fully framed no matter where you are.
+        const vGive = 0;
         const nextOff = d.startOffset + Math.round(dx / (g.step || 6));
         // remember WHEN the right edge points at — later candles can't move it
         const endIdx = total - 1 - nextOff;
         anchorRef.current = (nextOff <= 0) ? null
           : (endIdx >= 0 && endIdx < total && agg[endIdx] && Number.isFinite(agg[endIdx].t))
             ? agg[endIdx].t : anchorRef.current;
-        setView((v) => ({ ...v, offset: nextOff, priceOff: vGive }));
+        setView((v) => ({ ...v, offset: nextOff, priceOff: 0 }));
         return;
       }
     }
