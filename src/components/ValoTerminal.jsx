@@ -2386,8 +2386,9 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
   };
   return (
     <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 16 }}>
-      {/* LIVE PnL + multiplier header — fluctuates while you hold */}
-      {position ? (
+      {/* LIVE PnL + multiplier header — paper only; on live the skinny
+          MY POSITIONS bar below carries the live P/L */}
+      {position && !liveMode ? (
         <div style={{ borderRadius: 10, padding: "10px 12px", marginBottom: 12, background: gain ? "rgba(22,199,132,0.1)" : "rgba(234,57,67,0.1)", border: `1px solid ${gain ? "rgba(22,199,132,0.4)" : "rgba(234,57,67,0.4)"}`, transition: "background .3s" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
@@ -2555,7 +2556,7 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
                     color: dtSellQty > 0 ? "#170808" : T.faint, lineHeight: 1.25, transition: "background .3s" }}>
                   <div style={{ fontSize: 12.5 }}>⚡ SELL</div>
                   <div style={{ fontSize: 8.5, opacity: 0.85 }}>
-                    {dtSellQty > 0 ? `${dtSellPct}% · ${fmtQty(dtSellQty)} ${token.sym}` : "no position"}
+                    {dtSellQty > 0 ? `${dtSellPct}% ≈ ${((dtSellQty * token.price) / SOL_USD).toFixed(4)} SOL · $${((dtSellQty * token.price)).toFixed(2)}` : "no position"}
                   </div>
                 </button>
               ) : (
@@ -2570,7 +2571,7 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
                   disabled={!(chainHeld > 0)}
                   style={{ flex: 1, border: `1px solid ${sellCol}`, borderRadius: 9, padding: "10px 4px", fontFamily: T.mono, fontSize: 10, fontWeight: 800, background: `${sellCol}22`, color: sellCol, cursor: chainHeld > 0 ? "pointer" : "not-allowed", opacity: chainHeld > 0 ? 1 : 0.5, lineHeight: 1.2 }}>
                   <div>SELL ALL</div>
-                  <div style={{ fontSize: 8, opacity: 0.9 }}>{chainHeld > 0 ? fmtQty(chainHeld) : "—"}</div>
+                  <div style={{ fontSize: 8, opacity: 0.9 }}>{chainHeld > 0 ? `≈ ${((chainHeld * token.price) / SOL_USD).toFixed(4)} SOL` : "—"}</div>
                 </button>
               ) : (
                 <button onClick={() => { if (held > 0) onExecute({ side: "sell", pay, amt: held, mode: "instant", tax: taxFor(pay), burn: splitFee(held, pay).total, legs: [] }); }}
@@ -5072,9 +5073,9 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
                 style={{ width: "100%", boxSizing: "border-box", border: "none", borderRadius: 9, padding: "9px", marginBottom: 8,
                   fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
                   background: T.red, color: "#170808", cursor: "pointer" }}>
-                ⛓ SELL ALL · {chainHoldings.filter((x) => !x.spam).length} on-chain · one approval
+                ⛓ SELL ALL · {chainHoldings.filter((x) => !x.spam && !x.dust).length} on-chain · one approval
               </button>
-              {chainHoldings.filter((h) => !h.spam || showSpam).map((h) => (
+              {chainHoldings.filter((h) => (!h.spam && !h.dust) || showSpam).map((h) => (
                 <div key={h.mint} style={{ display: "flex", alignItems: "center", gap: 8, background: "#0c0f16",
                   border: `1px solid ${T.amber}33`, borderLeft: `2px solid ${T.amber}`, borderRadius: 9, padding: "8px 9px", marginBottom: 5 }}>
                   <div onClick={() => onOpenMint && onOpenMint(h.mint)} style={{ minWidth: 0, flex: 1, cursor: onOpenMint ? "pointer" : "default" }}>
@@ -5101,11 +5102,11 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
                   </button>
                 </div>
               ))}
-              {chainHoldings.some((h) => h.spam) && (
+              {chainHoldings.some((h) => h.spam || h.dust) && (
                 <button onClick={() => setShowSpam((v) => !v)}
                   style={{ width: "100%", border: `1px dashed ${T.border}`, background: "transparent", color: T.faint,
                     borderRadius: 8, padding: "6px", cursor: "pointer", fontFamily: T.mono, fontSize: 8, fontWeight: 800, marginBottom: 4 }}>
-                  {showSpam ? "hide" : "show"} {chainHoldings.filter((h) => h.spam).length} spam airdrop{chainHoldings.filter((h) => h.spam).length === 1 ? "" : "s"} 🗑
+                  {showSpam ? "hide" : "show"} {chainHoldings.filter((h) => h.spam || h.dust).length} hidden (spam + dust) 🗑
                 </button>
               )}
             </>
@@ -5286,7 +5287,7 @@ function LiveFundsNotice({ sol = 0, compact = false, autoOn = false, onToggleAut
             boxShadow: `0 0 7px ${T.amber}` }} />
           <span style={{ fontFamily: T.mono, fontSize: compact ? 7.5 : 8.5, fontWeight: 800,
             letterSpacing: 0.6, color: T.amber, whiteSpace: "nowrap" }}>
-            LIVE · REAL FUNDS{turboOn ? ` · ⚡TURBO ◎${(+sol || 0).toFixed(4)}` : ""}
+            LIVE · REAL FUNDS{turboOn ? " · ⚡TURBO" : ""}
           </span>
           <span style={{ fontFamily: T.mono, fontSize: compact ? 7 : 7.5, color: T.dim,
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -5295,8 +5296,8 @@ function LiveFundsNotice({ sol = 0, compact = false, autoOn = false, onToggleAut
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto" }}>
           {sol > 0 && (
-            <span style={{ fontFamily: T.mono, fontSize: compact ? 7.5 : 8.5, fontWeight: 800,
-              color: T.dim }}>{sol.toFixed(3)} SOL</span>
+            <span style={{ fontFamily: T.mono, fontSize: compact ? 7.5 : 8.5, fontWeight: 800, whiteSpace: "nowrap",
+              color: turboOn ? T.amber : T.dim }}>{turboOn ? `◎${sol.toFixed(4)}` : `${sol.toFixed(3)} SOL`}</span>
           )}
           {onToggleAuto && (
             <button onClick={() => (autoOn ? onToggleAuto(false) : setArmOpen(true))}
@@ -6191,6 +6192,21 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                   <div style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 800, color: T.amber }}>
                     {mask(`$${chEquity.toLocaleString(undefined, { maximumFractionDigits: 0 })}`)}
                   </div>
+                  {(() => {
+                    const holdsL = chainHoldingsLive2 || [];
+                    const unreal = holdsL.reduce((s, h) => s + (h.pnlUsd || 0), 0);
+                    const realized = (chainLedger.realizedSol || 0) * SOL_USD;
+                    const totalPnl = unreal + realized;
+                    const up = totalPnl >= 0;
+                    return (
+                      <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, color: up ? T.green : T.red, margin: "2px 0" }}>
+                        {mask(`${up ? "▲ +" : "▼ −"}$${Math.abs(totalPnl).toFixed(2)} all-time P/L`)}
+                        <span style={{ fontSize: 8, fontWeight: 700, color: T.dim, marginLeft: 6 }}>
+                          {mask(`${unreal >= 0 ? "+" : "−"}$${Math.abs(unreal).toFixed(2)} open · ${realized >= 0 ? "+" : "−"}$${Math.abs(realized).toFixed(2)} realized`)}
+                        </span>
+                      </div>
+                    );
+                  })()}
                   <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 700, color: T.dim }}>
                     {mask(`${chSol.toFixed(3)} SOL + ${chCount} token${chCount === 1 ? "" : "s"} · read-only`)}
                   </div>
@@ -6300,7 +6316,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                     {mask(chainFills.length === 0 ? "—" : `${v >= 0 ? "+" : "−"}$${Math.abs(v).toFixed(2)}`)}
                   </b>; })()}
               </div>
-              {(chainHoldingsLive2 || ((walletChain && walletChain.holdings) || [])).filter((h) => !h.spam).slice(0, 10).map((h) => {
+              {(chainHoldingsLive2 || ((walletChain && walletChain.holdings) || [])).filter((h) => !h.spam && !h.dust).slice(0, 10).map((h) => {
                 const pnl = h.pnlUsd != null ? h.pnlUsd : (() => {
                   const led = chainLedger.byMint[h.mint];
                   const hasBasis = led && led.qty > 0;
@@ -9571,6 +9587,7 @@ export default function App() {
         if (landed && !landed.ok) return { ok: false, sig, err: `reverted on-chain — funds did not move. ${landed.err || ""}` };
         const q2 = j.quote || {};
         const oDec = Number.isInteger(q2.outDecimals) ? q2.outDecimals : 6;
+        const prevHoldQty2 = (() => { try { const hh0 = chainHoldingOf(token); return (hh0 && hh0.qty) || 0; } catch (e) { return 0; } })();
         const estOutQty = (+q2.outAmount || 0) / Math.pow(10, oDec);
         const qty = selling ? size : (estOutQty || (token.price > 0 ? (Math.min(size, onchain.maxSol || size) * SOL_USD) / token.price : 0));
         const sol = selling ? ((+q2.outAmount || 0) / 1e9 || size * ((token.price || 0) / SOL_USD)) : Math.min(size, onchain.maxSol || size);
@@ -9579,7 +9596,16 @@ export default function App() {
         try {
           const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(tradeAddr || wallet.address)}&t=${Date.now()}`);
           const j2 = await r2.json();
-          if (j2 && !j2.error) setWalletChain(j2);
+          if (j2 && !j2.error) {
+            setWalletChain(j2);
+            if (!selling && landed && landed.ok && !(estOutQty > 0)) {
+              const nh = (j2.holdings || []).find((x) => x.mint === token.liveMint);
+              const gotQty = Math.max(0, ((nh && nh.qty) || 0) - prevHoldQty2);
+              if (gotQty > 0 && sol > 0)
+                recordRealFill({ at: Date.now(), side: "buy", mint: token.liveMint, sym: token.sym,
+                  qty: gotQty, sol, sig, px: (sol * SOL_USD) / gotQty, deltaMeasured: true });
+            }
+          }
         } catch (e) {}
         return { ok: true, sig, qty, sol, confirmed: !!(landed && landed.ok) };
       } catch (e) {
@@ -9680,7 +9706,7 @@ export default function App() {
   // (One literal transaction isn't possible non-custodially: a single swap
   // route already fills most of Solana's 1232-byte tx limit.)
   const realSellAllHoldings = async (holds) => {
-    const list = (holds || []).filter((h) => h && h.mint && h.qty > 0 && !h.spam);
+    const list = (holds || []).filter((h) => h && h.mint && h.qty > 0 && !h.spam && !h.dust);
     if (!list.length) return;
     if (turboLockedButPresent) {
       pushNotif({ type: "system", user: null, tokenId: null,
@@ -9833,12 +9859,21 @@ export default function App() {
       }
 
       setRealOrder({ ...o, stage: "done", sig, confirmed: !!(landed && landed.ok) });
+      const prevHoldQty = (() => { try { const hh0 = chainHoldingOf(o.token); return (hh0 && hh0.qty) || 0; } catch (e) { return 0; } })();
       if (selling && landed && landed.ok) {
-        // full exit? the position leaves MY POSITIONS immediately — the wallet
-        // refresh below re-confirms from the chain a moment later
+        // near-full exit → the row leaves MY POSITIONS NOW (chain refresh
+        // re-confirms). Partial sells shrink the qty so P/L stays honest.
         const hh = chainHoldingOf(o.token);
-        if (hh && (+o.size || 0) >= hh.qty * 0.999) {
-          setWalletChain((W) => W ? { ...W, holdings: (W.holdings || []).filter((x) => x.mint !== o.token.liveMint), holdingsCount: Math.max(0, (W.holdingsCount || 1) - 1) } : W);
+        if (hh) {
+          const full = (+o.size || 0) >= hh.qty * 0.95;
+          setWalletChain((W) => {
+            if (!W) return W;
+            const holds = (W.holdings || []);
+            const nextHolds = full
+              ? holds.filter((x) => x.mint !== o.token.liveMint)
+              : holds.map((x) => x.mint === o.token.liveMint ? { ...x, qty: Math.max(0, x.qty - (+o.size || 0)), usd: Math.max(0, (x.usd || 0) - (+o.size || 0) * (x.price || 0)) } : x);
+            return { ...W, holdings: nextHolds, holdingsCount: full ? Math.max(0, (W.holdingsCount || 1) - 1) : W.holdingsCount };
+          });
         }
       }
       // 🏦 site fee — SOL notional of the fill (spend on buys, proceeds on sells)
@@ -9867,10 +9902,25 @@ export default function App() {
       // the wallet's holdings just changed. Refresh past the CDN cache, or the
       // next sell will size itself off the balance from before this one.
       try {
-        if (wallet && wallet.address) {
-          const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(tradeAddr || wallet.address)}&t=${Date.now()}`);
+        if (tradeAddr) {
+          const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(tradeAddr)}&t=${Date.now()}`);
           const j2 = await r2.json();
-          if (j2 && !j2.error) setWalletChain(j2);
+          if (j2 && !j2.error) {
+            setWalletChain(j2);
+            // curve buys promise no output qty — the chain's delta says what
+            // actually arrived, and THAT becomes the cost basis for live P/L
+            if (!selling && landed && landed.ok) {
+              const q2c = o.quote || {};
+              if (!((+q2c.outAmount || 0) > 0)) {
+                const nh = (j2.holdings || []).find((x) => x.mint === o.token.liveMint);
+                const gotQty = Math.max(0, ((nh && nh.qty) || 0) - prevHoldQty);
+                const spent = +o.size || 0;
+                if (gotQty > 0 && spent > 0)
+                  recordRealFill({ at: Date.now(), side: "buy", mint: o.token.liveMint, sym: o.token.sym,
+                    qty: gotQty, sol: spent, sig, px: (spent * SOL_USD) / gotQty, deltaMeasured: true });
+              }
+            }
+          }
         }
       } catch (e) {}
     } catch (e) {
@@ -10926,10 +10976,13 @@ export default function App() {
       // no pool anywhere — still open a card from the wallet's own record so
       // the order ticket (and its SELL) works on a token you already hold
       const h = ((walletChain && walletChain.holdings) || []).find((x) => x.mint === mint);
+      // sanitize the symbol — mangled dust symbols crash the chart label
+      const cleanSym = String((h && (h.sym || h.name)) || mint.slice(0, 5)).replace(/[^\x20-\x7E]/g, "").slice(0, 12) || mint.slice(0, 5);
       const card = {
-        id: "mint-" + mint, sym: h && (h.sym || h.name) ? (h.sym || h.name) : mint.slice(0, 5),
-        name: (h && (h.name || h.sym)) || "wallet token", liveMint: mint, pool: null,
-        price: (h && h.price) || 0, mc: 0, tvl: 0, hue: symbolHue((h && h.sym) || mint),
+        id: "mint-" + mint, sym: cleanSym,
+        name: String((h && (h.name || h.sym)) || "wallet token").replace(/[^\x20-\x7E]/g, "").slice(0, 24) || "wallet token",
+        liveMint: mint, pool: null,
+        price: (h && h.price) || 0, mc: 0, tvl: 0, hue: symbolHue(cleanSym),
         candles: [], greenUsd: 0, redUsd: 0, traders: 0, market: true, chartless: true,
       };
       setTokens((Ts) => (Ts.some((t) => t.liveMint === mint) ? Ts : [...Ts, card]));
@@ -11180,21 +11233,7 @@ export default function App() {
   // ⛓ holdings enriched with live P/L — avg cost from the fills ledger, price
   // from the live card when the token is loaded (ticks every 2.2s), else the
   // wallet snapshot. This one list feeds every positions surface.
-  const chainHoldingsLive = useMemo(() => {
-    const holds = (walletChain && walletChain.holdings) || [];
-    return holds.map((h) => {
-      const card = (tokens || []).find((t) => t.liveMint === h.mint);
-      const price = (card && card.price > 0) ? card.price : (h.price || 0);
-      const led = chainLedger.byMint[h.mint];
-      if (!led || !(led.qty > 0) || !(price > 0)) return { ...h, livePrice: price, pnlUsd: null, pnlPct: null };
-      const q = Math.min(h.qty, led.qty);
-      const basisUsd = led.costSol * SOL_USD * (q / led.qty);
-      const pnlUsd = price * q - basisUsd;
-      return { ...h, livePrice: price,
-        avgCostUsd: q > 0 ? basisUsd / q : null,
-        pnlUsd, pnlPct: basisUsd > 0 ? (pnlUsd / basisUsd) * 100 : null };
-    });
-  }, [walletChain, tokens, chainLedger]);
+
 
 
   const getProvider = () => {
@@ -11772,6 +11811,32 @@ export default function App() {
   }, [sel]);
 
   const selected = tokens.find((t) => t.id === sel) || null;
+  // 📍 real-fill markers for the OPEN token — buys & sells on its chart,
+  // rebuilt from the persistent fills ledger so they survive a refresh/relogin
+  const chartRealMarkers = useMemo(() => {
+    if (!selected || !selected.liveMint) return [];
+    return (realFills || [])
+      .filter((f) => f.mint === selected.liveMint && f.qty > 0)
+      .map((f) => ({ t: f.at, side: f.side, price: f.px || (f.qty > 0 ? (f.sol * SOL_USD) / f.qty : 0),
+        p: f.px || 0, amt: f.side === "buy" ? f.sol : f.qty, unit: f.side === "buy" ? "SOL" : f.sym,
+        sym: f.sym, tx: f.sig, real: true }));
+  }, [realFills, selected && selected.liveMint]);
+  const chainHoldingsLive = useMemo(() => {
+    const holds = (walletChain && walletChain.holdings) || [];
+    return holds.map((h) => {
+      const card = (tokens || []).find((t) => t.liveMint === h.mint);
+      const price = (card && card.price > 0) ? card.price : (h.price || 0);
+      const led = chainLedger.byMint[h.mint];
+      if (!led || !(led.qty > 0) || !(price > 0)) return { ...h, dust: h.dust, spam: h.spam, livePrice: price, pnlUsd: null, pnlPct: null };
+      const q = Math.min(h.qty, led.qty);
+      const basisUsd = led.costSol * SOL_USD * (q / led.qty);
+      const pnlUsd = price * q - basisUsd;
+      return { ...h, livePrice: price,
+        avgCostUsd: q > 0 ? basisUsd / q : null,
+        pnlUsd, pnlPct: basisUsd > 0 ? (pnlUsd / basisUsd) * 100 : null };
+    });
+  }, [walletChain, tokens, chainLedger]);
+
   selRef.current = sel;
   const selPoolRef = useRef(null);
   useEffect(() => { if (selected) selPoolRef.current = selected.pool || null; }, [selected && selected.id, selected && selected.pool]);
@@ -12549,7 +12614,7 @@ export default function App() {
       });
     const liveReal = liveData && selected.pool;
     const all = liveReal
-      ? [...mine, ...hist]                        // only your own trades mark the chart
+      ? [...mine, ...hist, ...chartRealMarkers]   // your own trades + persistent real fills
       : [...mine, ...dev, ...hist, ...followed];  // simulation keeps its own cast
     // de-dupe by tx so a followed dev doesn't double-draw
     const seen = new Set();
@@ -12558,7 +12623,7 @@ export default function App() {
       if (seen.has(t.tx)) return false;
       seen.add(t.tx); return true;
     });
-  }, [selected, tradesByToken, showDevTrades, histMarker, traderPrefs, realChartTrades, liveData]);
+  }, [selected, tradesByToken, showDevTrades, histMarker, traderPrefs, realChartTrades, liveData, chartRealMarkers]);
 
   // trending button + callout widget — shared between the desktop header row
   // and the mobile chart-tools row (noBox drops the frame on mobile)
@@ -13492,7 +13557,7 @@ export default function App() {
                     cursor: mSellQty > 0 ? "pointer" : "not-allowed", lineHeight: 1.15 }}>
                   <div style={{ fontSize: 12 }}>⚡ SELL</div>
                   <div style={{ fontSize: 7.5, opacity: 0.9 }}>
-                    {mSellQty > 0 ? `${mSellPct}% · ${fmtQty(mSellQty)}` : "no position"}
+                    {mSellQty > 0 ? `${mSellPct}% ≈ ${((mSellQty * (selected.price || 0)) / SOL_USD).toFixed(4)} ◎` : "no position"}
                   </div>
                 </button>
                 <button disabled={!(mChainHeld > 0)} onClick={() => mChainHeld > 0 && quoteRealOrder(selected, "sell", mChainHeld)}
@@ -13500,7 +13565,7 @@ export default function App() {
                     background: `${sellCol}22`, color: sellCol, cursor: mChainHeld > 0 ? "pointer" : "not-allowed",
                     opacity: mChainHeld > 0 ? 1 : 0.5, lineHeight: 1.1 }}>
                   <div style={{ fontSize: 9 }}>ALL</div>
-                  <div style={{ fontSize: 7, opacity: 0.85 }}>{mChainHeld > 0 ? fmtQty(mChainHeld) : "—"}</div>
+                  <div style={{ fontSize: 7, opacity: 0.85 }}>{mChainHeld > 0 ? `≈ ${((mChainHeld * (selected.price || 0)) / SOL_USD).toFixed(4)} ◎` : "—"}</div>
                 </button>
               </>
             ) : (
@@ -14857,7 +14922,7 @@ export default function App() {
         const botRealAll = botRuns.reduce((s, r) => s + r.exits.reduce((a, e) => a + e.pnlUsd, 0), 0);
         const tickReal = realizedPnl - botRealAll;
         const showBots = posTab !== "tickets", showTix = posTab !== "bots";
-        const drawerHolds = liveData ? chainHoldingsLive.filter((h) => !h.spam) : [];
+        const drawerHolds = liveData ? chainHoldingsLive.filter((h) => !h.spam && !h.dust) : [];
         const unreal = (showTix ? tix.reduce((s, x) => s + x.pnl, 0) : 0) + (showBots ? runsL.reduce((s, x) => s + x.pnl, 0) : 0);
         const real = (showTix ? tickReal : 0) + (showBots ? botRealAll : 0);
         const scoped = unreal;

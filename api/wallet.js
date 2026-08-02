@@ -104,8 +104,13 @@ export default async function handler(req, res) {
     holdings = holdings.filter((h) => h.qty > 0)
       .map((h) => {
         const label = `${h.sym || ""} ${h.name || ""}`;
-        const spam = spamRe.test(label) || (h.name || "").length > 40 || (h.sym || "").length > 15;
-        return spam ? { ...h, spam: true } : h;
+        const spam = spamRe.test(label) || (h.name || "").length > 40 || (h.sym || "").length > 15
+          // control/format chars or non-printable symbols → mangled dust like "mɔ"
+          || /[\u0250-\u02AF\u0300-\u036F\uFFFD]/.test(String(h.sym || ""));
+        // dust: a real price exists and the holding is worth < 1 cent → a
+        // leftover sliver from an imperfect sell, not a position
+        const dust = !spam && h.price > 0 && h.usd < 0.01;
+        return (spam || dust) ? { ...h, spam: spam || undefined, dust: dust || undefined } : h;
       })
       .sort((a, b) => (a.spam ? 1 : 0) - (b.spam ? 1 : 0) || b.usd - a.usd).slice(0, 80);
 
