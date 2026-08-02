@@ -2365,7 +2365,7 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
   );
 }
 
-function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, setAmount, pay, setPay, position, solBalance, valoBalance, positions, tokens, onOpenToken, onCloseAll, bestMult, pctSel, setPctSel, pendingOrders = [], onOpenBot, onCancelBot, onPosTrade, onDraftLevel, realized24 = 0, botRuns = [], onRealOrder, onChainReady = false, onChainMax = 0, chainHeld = 0, chainSol = 0, autoOn = false, onToggleAuto = null}) {
+function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, setAmount, pay, setPay, position, solBalance, valoBalance, positions, tokens, onOpenToken, onCloseAll, bestMult, pctSel, setPctSel, pendingOrders = [], onOpenBot, onCancelBot, onPosTrade, onDraftLevel, realized24 = 0, botRuns = [], onRealOrder, onChainReady = false, onChainMax = 0, chainHeld = 0, chainSol = 0, autoOn = false, onToggleAuto = null, liveMode = false, chainHoldings = [], onRealSellOne = null, onRealSellAll = null, onOpenMint = null}) {
   const [dtBuyPcts, setDtBuyPcts] = useState([10, 25, 50, 75, 100]);  // dbl-click / right-click a chip to retype it
   const [dtSellPcts, setDtSellPcts] = useState([10, 25, 50, 75, 100]);
   const [dtFixed, setDtFixed] = useState([0.5, 1, 2, 5]);
@@ -2589,7 +2589,7 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
       })()}
 
       {/* held positions dropdown */}
-      <HeldPositions positions={positions} tokens={tokens} pay={pay} onTrade={onPosTrade} solBalance={solBalance} valoWallet={valoBalance}
+      <HeldPositions liveMode={liveMode} chainHoldings={chainHoldings} onRealSellOne={onRealSellOne} onRealSellAll={onRealSellAll} onOpenMint={onOpenMint} positions={positions} tokens={tokens} pay={pay} onTrade={onPosTrade} solBalance={solBalance} valoWallet={valoBalance}
         onOpenToken={onOpenToken}
         onSellAll={(t) => { const p = positions[t.id]; if (p && p.amt > 0) onExecute({ side: "sell", pay: p.pay, amt: p.amt, mode: "instant", tax: taxFor(p.pay), burn: splitFee(p.amt, p.pay).total, legs: [] }, t); }}
         onCloseAll={onCloseAll} />
@@ -5028,9 +5028,12 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
 
 // PC MY POSITIONS — bots and order tickets under one collapsible roof
 function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrders = [], pay = "SOL",
-  onOpenToken, onSellPos, onCloseTickets, onSellRun, onSellAllBots, onCancelBot }) {
+  onOpenToken, onSellPos, onCloseTickets, onSellRun, onSellAllBots, onCancelBot,
+  liveMode = false, chainHoldings = [], onRealSellOne = null, onRealSellAll = null, onOpenMint = null }) {
   const [open, setOpen] = useState(true);
   const [tab, setTab] = useState("both"); // bots | both | tickets
+  const [saConfirm, setSaConfirm] = useState(false);
+  useEffect(() => { if (!saConfirm) return; const t2 = setTimeout(() => setSaConfirm(false), 4000); return () => clearTimeout(t2); }, [saConfirm]);
   const unit$ = (p) => (p === "SOL" ? SOL_USD : 0.0125);
   const tickets = Object.entries(positions).map(([id, p]) => {
     const t = tokens.find((x) => String(x.id) === String(id));
@@ -5056,7 +5059,7 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
     <div style={{ marginTop: 10, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 12, padding: 11 }}>
       <button onClick={() => setOpen((v) => !v)}
         style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", border: "none", background: "transparent", cursor: "pointer", padding: 0, fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: T.text }}>
-        <span>{open ? "▾" : "▸"} MY POSITIONS · {tickets.length + runsLive.length}</span>
+        <span>{open ? "▾" : "▸"} MY POSITIONS · {liveMode ? chainHoldings.length + runsLive.length : tickets.length + runsLive.length}</span>
         <span style={{ color: ticketPnl + botPnl >= 0 ? T.green : T.red, fontWeight: 900 }}>{ticketPnl + botPnl >= 0 ? "+" : "−"}${Math.abs(ticketPnl + botPnl).toFixed(2)}</span>
       </button>
       {open && (
@@ -5064,8 +5067,35 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
           <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
             <button onClick={() => setTab("bots")} style={{ ...chip(tab === "bots"), flex: 1, textAlign: "center", padding: "6px", fontSize: 8.5, fontWeight: 800 }}>🤖 TRADING BOTS</button>
             <button onClick={() => setTab("both")} style={{ ...chip(tab === "both"), flex: 1, textAlign: "center", padding: "6px", fontSize: 8.5, fontWeight: 800 }}>BOTH</button>
-            <button onClick={() => setTab("tickets")} style={{ ...chip(tab === "tickets"), flex: 1, textAlign: "center", padding: "6px", fontSize: 8.5, fontWeight: 800 }}>🧾 ORDER TICKETS</button>
+            <button onClick={() => setTab("tickets")} style={{ ...chip(tab === "tickets"), flex: 1, textAlign: "center", padding: "6px", fontSize: 8.5, fontWeight: 800 }}>{liveMode ? "⛓ HOLDINGS" : "🧾 ORDER TICKETS"}</button>
           </div>
+          {liveMode && tab !== "bots" && chainHoldings.length > 0 && (
+            <>
+              <button onClick={() => { if (saConfirm) { onRealSellAll && onRealSellAll(chainHoldings); setSaConfirm(false); } else setSaConfirm(true); }}
+                style={{ width: "100%", boxSizing: "border-box", border: "none", borderRadius: 9, padding: "9px", marginBottom: 8,
+                  fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
+                  background: saConfirm ? T.amber : T.red, color: saConfirm ? "#1d1503" : "#170808", cursor: "pointer",
+                  boxShadow: saConfirm ? "0 0 16px rgba(240,185,11,0.5)" : "none", transition: "background .15s" }}>
+                {saConfirm ? `⚠ CONFIRM — SELL ${chainHoldings.length} POSITION${chainHoldings.length === 1 ? "" : "S"} FOR REAL` : `⛓ SELL ALL · ${chainHoldings.length} on-chain`}
+              </button>
+              {chainHoldings.map((h) => (
+                <div key={h.mint} style={{ display: "flex", alignItems: "center", gap: 8, background: "#0c0f16",
+                  border: `1px solid ${T.amber}33`, borderLeft: `2px solid ${T.amber}`, borderRadius: 9, padding: "8px 9px", marginBottom: 5 }}>
+                  <div onClick={() => onOpenMint && onOpenMint(h.mint)} style={{ minWidth: 0, flex: 1, cursor: onOpenMint ? "pointer" : "default" }}>
+                    <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: T.text }}>
+                      ${h.sym || h.name || h.mint.slice(0, 5)} <span style={{ color: T.amber, fontSize: 7.5 }}>⛓</span>
+                    </div>
+                    <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>{fmtQty(h.qty)} · ${(h.usd || 0).toFixed(2)}</div>
+                  </div>
+                  <button onClick={() => onRealSellOne && onRealSellOne(h)}
+                    style={{ border: `1px solid ${T.red}`, background: "rgba(234,57,67,0.12)", color: T.red,
+                      borderRadius: 8, padding: "6px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900 }}>
+                    SELL
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
           {(tab === "tickets" ? tickets.length : tab === "bots" ? runsLive.length : tickets.length + runsLive.length) > 0 && (
             <button onClick={() => { if (showTickets) onCloseTickets(); if (showBots) onSellAllBots(); }}
               style={{ width: "100%", boxSizing: "border-box", border: "none", borderRadius: 9, padding: "9px", marginBottom: 8, fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
@@ -5103,7 +5133,11 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
             </div>
           ))}
           {tickets.length + runsLive.length + pend.length === 0 && (
-            <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center", padding: 12 }}>Nothing open yet.</div>
+            liveMode ? (
+              <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center", padding: 12 }}>
+                No on-chain positions — buy any token and it lives here until fully sold.
+              </div>
+            ) : <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center", padding: 12 }}>Nothing open yet.</div>
           )}
         </div>
       )}
@@ -5242,7 +5276,7 @@ function LiveFundsNotice({ sol = 0, compact = false, autoOn = false, onToggleAut
 }
 
 // PRO LAYOUT order ticket — one wide bar under the chart, buy & sell side by side
-function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, valoBalance = 0, position, onExecute, onPosTrade, clickMode, setClickMode, realized24 = 0, onRealOrder, onChainReady = false, onChainMax = 0, chainHeld = 0, chainSol = 0, autoOn = false, onToggleAuto = null}) {
+function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, valoBalance = 0, position, onExecute, onPosTrade, clickMode, setClickMode, realized24 = 0, onRealOrder, onChainReady = false, onChainMax = 0, chainHeld = 0, chainSol = 0, autoOn = false, onToggleAuto = null, liveMode = false, chainHoldings = [], onRealSellOne = null, onRealSellAll = null, onOpenMint = null}) {
   const [poPcts, setPoPcts] = useState([25, 50, 75, 100]);      // dbl-click / right-click to retype
   const [poFixed, setPoFixed] = useState([0.5, 1, 2, 5]);
   const [poSellPcts, setPoSellPcts] = useState([10, 25, 50, 75]);
@@ -5779,7 +5813,8 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   botsSlot = null,
   onPosTrade,
   epochLastHour = 0, epochTotalEarned = 0, valoUsdForEpoch = 0.0125, onOpenClaim,
-  liveMode = false, chainFills = [], chainLedger = { byMint: {}, realizedSol: 0 } }) {
+  liveMode = false, chainFills = [], chainLedger = { byMint: {}, realizedSol: 0 }, onOpenChainFill = null,
+  valoMint = null, onRealSwap = null }) {
   const bestCalloutPeak = Object.values(myCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0);
   const mask = (s) => (hideBalance ? "••••••" : s);
   // ⛓/📝 the SITE decides the wallet. Live mode = on-chain, demo = paper.
@@ -5791,6 +5826,25 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   const chEquity = chSol * SOL_USD + chTokensUsd;
   // ⛓ PnL — from fills placed through VALO. Coins bought elsewhere have no
   // basis here, so they're valued but not scored; that's stated, not hidden.
+  const [chDur, setChDur] = useState("ALL");   // 1H · 24H · 7D · ALL
+  const chDurMs = chDur === "1H" ? 36e5 : chDur === "24H" ? 864e5 : chDur === "7D" ? 6048e5 : null;
+  const chRealizedWin = useMemo(() => {
+    if (chDurMs == null) return null;  // ALL → the ledger total is authoritative
+    const cutoff = Date.now() - chDurMs;
+    const basis = {};
+    let realized = 0;
+    for (const f of chainFills) {
+      const m = basis[f.mint] || (basis[f.mint] = { qty: 0, costSol: 0 });
+      if (f.side === "buy") { m.qty += f.qty; m.costSol += f.sol; }
+      else if (m.qty > 0) {
+        const p2 = Math.min(1, f.qty / m.qty);
+        const b = m.costSol * p2;
+        if (f.at >= cutoff) realized += f.sol - b;
+        m.costSol -= b; m.qty = Math.max(0, m.qty - f.qty);
+      } else if (f.at >= cutoff) realized += f.sol;
+    }
+    return realized * SOL_USD;
+  }, [chainFills, chDurMs]);
   const chPnl = useMemo(() => {
     const holds = (walletChain && walletChain.holdings) || [];
     let unrealUsd = 0, tracked = 0;
@@ -6056,8 +6110,8 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               </div>
             )}
           </div>
-          {/* epoch rewards banner — PAPER feature, never on the live site */}
-          {!liveMode && (
+          {/* epoch rewards — on the live site claims pay REAL $VALO to the
+              connected Phantom wallet from the epoch vault at epoch close */}
           <div style={{ background: "linear-gradient(120deg, rgba(240,185,11,0.08), rgba(125,92,240,0.06))", border: "1px solid rgba(240,185,11,0.3)", borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <span style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 800, letterSpacing: 1, color: T.amber }}>🎁 EPOCH REWARDS</span>
@@ -6077,6 +6131,10 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               </div>
             </div>
           </div>
+          {liveMode && (
+            <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.dim, margin: "-6px 0 10px", lineHeight: 1.5 }}>
+              ⛓ Claims here are <b style={{ color: T.amber }}>real</b> — paid in $VALO to {wallet && wallet.address ? `👻 ${wallet.address.slice(0, 4)}…${wallet.address.slice(-4)}` : "your connected wallet"} from the epoch vault at epoch close.
+            </div>
           )}
           {chainOn ? (
             <div style={{ background: "#0c0f16", border: `1px solid ${T.amber}44`, borderRadius: 9, padding: "8px 10px", marginBottom: 10 }}>
@@ -6090,11 +6148,23 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                   {mask(chPnl.tracked === 0 ? "—" : `${chPnl.unrealUsd >= 0 ? "+" : "−"}$${Math.abs(chPnl.unrealUsd).toFixed(2)}`)}
                 </b>
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 10.5, marginTop: 4 }}>
-                <span style={{ color: T.faint }}>REALIZED · est.</span>
-                <b style={{ color: chainFills.length === 0 ? T.faint : chPnl.realUsd >= 0 ? T.green : T.red }}>
-                  {mask(chainFills.length === 0 ? "—" : `${chPnl.realUsd >= 0 ? "+" : "−"}$${Math.abs(chPnl.realUsd).toFixed(2)}`)}
-                </b>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: T.mono, fontSize: 10.5, marginTop: 4 }}>
+                <span style={{ color: T.faint, display: "flex", alignItems: "center", gap: 6 }}>
+                  REALIZED · est.
+                  <span style={{ display: "flex", gap: 3 }}>
+                    {["1H", "24H", "7D", "ALL"].map((d) => (
+                      <button key={d} onClick={() => setChDur(d)}
+                        style={{ border: `1px solid ${chDur === d ? T.amber : T.border}`, borderRadius: 5,
+                          background: chDur === d ? "rgba(240,185,11,0.12)" : "transparent",
+                          color: chDur === d ? T.amber : T.faint, cursor: "pointer",
+                          fontFamily: T.mono, fontSize: 6.5, fontWeight: 900, padding: "1px 5px" }}>{d}</button>
+                    ))}
+                  </span>
+                </span>
+                {(() => { const v = chDur === "ALL" ? chPnl.realUsd : (chRealizedWin || 0);
+                  return <b style={{ color: chainFills.length === 0 ? T.faint : v >= 0 ? T.green : T.red }}>
+                    {mask(chainFills.length === 0 ? "—" : `${v >= 0 ? "+" : "−"}$${Math.abs(v).toFixed(2)}`)}
+                  </b>; })()}
               </div>
               {((walletChain && walletChain.holdings) || []).slice(0, 10).map((h) => {
                 const led = chainLedger.byMint[h.mint];
@@ -6143,8 +6213,8 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           )}
       {botsSlot}
       {heldSlot}
-          {/* deposit / withdraw / swap — PAPER machinery. On the live site the
-              wallet IS Phantom; funds move only through real signed orders. */}
+          {/* deposit / withdraw — PAPER machinery, demo only. The swap box below
+              lives in BOTH modes: on live it buys real $VALO. */}
           {!liveMode && (<>
           {/* deposit / withdraw — clicking fills the max you can do, then confirm */}
           <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: 10, marginBottom: 10 }}>
@@ -6214,6 +6284,33 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
             </div>
             {dwArmed && <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, textAlign: "center", marginTop: 6 }}>click again to confirm {dwArmed}</div>}
           </div>
+          </>)}
+          {liveMode && (
+            <div style={{ background: "#0c0f16", border: `1px solid ${VALO_PURPLE}44`, borderRadius: 9, padding: 10, marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
+                <span style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1 }}>⇄ SWAP · SOL → $VALO <span style={{ color: T.amber }}>⛓ real</span></span>
+              </div>
+              {valoMint ? (
+                <>
+                  <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.dim, lineHeight: 1.6, marginBottom: 8 }}>
+                    Buys real $VALO on-chain with SOL from your connected wallet — same review &amp; confirm as any live order.
+                  </div>
+                  <button onClick={() => onRealSwap && onRealSwap()}
+                    disabled={!(wallet && wallet.address)}
+                    style={{ width: "100%", border: "none", borderRadius: 8, padding: "9px", fontFamily: T.mono, fontSize: 11,
+                      fontWeight: 800, background: wallet && wallet.address ? VALO_PURPLE : "#1a2030",
+                      color: wallet && wallet.address ? "#0a0713" : T.faint, cursor: wallet && wallet.address ? "pointer" : "not-allowed" }}>
+                    {wallet && wallet.address ? "⛓ SWAP SOL → $VALO" : "connect wallet to swap"}
+                  </button>
+                </>
+              ) : (
+                <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.dim, lineHeight: 1.6, textAlign: "center", padding: "6px 0" }}>
+                  Real $VALO swaps switch on the moment the token launches — this box goes live automatically.
+                </div>
+              )}
+            </div>
+          )}
+          {!liveMode && (<>
           {/* swap SOL ⇄ VALO, no site tax, flippable direction */}
           <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: 10 }}>
             {(() => {
@@ -6279,6 +6376,39 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                   );
                 })}
               </div>
+            </div>
+          )}
+          {liveMode && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontFamily: T.mono, fontSize: 9, color: T.amber, letterSpacing: 1, marginBottom: 7 }}>
+                ⛓ ACTIVITY <span style={{ fontSize: 7.5, color: T.faint }}>· your real orders through VALO</span>
+              </div>
+              {chainFills.length === 0 ? (
+                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center", padding: "12px 0", border: `1px dashed ${T.border}`, borderRadius: 9 }}>No real trades yet — your on-chain buys & sells show here.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 5, maxHeight: 240, overflowY: "auto" }}>
+                  {[...chainFills].reverse().slice(0, 30).map((f, i) => (
+                    <div key={f.sig || i}
+                      onClick={() => onOpenChainFill && onOpenChainFill(f)}
+                      title="Open the chart at this trade"
+                      style={{ display: "flex", alignItems: "center", gap: 8, background: "#0c0f16", border: `1px solid ${T.border}`,
+                        borderLeft: `2px solid ${f.side === "buy" ? T.green : T.red}`, borderRadius: 8, padding: "7px 9px",
+                        cursor: onOpenChainFill ? "pointer" : "default" }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 800, color: f.side === "buy" ? T.green : T.red }}>
+                          {f.side === "buy" ? "BUY" : "SELL"} <span style={{ color: T.text }}>${f.sym}</span>
+                          <span style={{ color: T.amber, fontSize: 7.5, marginLeft: 5 }}>⛓</span>
+                        </div>
+                        <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>
+                          {mask(`${fmtQty(f.qty)} ${f.sym} · ${f.sol.toFixed(4)} SOL`)} · {new Date(f.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </div>
+                      </div>
+                      {f.sig && <a onClick={(e) => e.stopPropagation()} href={`https://solscan.io/tx/${f.sig}`} target="_blank" rel="noopener noreferrer"
+                        title="View on Solscan" style={{ flexShrink: 0, textDecoration: "none", color: T.blue, fontSize: 12 }}>🔗</a>}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {!liveMode && (<>
@@ -8935,6 +9065,7 @@ export default function App() {
   const [claimOpen, setClaimOpen] = useState(false);
   // ⛓ real trading (off unless the server enables it)
   const [onchain, setOnchain] = useState({ enabled: false, maxSol: 0 });
+  const [valoMint, setValoMint] = useState(null);   // real $VALO mint, once launched
   // every confirmed real order, recorded from the quote at fill time.
   // Quote ≠ exact fill (slippage), so everything derived is labeled estimated.
   const [realFills, setRealFills] = useState(() => {
@@ -9096,7 +9227,7 @@ export default function App() {
         const oDec = Number.isInteger(q2.outDecimals) ? q2.outDecimals : 6;
         const qty = selling ? size : (+q2.outAmount || 0) / Math.pow(10, oDec);
         const sol = selling ? (+q2.outAmount || 0) / 1e9 : Math.min(size, onchain.maxSol || size);
-        try { if (qty > 0 && sol > 0) recordRealFill({ at: Date.now(), side, mint: token.liveMint, sym: token.sym, qty, sol, sig }); } catch (e) {}
+        try { if (qty > 0 && sol > 0) recordRealFill({ at: Date.now(), side, mint: token.liveMint, sym: token.sym, qty, sol, sig, px: (sol * SOL_USD) / qty }); } catch (e) {}
         try {
           const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(wallet.address)}&t=${Date.now()}`);
           const j2 = await r2.json();
@@ -9112,6 +9243,28 @@ export default function App() {
       .finally(() => { autoBusyRef.current = false; });
     autoQueueRef.current = run.catch(() => {});
     return run;
+  };
+
+  // sell ONE real holding — human-tapped, so it goes through the review flow
+  const realSellHolding = (h) => {
+    if (!h || !h.mint) return;
+    quoteRealOrder({ id: "chain-" + h.mint, sym: h.sym || h.mint.slice(0, 5), name: h.name || h.sym || "token",
+      liveMint: h.mint, price: h.price || 0, hue: symbolHue(h.sym || "?") }, "sell", h.qty);
+  };
+  // sell EVERYTHING — confirm already happened in the UI (two-tap). Serialized
+  // real sells, one per holding, each confirmed on-chain before the next.
+  const realSellAllHoldings = async (holds) => {
+    const list = (holds || []).filter((h) => h && h.mint && h.qty > 0);
+    if (!list.length) return;
+    pushNotif({ type: "system", user: null, tokenId: null,
+      text: `⛓ selling ALL ${list.length} on-chain position${list.length === 1 ? "" : "s"} — orders run one at a time…` });
+    for (const h of list) {
+      const tk = { id: "chain-" + h.mint, sym: h.sym || h.mint.slice(0, 5), liveMint: h.mint, price: h.price || 0, hue: 200 };
+      const res = await fireRealOrderDirect(tk, "sell", h.qty);
+      if (res.ok) sayPrivate({ type: "note", text: `⛓ sold ${fmtQty(h.qty)} ${tk.sym} → ${res.sol.toFixed(4)} SOL` });
+      else pushNotif({ type: "system", user: null, tokenId: null, text: `⚠⛓ SELL ALL: ${tk.sym} failed (${res.err}) — still held. Continuing with the rest.` });
+    }
+    pushNotif({ type: "system", user: null, tokenId: null, text: "⛓ SELL ALL finished — check your activity for each fill." });
   };
 
   // web3.js, fetched only when a real order is actually placed
@@ -9191,7 +9344,7 @@ export default function App() {
               qty: +o.size || 0, sol: (+q2.outAmount || 0) / 1e9, sig }
           : { at: Date.now(), side: "buy", mint: o.token.liveMint, sym: o.token.sym,
               qty: (+q2.outAmount || 0) / Math.pow(10, oDec), sol: +o.size || 0, sig };
-        if (fill.mint && fill.qty > 0 && fill.sol > 0) recordRealFill(fill);
+        if (fill.mint && fill.qty > 0 && fill.sol > 0) recordRealFill({ ...fill, px: (fill.sol * SOL_USD) / fill.qty });
       } catch (e) {}
       pushNotif({ type: "system", user: null, tokenId: o.token.id,
         text: landed
@@ -9950,6 +10103,7 @@ export default function App() {
   const [walletPop, setWalletPop] = useState(null);         // hold the stats bar → open-wallet popup
   const [quickWatch, setQuickWatch] = useState(false);      // watchlist opened from the trader tabs
   const [posDrawer, setPosDrawer] = useState(false);        // MY POSITIONS slide-over
+  const [posSaConfirm, setPosSaConfirm] = useState(false);  // two-tap real SELL ALL in the drawer
   const [posTab, setPosTab] = useState("both");
   const [sellArm2, setSellArm2] = useState(null);   // mobile: sell button awaiting its confirm tap
   const [sellFlash2, setSellFlash2] = useState(null); // just-confirmed pop
@@ -10013,6 +10167,18 @@ export default function App() {
     if (/[?&](live|test)=1/.test(q)) return true;                            // live, explicitly
     return window.__VALO_LIVE__ === true;  // otherwise the deployment decides (VITE_LIVE_DATA)
   }); // 🛰 real tokens, simulated wallet — URL wins in both directions
+  useEffect(() => {
+    if (!liveData) return;
+    let stop = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/treasury");
+        const j = await r.json();
+        if (!stop && j && j.token && j.token.mint) setValoMint(j.token.mint);
+      } catch (e) {}
+    })();
+    return () => { stop = true; };
+  }, [liveData]);
   // 🔎 market-wide search: every Solana / pump.fun token DexScreener
   // indexes, merged in behind whatever is already on screen
   const [mktHits, setMktHits] = useState([]);
@@ -13240,7 +13406,7 @@ export default function App() {
                         onRealOrder={quoteRealOrder}
                         onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
                         onChainMax={onchain.maxSol || 0}
-                        chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0} autoOn={liveAuto} onToggleAuto={setLiveAuto} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
+                        chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0} autoOn={liveAuto} onToggleAuto={setLiveAuto} liveMode={liveData} chainHoldings={(walletChain && walletChain.holdings) || []} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
                         solBalance={dispSol} valoBalance={dispValo} position={positions[selected.id]}
                         clickMode={clickMode} setClickMode={setClickMode}
                         realized24={realized24For(selected.sym)}
@@ -13300,7 +13466,7 @@ export default function App() {
             </div>
             {selected && (
               <div style={{ marginTop: -10 }}>
-                <MyPositionsHub tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
+                <MyPositionsHub liveMode={liveData} chainHoldings={(walletChain && walletChain.holdings) || []} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
                   onOpenToken={(id) => { setSel(id); setClickMode(null); }} onSellPos={sellPos} onCloseTickets={closeAllTickets}
                   onSellRun={sellRun} onSellAllBots={sellAllRuns} onCancelBot={cancelBot} />
               </div>
@@ -13347,7 +13513,7 @@ export default function App() {
                 onCancelBot={cancelBot} onSellRun={sellRun} onOpenBotRun={(id) => setBotRunOpen(id)}
                 onOpenTokenAuto={(tid, botId) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(botId || null); }} />
             ) : selected ? (
-              <DesktopTradePanel token={selected} botRuns={botRuns} chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0} autoOn={liveAuto} onToggleAuto={setLiveAuto}
+              <DesktopTradePanel token={selected} botRuns={botRuns} chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0} autoOn={liveAuto} onToggleAuto={setLiveAuto} liveMode={liveData} chainHoldings={(walletChain && walletChain.holdings) || []} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint}
                 onRealOrder={quoteRealOrder}
                 onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
                 onChainMax={onchain.maxSol || 0}
@@ -13376,7 +13542,7 @@ export default function App() {
             )}
             {/* MY POSITIONS — bots + tickets, visible on every tab */}
             {selected && (
-              <MyPositionsHub tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
+              <MyPositionsHub liveMode={liveData} chainHoldings={(walletChain && walletChain.holdings) || []} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
                 onOpenToken={(id) => { setSel(id); setClickMode(null); }} onSellPos={sellPos} onCloseTickets={closeAllTickets}
                 onSellRun={sellRun} onSellAllBots={sellAllRuns} onCancelBot={cancelBot} />
             )}
@@ -13406,6 +13572,21 @@ export default function App() {
             <PortfolioPanel big
               solBalance={dispSol} valoWallet={dispValo} positions={positions} tokens={tokens}
               realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger}
+              valoMint={valoMint}
+              onRealSwap={() => {
+                if (!valoMint) return;
+                const amt2 = Math.min(Math.max(parseFloat(amount) || 0.01, 0.001), onchain.maxSol || 0.01);
+                quoteRealOrder({ id: "valo-live", sym: "VALO", name: "VALO", liveMint: valoMint, price: 0, hue: 265 }, "buy", amt2);
+              }}
+              onOpenChainFill={(f) => {
+                openTokenByMint(f.mint);
+                const px = f.px || ((f.sol * SOL_USD) / Math.max(f.qty, 1e-12));
+                setHistMarker({ t: f.at, side: f.side, p: px, price: px,
+                  amt: f.side === "buy" ? f.sol : f.qty, unit: f.side === "buy" ? "SOL" : f.sym,
+                  sym: f.sym, tx: f.sig, real: true });
+                setHighlightTx(f.sig);
+                if (typeof setPortfolioDrawer === "function") setPortfolioDrawer(false);
+              }}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
@@ -14044,6 +14225,32 @@ export default function App() {
                   <button key={k} onClick={() => setPosTab(k)} style={{ ...chip(posTab === k), flex: 1, textAlign: "center", padding: "7px 0", fontSize: 9, fontWeight: 800 }}>{l}</button>
                 ))}
               </div>
+              {drawerHolds.length > 0 && posTab !== "bots" && (
+                <>
+                  <button onClick={() => { if (posSaConfirm) { realSellAllHoldings(drawerHolds); setPosSaConfirm(false); setPosDrawer(false); } else setPosSaConfirm(true); }}
+                    style={{ width: "100%", boxSizing: "border-box", border: "none", borderRadius: 9, padding: "10px", margin: "8px 0",
+                      fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
+                      background: posSaConfirm ? T.amber : T.red, color: posSaConfirm ? "#1d1503" : "#170808", cursor: "pointer" }}>
+                    {posSaConfirm ? `⚠ CONFIRM — SELL ${drawerHolds.length} FOR REAL` : `⛓ SELL ALL · ${drawerHolds.length} on-chain`}
+                  </button>
+                  {drawerHolds.map((h) => (
+                    <div key={h.mint} style={{ display: "flex", alignItems: "center", gap: 8, background: "#0c0f16",
+                      border: `1px solid ${T.amber}33`, borderLeft: `2px solid ${T.amber}`, borderRadius: 9, padding: "9px", marginBottom: 5 }}>
+                      <div onClick={() => { openTokenByMint(h.mint); setPosDrawer(false); }} style={{ minWidth: 0, flex: 1, cursor: "pointer" }}>
+                        <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: T.text }}>
+                          ${h.sym || h.name || h.mint.slice(0, 5)} <span style={{ color: T.amber, fontSize: 8 }}>⛓</span>
+                        </div>
+                        <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>{fmtQty(h.qty)} · ${(h.usd || 0).toFixed(2)}</div>
+                      </div>
+                      <button onClick={() => { realSellHolding(h); setPosDrawer(false); }}
+                        style={{ border: `1px solid ${T.red}`, background: "rgba(234,57,67,0.12)", color: T.red,
+                          borderRadius: 8, padding: "7px 13px", cursor: "pointer", fontFamily: T.mono, fontSize: 10, fontWeight: 900 }}>
+                        SELL
+                      </button>
+                    </div>
+                  ))}
+                </>
+              )}
               {(showTix ? tix.length : 0) + (showBots ? runsL.length : 0) > 0 && (
                 <button onClick={() => confirmSell("sellscope", sellScope)}
                   style={{ width: "100%", border: "none", borderRadius: 10, padding: "10px", marginBottom: 9, fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
@@ -14955,6 +15162,21 @@ export default function App() {
             <PortfolioPanel big
               solBalance={dispSol} valoWallet={dispValo} positions={positions} tokens={tokens}
               realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger}
+              valoMint={valoMint}
+              onRealSwap={() => {
+                if (!valoMint) return;
+                const amt2 = Math.min(Math.max(parseFloat(amount) || 0.01, 0.001), onchain.maxSol || 0.01);
+                quoteRealOrder({ id: "valo-live", sym: "VALO", name: "VALO", liveMint: valoMint, price: 0, hue: 265 }, "buy", amt2);
+              }}
+              onOpenChainFill={(f) => {
+                openTokenByMint(f.mint);
+                const px = f.px || ((f.sol * SOL_USD) / Math.max(f.qty, 1e-12));
+                setHistMarker({ t: f.at, side: f.side, p: px, price: px,
+                  amt: f.side === "buy" ? f.sol : f.qty, unit: f.side === "buy" ? "SOL" : f.sym,
+                  sym: f.sym, tx: f.sig, real: true });
+                setHighlightTx(f.sig);
+                if (typeof setPortfolioDrawer === "function") setPortfolioDrawer(false);
+              }}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
