@@ -2365,7 +2365,7 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
   );
 }
 
-function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, setAmount, pay, setPay, position, solBalance, valoBalance, positions, tokens, onOpenToken, onCloseAll, bestMult, pctSel, setPctSel, pendingOrders = [], onOpenBot, onCancelBot, onPosTrade, onDraftLevel, realized24 = 0, botRuns = [], onRealOrder, onChainReady = false, onChainMax = 0, chainHeld = 0, chainSol = 0}) {
+function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, setAmount, pay, setPay, position, solBalance, valoBalance, positions, tokens, onOpenToken, onCloseAll, bestMult, pctSel, setPctSel, pendingOrders = [], onOpenBot, onCancelBot, onPosTrade, onDraftLevel, realized24 = 0, botRuns = [], onRealOrder, onChainReady = false, onChainMax = 0, chainHeld = 0, chainSol = 0, autoOn = false, onToggleAuto = null}) {
   const [dtBuyPcts, setDtBuyPcts] = useState([10, 25, 50, 75, 100]);  // dbl-click / right-click a chip to retype it
   const [dtSellPcts, setDtSellPcts] = useState([10, 25, 50, 75, 100]);
   const [dtFixed, setDtFixed] = useState([0.5, 1, 2, 5]);
@@ -2601,7 +2601,7 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
         <button onClick={() => setClickMode(clickMode === "sell" ? null : "sell")}
           style={{ ...chip(clickMode === "sell"), flex: 1, textAlign: "center", color: clickMode === "sell" ? T.red : T.dim, borderColor: clickMode === "sell" ? T.red : T.border }}>▼ ARM SELL</button>
       </div>
-      {onChainReady && <div style={{ marginBottom: 12 }}><LiveFundsNotice sol={chainSol} compact /></div>}
+      {onChainReady && <div style={{ marginBottom: 12 }}><LiveFundsNotice sol={chainSol} compact autoOn={autoOn} onToggleAuto={onToggleAuto} /></div>}
       {clickMode && <div style={{ fontFamily: T.mono, fontSize: 9.5, color: clickMode === "buy" ? T.green : T.red, marginBottom: 12 }}>
         Armed — click the chart to fill instantly & stamp the spot.
       </div>}
@@ -5113,7 +5113,8 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
 
 // Sits under the BUY/SELL pair whenever on-chain execution is armed. The buttons
 // no longer shout "REAL" at you, so this is what tells you which mode you're in.
-function LiveFundsNotice({ sol = 0, compact = false }) {
+function LiveFundsNotice({ sol = 0, compact = false, autoOn = false, onToggleAuto = null }) {
+  const [armOpen, setArmOpen] = useState(false);
   const [tipOpen, setTipOpen] = useState(false);
   // once someone says "got it", stay quiet forever — a tip that keeps coming
   // back next to a money button stops being a tip
@@ -5146,6 +5147,17 @@ function LiveFundsNotice({ sol = 0, compact = false }) {
             <span style={{ fontFamily: T.mono, fontSize: compact ? 7.5 : 8.5, fontWeight: 800,
               color: T.dim }}>{sol.toFixed(3)} SOL</span>
           )}
+          {onToggleAuto && (
+            <button onClick={() => (autoOn ? onToggleAuto(false) : setArmOpen(true))}
+              title={autoOn ? "Live automation ARMED — tap to disarm" : "Let bots trade real funds (arm live automation)"}
+              style={{ border: `1px solid ${autoOn ? T.red : `${T.border2}`}`, borderRadius: 6,
+                background: autoOn ? "rgba(234,57,67,0.16)" : "rgba(255,255,255,0.03)",
+                color: autoOn ? T.red : T.faint, cursor: "pointer", fontFamily: T.mono, fontWeight: 900,
+                fontSize: compact ? 7 : 7.5, letterSpacing: 0.4, padding: compact ? "2px 6px" : "3px 7px",
+                boxShadow: autoOn ? `0 0 8px ${T.red}55` : "none" }}>
+              🤖{autoOn ? " ARMED" : compact ? "" : " AUTO"}
+            </button>
+          )}
           <button onClick={() => setTipOpen((v) => !v)}
             title="Make orders instant"
             style={{ border: `1px solid ${tipOpen ? T.amber : `${T.amber}55`}`, borderRadius: 6,
@@ -5157,6 +5169,42 @@ function LiveFundsNotice({ sol = 0, compact = false }) {
           </button>
         </span>
       </div>
+      {armOpen && typeof document !== "undefined" && createPortal(
+        <div onClick={() => setArmOpen(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(5,7,12,0.6)",
+            backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ width: "100%", maxWidth: 290, background: T.panel, border: `1.5px solid ${T.red}66`,
+              borderRadius: 13, padding: "13px 15px", boxShadow: "0 12px 40px rgba(0,0,0,0.6), 0 0 22px rgba(234,57,67,0.14)" }}>
+            <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 0.8, color: T.red, marginBottom: 7 }}>
+              🤖⛓ ARM LIVE AUTOMATION
+            </div>
+            <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.text, lineHeight: 1.75 }}>
+              While armed, <b>bots and chart-armed orders spend real SOL</b> from your connected wallet the moment their trigger hits — no review screen per order.
+            </div>
+            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, lineHeight: 1.7, margin: "8px 0" }}>
+              · every order stays capped at the server limit<br />
+              · runs only while VALO is open — closing the tab disarms it<br />
+              · without Phantom auto-confirm, each fill still asks your wallet; a missed prompt = a missed fill<br />
+              · a failed exit means the position is <b style={{ color: T.text }}>still held</b> — you'll be alerted to sell manually
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setArmOpen(false)}
+                style={{ flex: 1, border: `1px solid ${T.border2}`, borderRadius: 9, padding: "9px",
+                  background: "transparent", color: T.dim, fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, cursor: "pointer" }}>
+                KEEP PAPER
+              </button>
+              <button onClick={() => { onToggleAuto && onToggleAuto(true); setArmOpen(false); }}
+                style={{ flex: 1.4, border: "none", borderRadius: 9, padding: "9px", background: T.red, color: "#170808",
+                  fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 0.6, cursor: "pointer",
+                  boxShadow: "0 0 16px rgba(234,57,67,0.4)" }}>
+                ⛓ ARM IT
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
       {tipOpen && typeof document !== "undefined" && createPortal(
         <div onClick={() => setTipOpen(false)}
           style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(5,7,12,0.55)",
@@ -5194,7 +5242,7 @@ function LiveFundsNotice({ sol = 0, compact = false }) {
 }
 
 // PRO LAYOUT order ticket — one wide bar under the chart, buy & sell side by side
-function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, valoBalance = 0, position, onExecute, onPosTrade, clickMode, setClickMode, realized24 = 0, onRealOrder, onChainReady = false, onChainMax = 0, chainHeld = 0, chainSol = 0}) {
+function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, valoBalance = 0, position, onExecute, onPosTrade, clickMode, setClickMode, realized24 = 0, onRealOrder, onChainReady = false, onChainMax = 0, chainHeld = 0, chainSol = 0, autoOn = false, onToggleAuto = null}) {
   const [poPcts, setPoPcts] = useState([25, 50, 75, 100]);      // dbl-click / right-click to retype
   const [poFixed, setPoFixed] = useState([0.5, 1, 2, 5]);
   const [poSellPcts, setPoSellPcts] = useState([10, 25, 50, 75]);
@@ -5306,7 +5354,7 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
             </button>
           )}
         </div>
-        {onChainReady && <LiveFundsNotice sol={chainSol} />}
+        {onChainReady && <LiveFundsNotice sol={chainSol} autoOn={autoOn} onToggleAuto={onToggleAuto} />}
       </div>
       {/* partial sells + arm */}
       <div style={{ ...seg, flex: "1 1 190px", minWidth: 180 }}>
@@ -8315,6 +8363,19 @@ export default function App() {
   // manual SELL on a running bot — dumps its whole remaining position at market
   const sellRun = (runId) => {
     const r = botRuns.find((x) => x.id === runId && x.status === "live"); if (!r) return;
+    if (r.real) {
+      const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return;
+      const qtySell = r.tokensLeft || 0; if (!(qtySell > 0)) return;
+      sayPrivate({ type: "note", text: `⛓ selling REAL run — ${fmtQty(qtySell)} ${r.sym}…` });
+      fireRealOrderDirect(t, "sell", qtySell).then((res) => {
+        if (!res.ok) { pushNotif({ type: "system", user: null, tokenId: t.id, text: `⚠⛓ manual run sell failed on ${r.sym} — still held (${res.err})` }); return; }
+        const pnlUsd = (res.sol - r.remaining) * SOL_USD;
+        setBotRuns((R) => R.map((x) => x.id === runId ? { ...x, exits: [...x.exits, { ts: Date.now(), price: t.price, amt: x.remaining, pnlUsd, trail: null, kind: "MANUAL⛓", sig: res.sig }], remaining: 0, tokensLeft: 0, status: "sold" } : x));
+        setPendingOrders((P) => P.filter((o) => o.runId !== runId));
+        sayPrivate({ type: "note", text: `⛓ run closed — ${fmtQty(qtySell)} ${r.sym} → ${res.sol.toFixed(4)} SOL · ${pnlUsd >= 0 ? "+" : "−"}$${Math.abs(pnlUsd).toFixed(2)} real` });
+      });
+      return;
+    }
     const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return;
     const proceeds = r.remaining * (t.price / r.entry);
     if (r.pay === "SOL") setSolBalance((b) => b + proceeds); else setValoWallet((v) => v + proceeds);
@@ -8329,6 +8390,18 @@ export default function App() {
   const sellRunPct = (runId, pctN) => {
     const r = botRuns.find((x) => x.id === runId && x.status === "live"); if (!r) return;
     if (pctN >= 100) { sellRun(runId); return; }
+    if (r.real) {
+      const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return;
+      const qtySell = (r.tokensLeft || 0) * (pctN / 100); if (!(qtySell > 0)) return;
+      const part = +(r.remaining * (pctN / 100)).toFixed(6);
+      fireRealOrderDirect(t, "sell", qtySell).then((res) => {
+        if (!res.ok) { pushNotif({ type: "system", user: null, tokenId: t.id, text: `⚠⛓ partial run sell failed on ${r.sym} — still held (${res.err})` }); return; }
+        const pnlUsd = (res.sol - part) * SOL_USD;
+        setBotRuns((R) => R.map((x) => x.id === runId ? { ...x, exits: [...x.exits, { ts: Date.now(), price: t.price, amt: part, pnlUsd, trail: null, kind: "MANUAL⛓", sig: res.sig }], remaining: +(x.remaining - part).toFixed(6), tokensLeft: Math.max(0, (x.tokensLeft || 0) - qtySell) } : x));
+        sayPrivate({ type: "note", text: `⛓ sold ${pctN}% of ${r.sym} run → ${res.sol.toFixed(4)} SOL · ${pnlUsd >= 0 ? "+" : "−"}$${Math.abs(pnlUsd).toFixed(2)} real` });
+      });
+      return;
+    }
     const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return;
     const part = +(r.remaining * (pctN / 100)).toFixed(6); if (!(part > 0)) return;
     const proceeds = part * (t.price / r.entry);
@@ -8362,7 +8435,14 @@ export default function App() {
     }));
   };
   const sellAllRuns = () => botRuns.filter((r) => r.status === "live").forEach((r) => sellRun(r.id));
-  const sellPos = (t) => { const p0 = positions[t.id]; if (p0 && p0.amt > 0) execute(t, { side: "sell", pay: p0.pay || pay, amt: p0.amt, mode: "instant", tax: taxFor(p0.pay || pay), burn: splitFee(p0.amt, p0.pay || pay).total, legs: [] }, {}); };
+  const sellPos = (t) => {
+    // live + a real on-chain holding of this token → real sell with review
+    if (liveData && onchain.enabled && wallet && wallet.address && t && t.liveMint) {
+      const held = chainHeldOf(t);
+      if (held > 0) { quoteRealOrder(t, "sell", held); return; }
+    }
+    const p0 = positions[t.id]; if (p0 && p0.amt > 0) execute(t, { side: "sell", pay: p0.pay || pay, amt: p0.amt, mode: "instant", tax: taxFor(p0.pay || pay), burn: splitFee(p0.amt, p0.pay || pay).total, legs: [] }, {});
+  };
   const closeAllTickets = () => Object.keys(positions).forEach((id) => { const t = tokens.find((x) => String(x.id) === String(id)); if (t) sellPos(t); });
   // VISUAL TRADING pair — buy line + sell-all point, armed as one bot
   const armVisualPair = ({ buy, sell, amt: a, trail, editId = null }) => {
@@ -8993,6 +9073,95 @@ export default function App() {
     } catch (e) {
       setRealOrder({ stage: "error", token, side, size, label, msg: String(e.message || e) });
     }
+  };
+
+  // 🤖⛓ live automation — bots may spend real funds ONLY while this is armed.
+  // Deliberately NOT persisted: closing the tab disarms it, every session
+  // starts paper-safe, and arming is a conscious act behind a confirm sheet.
+  const [liveAuto, setLiveAuto] = useState(false);
+  const autoQueueRef = useRef(Promise.resolve());
+  const autoBusyRef = useRef(false);
+
+  // headless real order — the bot path. No review modal (that's what "armed"
+  // means), but every other guard stays: server size cap, confirmation poll,
+  // ledger record, wallet refresh. Returns { ok, sig, qty, sol } | { ok:false, err }.
+  const fireRealOrderDirect = (token, side, size) => {
+    const job = async () => {
+      if (!onchain.enabled || !wallet || !wallet.address || !token || !token.liveMint)
+        return { ok: false, err: "live trading not armed" };
+      const SOLM = "So11111111111111111111111111111111111111112";
+      const selling = side === "sell";
+      const inputMint = selling ? token.liveMint : SOLM;
+      const outputMint = selling ? SOLM : token.liveMint;
+      let q = "";
+      if (selling) {
+        const h = chainHoldingOf(token);
+        const held = h ? h.qty : 0;
+        const qty = Math.min(size, held);
+        if (!(qty > 0)) return { ok: false, err: `no $${token.sym} held on-chain` };
+        const fullExit = qty >= held && h && h.raw;
+        q = fullExit ? `&amountRaw=${h.raw}` : `&amountUi=${qty}`;
+      } else {
+        const capped = Math.min(size, onchain.maxSol || size);   // cap enforced here AND server-side
+        const amount = Math.floor(capped * 1e9);
+        if (!(amount > 0)) return { ok: false, err: "zero-size order" };
+        q = `&amount=${amount}`;
+      }
+      try {
+        const ph = getProvider();
+        if (!ph) return { ok: false, err: "Phantom not found" };
+        const r = await fetch(`/api/swap?mode=build&inputMint=${inputMint}&outputMint=${outputMint}${q}&slippageBps=150&user=${wallet.address}`);
+        const j = await r.json();
+        if (!r.ok || j.error || !j.swapTransaction) return { ok: false, err: j.error || "no route" };
+        const web3 = await loadWeb3();
+        const raw = Uint8Array.from(atob(j.swapTransaction), (c) => c.charCodeAt(0));
+        const tx = web3.VersionedTransaction.deserialize(raw);
+        let sig = null;
+        if (ph.signAndSendTransaction) {
+          const out = await ph.signAndSendTransaction(tx);   // silent if the user enabled auto-confirm
+          sig = out && (out.signature || out);
+        } else if (ph.signTransaction) {
+          const signed = await ph.signTransaction(tx);
+          const b64 = btoa(String.fromCharCode(...signed.serialize()));
+          const send = await fetch("/api/sendtx", { method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ signed: b64 }) });
+          const sj = await send.json();
+          if (!sj.ok) return { ok: false, err: sj.error || "network rejected it" };
+          sig = sj.signature;
+        } else return { ok: false, err: "wallet can't sign here" };
+        if (!sig) return { ok: false, err: "not signed" };
+        // wait for the chain — an automated fill that isn't confirmed isn't a fill
+        let landed = null;
+        for (let i = 0; i < 30; i++) {
+          await new Promise((res) => setTimeout(res, 1500));
+          try {
+            const cr = await fetch(`/api/sendtx?sig=${sig}`);
+            const cj = await cr.json();
+            if (cj.status === "failed") { landed = { ok: false, err: cj.err }; break; }
+            if (cj.confirmed) { landed = { ok: true }; break; }
+          } catch (e) {}
+        }
+        if (landed && !landed.ok) return { ok: false, sig, err: `reverted on-chain — funds did not move. ${landed.err || ""}` };
+        const q2 = j.quote || {};
+        const oDec = Number.isInteger(q2.outDecimals) ? q2.outDecimals : 6;
+        const qty = selling ? size : (+q2.outAmount || 0) / Math.pow(10, oDec);
+        const sol = selling ? (+q2.outAmount || 0) / 1e9 : Math.min(size, onchain.maxSol || size);
+        try { if (qty > 0 && sol > 0) recordRealFill({ at: Date.now(), side, mint: token.liveMint, sym: token.sym, qty, sol, sig }); } catch (e) {}
+        try {
+          const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(wallet.address)}&t=${Date.now()}`);
+          const j2 = await r2.json();
+          if (j2 && !j2.error) setWalletChain(j2);
+        } catch (e) {}
+        return { ok: true, sig, qty, sol, confirmed: !!(landed && landed.ok) };
+      } catch (e) {
+        return { ok: false, err: String((e && e.message) || e) };
+      }
+    };
+    // serialize — one real order in flight at a time, always
+    const run = autoQueueRef.current.then(() => { autoBusyRef.current = true; return job(); })
+      .finally(() => { autoBusyRef.current = false; });
+    autoQueueRef.current = run.catch(() => {});
+    return run;
   };
 
   // web3.js, fetched only when a real order is actually placed
@@ -11103,6 +11272,36 @@ export default function App() {
       const t = tokens.find((x) => String(x.id) === String(o.tokenId));
       if (!t) return;
       if (o.side === "buy") {
+        const goReal = liveAuto && liveData && onchain.enabled && wallet && wallet.address && o.pay === "SOL" && t.liveMint;
+        if (goReal) {
+          // paper escrow goes back — this buy spends REAL SOL from the wallet
+          refundEscrow(o.amt, o.pay);
+          const runId = "run" + Date.now() + Math.random();
+          const size = Math.min(o.amt, onchain.maxSol || o.amt);
+          sayPrivate({ type: "note", text: `⛓🤖 bot triggered — placing REAL buy of ${size} SOL into ${t.sym}…` });
+          fireRealOrderDirect(t, "buy", size).then((res) => {
+            if (!res.ok) {
+              pushNotif({ type: "system", user: null, tokenId: t.id, text: `⛓🤖 bot buy MISSED on ${t.sym} — ${res.err}. No funds moved; re-arm if you still want in.` });
+              sayPrivate({ type: "note", text: `⚠ bot buy missed on ${t.sym}: ${res.err}` });
+              return;
+            }
+            // the run's book is REAL: tokens actually received, SOL actually spent
+            setBotRuns((R) => [...R, { id: runId, tokenId: o.tokenId, pool: t.pool || null, sym: t.sym, hue: t.hue,
+              entry: t.price, level: o.level, amt: size, remaining: size, pay: "SOL", legs: o.legs || [],
+              stopLossPrice: o.stopLoss || null, filledTs: Date.now(), exits: [], status: "live",
+              real: true, qtyTokens: res.qty, tokensLeft: res.qty, buySig: res.sig }]);
+            sayPrivate({ type: "note", text: `⛓🎯 REAL bot fill — bought ${fmtQty(res.qty)} ${t.sym} with ${size} SOL @ $${fmtP(t.price)}` });
+            const follow = [];
+            if (o.vtSell > 0) follow.push({ id: Date.now() + Math.random(), tokenId: o.tokenId, side: "sell", level: o.vtSell, dir: o.vtSell <= t.price ? -1 : 1, amt: size, pay: "SOL", tax: o.tax, runId, vt: true, trail: o.vtTrail || null, exitKind: "VT", ts: Date.now() });
+            else {
+              if (o.stopLoss > 0) follow.push({ id: Date.now() + Math.random(), tokenId: o.tokenId, side: "sell", level: o.stopLoss, dir: -1, amt: size, pay: "SOL", tax: o.tax, runId, exitKind: "SL", ts: Date.now() });
+              if (Array.isArray(o.legs) && o.legs.length) o.legs.forEach((l, i) => { if (l.mult > 1 && l.alloc > 0) follow.push({ id: Date.now() + Math.random() + i, tokenId: o.tokenId, side: "sell", level: t.price * l.mult, dir: 1, amt: +((size * l.alloc) / 100).toFixed(6), pay: "SOL", tax: o.tax, runId, trail: l.trail, exitKind: "TP", ts: Date.now() }); });
+              else if (o.tpMult > 1) follow.push({ id: Date.now() + Math.random() + 1, tokenId: o.tokenId, side: "sell", level: t.price * o.tpMult, dir: 1, amt: size, pay: "SOL", tax: o.tax, runId, exitKind: "TP", ts: Date.now() });
+            }
+            if (follow.length) setPendingOrders((P) => [...P, ...follow]);
+          });
+          return; // real path owns this fill — paper code below must not run
+        }
         // fill → a RUNNING BOT with its own book, kept out of the Live P/L box
         // funds already escrowed at arm time — the fill just converts them
         TestLog.push("bot_fill", { sym: t.sym, amt: o.amt, pay: o.pay, px: t.price });
@@ -11127,6 +11326,33 @@ export default function App() {
         // exit leg of a running bot — settle against the run's own book
         const r = botRuns.find((x) => x.id === o.runId && x.status === "live"); if (!r) return;
         const portion = Math.min(o.amt, r.remaining); if (portion <= 0) return;
+        if (r.real) {
+          // real run → real sell, proportional in actual tokens
+          const frac = Math.min(1, portion / r.amt);
+          const qtySell = Math.min((r.tokensLeft || 0), (r.qtyTokens || 0) * frac);
+          if (!(qtySell > 0)) return;
+          sayPrivate({ type: "note", text: `⛓🤖 ${o.exitKind || "TP"} hit on ${r.sym} — placing REAL sell of ${fmtQty(qtySell)}…` });
+          fireRealOrderDirect(t, "sell", qtySell).then((res) => {
+            if (!res.ok) {
+              // a failed automated exit is the one people must hear about LOUDLY
+              pushNotif({ type: "system", user: null, tokenId: t.id,
+                text: `⚠⛓ bot ${o.exitKind || "exit"} FAILED on ${r.sym} — position is STILL HELD (${res.err}). Sell manually from the portfolio.` });
+              sayPrivate({ type: "note", text: `⚠⛓ ${o.exitKind || "exit"} failed on ${r.sym}: ${res.err} — still holding` });
+              return;
+            }
+            const remaining = +(r.remaining - portion).toFixed(6);
+            const tokensLeft = Math.max(0, (r.tokensLeft || 0) - qtySell);
+            const done = remaining <= r.amt * 0.001 || tokensLeft <= 0;
+            const costFrac = r.amt * frac;                        // SOL basis of this slice
+            const pnlUsd = (res.sol - costFrac) * SOL_USD;        // real proceeds vs real basis
+            setBotRuns((R) => R.map((x) => x.id === r.id ? { ...x,
+              exits: [...x.exits, { ts: Date.now(), price: t.price, amt: portion, pnlUsd, trail: o.trail || null, kind: (o.exitKind || "TP") + "⛓", sig: res.sig }],
+              remaining, tokensLeft, status: done ? "sold" : "live" } : x));
+            if (done) setPendingOrders((P) => P.filter((x) => x.runId !== r.id));
+            sayPrivate({ type: "note", text: `⛓🤖 ${o.exitKind || "TP"} filled — sold ${fmtQty(qtySell)} ${r.sym} for ${res.sol.toFixed(4)} SOL · ${pnlUsd >= 0 ? "+" : "−"}$${Math.abs(pnlUsd).toFixed(2)} real` });
+          });
+          return; // real path owns it — paper settlement below must not run
+        }
         const proceeds = portion * (t.price / r.entry);
         if (r.pay === "SOL") setSolBalance((b) => b + proceeds); else setValoWallet((v) => v + proceeds);
         const pnlUsd = (proceeds - portion) * (r.pay === "SOL" ? SOL_USD : 0.0125);
@@ -11143,7 +11369,7 @@ export default function App() {
         sayPrivate({ type: "note", text: `🎯 marker hit — SELL ${o.amt} ${o.pay} filled on ${t.sym} @ $${fmtP(t.price)} (armed @ $${fmtP(o.level)})` });
       }
     });
-  }, [tokens]);
+  }, [tokens, liveAuto, botRuns]);
 
   const shownBase = useMemo(() => {
     const flowOf = (t) => (+t.greenUsd || 0) + (+t.redUsd || 0);
@@ -12485,7 +12711,7 @@ export default function App() {
           </div>
         </div>
       </div>
-      {mLive && <div style={{ marginTop: 6 }}><LiveFundsNotice sol={mChainSol} compact /></div>}
+      {mLive && <div style={{ marginTop: 6 }}><LiveFundsNotice sol={mChainSol} compact autoOn={liveAuto} onToggleAuto={setLiveAuto} /></div>}
     </div>
     );
   })();
@@ -13033,7 +13259,7 @@ export default function App() {
                         onRealOrder={quoteRealOrder}
                         onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
                         onChainMax={onchain.maxSol || 0}
-                        chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
+                        chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0} autoOn={liveAuto} onToggleAuto={setLiveAuto} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
                         solBalance={solBalance} valoBalance={valoWallet} position={positions[selected.id]}
                         clickMode={clickMode} setClickMode={setClickMode}
                         realized24={realized24For(selected.sym)}
@@ -13140,7 +13366,7 @@ export default function App() {
                 onCancelBot={cancelBot} onSellRun={sellRun} onOpenBotRun={(id) => setBotRunOpen(id)}
                 onOpenTokenAuto={(tid, botId) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(botId || null); }} />
             ) : selected ? (
-              <DesktopTradePanel token={selected} botRuns={botRuns} chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0}
+              <DesktopTradePanel token={selected} botRuns={botRuns} chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0} autoOn={liveAuto} onToggleAuto={setLiveAuto}
                 onRealOrder={quoteRealOrder}
                 onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
                 onChainMax={onchain.maxSol || 0}
