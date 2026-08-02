@@ -790,9 +790,14 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     // never let padding drive the floor to (or below) zero: on a wide range that
     // both breaks log scaling and squashes everything into a hairline
     // a log axis wants proportional headroom, not a flat subtraction
-    lo = trueLo > 0 ? trueLo * 0.82 : Math.max(1e-15, trueHi * 1e-6);
+    // pad by a share of the visible RANGE (not the price value) → the top and
+    // bottom candles always keep clear air, even fully zoomed out on a big move
+    const range = Math.max(trueHi - trueLo, trueHi * 0.02);   // never a zero range
+    const padTop = range * 0.34;     // generous headroom over the tallest wick
+    const padBot = range * 0.16;     // a little under the lowest
+    lo = trueLo > 0 ? Math.max(1e-15, trueLo - padBot) : Math.max(1e-15, trueHi * 1e-6);
     if (!(lo > 0)) lo = Math.max(1e-15, trueHi * 1e-6);
-    hi = trueHi > 0 ? trueHi * 1.18 : hi + p8;
+    hi = trueHi > 0 ? trueHi + padTop : hi + p8;
     // vertical zoom: stretch the visible price range around its centre. This is
     // what gives headroom above the candles for placing bot and visual lines.
     const pz = Math.max(0.15, Math.min(40, view.priceZoom || 1));
@@ -5197,6 +5202,7 @@ function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phanto
   const [backup, setBackup] = useState(null);   // shown ONCE at creation
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [collapsed, setCollapsed] = useState(false);   // armed panel folds away
   const active = turbo && turbo.unlocked;
   const box = { background: "#0c0f16", border: `1px solid ${active ? "rgba(22,199,132,0.4)" : `${T.amber}44`}`, borderRadius: 10, padding: "10px 12px", marginBottom: 10 };
   const run = async (fn) => { setBusy(true); setErr(null); try { await fn(); } catch (e) { setErr(String(e.message || e)); } setBusy(false); };
@@ -5216,10 +5222,24 @@ function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phanto
   return (
     <div style={box}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-        <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 0.8, color: active ? T.green : T.amber }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 0.8, color: active ? T.green : T.amber }}>
+          {active && (
+            <button onClick={() => setCollapsed((c) => !c)} title={collapsed ? "Expand turbo controls" : "Collapse — keep trading, hide controls"}
+              style={{ border: `1px solid ${T.green}55`, background: "rgba(22,199,132,0.08)", color: T.green, borderRadius: 6,
+                width: 18, height: 18, display: "grid", placeItems: "center", cursor: "pointer", fontSize: 9, fontWeight: 900, padding: 0 }}>
+              {collapsed ? "▾" : "▴"}
+            </button>
+          )}
           ⚡ TURBO WALLET {active ? "· ARMED" : turbo ? "· LOCKED" : ""}
         </span>
-        {turbo && <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, color: turboSol > 0 ? T.green : T.dim }}>◎ {turboSol.toFixed(4)} SOL</span>}
+        <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          {turbo && <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, color: turboSol > 0 ? T.green : T.dim }}>◎ {turboSol.toFixed(4)} SOL</span>}
+          {active && collapsed && (
+            <button onClick={onLock} title="Disarm — lock the turbo wallet"
+              style={{ border: `1px solid ${T.border2}`, background: "transparent", color: T.faint, borderRadius: 6,
+                padding: "2px 8px", cursor: "pointer", fontFamily: T.mono, fontSize: 8, fontWeight: 800 }}>🔒 LOCK</button>
+          )}
+        </span>
       </div>
       {!turbo && (
         <>
@@ -5249,7 +5269,12 @@ function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phanto
         </div>
         </div>
       )}
-      {active && (
+      {active && collapsed && (
+        <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.green, opacity: 0.85 }}>
+          armed · trading silently · ▾ to manage funds
+        </div>
+      )}
+      {active && !collapsed && (
         <>
           <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.dim, lineHeight: 1.6, marginBottom: 7 }}>
             All trades now sign instantly with this key — buys land here, sells sell from here. Positions below are this wallet's. Fund it small; sweep back to Phantom anytime.
@@ -9639,11 +9664,28 @@ export default function App() {
         const sol = selling ? ((+q2.outAmount || 0) / 1e9 || size * ((token.price || 0) / SOL_USD)) : Math.min(size, onchain.maxSol || size);
         try { if (qty > 0 && sol > 0) recordRealFill({ at: Date.now(), side, mint: token.liveMint, sym: token.sym, qty, sol, sig, px: (sol * SOL_USD) / qty }); } catch (e) {}
         try { if (landed && landed.ok && sol > 0) payTurboFee(sol, j.quote || j); } catch (e) {}
+        // ⚡ instant sellability — insert the holding the moment the buy lands
+        if (!selling && landed && landed.ok) {
+          const addQty = qty > 0 ? qty : 1;
+          setWalletChain((W) => {
+            if (!W) return W;
+            const holds = (W.holdings || []).slice();
+            const idx = holds.findIndex((x) => x.mint === token.liveMint);
+            const pg = token.price || (holds[idx] && holds[idx].price) || 0;
+            if (idx >= 0) holds[idx] = { ...holds[idx], qty: (holds[idx].qty || 0) + (qty > 0 ? qty : 0), pending: !(qty > 0) };
+            else holds.unshift({ mint: token.liveMint, sym: token.sym, name: token.name || token.sym,
+              qty: addQty, usd: addQty * pg, price: pg, account: null, program: null,
+              owner: tradeAddr, src: (turbo && tradeAddr === turbo.pubkey) ? "turbo" : "phantom",
+              pending: !(qty > 0), justBought: true });
+            return { ...W, holdings: holds, holdingsCount: idx >= 0 ? W.holdingsCount : (W.holdingsCount || 0) + 1 };
+          });
+        }
         try {
           const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(tradeAddr || wallet.address)}&t=${Date.now()}`);
           const j2 = await r2.json();
           if (j2 && !j2.error) {
             setWalletChain(j2);
+            try { ensureCardsForHoldings(j2.holdings || []); } catch (e) {}
             if (!selling && landed && landed.ok && !(estOutQty > 0)) {
               const nh = (j2.holdings || []).find((x) => x.mint === token.liveMint);
               const gotQty = Math.max(0, ((nh && nh.qty) || 0) - prevHoldQty2);
@@ -9933,6 +9975,31 @@ export default function App() {
 
       setRealOrder({ ...o, stage: "done", sig, confirmed: !!(landed && landed.ok) });
       const prevHoldQty = (() => { try { const hh0 = chainHoldingOf(o.token); return (hh0 && hh0.qty) || 0; } catch (e) { return 0; } })();
+      // ⚡ INSTANT position: a confirmed buy drops the holding into the wallet
+      // immediately so it's sellable NOW — no waiting for a chart tick.
+      if (!selling && landed && landed.ok) {
+        const q2i = o.quote || {};
+        const oDecI = Number.isInteger(q2i.outDecimals) ? q2i.outDecimals : 6;
+        const gotQty = (+q2i.outAmount || 0) / Math.pow(10, oDecI);   // 0 for curve (reconciled by refresh)
+        const setter = ((o.owner || tradeAddr) === tradeAddr) ? setWalletChain : setWalletVault;
+        setter((W) => {
+          if (!W) return W;
+          const holds = (W.holdings || []).slice();
+          const idx = holds.findIndex((x) => x.mint === o.token.liveMint);
+          const addQty = gotQty > 0 ? gotQty : (idx >= 0 ? 0 : 1);   // placeholder qty so the row+sell exist even for curve buys
+          const priceGuess = o.token.price || (holds[idx] && holds[idx].price) || 0;
+          if (idx >= 0) {
+            holds[idx] = { ...holds[idx], qty: (holds[idx].qty || 0) + (gotQty > 0 ? gotQty : 0), usd: ((holds[idx].qty || 0) + (gotQty > 0 ? gotQty : 0)) * priceGuess, pending: gotQty <= 0 };
+          } else {
+            holds.unshift({ mint: o.token.liveMint, sym: o.token.sym, name: o.token.name || o.token.sym,
+              qty: addQty, usd: addQty * priceGuess, price: priceGuess,
+              account: null, program: null, owner: (o.owner || tradeAddr),
+              src: (turbo && (o.owner || tradeAddr) === turbo.pubkey) ? "turbo" : "phantom",
+              pending: gotQty <= 0, justBought: true });
+          }
+          return { ...W, holdings: holds, holdingsCount: idx >= 0 ? W.holdingsCount : (W.holdingsCount || 0) + 1 };
+        });
+      }
       if (selling && landed && landed.ok) {
         // near-full exit → the row leaves MY POSITIONS NOW (chain refresh
         // re-confirms). Partial sells shrink the qty so P/L stays honest.
@@ -9987,6 +10054,8 @@ export default function App() {
           const j2 = await r2.json();
           if (j2 && !j2.error) {
             if (ordOwner === tradeAddr) setWalletChain(j2); else setWalletVault(j2);
+            // adopt the token's card immediately so its chart/price is ready
+            try { ensureCardsForHoldings(j2.holdings || []); } catch (e) {}
             // curve buys promise no output qty — the chain's delta says what
             // actually arrived, and THAT becomes the cost basis for live P/L
             if (!selling && landed && landed.ok) {
