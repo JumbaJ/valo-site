@@ -1026,7 +1026,13 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
             const mine = traderKey === "__me__";
             const hiIn = highlightTx && list.some((t) => t.tx === highlightTx);
             const rankC = Math.min(rank, 2);   // three tiers max — never a tower
-            const baseY = (isBuy ? y(c.h) - 16 : y(c.l) + 16) + (isBuy ? -rankC * 19 : rankC * 19);
+            // anchor = the trades' own price (avg if several in this bar) —
+            // candle extremes shift with aggregation, a fill price never does
+            const withPx = list.filter((t2) => Number.isFinite(+t2.price || +t2.p) && (+t2.price || +t2.p) > 0);
+            const anchorP = withPx.length
+              ? withPx.reduce((s2, t2) => s2 + (+t2.price || +t2.p), 0) / withPx.length
+              : (isBuy ? c.h : c.l);
+            const baseY = (isBuy ? y(anchorP) - 16 : y(anchorP) + 16) + (isBuy ? -rankC * 19 : rankC * 19);
             // badge body is always the gain/loss colour (green buy / red sell) so
             // direction reads instantly; the trader's own colour becomes the ring.
             const own = isBuy ? T.green : T.red;
