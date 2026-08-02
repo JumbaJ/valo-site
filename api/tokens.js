@@ -1,12 +1,22 @@
-// VALO — /api/tokens[?page=N] : trending Solana pools → VALO token shape.
-// page 1..10 lets the scanner keep loading as you scroll.
+// VALO — /api/tokens[?page=N&feed=trending|new|top] : Solana pools → VALO shape.
+// Multiple feeds keep the scanner ENDLESS and FRESH (new pairs, not the same
+// trending set forever). The client rotates feeds as it paginates.
 const GT = "https://api.geckoterminal.com/api/v2";
 const hueOf = (s) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h % 360; };
 
+const FEEDS = {
+  // freshest launches — this is what makes new tokens "pop up"
+  new: (pg) => `${GT}/networks/solana/new_pools?include=base_token&page=${pg}`,
+  // biggest by volume/liquidity — deeper catalog than trending
+  top: (pg) => `${GT}/networks/solana/pools?include=base_token&page=${pg}&sort=h24_volume_usd_desc`,
+  trending: (pg) => `${GT}/networks/solana/trending_pools?include=base_token&page=${pg}`,
+};
+
 export default async function handler(req, res) {
   const page = Math.max(1, Math.min(10, parseInt(req.query.page || "1", 10) || 1));
+  const feed = FEEDS[String(req.query.feed || "trending")] ? String(req.query.feed) : "trending";
   try {
-    const r = await fetch(`${GT}/networks/solana/trending_pools?include=base_token&page=${page}`, {
+    const r = await fetch(FEEDS[feed](page), {
       headers: { accept: "application/json" },
     });
     if (!r.ok) throw new Error(`GT ${r.status}`);
@@ -53,10 +63,10 @@ export default async function handler(req, res) {
         traders: buys + sells || (buys24 + sells24), buys24, sells24,
         createdAt: created,
         launchpad: /pump$/i.test(meta.address || "") ? "pump" : "solana",
-        page,
+        page, feed,
       });
     }
-    res.setHeader("Cache-Control", "s-maxage=15, stale-while-revalidate=45");
+    res.setHeader("Cache-Control", feed === "new" ? "s-maxage=8, stale-while-revalidate=20" : "s-maxage=15, stale-while-revalidate=45");
     res.status(200).json(out);
   } catch (e) {
     res.status(502).json({ error: String(e.message || e) });

@@ -9127,6 +9127,30 @@ export default function App() {
   // person onto every chart, past or future, until you change it.
   // { [trader]: { following: bool, color: "#rrggbb", icon: dataURL|null } }
   const [traderPrefs, setTraderPrefs] = useState({});
+  // real on-chain trades of pinned traders, keyed `${wallet}|${mint}`
+  const [pinnedTrades, setPinnedTrades] = useState({});
+  const pinnedBusy = useRef({});
+  const fetchPinnedTraderTrades = useCallback(async (trader, wallet, mint, tok) => {
+    if (!wallet || !mint) return;
+    const key = `${wallet}|${mint}`;
+    if (pinnedBusy.current[key] && Date.now() - pinnedBusy.current[key] < 20000) return;
+    pinnedBusy.current[key] = Date.now();
+    try {
+      const r = await fetch(`/api/trader?wallet=${encodeURIComponent(wallet)}&mint=${encodeURIComponent(mint)}`);
+      const j = await r.json();
+      if (j && Array.isArray(j.trades)) {
+        // map chain trades → marker shape (price in USD for the axis)
+        const markers = j.trades.map((t) => {
+          const pxUsd = t.priceSol * SOL_USD;
+          return { t: t.t, side: t.side, price: pxUsd, p: pxUsd,
+            amt: t.side === "buy" ? t.solAmt : t.tokenAmt, unit: t.side === "buy" ? "SOL" : (tok && tok.sym) || "",
+            sym: (tok && tok.sym) || "", tx: t.sig, trader, wallet, real: true,
+            mc: (tok && tok.mc && tok.price) ? pxUsd * (tok.mc / tok.price) : null };
+        });
+        setPinnedTrades((P) => ({ ...P, [key]: markers }));
+      }
+    } catch (e) {}
+  }, []);
   const setTraderPref = (trader, patch) => setTraderPrefs((M) => ({
     ...M,
     [trader]: { following: false, color: pickTraderColor(trader), icon: null, ...(M[trader] || {}), ...patch },
@@ -11087,12 +11111,23 @@ export default function App() {
   }, [isMobile, liveData]);
   const morePage = useRef(1);
   const moreBusy = useRef(false);
+  const feedOrder = ["trending", "top", "new"];
+  const feedIdx = useRef(0);
   const loadMoreTokens = useCallback(async () => {
-    if (!liveData || moreBusy.current || morePage.current >= 10) return;
+    if (!liveData || moreBusy.current) return;
     moreBusy.current = true;
-    const page = morePage.current + 1;
+    let page = morePage.current + 1;
+    let feed = feedOrder[feedIdx.current];
+    // exhausted this feed's pages? advance to the next feed at page 1
+    if (page > 10) {
+      feedIdx.current = (feedIdx.current + 1) % feedOrder.length;
+      feed = feedOrder[feedIdx.current];
+      page = 1;
+    }
     try {
-      const r = await fetch(`/api/tokens?page=${page}`);
+      // cache-bust the "new" feed so fresh launches actually show up
+      const bust = feed === "new" ? `&t=${Math.floor(Date.now() / 8000)}` : "";
+      const r = await fetch(`/api/tokens?feed=${feed}&page=${page}${bust}`);
       if (r.ok) {
         const j = await r.json();
         if (Array.isArray(j) && j.length) {
@@ -12885,21 +12920,45 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveData, selected && selected.id, selected && selected.pool, tf, streamOn]);
 
+  // fetch pinned traders' real on-chain trades for the open token, live-refresh
+  useEffect(() => {
+    if (!liveData || !selected || !selected.liveMint) return;
+    const reg = (typeof window !== "undefined" && window.__VALO_WALLETS__) || {};
+    const walletOf = (trader) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trader) ? trader : (reg[trader] || null);
+    const pins = Object.entries(traderPrefs).filter(([, p]) => p && p.following).map(([k]) => k).filter((k) => k !== "__me__");
+    if (!pins.length) return;
+    const pull = () => pins.forEach((tr) => { const w = walletOf(tr); if (w) fetchPinnedTraderTrades(tr, w, selected.liveMint, selected); });
+    pull();
+    const iv = setInterval(pull, 30000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData, selected && selected.liveMint, JSON.stringify(Object.entries(traderPrefs).filter(([, p]) => p && p.following).map(([k]) => k))]);
+
   const chartTrades = useMemo(() => {
     if (!selected) return [];
     const mine = (tradesByToken[selected.id] || []).map((t) => ({ ...t, trader: t.trader || "__me__" }));
     const dev = showDevTrades ? (selected.dev.trades || []) : [];
     const hist = histMarker && histMarker.sym === selected.sym ? [histMarker] : [];
-    const followed = Object.entries(traderPrefs)
-      .filter(([, p]) => p && p.following)
-      .flatMap(([trader]) => {
-        if (trader === "__me__") return [];
+    const walletOf = (trader) => {
+      if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trader)) return trader;   // already an address
+      const reg = (typeof window !== "undefined" && window.__VALO_WALLETS__) || {};
+      return reg[trader] || null;
+    };
+    const followedKeys = Object.entries(traderPrefs).filter(([, p]) => p && p.following).map(([k]) => k);
+    // live site → REAL pinned-trader markers from chain; demo → synthetic
+    const followed = followedKeys.flatMap((trader) => {
+      if (trader === "__me__") return [];
+      if (!liveData) {
         if (trader === selected.dev.wallet) return showDevTrades ? [] : (selected.dev.trades || []);
         return traderTradesFor(selected, trader);
-      });
+      }
+      const w = walletOf(trader);
+      if (!w || !selected.liveMint) return [];
+      return (pinnedTrades[`${w}|${selected.liveMint}`] || []);
+    });
     const liveReal = liveData && selected.pool;
     const all = liveReal
-      ? [...mine, ...hist, ...chartRealMarkers]   // your own trades + persistent real fills
+      ? [...mine, ...hist, ...chartRealMarkers, ...followed]   // your fills + pinned traders' real trades
       : [...mine, ...dev, ...hist, ...followed];  // simulation keeps its own cast
     // de-dupe by tx so a followed dev doesn't double-draw
     const seen = new Set();
@@ -12908,7 +12967,7 @@ export default function App() {
       if (seen.has(t.tx)) return false;
       seen.add(t.tx); return true;
     });
-  }, [selected, tradesByToken, showDevTrades, histMarker, traderPrefs, realChartTrades, liveData, chartRealMarkers]);
+  }, [selected, tradesByToken, showDevTrades, histMarker, traderPrefs, realChartTrades, liveData, chartRealMarkers, pinnedTrades]);
 
   // trending button + callout widget — shared between the desktop header row
   // and the mobile chart-tools row (noBox drops the frame on mobile)
