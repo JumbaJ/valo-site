@@ -5221,8 +5221,11 @@ function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phanto
           <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.dim, lineHeight: 1.6, marginBottom: 7 }}>
             All trades now sign instantly with this key — buys land here, sells sell from here. Positions below are this wallet's. Fund it small; sweep back to Phantom anytime.
           </div>
+          <div style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, marginBottom: 5 }}>
+            fund ≥ 0.03 — Solana reserves ~0.002/token account for rent, and buys keep ~0.0065 aside automatically
+          </div>
           <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-            <input value={fundAmt} onChange={(e) => setFundAmt(e.target.value)} inputMode="decimal"
+            <input value={fundAmt} onChange={(e) => setFundAmt(e.target.value)} inputMode="decimal" placeholder="0.05"
               style={{ ...inp, flex: 1, padding: "7px", fontSize: 10.5, textAlign: "center" }} />
             <button disabled={busy || !phantomOk || !(parseFloat(fundAmt) > 0)}
               onClick={() => run(async () => { const r = await onFund(parseFloat(fundAmt)); if (!r.ok) throw new Error(r.err); })}
@@ -9229,6 +9232,14 @@ export default function App() {
     return h ? h.qty : 0;
   };
 
+  const friendlyTxErr = (m) => {
+    const s = String(m || "");
+    if (/insufficient funds for rent|InsufficientFundsForRent/i.test(s))
+      return "not enough SOL left for account rent — Solana reserves ~0.002 SOL per new token account plus fees. Lower the size or add ~0.01 SOL.";
+    if (/insufficient lamports|insufficient funds/i.test(s))
+      return "not enough SOL in this wallet for that size + fees.";
+    return s;
+  };
   const quoteRealOrder = async (token, side, size) => {
     if (!onchain.enabled || !wallet || !wallet.address || !token || !token.liveMint) return;
     const SOLM = "So11111111111111111111111111111111111111112";
@@ -9252,6 +9263,17 @@ export default function App() {
       q = fullExit ? `&amountRaw=${h.raw}` : `&amountUi=${qty}`;
       label = `${fmtQty(qty)} ${token.sym}${fullExit ? " (all)" : ""}`;
     } else {
+      const SOL_RESERVE = 0.0065;   // rent (ATA + temp wSOL) + fees + wallet floor
+      const bal = (walletChain && walletChain.sol) || 0;
+      const spendable = Math.max(0, bal - SOL_RESERVE);
+      if (bal > 0 && size > spendable) {
+        if (spendable <= 0.0005) {
+          setRealOrder({ stage: "error", token, side, msg:
+            `not enough SOL for a buy — Solana needs ~${SOL_RESERVE} kept aside for account rent + fees. Add SOL to this wallet (it holds ${bal.toFixed(4)}).` });
+          return;
+        }
+        size = +spendable.toFixed(4);   // clamp instead of letting simulation fail
+      }
       const amount = Math.floor(size * 1e9);
       if (!(amount > 0)) return;
       q = `&amount=${amount}`;
@@ -9503,7 +9525,7 @@ export default function App() {
         } catch (e) {}
         return { ok: true, sig, qty, sol, confirmed: !!(landed && landed.ok) };
       } catch (e) {
-        return { ok: false, err: String((e && e.message) || e) };
+        return { ok: false, err: friendlyTxErr((e && e.message) || e) };
       }
     };
     // serialize — one real order in flight at a time, always
@@ -9785,7 +9807,7 @@ export default function App() {
         }
       } catch (e) {}
     } catch (e) {
-      setRealOrder({ ...o, stage: "error", msg: String(e.message || e) });
+      setRealOrder({ ...o, stage: "error", msg: friendlyTxErr(e.message || e) });
     }
   };
 
@@ -13198,9 +13220,12 @@ export default function App() {
     const mChainHeld = mLive ? chainHeldOf(selected) : 0;
     const mChainSol = (walletChain && walletChain.sol) || 0;
     const mBuySize = Math.min(a, onchain.maxSol || 0);
+    const mSpendable = Math.max(0, mChainSol - 0.0065);
     const mBuyBad = pay !== "SOL" ? "switch unit to SOL"
       : !(mBuySize > 0) ? "set an amount"
-      : (mChainSol > 0 && mBuySize > mChainSol) ? `wallet holds ${mChainSol.toFixed(3)} SOL` : null;
+      : (mChainSol > 0 && mBuySize > mSpendable)
+        ? (mSpendable > 0.0005 ? `max ${mSpendable.toFixed(4)} (rent+fees reserved)` : `add SOL — ~0.0065 needed for rent+fees`)
+        : null;
     // the sell chips set a %; live sells apply it to the real balance
     const mSellPct = pctSel && pctSel.side === "sell" ? pctSel.p : 100;
     const mSellQty = mChainHeld > 0 ? mChainHeld * (mSellPct / 100) : 0;
