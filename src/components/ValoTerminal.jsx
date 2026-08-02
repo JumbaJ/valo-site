@@ -9294,6 +9294,7 @@ export default function App() {
   };
   const quoteRealOrder = async (token, side, size, opts = {}) => {
     const owner = opts.owner || tradeAddr;
+    const fullExit = !!opts.fullExit;
     if (!onchain.enabled || !walletReady || !token || !token.liveMint) return;
     if (turboLockedButPresent && (!opts.owner || (turbo && opts.owner === turbo.pubkey))) {
       setRealOrder({ stage: "error", token, side, msg:
@@ -9338,12 +9339,12 @@ export default function App() {
       label = `${size} SOL`;
     }
 
-    setRealOrder({ stage: "quoting", token, side, size, label, owner });
+    setRealOrder({ stage: "quoting", token, side, size, label, owner, fullExit });
     try {
       const r = await fetch(`/api/swap?mode=quote&inputMint=${inputMint}&outputMint=${outputMint}${q}&slippageBps=100`);
       const j = await r.json();
       if (!r.ok || j.error) { setRealOrder({ stage: "error", token, side, size, label, msg: j.error || "no route" }); return; }
-      setRealOrder({ stage: "review", token, side, size, label, quote: j.quote, inputMint, outputMint, q, owner });
+      setRealOrder({ stage: "review", token, side, size, label, quote: j.quote, inputMint, outputMint, q, owner, fullExit });
     } catch (e) {
       setRealOrder({ stage: "error", token, side, size, label, msg: String(e.message || e) });
     }
@@ -9717,7 +9718,7 @@ export default function App() {
     if (!h || !h.mint) return;
     quoteRealOrder({ id: "chain-" + h.mint, sym: h.sym || h.mint.slice(0, 5), name: h.name || h.sym || "token",
       liveMint: h.mint, price: h.price || 0, hue: symbolHue(h.sym || "?") }, "sell", h.qty,
-      { owner: h.owner || tradeAddr, raw: h.raw, heldQty: h.qty });
+      { owner: h.owner || tradeAddr, raw: h.raw, heldQty: h.qty, fullExit: true });
   };
   // sell EVERYTHING — one click, ONE Phantom approval. Every sell tx is built
   // first, signed together via signAllTransactions, then landed in sequence.
@@ -9928,9 +9929,14 @@ export default function App() {
         const q2 = o.quote || {};
         const oDec = Number.isInteger(q2.outDecimals) ? q2.outDecimals : 6;
         const estSellSol = (+o.size || 0) * ((o.token.price || 0) / SOL_USD);
+        // on a near-full exit, record the ledger's remaining qty so net → 0
+        // exactly (covers curve sells whose o.size was an estimate)
+        const ledMint = chainLedger.byMint[o.token.liveMint];
+        const sellQty = (o.fullExit && ledMint && ledMint.qty > 0)
+          ? Math.max(+o.size || 0, ledMint.qty) : (+o.size || 0);
         const fill = selling
           ? { at: Date.now(), side: "sell", mint: o.token.liveMint, sym: o.token.sym,
-              qty: +o.size || 0, sol: (+q2.outAmount || 0) / 1e9 || estSellSol, est: !q2.outAmount, sig }
+              qty: sellQty, sol: (+q2.outAmount || 0) / 1e9 || estSellSol, est: !q2.outAmount, sig }
           : { at: Date.now(), side: "buy", mint: o.token.liveMint, sym: o.token.sym,
               qty: (+q2.outAmount || 0) / Math.pow(10, oDec), sol: +o.size || 0, sig };
         if (fill.mint && fill.qty > 0 && fill.sol > 0) recordRealFill({ ...fill, px: (fill.sol * SOL_USD) / fill.qty });
@@ -11868,18 +11874,65 @@ export default function App() {
   // rebuilt from the persistent fills ledger so they survive a refresh/relogin
   const chartRealMarkers = useMemo(() => {
     if (!selected || !selected.liveMint) return [];
-    return (realFills || [])
+    const mine = (realFills || [])
       .filter((f) => f.mint === selected.liveMint && f.qty > 0)
-      .map((f) => ({ t: f.at, side: f.side, price: f.px || (f.qty > 0 ? (f.sol * SOL_USD) / f.qty : 0),
-        p: f.px || 0, amt: f.side === "buy" ? f.sol : f.qty, unit: f.side === "buy" ? "SOL" : f.sym,
-        sym: f.sym, tx: f.sig, real: true }));
-  }, [realFills, selected && selected.liveMint]);
+      .sort((a, b) => (a.at || 0) - (b.at || 0));
+    // walk the fills to compute avg cost & realized P/L at each point — the
+    // same running-basis math the portfolio uses, attached to each marker
+    let qty = 0, costUsd = 0;
+    const supply = (selected.mc > 0 && selected.price > 0) ? selected.mc / selected.price : 0;
+    return mine.map((f) => {
+      const px = f.px || (f.qty > 0 ? (f.sol * SOL_USD) / f.qty : 0);
+      let pnlMoney = null, pnlPct = null, entryAvg = null;
+      if (f.side === "buy") { qty += f.qty; costUsd += f.sol * SOL_USD; }
+      else if (qty > 0) {
+        const avg = costUsd / qty;                 // avg cost USD/token
+        entryAvg = avg;
+        const proceeds = px * Math.min(f.qty, qty);
+        const basis = avg * Math.min(f.qty, qty);
+        pnlMoney = (proceeds - basis) / SOL_USD;   // in SOL, MarkerReceipt scales
+        pnlPct = basis > 0 ? ((proceeds - basis) / basis) * 100 : null;
+        const p2 = Math.min(1, f.qty / qty);
+        costUsd -= costUsd * p2; qty = Math.max(0, qty - f.qty);
+      }
+      return {
+        t: f.at, side: f.side, price: px, p: px,
+        amt: f.side === "buy" ? f.sol : f.qty,
+        unit: f.side === "buy" ? "SOL" : f.sym,
+        sym: f.sym, tx: f.sig, real: true, mine: true,
+        trader: "__me__",
+        fillPrice: px, entry: entryAvg,
+        mc: supply > 0 ? px * supply : (selected.mc || null),   // MC at this fill's price
+        pnlMoney, pnlPct,
+        qtyTokens: f.qty, solValue: f.sol, est: !!f.est,
+      };
+    });
+  }, [realFills, selected && selected.liveMint, selected && selected.mc, selected && selected.price]);
+  // mints just sold to zero — suppress until the chain's cache catches up, so
+  // a stale snapshot can't resurrect a position you already closed
+  const recentlyClosed = useMemo(() => {
+    const net = {};    // mint → net token qty from the ledger
+    const lastSell = {};
+    for (const f of (realFills || [])) {
+      if (!f.mint) continue;
+      net[f.mint] = (net[f.mint] || 0) + (f.side === "buy" ? (f.qty || 0) : -(f.qty || 0));
+      if (f.side === "sell") lastSell[f.mint] = Math.max(lastSell[f.mint] || 0, f.at || 0);
+    }
+    const now = Date.now();
+    const out = new Set();
+    for (const m in net) {
+      // net ≤ 0.5% of the largest buy → effectively flat, and sold recently
+      if (net[m] <= 1e-6 && lastSell[m] && now - lastSell[m] < 90000) out.add(m);
+    }
+    return out;
+  }, [realFills]);
+
   const chainHoldingsLive = useMemo(() => {
     const tHolds = ((walletChain && walletChain.holdings) || []).map((h) => ({ ...h,
       owner: tradeAddr, src: (turbo && tradeAddr === turbo.pubkey) ? "turbo" : "phantom" }));
     const vHolds = ((walletVault && walletVault.holdings) || []).map((h) => ({ ...h,
       owner: vaultAddr, src: "phantom" }));
-    const holds = [...tHolds, ...vHolds];
+    const holds = [...tHolds, ...vHolds].filter((h) => !recentlyClosed.has(h.mint));
     return holds.map((h) => {
       const card = (tokens || []).find((t) => t.liveMint === h.mint);
       const price = (card && card.price > 0) ? card.price : (h.price || 0);
@@ -11892,7 +11945,7 @@ export default function App() {
         avgCostUsd: q > 0 ? basisUsd / q : null,
         pnlUsd, pnlPct: basisUsd > 0 ? (pnlUsd / basisUsd) * 100 : null };
     });
-  }, [walletChain, walletVault, tokens, chainLedger, tradeAddr, vaultAddr]);
+  }, [walletChain, walletVault, tokens, chainLedger, tradeAddr, vaultAddr, recentlyClosed]);
   // 🧾 combined chain — the portfolio's truth: both wallets, one book
   const combinedChain = useMemo(() => {
     if (!walletChain) return null;
