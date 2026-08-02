@@ -4752,13 +4752,13 @@ function AutoTraderPanel({ wide = false, solBalance = 0, valoWallet = 0, positio
           botLock={botLock} onStageSide={onStageSide} onArmPair={onArmPair}
           dragSetOn={dragSetOn} onToggleDragSet={onToggleDragSet} onDraftLevel={onDraftLevel}
           onSetDragSet={onSetDragSet} onLinesChange={onLinesChange} onReadyArm={onReadyArm}
-          solBalance={dispSol} valoWallet={dispValo}
+          solBalance={solBalance} valoWallet={valoWallet}
           editBot={editBot && editBot.vt ? editBot : null} />
       ) : (
       <TradePanel key={editingBotId || "new"} token={token} amount={amount} setAmount={setAmount} pay={pay} wide={wide}
         onExecute={onExecute} onDraftLevel={onDraftLevel} editBot={editBot} onRelaunch={onRelaunch} botLock={botLock}
         dragSetOn={dragSetOn} onToggleDragSet={onToggleDragSet} setPay={setPay} onReadyArm={onReadyArm}
-        solBalance={dispSol} valoWallet={dispValo} onOpenSearch={onOpenSearch} />
+        solBalance={solBalance} valoWallet={valoWallet} onOpenSearch={onOpenSearch} />
       )}
     </div>
     <div style={wide ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, alignItems: "start" } : undefined}>
@@ -12379,14 +12379,15 @@ export default function App() {
       const t = tokens.find((x) => String(x.id) === String(o.tokenId));
       if (!t) return;
       if (o.side === "buy") {
-        const goReal = liveAuto && liveData && onchain.enabled && wallet && wallet.address && o.pay === "SOL" && t.liveMint;
+        const goReal = liveAuto && liveData && onchain.enabled && walletReady && !turboLockedButPresent && o.pay === "SOL" && t.liveMint;
         if (liveData && !goReal) {
           // LIVE SITE, but this order can't fire real (automation disarmed, no
           // wallet, or no route). It does NOT fall back to paper — the live
           // site never writes a paper fill. Refund the arm escrow and say why.
           refundEscrow(o.amt, o.pay);
           const why = !liveAuto ? "live automation is disarmed (🤖 AUTO on the trade bar)"
-            : !(wallet && wallet.address) ? "no wallet connected"
+            : turboLockedButPresent ? "⚡ turbo wallet is locked — unlock it with your PIN so bots can sign"
+            : !walletReady ? "no wallet — set up ⚡ turbo or connect Phantom"
             : o.pay !== "SOL" ? "live orders are SOL-only"
             : "this token has no live route";
           pushNotif({ type: "system", user: null, tokenId: t.id,
