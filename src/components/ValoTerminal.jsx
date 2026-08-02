@@ -4720,13 +4720,13 @@ function AutoTraderPanel({ wide = false, solBalance = 0, valoWallet = 0, positio
           botLock={botLock} onStageSide={onStageSide} onArmPair={onArmPair}
           dragSetOn={dragSetOn} onToggleDragSet={onToggleDragSet} onDraftLevel={onDraftLevel}
           onSetDragSet={onSetDragSet} onLinesChange={onLinesChange} onReadyArm={onReadyArm}
-          solBalance={solBalance} valoWallet={valoWallet}
+          solBalance={dispSol} valoWallet={dispValo}
           editBot={editBot && editBot.vt ? editBot : null} />
       ) : (
       <TradePanel key={editingBotId || "new"} token={token} amount={amount} setAmount={setAmount} pay={pay} wide={wide}
         onExecute={onExecute} onDraftLevel={onDraftLevel} editBot={editBot} onRelaunch={onRelaunch} botLock={botLock}
         dragSetOn={dragSetOn} onToggleDragSet={onToggleDragSet} setPay={setPay} onReadyArm={onReadyArm}
-        solBalance={solBalance} valoWallet={valoWallet} onOpenSearch={onOpenSearch} />
+        solBalance={dispSol} valoWallet={dispValo} onOpenSearch={onOpenSearch} />
       )}
     </div>
     <div style={wide ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, alignItems: "start" } : undefined}>
@@ -5782,12 +5782,9 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   liveMode = false, chainFills = [], chainLedger = { byMint: {}, realizedSol: 0 } }) {
   const bestCalloutPeak = Object.values(myCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0);
   const mask = (s) => (hideBalance ? "••••••" : s);
-  // ⛓/📝 equity view — chain view exists only when live mode is on AND a wallet
-  // is actually connected with data. On the demo site this stays paper, always.
-  const chainAvail = !!(liveMode && wallet && wallet.address && walletChain);
-  const [eqView, setEqView] = useState("paper");
-  const chainOn = chainAvail && eqView === "chain";
-  useEffect(() => { if (!chainAvail && eqView !== "paper") setEqView("paper"); }, [chainAvail]);
+  // ⛓/📝 the SITE decides the wallet. Live mode = on-chain, demo = paper.
+  // No toggle: the two books never appear on the same screen, ever.
+  const chainOn = !!(liveMode && wallet && wallet.address && walletChain);
   const chSol = (walletChain && walletChain.sol) || 0;
   const chTokensUsd = (walletChain && walletChain.tokensUsd) || 0;
   const chCount = (walletChain && walletChain.holdingsCount) || 0;
@@ -5889,71 +5886,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
     <>
     <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14, marginTop: 12, position: "relative", overflow: "hidden" }}>
       {/* PHANTOM GATE — funds stay blurred until the user's own wallet is in */}
-      {walletConnected && wallet && (
-        <div style={{ border: `1px solid ${wallet.verified ? T.green + "66" : T.border2}`, borderRadius: 11,
-          background: wallet.verified ? "rgba(22,199,132,0.06)" : "rgba(255,255,255,0.02)",
-          padding: "9px 11px", marginBottom: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 13 }}>👻</span>
-            <a href={`https://solscan.io/account/${wallet.address}`} target="_blank" rel="noopener noreferrer"
-              style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: T.text, textDecoration: "none" }}>
-              {wallet.address.slice(0, 4)}…{wallet.address.slice(-4)}
-            </a>
-            {wallet.verified && (
-              <span title="You signed a message proving you hold this wallet"
-                style={{ fontFamily: T.mono, fontSize: 7, fontWeight: 900, letterSpacing: 1, color: T.green,
-                  border: `1px solid ${T.green}66`, borderRadius: 5, padding: "1px 5px" }}>✓ VERIFIED</span>
-            )}
-            <button onClick={onDisconnectWallet}
-              style={{ marginLeft: "auto", border: `1px solid ${T.border2}`, background: "transparent",
-                color: T.faint, borderRadius: 7, padding: "3px 8px", cursor: "pointer",
-                fontFamily: T.mono, fontSize: 8.5 }}>DISCONNECT</button>
-          </div>
-          {walletChain && (
-            <div style={{ display: "flex", gap: 12, marginTop: 6, fontFamily: T.mono, fontSize: 9, color: T.dim }}>
-              <span>ON-CHAIN <b style={{ color: T.text }}>{walletChain.sol != null ? walletChain.sol.toFixed(3) : "—"} SOL</b></span>
-              <span>TOKENS <b style={{ color: T.text }}>{fmt$(walletChain.tokensUsd || 0)}</b></span>
-              <span style={{ color: T.faint }}>{walletChain.holdingsCount || 0} positions</span>
-            </div>
-          )}
-          {walletChain && (walletChain.holdings || []).length > 0 && (
-            <>
-              <div onClick={() => setChainOpen((v) => !v)}
-                style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 7, cursor: "pointer",
-                  fontFamily: T.mono, fontSize: 8, letterSpacing: 1, color: T.faint }}>
-                <span style={{ textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
-                  {chainOpen ? "▴" : "▾"} REAL HOLDINGS · {walletChain.holdingsCount}
-                </span>
-                <span style={{ marginLeft: "auto", color: T.faint }}>live · refreshes every 30s</span>
-              </div>
-              {chainOpen && (
-                <div style={{ maxHeight: 190, overflowY: "auto", marginTop: 5 }}>
-                  {(walletChain.holdings || []).map((h) => (
-                    <div key={h.mint}
-                      onClick={() => { if (onOpenByMintChain) onOpenByMintChain(h.mint); }}
-                      title={h.sym ? `Open the $${h.sym} chart` : h.mint}
-                      style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 7px", marginTop: 3,
-                        border: `1px solid ${T.border}`, borderRadius: 8, background: "#0a0d13",
-                        cursor: onOpenByMintChain ? "pointer" : "default" }}>
-                      <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900,
-                        color: accent(symbolHue(h.sym || "?")) }}>${h.sym || h.mint.slice(0, 4)}</span>
-                      <span style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, flex: 1, minWidth: 0,
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtQty(h.qty)}</span>
-                      <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, color: T.text }}>{fmt$(h.usd)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 7, lineHeight: 1.5,
-            borderTop: `1px solid ${T.border}`, paddingTop: 6 }}>
-            <b style={{ color: T.dim }}>These are your real wallet holdings</b>, shown live and read-only.
-            They are separate from your VALO paper balance below — VALO can't move your funds
-            and never asks for a transaction.
-          </div>
-        </div>
-      )}
+      {/* wallet identity lives in the pill under the username — no header box */}
       {!walletConnected && (
         <div style={{ position: "absolute", inset: 0, zIndex: 6, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: 20,
           background: "rgba(10,13,19,0.35)", backdropFilter: "blur(2px)" }}>
@@ -6023,6 +5956,23 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           ⏳ {nameErr} · tap to dismiss
         </div>
       )}
+      {walletConnected && wallet && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, paddingBottom: 10,
+          borderBottom: `1px solid ${T.border}`, flexWrap: "wrap" }}>
+          <a href={`https://solscan.io/account/${wallet.address}`} target="_blank" rel="noopener noreferrer"
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, fontFamily: T.mono, fontSize: 8.5,
+              fontWeight: 800, color: T.dim, textDecoration: "none", border: `1px solid ${T.border}`,
+              borderRadius: 999, padding: "2px 9px", background: "rgba(255,255,255,0.02)" }}>
+            👻 {wallet.address.slice(0, 4)}…{wallet.address.slice(-4)}
+            {wallet.verified && <span style={{ color: T.green, fontSize: 7.5 }}>✓</span>}
+          </a>
+          <button onClick={onDisconnectWallet}
+            style={{ border: `1px solid ${T.border}`, background: "transparent", color: T.faint,
+              borderRadius: 999, padding: "2px 9px", cursor: "pointer", fontFamily: T.mono,
+              fontSize: 8, fontWeight: 800, letterSpacing: 0.5 }}>DISCONNECT</button>
+          <span style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, marginLeft: "auto" }}>read-only · refreshes 30s</span>
+        </div>
+      )}
       {/* social row — followers / following, both open the lists */}
       <div style={{ display: "flex", gap: 16, marginBottom: 10, fontFamily: T.mono, fontSize: 10.5 }}>
         <span onClick={() => onOpenFollowList && onOpenFollowList("followers")} style={{ cursor: "pointer", color: T.dim }}>
@@ -6037,15 +5987,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           <button key={k} onClick={() => setTab(k)}
             style={{ ...chip(tab === k), flex: 1, textAlign: "center", padding: "7px", fontSize: 11 }}>{l}</button>
         ))}
-        {chainAvail && (
-          <button onClick={() => setEqView((v) => (v === "paper" ? "chain" : "paper"))}
-            title={chainOn ? "Showing your on-chain wallet — tap for paper" : "Showing paper — tap for your on-chain wallet"}
-            style={{ ...chip(chainOn), flex: "0 0 auto", padding: "7px 10px", fontSize: 11,
-              color: chainOn ? T.amber : T.faint, borderColor: chainOn ? `${T.amber}66` : T.border,
-              background: chainOn ? "rgba(240,185,11,0.1)" : "transparent" }}>
-            {chainOn ? "⛓ LIVE" : "⛓"}
-          </button>
-        )}
+
       </div>
 
       {tab === "wallet" ? (
@@ -6056,16 +5998,10 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               style={{ position: "absolute", right: 0, top: 0, ...chip(false), padding: "3px 8px", fontSize: 11 }}>
               {hideBalance ? "🙈" : "👁"}
             </button>
-            <div onClick={() => chainAvail && setEqView((v) => (v === "paper" ? "chain" : "paper"))}
-              title={chainAvail ? "Tap to switch between VALO paper equity and your on-chain wallet" : undefined}
-              style={{ cursor: chainAvail ? "pointer" : "default", userSelect: "none", WebkitTapHighlightColor: "transparent" }}>
+            <div style={{ userSelect: "none" }}>
               <div style={{ fontFamily: T.mono, fontSize: 9, color: chainOn ? T.amber : T.faint, letterSpacing: 1,
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                {chainOn ? "⛓ ON-CHAIN WALLET" : "TOTAL EQUITY"}
-                {chainAvail && (
-                  <span style={{ fontSize: 7, color: T.faint, border: `1px solid ${T.border}`, borderRadius: 5,
-                    padding: "1px 5px" }}>{chainOn ? "tap for paper" : "tap for on-chain"}</span>
-                )}
+                {chainOn ? "⛓ ON-CHAIN WALLET" : liveMode ? "⛓ ON-CHAIN WALLET" : "TOTAL EQUITY"}
               </div>
               {chainOn ? (
                 <>
@@ -6075,6 +6011,11 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                   <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 700, color: T.dim }}>
                     {mask(`${chSol.toFixed(3)} SOL + ${chCount} token${chCount === 1 ? "" : "s"} · read-only`)}
                   </div>
+                </>
+              ) : liveMode ? (
+                <>
+                  <div style={{ fontFamily: T.mono, fontSize: 22, fontWeight: 800, color: T.faint }}>$—</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 700, color: T.dim }}>connect Phantom to see your on-chain wallet</div>
                 </>
               ) : (
                 <>
@@ -6092,15 +6033,20 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           {/* balance breakdown */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
             <div style={{ background: "#0c0f16", border: `1px solid ${chainOn ? `${T.amber}55` : T.border}`, borderRadius: 9, padding: "8px 10px" }}>
-              <div style={{ fontFamily: T.mono, fontSize: 8.5, color: chainOn ? T.amber : T.faint }}>{chainOn ? "⛓ SOL · ON-CHAIN" : "SOL BALANCE"}</div>
-              <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>{mask(chainOn ? chSol.toFixed(3) : solBalance.toFixed(2))}</div>
-              <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{mask(`$${((chainOn ? chSol : solBalance) * SOL_USD).toFixed(0)}`)}</div>
+              <div style={{ fontFamily: T.mono, fontSize: 8.5, color: (chainOn || liveMode) ? T.amber : T.faint }}>{(chainOn || liveMode) ? "⛓ SOL · ON-CHAIN" : "SOL BALANCE"}</div>
+              <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>{mask(chainOn ? chSol.toFixed(3) : liveMode ? "—" : solBalance.toFixed(2))}</div>
+              <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{mask(chainOn ? `$${(chSol * SOL_USD).toFixed(0)}` : liveMode ? "connect wallet" : `$${(solBalance * SOL_USD).toFixed(0)}`)}</div>
             </div>
             {chainOn ? (
               <div style={{ background: "#0c0f16", border: `1px solid ${T.amber}55`, borderRadius: 9, padding: "8px 10px" }}>
                 <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.amber }}>⛓ TOKENS · ON-CHAIN</div>
                 <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>{mask(`$${chTokensUsd.toFixed(0)}`)}</div>
                 <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{mask(`${chCount} position${chCount === 1 ? "" : "s"}`)}</div>
+              </div>
+            ) : liveMode ? (
+              <div style={{ background: "#0c0f16", border: `1px dashed ${T.amber}44`, borderRadius: 9, padding: "8px 10px" }}>
+                <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.amber }}>⛓ TOKENS · ON-CHAIN</div>
+                <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 700, color: T.faint }}>connect wallet</div>
               </div>
             ) : (
               <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: "8px 10px" }}>
@@ -6110,13 +6056,8 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               </div>
             )}
           </div>
-          {chainOn && (
-            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, margin: "-4px 0 10px", lineHeight: 1.5 }}>
-              Live from your connected wallet, read-only. Deposits, withdrawals, swaps and rewards below are paper features — they never touch these funds.
-            </div>
-          )}
-
-          {/* epoch rewards banner — last hour + all-time earned + jump to claim */}
+          {/* epoch rewards banner — PAPER feature, never on the live site */}
+          {!liveMode && (
           <div style={{ background: "linear-gradient(120deg, rgba(240,185,11,0.08), rgba(125,92,240,0.06))", border: "1px solid rgba(240,185,11,0.3)", borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <span style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 800, letterSpacing: 1, color: T.amber }}>🎁 EPOCH REWARDS</span>
@@ -6136,6 +6077,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               </div>
             </div>
           </div>
+          )}
           {chainOn ? (
             <div style={{ background: "#0c0f16", border: `1px solid ${T.amber}44`, borderRadius: 9, padding: "8px 10px", marginBottom: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 10.5 }}>
@@ -6166,7 +6108,9 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                       fontFamily: T.mono, fontSize: 9.5, marginTop: 6, paddingTop: 6, borderTop: `1px solid ${T.border}`,
                       cursor: onOpenByMintChain ? "pointer" : "default" }}>
                     <span style={{ color: T.text, fontWeight: 700, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {h.sym || h.mint.slice(0, 5)} <span style={{ color: T.faint, fontWeight: 400 }}>{fmtQty(h.qty)}</span>
+                      ${h.sym || h.name || h.mint.slice(0, 5)}
+                      {h.name && h.sym && h.name !== h.sym && <span style={{ color: T.faint, fontWeight: 400, fontSize: 8 }}> {h.name.slice(0, 16)}</span>}
+                      <span style={{ color: T.faint, fontWeight: 400 }}> {fmtQty(h.qty)}</span>
                     </span>
                     <span style={{ flex: "0 0 auto", display: "flex", gap: 8 }}>
                       {pnl != null && <b style={{ color: pnl >= 0 ? T.green : T.red }}>{mask(`${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}`)}</b>}
@@ -6181,7 +6125,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                 </div>
               )}
             </div>
-          ) : (
+          ) : liveMode ? null : (
           <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: "8px 10px", marginBottom: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 10.5 }}>
               <span style={{ color: T.faint }}>IN LIVE TRADES · {fmtQty(Object.entries(positions || {}).reduce((s, [id, p]) => { const t = (tokens || []).find((x) => String(x.id) === String(id)); return t && p.amt > 0 ? s + posTokenQty(t, p) : s; }, 0))} tokens</span>
@@ -6199,6 +6143,9 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           )}
       {botsSlot}
       {heldSlot}
+          {/* deposit / withdraw / swap — PAPER machinery. On the live site the
+              wallet IS Phantom; funds move only through real signed orders. */}
+          {!liveMode && (<>
           {/* deposit / withdraw — clicking fills the max you can do, then confirm */}
           <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: 10, marginBottom: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
@@ -6313,6 +6260,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           </div>
 
           {/* bot trades — sold auto-bots live here, not in the Live P/L box */}
+          </>)}
           {(botHistory || []).length > 0 && (
             <div style={{ marginTop: 10 }}>
               <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1, marginBottom: 7 }}>🤖 BOT TRADES · tap for full stats</div>
@@ -6333,6 +6281,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               </div>
             </div>
           )}
+          {!liveMode && (<>
           {/* activity feed — token, amount, PnL if sold, all on one bar, solscan link */}
           <div style={{ marginTop: 10 }}>
             <div onClick={() => onOpenActivity && onOpenActivity()} title="Open every trade — searchable and sortable"
@@ -6380,6 +6329,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               </div>
             )}
           </div>
+          </>)}
         </>
       ) : chainOn ? (
         <>
@@ -10491,6 +10441,10 @@ export default function App() {
   const [wallet, setWallet] = useState(null);        // { address, verified }
   const [walletBusy, setWalletBusy] = useState(false);
   const [walletChain, setWalletChain] = useState(null); // real on-chain balances
+  // what trading surfaces DISPLAY as balance. On the live site paper numbers
+  // never appear — connected shows the real wallet, unconnected shows zero.
+  const dispSol = liveData ? ((wallet && wallet.address && walletChain && walletChain.sol) || 0) : solBalance;
+  const dispValo = liveData ? 0 : valoWallet;
 
   const getProvider = () => {
     if (typeof window === "undefined") return null;
@@ -11046,6 +11000,12 @@ export default function App() {
 
   // core execute — marker always lands on the live candle at fill price
   const execute = (t, o, spot) => {
+    if (liveData) {
+      // the live site does not write paper trades — the last door is closed.
+      pushNotif({ type: "system", user: null, tokenId: t && t.id,
+        text: "⛓ this is the live site — trades here are real. Connect Phantom to trade; paper trading lives on the demo site." });
+      return;
+    }
     TestLog.push("order", { sym: t && t.sym, side: o.side, mode: o.mode, amt: o.amt, pay: o.pay, px: t && t.price });
     // AUTO STRATEGY = a bot, full stop. It arms at the user's buy-in price and
     // fills only when the market reaches it — never an instant market buy.
@@ -11273,6 +11233,20 @@ export default function App() {
       if (!t) return;
       if (o.side === "buy") {
         const goReal = liveAuto && liveData && onchain.enabled && wallet && wallet.address && o.pay === "SOL" && t.liveMint;
+        if (liveData && !goReal) {
+          // LIVE SITE, but this order can't fire real (automation disarmed, no
+          // wallet, or no route). It does NOT fall back to paper — the live
+          // site never writes a paper fill. Refund the arm escrow and say why.
+          refundEscrow(o.amt, o.pay);
+          const why = !liveAuto ? "live automation is disarmed (🤖 AUTO on the trade bar)"
+            : !(wallet && wallet.address) ? "no wallet connected"
+            : o.pay !== "SOL" ? "live orders are SOL-only"
+            : "this token has no live route";
+          pushNotif({ type: "system", user: null, tokenId: t.id,
+            text: `🤖 bot trigger hit on ${t.sym} but was SKIPPED — ${why}. Nothing was bought.` });
+          sayPrivate({ type: "note", text: `⚠ bot skipped on ${t.sym}: ${why}` });
+          return;
+        }
         if (goReal) {
           // paper escrow goes back — this buy spends REAL SOL from the wallet
           refundEscrow(o.amt, o.pay);
@@ -11326,6 +11300,13 @@ export default function App() {
         // exit leg of a running bot — settle against the run's own book
         const r = botRuns.find((x) => x.id === o.runId && x.status === "live"); if (!r) return;
         const portion = Math.min(o.amt, r.remaining); if (portion <= 0) return;
+        if (liveData && !r.real) {
+          pushNotif({ type: "system", user: null, tokenId: t.id,
+            text: `🤖 a paper-era bot leg on ${r.sym} was retired — the live site doesn't settle paper trades.` });
+          setPendingOrders((P) => P.filter((x) => x.runId !== r.id));
+          setBotRuns((R) => R.map((x) => x.id === r.id ? { ...x, status: "sold" } : x));
+          return;
+        }
         if (r.real) {
           // real run → real sell, proportional in actual tokens
           const frac = Math.min(1, portion / r.amt);
@@ -13241,7 +13222,7 @@ export default function App() {
                   setEditLineReq({ id, level: base ? (isExit ? base.vtSell : base.level) : null, n: Date.now() });
                 }} />
                     ) : ticketTab === "auto" ? (
-                      <AutoTraderPanel onOpenSearch={isMobile ? () => setEcoFull(true) : null} solBalance={solBalance} valoWallet={valoWallet} position={positions[selected.id]} token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
+                      <AutoTraderPanel onOpenSearch={isMobile ? () => setEcoFull(true) : null} solBalance={dispSol} valoWallet={dispValo} position={positions[selected.id]} token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
                         wide
                         dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
                         onStageSide={(m) => setBotSide(m)} onArmPair={armVisualPair}
@@ -13260,7 +13241,7 @@ export default function App() {
                         onChainReady={!!(onchain.enabled && wallet && wallet.address && selected && selected.liveMint)}
                         onChainMax={onchain.maxSol || 0}
                         chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0} autoOn={liveAuto} onToggleAuto={setLiveAuto} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
-                        solBalance={solBalance} valoBalance={valoWallet} position={positions[selected.id]}
+                        solBalance={dispSol} valoBalance={dispValo} position={positions[selected.id]}
                         clickMode={clickMode} setClickMode={setClickMode}
                         realized24={realized24For(selected.sym)}
                         onExecute={(o) => execute(selected, o)} onPosTrade={onPosTrade} />
@@ -13353,7 +13334,7 @@ export default function App() {
                   setEditLineReq({ id, level: base ? (isExit ? base.vtSell : base.level) : null, n: Date.now() });
                 }} />
             ) : selected && ticketTab === "auto" ? (
-              <AutoTraderPanel onOpenSearch={isMobile ? () => setEcoFull(true) : null} solBalance={solBalance} valoWallet={valoWallet} position={positions[selected.id]} token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
+              <AutoTraderPanel onOpenSearch={isMobile ? () => setEcoFull(true) : null} solBalance={dispSol} valoWallet={dispValo} position={positions[selected.id]} token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
                 dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
                 onStageSide={(m) => setBotSide(m)} onArmPair={armVisualPair}
                 onSetDragSet={(v) => setBotDragSet(!!v)} onLinesChange={(l) => setVtLines(l)}
@@ -13377,7 +13358,7 @@ export default function App() {
                 pendingOrders={pendingOrders} onOpenBot={(id) => { setTicketTab("auto"); setEditingBotId(id); }} onCancelBot={cancelBot} onPosTrade={onPosTrade}
                 onDraftLevel={(lvl, tid, side) => setBotDraftLevel(lvl ? { tokenId: tid, level: lvl, side: side || botSide } : null)}
                 realized24={realized24For(selected.sym)}
-                position={positions[selected.id]} solBalance={solBalance} valoBalance={valoWallet}
+                position={positions[selected.id]} solBalance={dispSol} valoBalance={dispValo}
                 positions={positions} tokens={tokens} bestMult={bestMultByToken[selected.id]}
                 onOpenToken={(id) => { setSel(id); setClickMode(null); }}
                 onCloseAll={() => {
@@ -13423,7 +13404,7 @@ export default function App() {
               › COLLAPSE WALLET
             </button>
             <PortfolioPanel big
-              solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
+              solBalance={dispSol} valoWallet={dispValo} positions={positions} tokens={tokens}
               realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
@@ -14329,7 +14310,7 @@ export default function App() {
         incomingReq={friendReqs.includes(profileUser)}
         onAcceptReq={() => { setFriendsList((F) => (F.includes(profileUser) ? F : [...F, profileUser])); setFriendReqs((R) => R.filter((x) => x !== profileUser)); }}
         onDeclineReq={() => setFriendReqs((R) => R.filter((x) => x !== profileUser))}
-        onOpenToken={navigateToToken} solBalance={solBalance} valoWallet={valoWallet}
+        onOpenToken={navigateToToken} solBalance={dispSol} valoWallet={dispValo}
         onSendFunds={(a, unit) => {
           if (unit === "SOL") setSolBalance((b) => b - a); else setValoWallet((v) => v - a);
           setDmLogs((D) => ({ ...D, [profileUser]: [...(D[profileUser] || []), { me: true, text: `💸 sent ${a} ${unit === "SOL" ? "SOL" : "$VALO"}` }] }));
@@ -14435,7 +14416,7 @@ export default function App() {
               editBot={pendingOrders.find((o) => o.id === editingBotId) || null}
               onRelaunch={(id, o) => relaunchBot(id, o, selected)} botLock={botLock}
               dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
-              solBalance={solBalance} valoWallet={valoWallet}
+              solBalance={dispSol} valoWallet={dispValo}
               onDraftLevel={(lvl, tid, side) => setBotDraftLevel(lvl ? { tokenId: tid != null ? tid : selected.id, level: lvl, side: side || botSide } : null)} />
             <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1.5, margin: "12px 0 7px" }}>BOT METRICS · CLOSEST TRIGGER FIRST</div>
             {pendingOrders.length === 0 && <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center", padding: 24 }}>No bots armed yet — arm buy/sell and tap the chart, or use the auto strategy.</div>}
@@ -14972,7 +14953,7 @@ export default function App() {
               <button onClick={() => setPortfolioDrawer(false)} style={{ ...chip(false), padding: "3px 9px" }}>✕</button>
             </div>
             <PortfolioPanel big
-              solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
+              solBalance={dispSol} valoWallet={dispValo} positions={positions} tokens={tokens}
               realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={walletChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
@@ -15020,7 +15001,7 @@ export default function App() {
                 </div>
               ) : null}
               heldSlot={
-                <HeldPositions positions={positions} tokens={tokens} pay={pay} onTrade={onPosTrade} solBalance={solBalance} valoWallet={valoWallet}
+                <HeldPositions positions={positions} tokens={tokens} pay={pay} onTrade={onPosTrade} solBalance={dispSol} valoWallet={dispValo}
                   onOpenToken={(id) => { setSel(id); setClickMode(null); setPortfolioDrawer(false); }}
                   onSellAll={(t) => { const p = positions[t.id]; if (p && p.amt > 0) execute(t, { side: "sell", pay: p.pay, amt: p.amt, mode: "instant", tax: taxFor(p.pay), burn: splitFee(p.amt, p.pay).total, legs: [] }); }}
                   onCloseAll={() => { Object.entries(positions).forEach(([id, p]) => { const tok = tokens.find((x) => x.id === +id); if (tok && p && p.amt > 0) execute(tok, { side: "sell", pay: p.pay, amt: p.amt, mode: "instant", tax: taxFor(p.pay), burn: splitFee(p.amt, p.pay).total, legs: [] }); }); }} />
