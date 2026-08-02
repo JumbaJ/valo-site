@@ -5276,7 +5276,7 @@ function LiveFundsNotice({ sol = 0, compact = false, autoOn = false, onToggleAut
             boxShadow: `0 0 7px ${T.amber}` }} />
           <span style={{ fontFamily: T.mono, fontSize: compact ? 7.5 : 8.5, fontWeight: 800,
             letterSpacing: 0.6, color: T.amber, whiteSpace: "nowrap" }}>
-            LIVE · REAL FUNDS{turboOn ? " · ⚡TURBO" : ""}
+            LIVE · REAL FUNDS{turboOn ? ` · ⚡TURBO ◎${(+sol || 0).toFixed(4)}` : ""}
           </span>
           <span style={{ fontFamily: T.mono, fontSize: compact ? 7 : 7.5, color: T.dim,
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -6133,6 +6133,16 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
             style={{ border: `1px solid ${T.border}`, background: "transparent", color: T.faint,
               borderRadius: 999, padding: "2px 9px", cursor: "pointer", fontFamily: T.mono,
               fontSize: 8, fontWeight: 800, letterSpacing: 0.5 }}>DISCONNECT</button>
+          {turboState && turboState.pubkey && (
+            <a href={`https://solscan.io/account/${turboState.pubkey}`} target="_blank" rel="noopener noreferrer"
+              title="Your Turbo trading wallet — balance live"
+              style={{ display: "inline-flex", alignItems: "center", gap: 5, fontFamily: T.mono, fontSize: 8.5,
+                fontWeight: 800, color: turboSol > 0 ? T.green : T.amber, textDecoration: "none",
+                border: `1px solid ${turboSol > 0 ? "rgba(22,199,132,0.4)" : `${T.amber}55`}`,
+                borderRadius: 999, padding: "2px 9px", background: "rgba(255,255,255,0.02)" }}>
+              ⚡ {turboState.pubkey.slice(0, 4)}…{turboState.pubkey.slice(-4)} · ◎{turboSol.toFixed(4)}
+            </a>
+          )}
           <span style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, marginLeft: "auto" }}>read-only · refreshes 30s</span>
         </div>
       )}
@@ -6164,7 +6174,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
             <div style={{ userSelect: "none" }}>
               <div style={{ fontFamily: T.mono, fontSize: 9, color: chainOn ? T.amber : T.faint, letterSpacing: 1,
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                {chainOn ? "⛓ ON-CHAIN WALLET" : liveMode ? "⛓ ON-CHAIN WALLET" : "TOTAL EQUITY"}
+                {chainOn ? (turboState ? "⚡ TURBO WALLET · ON-CHAIN" : "⛓ ON-CHAIN WALLET") : liveMode ? "⛓ ON-CHAIN WALLET" : "TOTAL EQUITY"}
               </div>
               {chainOn ? (
                 <>
@@ -9444,17 +9454,34 @@ export default function App() {
     try {
       const web3 = await loadWeb3();
       const bal = await (await fetch(`/api/wallet?address=${turbo.pubkey}&t=${Date.now()}`)).json();
-      const lam = Math.floor(((bal && bal.sol) || 0) * 1e9) - 6000;   // keep the fee
-      if (lam <= 0) return { ok: false, err: "nothing to sweep" };
-      const bhx = await getBlockhash();
-      const tx = new web3.Transaction({ feePayer: new web3.PublicKey(turbo.pubkey), recentBlockhash: bhx });
-      tx.add(web3.SystemProgram.transfer({
-        fromPubkey: new web3.PublicKey(turbo.pubkey),
-        toPubkey: new web3.PublicKey(wallet.address),
-        lamports: lam,
-      }));
-      const sig = await turboSignSend(tx);
-      return { ok: true, sig, sol: lam / 1e9 };
+      const balLam = Math.floor(((bal && bal.sol) || 0) * 1e9);
+      // Solana's rule: an account may be emptied to EXACTLY 0, or must keep
+      // the rent-exempt minimum (~0.00089) — anything between is rejected.
+      // Sweep = balance − the 5000-lamport fee → final balance is exactly 0.
+      const FEE = 5000, RENT_MIN = 895000;
+      const attempt = async (lam) => {
+        if (lam <= 0) throw new Error("nothing to sweep");
+        const bhx = await getBlockhash();
+        const tx = new web3.Transaction({ feePayer: new web3.PublicKey(turbo.pubkey), recentBlockhash: bhx });
+        tx.add(web3.SystemProgram.transfer({
+          fromPubkey: new web3.PublicKey(turbo.pubkey),
+          toPubkey: new web3.PublicKey(wallet.address),
+          lamports: lam,
+        }));
+        const sig = await turboSignSend(tx);
+        return { sig, lam };
+      };
+      try {
+        const r1 = await attempt(balLam - FEE);                 // full empty → 0
+        setTurboSolBal(0);
+        return { ok: true, sig: r1.sig, sol: r1.lam / 1e9 };
+      } catch (e) {
+        if (!/rent/i.test(String(e.message || e))) throw e;
+        // stale balance or edge case — leave the rent minimum behind instead
+        const r2 = await attempt(balLam - FEE - RENT_MIN);
+        setTurboSolBal(RENT_MIN / 1e9);
+        return { ok: true, sig: r2.sig, sol: r2.lam / 1e9 };
+      }
     } catch (e) { return { ok: false, err: String(e.message || e) }; }
   };
 
