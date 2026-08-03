@@ -4458,7 +4458,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
               </div>
             ); })()}
             {txShown.filter((x) => !txFilter || (x.t ? x.t.sym : x.sym) === txFilter).map((x, i) => {
-              const xsym = x.t ? xsym : x.sym;
+              const xsym = x.t ? x.t.sym : x.sym;
               const qty = x.qty != null ? x.qty : x.tokQty != null ? x.tokQty : (x.sol * SOL_USD) / ((x.priceAt || (x.t && x.t.price)) || 1);
               const qtyTxt = qty >= 1e6 ? (qty / 1e6).toFixed(1) + "M" : qty >= 1e3 ? (qty / 1e3).toFixed(1) + "K" : qty.toFixed(qty >= 10 ? 0 : 2);
               return (
