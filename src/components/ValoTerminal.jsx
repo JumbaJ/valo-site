@@ -8775,6 +8775,32 @@ export default function App() {
   };
   const closeAllTickets = () => Object.keys(positions).forEach((id) => { const t = tokens.find((x) => String(x.id) === String(id)); if (t) sellPos(t); });
   // VISUAL TRADING pair — buy line + sell-all point, armed as one bot
+  // called after any bot/pair arms in live mode — one clear heads-up, at most
+  // once per session per reason, with the exact step to make triggers fire
+  const armedBotReadyCheck = () => {
+    if (!liveData) return;
+    try {
+      if (!liveAuto) {
+        if (!window.__valoWarnedAuto) {
+          window.__valoWarnedAuto = true;
+          pushNotif({ type: "system", user: null, tokenId: null,
+            text: "🤖 Lines armed — but LIVE AUTOMATION is OFF, so triggers will be skipped. Tap the 🤖 AUTO chip on the LIVE·REAL FUNDS bar to arm real auto-fire." });
+        }
+        sayPrivate({ type: "note", text: "⚠ arm 🤖 AUTO (trade bar) or this bot's triggers will skip" });
+      } else if (turboLockedButPresent) {
+        if (!window.__valoWarnedTurboLock) {
+          window.__valoWarnedTurboLock = true;
+          pushNotif({ type: "system", user: null, tokenId: null,
+            text: "⚡ Lines armed — but your TURBO wallet is LOCKED, so triggers can't sign. Unlock it (PIN, portfolio → ⚡ TURBO) so bots can fire." });
+        }
+        sayPrivate({ type: "note", text: "⚠ unlock ⚡ TURBO or this bot's triggers will skip" });
+      } else if (pay !== "SOL") {
+        sayPrivate({ type: "note", text: "⚠ live bots fire in SOL only — flip the unit to $SOL" });
+      } else {
+        sayPrivate({ type: "note", text: "✅ armed & live-ready — triggers will fire real fills through ⚡ TURBO" });
+      }
+    } catch (e) {}
+  };
   const armVisualPair = ({ buy, sell, amt: a, trail, editId = null }) => {
     if (!selected || !(buy > 0) || !(sell > 0) || !(a > 0)) return;
     const oldB = editId ? pendingOrders.find((x) => x.id === editId) : null;
@@ -8786,6 +8812,7 @@ export default function App() {
     if (editId) setEditingBotId(null);
     setBotDraftLevel(null); setBotDragSet(false); setVtLines(null);
     sayPrivate({ type: "note", text: `👁 visual pair armed — BUY ${a} ${pay} @ $${fmtP(buy)} → SELL ALL @ $${fmtP(sell)}${trail > 0 ? ` (trail ${trail}%)` : ""}` });
+    armedBotReadyCheck();
   };
   // PC drag-set double-click: arms a bot at that level instantly — no ARM press,
   // and as many as you like
@@ -12261,6 +12288,7 @@ export default function App() {
       const legs = (o.legs || []).filter((l) => l.mult > 1 && l.alloc > 0);
       const tp = !legs.length && o.legs && o.legs[0] && o.legs[0].mult > 1 ? o.legs[0].mult : null;
       setPendingOrders((P) => [...P, { id: Date.now() + Math.random(), tokenId: t.id, side: "buy", level: lvl, dir, amt: o.amt, pay: o.pay, tax: o.tax, stopLoss: parseFloat(o.stopLoss) > 0 ? lvl * (1 - parseFloat(o.stopLoss) / 100) : null, tpMult: tp, legs, ts: Date.now() }]);
+      armedBotReadyCheck();
       sayPrivate({ type: "note", text: `🤖 auto strategy armed — BUY ${o.amt} ${o.pay} on ${t.sym} waits @ $${fmtP(lvl)}${o.stopLoss > 0 ? ` · SL $${fmtP(o.stopLoss)}` : ""}${tp ? ` · TP ${tp}×` : ""}` });
       return;
     }
@@ -12437,6 +12465,7 @@ export default function App() {
     const lvl = level != null && isFinite(level) && level > 0 ? level : selected.price;
     const dir = lvl <= selected.price ? -1 : 1; // -1 fills when price falls to level, +1 when it rises
     setPendingOrders((P) => [...P, { id: Date.now() + Math.random(), tokenId: selected.id, side, level: lvl, dir, amt, pay, tax, stopLoss: null, tpMult: null, ts: Date.now() }]);
+    armedBotReadyCheck();
     sayPrivate({ type: "note", text: `🤖 bot armed — ${side.toUpperCase()} ${amt} ${pay} on ${selected.sym} @ $${fmtP(lvl)} · fills only when price hits the marker` });
   };
 
