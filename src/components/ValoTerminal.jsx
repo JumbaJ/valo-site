@@ -6210,7 +6210,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
     <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14, marginTop: 12, position: "relative", overflow: "hidden" }}>
       {/* PHANTOM GATE — funds stay blurred until the user's own wallet is in */}
       {/* wallet identity lives in the pill under the username — no header box */}
-      {!walletConnected && (
+      {!walletConnected && !liveMode && (
         <div style={{ position: "absolute", inset: 0, zIndex: 6, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: 20,
           background: "rgba(10,13,19,0.35)", backdropFilter: "blur(2px)" }}>
           <div style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, letterSpacing: 1.5, color: T.text }}>🔒 CONNECT TO UNLOCK</div>
@@ -6225,7 +6225,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           <div style={{ fontFamily: T.mono, fontSize: 7, color: T.faint }}>DEMO · real Phantom hookup goes live at mainnet</div>
         </div>
       )}
-      <div style={!walletConnected ? { filter: "blur(9px)", pointerEvents: "none", userSelect: "none" } : undefined}>
+      <div style={!walletConnected && !liveMode ? { filter: "blur(9px)", pointerEvents: "none", userSelect: "none" } : undefined}>
       {/* username row */}
       {username && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${T.border}` }}>
@@ -6279,9 +6279,10 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           ⏳ {nameErr} · tap to dismiss
         </div>
       )}
-      {walletConnected && wallet && (
+      {((walletConnected && wallet) || (turboState && turboState.pubkey)) && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, paddingBottom: 10,
           borderBottom: `1px solid ${T.border}`, flexWrap: "wrap" }}>
+          {walletConnected && wallet && (<>
           <a href={`https://solscan.io/account/${wallet.address}`} target="_blank" rel="noopener noreferrer"
             style={{ display: "inline-flex", alignItems: "center", gap: 5, fontFamily: T.mono, fontSize: 8.5,
               fontWeight: 800, color: T.dim, textDecoration: "none", border: `1px solid ${T.border}`,
@@ -6293,6 +6294,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
             style={{ border: `1px solid ${T.border}`, background: "transparent", color: T.faint,
               borderRadius: 999, padding: "2px 9px", cursor: "pointer", fontFamily: T.mono,
               fontSize: 8, fontWeight: 800, letterSpacing: 0.5 }}>DISCONNECT</button>
+          </>)}
           {turboState && turboState.pubkey && (
             <a href={`https://solscan.io/account/${turboState.pubkey}`} target="_blank" rel="noopener noreferrer"
               title="Your Turbo trading wallet — balance live"
