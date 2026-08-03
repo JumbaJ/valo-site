@@ -11617,11 +11617,21 @@ export default function App() {
     if (!liveData) return;
     let stop = false;
     const load = async () => {
-      // primary: our own cached serverless API (GeckoTerminal upstream, keyless)
+      // primary: our own cached serverless API — THREE feeds in parallel so the
+      // first screen is rich and varied even when trending is one token's pools
       try {
-        const r = await fetch("/api/tokens");
+        const rs = await Promise.allSettled([
+          fetch("/api/tokens"), fetch("/api/tokens?feed=new"), fetch("/api/tokens?feed=top"),
+        ]);
+        const arrs = [];
+        for (const rr of rs) {
+          if (rr.status === "fulfilled" && rr.value.ok) {
+            try { const a = await rr.value.json(); if (Array.isArray(a)) arrs.push(a); } catch (e) {}
+          }
+        }
+        const r = { ok: arrs.length > 0 };
         if (r.ok) {
-          const arr0 = await r.json();
+          const arr0 = [].concat(...arrs);
           // boot list: one row per token, no broken-FDV pools
           const seenM = new Set(); const arr = [];
           for (const x of (Array.isArray(arr0) ? arr0 : [])) {
@@ -11629,7 +11639,7 @@ export default function App() {
             const k = x.mint || x.id; if (seenM.has(k)) continue; seenM.add(k); arr.push(x);
           }
           if (!stop && Array.isArray(arr) && arr.length) {
-            const mapped = arr.slice(0, 14).map((x) => ({
+            const mapped = arr.slice(0, 24).map((x) => ({
               sym: (x.sym || "???").toUpperCase().slice(0, 10), name: x.name || "live token",
               price: +x.price || 0, mc: +x.mc || 0, tvl: +x.tvl || 0,
               img: x.img || null, pool: x.id, mint: x.mint || null,
@@ -11639,6 +11649,36 @@ export default function App() {
               buys: +x.buys || 0, sells: +x.sells || 0, vol24: +x.vol24 || 0,
             }));
             liveArrRef.current = mapped;
+            // adopted/live token objects refresh straight from the feed rows
+            const byPoolRow = new Map(mapped.map((lv) => [lv.pool, lv]));
+            setTokens((Ts) => Ts.map((t3) => {
+              const row = t3.pool && byPoolRow.get(t3.pool);
+              return row ? { ...t3, price: row.price || t3.price, mc: row.mc || t3.mc, tvl: row.tvl || t3.tvl,
+                ch24: row.ch24 != null ? row.ch24 : t3.ch24, ch: row.ch != null ? row.ch : t3.ch,
+                buys: row.buys || t3.buys, sells: row.sells || t3.sells, vol24: row.vol24 || t3.vol24 } : t3;
+            }));
+            // 🔄 anything with a pool NOT in this feed batch (watchlist tokens,
+            // adopted cards that fell off trending) refreshes via multi-pool
+            const stale = (tokensRef.current || []).filter((t3) => t3.pool && !byPoolRow.has(t3.pool)).map((t3) => t3.pool);
+            if (stale.length) {
+              (async () => {
+                try {
+                  for (let ci = 0; ci < stale.length && ci < 60; ci += 30) {
+                    const r2 = await fetch(`/api/tokens?pools=${encodeURIComponent(stale.slice(ci, ci + 30).join(","))}`);
+                    if (!r2.ok) continue;
+                    const rows = await r2.json();
+                    if (!Array.isArray(rows) || !rows.length) continue;
+                    const m2 = new Map(rows.map((lv) => [lv.id, lv]));
+                    setTokens((Ts) => Ts.map((t3) => {
+                      const row = t3.pool && m2.get(t3.pool);
+                      return row ? { ...t3, price: +row.price || t3.price, mc: +row.mc || t3.mc, tvl: +row.tvl || t3.tvl,
+                        ch24: row.ch24 != null ? +row.ch24 : t3.ch24, ch: row.ch != null ? +row.ch : t3.ch,
+                        buys: +row.buys || t3.buys, sells: +row.sells || t3.sells, vol24: +row.vol24 || t3.vol24 } : t3;
+                    }));
+                  }
+                } catch (e) {}
+              })();
+            }
             // 🔒 bind each pool to ONE card, permanently for this session
             const B = liveBindRef.current;
             for (const lv of mapped) {
@@ -11650,7 +11690,10 @@ export default function App() {
           }
         }
       } catch (e) { /* fall through to DexScreener */ }
-      // fallback: direct DexScreener (local dev without serverless functions)
+      // fallback: direct DexScreener — LOCAL DEV ONLY (no serverless there).
+      // In production a failed fetch just waits for the 15s retry; the old
+      // behavior filled the first screen with pump-search results.
+      if (typeof window !== "undefined" && !/^(localhost|127\.)/.test(window.location.hostname)) return;
       try {
         const r = await fetch("https://api.dexscreener.com/latest/dex/search?q=pump");
         const j = await r.json();

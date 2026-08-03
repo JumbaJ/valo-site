@@ -15,8 +15,13 @@ const FEEDS = {
 export default async function handler(req, res) {
   const page = Math.max(1, Math.min(10, parseInt(req.query.page || "1", 10) || 1));
   const feed = FEEDS[String(req.query.feed || "trending")] ? String(req.query.feed) : "trending";
+  // 🔄 multi-pool price refresh: ?pools=a,b,c → same token shape for exactly
+  // those pools. Keeps watchlists and adopted cards live without full feeds.
+  const pools = String(req.query.pools || "").trim();
   try {
-    const r = await fetch(FEEDS[feed](page), {
+    const r = await fetch(pools
+      ? `${GT}/networks/solana/pools/multi/${encodeURIComponent(pools.split(",").slice(0, 30).join(","))}?include=base_token`
+      : FEEDS[feed](page), {
       headers: { accept: "application/json" },
     });
     if (!r.ok) throw new Error(`GT ${r.status}`);
@@ -77,7 +82,7 @@ export default async function handler(req, res) {
       deduped.push(t);
     }
     out.length = 0; out.push(...deduped);
-    res.setHeader("Cache-Control", feed === "new" ? "s-maxage=8, stale-while-revalidate=20" : "s-maxage=15, stale-while-revalidate=45");
+    res.setHeader("Cache-Control", pools ? "s-maxage=10, stale-while-revalidate=30" : feed === "new" ? "s-maxage=8, stale-while-revalidate=20" : "s-maxage=15, stale-while-revalidate=45");
     res.status(200).json(out);
   } catch (e) {
     res.status(502).json({ error: String(e.message || e) });
