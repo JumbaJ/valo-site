@@ -8273,8 +8273,32 @@ function TraceMini({ candles, hue = 265, h = 88 }) {
 }
 
 function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "72vh", onWatchAdd, tdProps = null }) {
+  // 🍼 live NEW feed: while the NEW filter is on, pull fresh launches straight
+  // from the source every 12s so the list grows in real time
+  const [freshX, setFreshX] = useState([]);
   const [plat, setPlat] = useState("all");        // all | pump | rh (exclusive)
   const [flags, setFlags] = useState({ trend: false, top: false, fresh: false, safe: false, risky: false });
+  useEffect(() => {
+    if (!flags.fresh) return;
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch(`/api/tokens?feed=new&t=${Math.floor(Date.now() / 8000)}`);
+        if (!r.ok) return;
+        const rows = await r.json();
+        if (stop || !Array.isArray(rows)) return;
+        const adopted = rows.filter((x) => (+x.mc || 0) < 1e11).map(adoptMarketToken);
+        setFreshX((F) => {
+          const seen = new Set(F.map((t) => t.liveMint || t.pool));
+          const add = adopted.filter((t) => !seen.has(t.liveMint || t.pool));
+          return add.length ? [...add, ...F].slice(0, 120) : F;
+        });
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 12000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [flags.fresh]);
   const [hov, setHov] = useState(null);
   const [, setTick] = useState(0);
   useEffect(() => { const iv = setInterval(() => setTick((x) => x + 1), 1500); return () => clearInterval(iv); }, []);
@@ -8285,7 +8309,19 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
     return n;
   });
   const ql = q.trim().toLowerCase();
-  let list = tokens.filter((t) => !ql || t.sym.toLowerCase().includes(ql) || (t.name || "").toLowerCase().includes(ql) || (t.ca || "").toLowerCase().includes(ql));
+  // one card per TOKEN: merge candidates and dedupe by mint (a token with
+  // three pools was showing three times)
+  const cand = (() => {
+    const all = [...tokens, ...freshX];
+    const seen = new Map();
+    for (const t of all) {
+      const k = t.liveMint || t.pool || t.id;
+      const prev = seen.get(k);
+      if (!prev || (+t.tvl || 0) > (+prev.tvl || 0)) seen.set(k, t);
+    }
+    return [...seen.values()];
+  })();
+  let list = cand.filter((t) => !ql || t.sym.toLowerCase().includes(ql) || (t.name || "").toLowerCase().includes(ql) || (t.ca || "").toLowerCase().includes(ql));
   if (plat !== "all") list = list.filter((t) => platOf(t) === plat);
   if (flags.trend) list = list.filter(isHotTok);
   if (flags.top) list = list.filter((t) => t.traders > 900);
@@ -8293,7 +8329,9 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
   if (flags.safe) list = list.filter((t) => scoreToken(t) >= 62);
   if (flags.risky) list = list.filter((t) => scoreToken(t) < 50);
   // pump/rh picked with nothing else → trending & movers float first
-  list = [...list].sort((a, b) => (isHotTok(b) ? 1 : 0) - (isHotTok(a) ? 1 : 0) || b.momentum - a.momentum);
+  list = flags.fresh
+    ? [...list].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))   // 🍼 newest launch first, real time
+    : [...list].sort((a, b) => (isHotTok(b) ? 1 : 0) - (isHotTok(a) ? 1 : 0) || b.momentum - a.momentum);
   const fbtn = (on, label, click, col) => (
     <button onClick={click} style={{ ...chip(on), padding: isMobile ? "5px 9px" : "5px 12px", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 900, letterSpacing: 0.5,
       color: on ? (col || VALO_PURPLE) : T.dim, borderColor: on ? `${col || VALO_PURPLE}88` : T.border,
@@ -8424,7 +8462,7 @@ function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, ec
       {eco && open && !isMobile && (
         <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 40, background: T.panel, border: `1px solid ${VALO_PURPLE}55`, borderRadius: 12, boxShadow: "0 26px 70px rgba(0,0,0,0.7)", overflow: "hidden",
           opacity: (typeof window !== "undefined" && window.__valoEcoDim) ? 0.07 : 1, pointerEvents: (typeof window !== "undefined" && window.__valoEcoDim) ? "none" : "auto", transition: "opacity .22s ease" }}>
-          <TokenEcosystem tokens={mktExtra && mktExtra.length ? [...tokens, ...mktExtra.filter((m) => !tokens.some((t) => String(t.pool || "") === String(m.pool)))] : tokens}
+          <TokenEcosystem tokens={mktExtra && mktExtra.length ? [...tokens, ...mktExtra] : tokens}
             q={q} isMobile={false} maxH="min(72vh, 760px)" tdProps={(typeof window !== "undefined" && window.__valoTdProps) || null}
             onPick={(id) => { onPickToken && onPickToken(id); setOpen(false); setQ(""); }}
             onWatchAdd={typeof window !== "undefined" && window.__valoWatchAdd ? window.__valoWatchAdd : undefined}
@@ -14805,7 +14843,7 @@ export default function App() {
             <StickySearch top={headerH}>
               <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <SearchBar tokens={tokens} username={username} full eco isMobile onFullEco={() => setEcoFull(true)} mktExtra={mktHits} onQuery={setEcoQ} onPickToken={openAnyToken} onPickUser={(u) => setProfileUser(u)} />
+                  <SearchBar tokens={tokens} username={username} full eco isMobile onFullEco={() => setEcoFull(true)} mktExtra={[...mktHits, ...moreToks]} onQuery={setEcoQ} onPickToken={openAnyToken} onPickUser={(u) => setProfileUser(u)} />
                 </div>
                 <button onClick={() => setCompactList((v) => !v)} title={compactList ? "Expand cards" : "Compact list"}
                   style={{ flex: "0 0 auto", border: `1px solid ${compactList ? VALO_PURPLE : T.border2}`, background: T.panel, color: compactList ? VALO_PURPLE : T.dim,
@@ -14916,7 +14954,7 @@ export default function App() {
               {/* search — the chart's exact width, glued under the callout
                   banner, riding along as you scroll */}
               <div style={{ position: "sticky", top: "calc(var(--stkTop, 8px) - 8px)", zIndex: 34, margin: "0 0 8px" }}>
-                <SearchBar tokens={tokens} username={username} full eco mktExtra={mktHits} onQuery={setEcoQ} onPickToken={openAnyToken} onPickUser={(u) => setProfileUser(u)} />
+                <SearchBar tokens={tokens} username={username} full eco mktExtra={[...mktHits, ...moreToks]} onQuery={setEcoQ} onPickToken={openAnyToken} onPickUser={(u) => setProfileUser(u)} />
               </div>
 
               {chartBlock}
@@ -15752,7 +15790,7 @@ export default function App() {
                 borderRadius: 14, padding: "4px 12px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, cursor: "pointer" }}>📊 POSITIONS</button>
           </div>
           <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-            <TokenEcosystem tokens={[...tokens, ...mktHits.filter((m) => !tokens.some((t) => String(t.pool || "") === String(m.pool)))]} q={ecoQ} isMobile maxH="100%" tdProps={tdProps}
+            <TokenEcosystem tokens={[...tokens, ...moreToks, ...mktHits]} q={ecoQ} isMobile maxH="100%" tdProps={tdProps}
               onPick={(id) => { setEcoFull(false); setEcoQ(""); openAnyToken(id); }}
               onWatchAdd={(id) => { watchAdd(id, null); popPlus(); }}
               onOpenUser={(u) => setProfileUser(u)} />
