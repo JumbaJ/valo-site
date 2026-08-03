@@ -5286,7 +5286,8 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
 }
 
 // ⚡ TURBO WALLET — the popup-free trading key, entirely on this device.
-function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phantomOk, turboSol = 0 }) {
+function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phantomOk, turboSol = 0, autoOn = false, onToggleAuto = null }) {
+  const [autoConfirm, setAutoConfirm] = useState(false);   // two-tap arm
   const [pin, setPin] = useState("");
   const [fundAmt, setFundAmt] = useState("0.05");
   const [sweepDest, setSweepDest] = useState("");
@@ -5325,6 +5326,9 @@ function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phanto
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
           {turbo && <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, color: turboSol > 0 ? T.green : T.dim }}>◎ {turboSol.toFixed(4)} SOL</span>}
+          {active && collapsed && autoOn && (
+            <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, color: T.red }}>🤖</span>
+          )}
           {active && collapsed && (
             <button onClick={onLock} title="Disarm — lock the turbo wallet"
               style={{ border: `1px solid ${T.border2}`, background: "transparent", color: T.faint, borderRadius: 6,
@@ -5370,6 +5374,23 @@ function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phanto
           <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.dim, lineHeight: 1.6, marginBottom: 7 }}>
             All trades now sign instantly with this key — buys land here, sells sell from here. Positions below are this wallet's. Fund it small; sweep back to Phantom anytime.
           </div>
+          {onToggleAuto && (
+            <button
+              onClick={() => {
+                if (autoOn) { onToggleAuto(false); setAutoConfirm(false); return; }
+                if (!autoConfirm) { setAutoConfirm(true); setTimeout(() => setAutoConfirm(false), 3200); return; }
+                setAutoConfirm(false); onToggleAuto(true);
+              }}
+              style={{ width: "100%", marginBottom: 7, border: `1.5px solid ${autoOn ? T.red : autoConfirm ? T.red : T.border2}`,
+                borderRadius: 8, padding: "8px", cursor: "pointer", fontFamily: T.mono, fontSize: 9, fontWeight: 900,
+                letterSpacing: 0.5, background: autoOn ? "rgba(234,57,67,0.16)" : autoConfirm ? "rgba(234,57,67,0.1)" : "rgba(255,255,255,0.03)",
+                color: autoOn || autoConfirm ? T.red : T.faint,
+                boxShadow: autoOn ? `0 0 10px ${T.red}55` : "none" }}>
+              {autoOn ? "🤖 LIVE AUTOMATION ARMED — tap to disarm"
+                : autoConfirm ? "⚠ CONFIRM — bots will spend REAL SOL on triggers"
+                : "🤖 ARM LIVE AUTOMATION (bots fire real trades)"}
+            </button>
+          )}
           <div onClick={() => { try { navigator.clipboard.writeText(turbo.pubkey); setErr("address copied ✓"); setTimeout(() => setErr(null), 1500); } catch (e) {} }}
             title="Tap to copy — send SOL here from any wallet or exchange"
             style={{ fontFamily: T.mono, fontSize: 7.5, color: T.dim, background: "#090b10", border: `1px dashed ${T.border}`,
@@ -5412,16 +5433,7 @@ function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phanto
 // no longer shout "REAL" at you, so this is what tells you which mode you're in.
 function LiveFundsNotice({ sol = 0, compact = false, autoOn = false, onToggleAuto = null, turboOn = false }) {
   const [armOpen, setArmOpen] = useState(false);
-  const [tipOpen, setTipOpen] = useState(false);
-  // once someone says "got it", stay quiet forever — a tip that keeps coming
-  // back next to a money button stops being a tip
-  const [tipDone, setTipDone] = useState(() => {
-    try { return localStorage.getItem("valo-ac-tip") === "1"; } catch (e) { return false; }
-  });
-  const dismiss = () => {
-    setTipOpen(false); setTipDone(true);
-    try { localStorage.setItem("valo-ac-tip", "1"); } catch (e) {}
-  };
+  // (Phantom Auto-Confirm tip removed — turbo makes every order instant)
   return (
     <div style={{ position: "relative" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
@@ -5444,26 +5456,12 @@ function LiveFundsNotice({ sol = 0, compact = false, autoOn = false, onToggleAut
             <span style={{ fontFamily: T.mono, fontSize: compact ? 7.5 : 8.5, fontWeight: 800, whiteSpace: "nowrap",
               color: turboOn ? T.amber : T.dim }}>{turboOn ? `◎${sol.toFixed(4)}` : `${sol.toFixed(3)} SOL`}</span>
           )}
-          {onToggleAuto && (
-            <button onClick={() => (autoOn ? onToggleAuto(false) : setArmOpen(true))}
-              title={autoOn ? "Live automation ARMED — tap to disarm" : "Let bots trade real funds (arm live automation)"}
-              style={{ border: `1px solid ${autoOn ? T.red : `${T.border2}`}`, borderRadius: 6,
-                background: autoOn ? "rgba(234,57,67,0.16)" : "rgba(255,255,255,0.03)",
-                color: autoOn ? T.red : T.faint, cursor: "pointer", fontFamily: T.mono, fontWeight: 900,
-                fontSize: compact ? 7 : 7.5, letterSpacing: 0.4, padding: compact ? "2px 6px" : "3px 7px",
-                boxShadow: autoOn ? `0 0 8px ${T.red}55` : "none" }}>
-              🤖{autoOn ? " ARMED" : compact ? "" : " AUTO"}
-            </button>
+          {autoOn && (
+            <span title="Live automation armed — manage in portfolio → ⚡ TURBO"
+              style={{ fontFamily: T.mono, fontSize: compact ? 7 : 7.5, fontWeight: 900, color: T.red,
+                border: `1px solid ${T.red}55`, borderRadius: 6, padding: compact ? "2px 6px" : "3px 7px",
+                background: "rgba(234,57,67,0.12)" }}>🤖 ARMED</span>
           )}
-          <button onClick={() => setTipOpen((v) => !v)}
-            title="Make orders instant"
-            style={{ border: `1px solid ${tipOpen ? T.amber : `${T.amber}55`}`, borderRadius: 6,
-              background: tipOpen ? "rgba(240,185,11,0.18)" : "rgba(240,185,11,0.06)",
-              color: T.amber, cursor: "pointer", fontFamily: T.mono, fontWeight: 900,
-              fontSize: compact ? 7 : 7.5, letterSpacing: 0.4, padding: compact ? "2px 6px" : "3px 7px",
-              boxShadow: !tipDone && !tipOpen ? `0 0 8px ${T.amber}66` : "none" }}>
-            ⚡ {compact ? "" : "INSTANT"}
-          </button>
         </span>
       </div>
       {armOpen && typeof document !== "undefined" && createPortal(
@@ -5502,38 +5500,7 @@ function LiveFundsNotice({ sol = 0, compact = false, autoOn = false, onToggleAut
         </div>,
         document.body
       )}
-      {tipOpen && typeof document !== "undefined" && createPortal(
-        <div onClick={() => setTipOpen(false)}
-          style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(5,7,12,0.55)",
-            backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
-        <div onClick={(e) => e.stopPropagation()}
-          style={{ width: "100%", maxWidth: 270,
-            background: T.panel, border: `1.5px solid ${T.amber}66`, borderRadius: 13, padding: "12px 14px",
-            boxShadow: "0 12px 40px rgba(0,0,0,0.6), 0 0 22px rgba(240,185,11,0.14)" }}>
-          <div style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 0.8, color: T.amber, marginBottom: 6 }}>
-            ⚡ MAKE ORDERS INSTANT
-          </div>
-          <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.dim, lineHeight: 1.65 }}>
-            Skip Phantom's approval popup on every order — Phantom itself has an <b style={{ color: T.text }}>Auto-Confirm</b> setting you control:
-          </div>
-          <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.text, lineHeight: 1.8, margin: "6px 0" }}>
-            1 · Open <b>Phantom</b> while on VALO<br />
-            2 · <b>Settings ⚙</b> → <b>Auto-Confirm</b><br />
-            3 · Enable it for <b>valotrading.app</b>
-          </div>
-          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, lineHeight: 1.6 }}>
-            Your wallet, your call — it's per-site, only for sites you trust, and you can switch it off in Phantom anytime.
-          </div>
-          <button onClick={dismiss}
-            style={{ width: "100%", marginTop: 8, border: "none", borderRadius: 8, padding: "7px",
-              background: T.amber, color: "#0a0713", fontFamily: T.mono, fontSize: 9,
-              fontWeight: 900, letterSpacing: 0.6, cursor: "pointer" }}>
-            GOT IT
-          </button>
-        </div>
-        </div>,
-        document.body
-      )}
+
     </div>
   );
 }
@@ -6090,7 +6057,8 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   liveMode = false, chainFills = [], chainLedger = { byMint: {}, realizedSol: 0 }, onOpenChainFill = null,
   valoMint = null, onRealSwap = null, chainHoldingsLive2 = null,
   turboState = null, onTurboCreate = null, onTurboUnlock = null, onTurboLock = null,
-  onTurboFund = null, onTurboSweep = null, phantomOk = false, turboSol = 0 }) {
+  onTurboFund = null, onTurboSweep = null, phantomOk = false, turboSol = 0,
+  turboAutoOn = false, onTurboToggleAuto = null }) {
   const bestCalloutPeak = Object.values(myCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0);
   const mask = (s) => (hideBalance ? "••••••" : s);
   // ⛓/📝 the SITE decides the wallet. Live mode = on-chain, demo = paper.
@@ -6419,7 +6387,8 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           {liveMode && (
             <TurboPanel turbo={turboState} onCreate={onTurboCreate} onUnlock={onTurboUnlock}
               onLock={onTurboLock} onFund={onTurboFund} onSweep={onTurboSweep}
-              phantomOk={!!(wallet && wallet.address)} turboSol={turboSol} />
+              phantomOk={!!(wallet && wallet.address)} turboSol={turboSol}
+              autoOn={turboAutoOn} onToggleAuto={onTurboToggleAuto} />
           )}
           {/* epoch rewards — on the live site claims pay REAL $VALO to the
               connected Phantom wallet from the epoch vault at epoch close */}
@@ -8847,9 +8816,9 @@ export default function App() {
         if (!window.__valoWarnedAuto) {
           window.__valoWarnedAuto = true;
           pushNotif({ type: "system", user: null, tokenId: null,
-            text: "🤖 Lines armed — but LIVE AUTOMATION is OFF, so triggers will be skipped. Tap the 🤖 AUTO chip on the LIVE·REAL FUNDS bar to arm real auto-fire." });
+            text: "🤖 Lines armed — but LIVE AUTOMATION is OFF, so triggers will be skipped. Arm it in the portfolio → ⚡ TURBO panel (🤖 ARM LIVE AUTOMATION)." });
         }
-        sayPrivate({ type: "note", text: "⚠ arm 🤖 AUTO (trade bar) or this bot's triggers will skip" });
+        sayPrivate({ type: "note", text: "⚠ arm 🤖 AUTO (portfolio → ⚡ TURBO) or this bot's triggers will skip" });
       } else if (turboLockedButPresent) {
         if (!window.__valoWarnedTurboLock) {
           window.__valoWarnedTurboLock = true;
@@ -12589,7 +12558,7 @@ export default function App() {
           // wallet, or no route). It does NOT fall back to paper — the live
           // site never writes a paper fill. Refund the arm escrow and say why.
           refundEscrow(o.amt, o.pay);
-          const why = !liveAuto ? "live automation is disarmed (🤖 AUTO on the trade bar)"
+          const why = !liveAuto ? "live automation is disarmed (arm 🤖 in portfolio → ⚡ TURBO)"
             : turboLockedButPresent ? "⚡ turbo wallet is locked — unlock it with your PIN so bots can sign"
             : !walletReady ? "no wallet — set up ⚡ turbo or connect Phantom"
             : o.pay !== "SOL" ? "live orders are SOL-only"
@@ -14858,7 +14827,7 @@ export default function App() {
               realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={combinedChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger} chainHoldingsLive2={chainHoldingsLive}
               turboState={turbo} onTurboCreate={turboCreate} onTurboUnlock={turboUnlock} onTurboLock={turboLock}
               onTurboFund={turboFund} onTurboSweep={turboSweep} phantomOk={!!(wallet && wallet.address)}
-              turboSol={turboSolBal}
+              turboSol={turboSolBal} turboAutoOn={liveAuto} onTurboToggleAuto={setLiveAuto}
               valoMint={valoMint}
               onRealSwap={() => {
                 if (!valoMint) return;
@@ -16484,7 +16453,7 @@ export default function App() {
               realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={combinedChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger} chainHoldingsLive2={chainHoldingsLive}
               turboState={turbo} onTurboCreate={turboCreate} onTurboUnlock={turboUnlock} onTurboLock={turboLock}
               onTurboFund={turboFund} onTurboSweep={turboSweep} phantomOk={!!(wallet && wallet.address)}
-              turboSol={turboSolBal}
+              turboSol={turboSolBal} turboAutoOn={liveAuto} onTurboToggleAuto={setLiveAuto}
               valoMint={valoMint}
               onRealSwap={() => {
                 if (!valoMint) return;
