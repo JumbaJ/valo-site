@@ -632,6 +632,12 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   const total = agg.length;
   // room to zoom past what's loaded — the gap is what pulls older candles in
   // frame everything we hold plus a small margin — never more
+  // heal any pre-clamp runaway stretch left in view state (the PC "scrunch")
+  useEffect(() => {
+    setView((v) => (v.priceZoom > 6 || v.priceZoom < 0.5)
+      ? { ...v, priceZoom: Math.max(0.5, Math.min(6, v.priceZoom || 1)) } : v);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const zoomCap = Math.max(60, Math.min(4000, Math.round(agg.length * 1.1) + 12));
   const count = Math.max(12, Math.min(view.count, zoomCap));
   // a small, fixed margin rather than most of a screen: enough to feel free,
@@ -1046,13 +1052,16 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
             const mine = traderKey === "__me__";
             const hiIn = highlightTx && list.some((t) => t.tx === highlightTx);
             const rankC = Math.min(rank, 2);   // three tiers max — never a tower
-            // anchor = the trades' own price (avg if several in this bar) —
-            // candle extremes shift with aggregation, a fill price never does
+            // LIVE last bar → trace the candle itself (rides the bounce, stays
+            // out of the action). Settled bars → pinned to the fill price.
+            const isLiveBar = s === total - 1 - winStart || idxOf(s) === total - 1;
             const withPx = list.filter((t2) => Number.isFinite(+t2.price || +t2.p) && (+t2.price || +t2.p) > 0);
-            const anchorP = withPx.length
+            const fillP = withPx.length
               ? withPx.reduce((s2, t2) => s2 + (+t2.price || +t2.p), 0) / withPx.length
-              : (isBuy ? c.h : c.l);
-            const baseY = (isBuy ? y(anchorP) - 16 : y(anchorP) + 16) + (isBuy ? -rankC * 19 : rankC * 19);
+              : (isBuy ? c.l : c.h);
+            const anchorP = isLiveBar ? (isBuy ? c.l : c.h) : fillP;
+            // 🟢 buys UNDER the bar, 🔴 sells ABOVE it
+            const baseY = (isBuy ? y(anchorP) + 16 : y(anchorP) - 16) + (isBuy ? rankC * 19 : -rankC * 19);
             // badge body is always the gain/loss colour (green buy / red sell) so
             // direction reads instantly; the trader's own colour becomes the ring.
             const own = isBuy ? T.green : T.red;
@@ -1062,12 +1071,12 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
             const ringCol = trackedCol ? "rgba(255,255,255,0.85)" : null;
             const icon = !mine && pref && pref.icon ? getIcon(pref.icon, requestRepaint) : null;
             const w = icon ? 22 : list.length > 1 ? 26 : 18, h = 15;
-            // triangle pointer toward the bar
+            // triangle pointer toward the bar (buys point UP at it, sells DOWN)
             ctx.beginPath();
-            if (isBuy) { ctx.moveTo(px, baseY + 9); ctx.lineTo(px - 5, baseY + 3); ctx.lineTo(px + 5, baseY + 3); }
-            else { ctx.moveTo(px, baseY - 9); ctx.lineTo(px - 5, baseY - 3); ctx.lineTo(px + 5, baseY - 3); }
+            if (isBuy) { ctx.moveTo(px, baseY - 9); ctx.lineTo(px - 5, baseY - 3); ctx.lineTo(px + 5, baseY - 3); }
+            else { ctx.moveTo(px, baseY + 9); ctx.lineTo(px - 5, baseY + 3); ctx.lineTo(px + 5, baseY + 3); }
             ctx.closePath(); ctx.fillStyle = badgeCol; ctx.fill();
-            const bx = px - w / 2, by = isBuy ? baseY - h + 3 : baseY - 3;
+            const bx = px - w / 2, by = isBuy ? baseY - 3 : baseY - h + 3;
             ctx.beginPath();
             if (ctx.roundRect) ctx.roundRect(bx, by, w, h, 5); else ctx.rect(bx, by, w, h);
             ctx.fillStyle = badgeCol; ctx.fill();
@@ -5139,7 +5148,7 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
                 style={{ width: "100%", boxSizing: "border-box", border: "none", borderRadius: 9, padding: "9px", marginBottom: 8,
                   fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
                   background: T.red, color: "#170808", cursor: "pointer" }}>
-                ⛓ SELL ALL · {chainHoldings.filter((x) => !x.spam && !x.dust).length} on-chain · one approval
+                ⚡ SELL ALL · {chainHoldings.filter((x) => !x.spam && !x.dust && x.src !== "phantom").length} turbo · instant
               </button>
               {chainHoldings.filter((h) => (!h.spam && !h.dust) || showSpam).map((h) => (
                 <div key={h.mint} style={{ display: "flex", alignItems: "center", gap: 8, background: "#0c0f16",
@@ -8479,9 +8488,10 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
             {[
               ["TIME", new Date(tr.t).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })],
               ["AMOUNT", `${tr.amt} ${tr.unit}`],
-              ["FILL PRICE", `$${fmtP(tr.price)}`],
+              ["FILL PRICE", `$${fmtP(isBuy ? tr.price : (tr.entry || tr.price))}`],
               ...(isBuy ? [] : [["EXIT PRICE", `$${fmtP(tr.price)}`]]),
-              ["MARKET CAP", tr.mc > 0 ? `${tr.mcEstimated ? "~" : ""}${fmt$(tr.mc)}` : "—"],
+              ...(!isBuy && tr.mcEntry > 0 ? [["MC AT ENTRY", `${tr.mcEstimated ? "~" : ""}${fmt$(tr.mcEntry)}`]] : []),
+              [isBuy ? "MC AT FILL" : "MC AT EXIT", tr.mc > 0 ? `${tr.mcEstimated ? "~" : ""}${fmt$(tr.mc)}` : "—"],
               ...(tr.side === "sell" && tr.pnlPct != null
                 ? [["ENTRY", `$${fmtP(tr.entry)}`], ["PNL %", null], ["PNL SOL", null], ["PNL USD", null]]
                 : []),
@@ -8490,8 +8500,8 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
                 <span style={{ color: T.faint, letterSpacing: 1 }}>{k}</span>
                 {v != null ? <b style={{ color: T.text }}>{v}</b> : (
                   k === "PNL %" ? <b style={{ color: gain ? T.green : T.red }}>{pct(tr.pnlPct)}</b>
-                  : k === "PNL SOL" ? <b style={{ color: gain ? T.green : T.red }}>{gain ? "+" : "−"}{Math.abs(pnlSol).toFixed(3)} SOL</b>
-                  : <b style={{ color: gain ? T.green : T.red }}>{gain ? "+" : "−"}${Math.abs(pnlSol * SOL_USD).toFixed(2)}</b>
+                  : k === "PNL SOL" ? <b style={{ color: gain ? T.green : T.red }}>{gain ? "+" : "−"}{Math.abs(pnlSol) < 0.01 ? Math.abs(pnlSol).toFixed(5) : Math.abs(pnlSol).toFixed(4)} SOL</b>
+                  : <b style={{ color: gain ? T.green : T.red }}>{gain ? "+" : "−"}${Math.abs(pnlSol * SOL_USD) < 0.01 ? Math.abs(pnlSol * SOL_USD).toFixed(4) : Math.abs(pnlSol * SOL_USD).toFixed(2)}</b>
                 )}
               </div>
             ))}
@@ -9408,10 +9418,13 @@ export default function App() {
     let mcAtFill = f.mcAtFill;
     if (!(mcAtFill > 0) && f.mint) {
       const tk = (tokensRef.current || []).find((t) => t.liveMint === f.mint);
-      if (tk && tk.mc > 0 && tk.price > 0 && f.px > 0) {
+      // effective fill price even when px wasn't recorded: proceeds ÷ qty
+      const pxEff = (f.px > 0) ? f.px : (f.qty > 0 && f.sol > 0 ? (f.sol * SOL_USD) / f.qty : 0);
+      if (tk && tk.mc > 0 && tk.price > 0 && pxEff > 0) {
         const supply = tk.mc / tk.price;           // supply is ~constant
-        mcAtFill = f.px * supply;                   // MC at the fill's own price
+        mcAtFill = pxEff * supply;                  // MC at the fill's own price
       } else if (tk && tk.mc > 0) mcAtFill = tk.mc; // best available
+      if (!(f.px > 0) && pxEff > 0) f = { ...f, px: pxEff };   // record it properly too
     }
     const stamped = mcAtFill > 0 ? { ...f, mcAtFill } : f;
     const next = [...F, stamped].slice(-500);
@@ -9930,7 +9943,10 @@ export default function App() {
   // route already fills most of Solana's 1232-byte tx limit.)
   const realSellAllHoldings = async (holds) => {
     const list = (holds || []).filter((h) => h && h.mint && h.qty > 0 && !h.spam && !h.dust)
-      .map((h) => ({ ...h, owner: h.owner || tradeAddr }));
+      .map((h) => ({ ...h, owner: h.owner || tradeAddr }))
+      // ⚡ turbo-only: SELL ALL is the trading wallet's button. Phantom is the
+      // vault (deposits/withdrawals) — its rows sell individually if ever needed.
+      .filter((h) => !turbo || h.owner === turbo.pubkey);
     if (!list.length) return;
     if (turboLockedButPresent) {
       pushNotif({ type: "system", user: null, tokenId: null,
@@ -12195,6 +12211,7 @@ export default function App() {
         // the TRUE MC recorded at fill time wins; else derive from supply × fill
         // price; else (no data) null so the receipt shows "—" not a wrong number
         mc: (f.mcAtFill > 0) ? f.mcAtFill : (supply > 0 && px > 0 ? px * supply : null),
+        mcEntry: (entryAvg > 0 && supply > 0) ? entryAvg * supply : null,   // MC at the avg entry
         mcEstimated: !(f.mcAtFill > 0),
         pnlMoney, pnlPct,
         qtyTokens: f.qty, solValue: f.sol, est: !!f.est,
