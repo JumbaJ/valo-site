@@ -713,6 +713,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
 
     const padR = 74, padB = 26, padT = 12, volH = 42;
     const chartH = H - padB - padT - volH;
+    if (chartH < 50) return;   // mid-transition sliver — skip this frame, RO redraws
     const plotW = W - padR;
     const step = plotW / count;
     const x = (s) => s * step + step / 2;
@@ -1410,7 +1411,21 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     return { cx: (p.clientX - r.left) / sc, cy: (p.clientY - r.top) / sc };
   };
   const axisRef = useRef(null); // dragging the price-axis strip = zoom
+  const pinchRef = useRef(null); // two-finger time zoom
   const onDown = (e) => {
+    // 🤏 two fingers = pinch-zoom the TIME axis (zoom into the bars)
+    if (e.touches && e.touches.length === 2) {
+      e.preventDefault && e.preventDefault();
+      const [a, b] = [e.touches[0], e.touches[1]];
+      const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      const g0 = geom.current;
+      const cvs0 = cvsRef.current; const r0 = cvs0 ? cvs0.getBoundingClientRect() : { left: 0, width: 1 };
+      const midX = ((a.clientX + b.clientX) / 2 - r0.left);
+      const midSlot = g0.step ? midX / g0.step : 0;   // the anchor bar
+      pinchRef.current = { d0: Math.max(20, dist), c0: count, off0: offset, midSlot };
+      dragRef.current = null; axisRef.current = null; setCross(null);
+      return;
+    }
     const { cx, cy } = ptOf(e);
     const g = geom.current;
     // touch/press starting in the right-hand price-number strip = zoom mode:
@@ -1494,6 +1509,19 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     setCross({ cx, cy });
   };
   const onMove = (e) => {
+    // 🤏 pinch in progress → rescale the candle count around the anchor bar
+    if (pinchRef.current && e.touches && e.touches.length === 2) {
+      e.preventDefault && e.preventDefault();
+      const pz = pinchRef.current;
+      const [a, b] = [e.touches[0], e.touches[1]];
+      const dist = Math.max(20, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY));
+      const nextCount = Math.max(12, Math.min(60000, Math.round(pz.c0 * (pz.d0 / dist))));
+      const ratio = nextCount / pz.c0;
+      const slotsRight0 = pz.c0 - pz.midSlot;
+      const dOff = Math.round(slotsRight0 * ratio - slotsRight0);
+      setView((v) => ({ ...v, count: nextCount, offset: Math.max(0, pz.off0 + dOff) }));
+      return;
+    }
     const { cx, cy } = ptOf(e);
     const st = stickyRef.current;
     // ✋ hover-trace: with drag-set armed (or SHIFT held) the yellow buy-in bar
@@ -1586,6 +1614,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     setLineMenu({ id: hit.id, x: e.clientX, y: e.clientY });
   };
   const onUp = (e) => {
+    if (pinchRef.current && (!e.touches || e.touches.length < 2)) { pinchRef.current = null; return; }
     if (e.touches) {
       const it = touchIntentRef.current;
       if (it && (it.scroll || !it.decided) && !chartForced()) return; // page owns it — chart holds still
@@ -1721,7 +1750,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       )}
       <canvas
         ref={cvsRef}
-        style={{ width: "100%", height, display: "block", cursor: clickMode ? "pointer" : "crosshair", touchAction: "pan-y", overscrollBehavior: "contain", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
+        style={{ width: "100%", height, display: "block", cursor: clickMode ? "pointer" : "crosshair", touchAction: isMobile ? "none" : "pan-y", overscrollBehavior: "contain", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
         onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
         onClick={onEmptyTap}
         onContextMenu={onCtx}
@@ -9016,20 +9045,42 @@ export default function App() {
   const [metricsCrunch, setMetricsCrunch] = useState(0); // 0 = full metrics, 1 = hidden
   // a freshly opened token starts pulled up: the chart meets the pull bar
   const mobOpenedRef = useRef(null);
+  const vpH = () => (typeof window !== "undefined"
+    ? Math.round((window.visualViewport && window.visualViewport.height) || window.innerHeight)
+    : 800);
   useEffect(() => {
     if (!isMobile || sel == null || mobOpenedRef.current === sel) return;
     mobOpenedRef.current = sel;
     setMetricsCrunch(1);
-    setMobChartH(Math.max(400, Math.round(window.innerHeight - 104)));
-    // settle, then shave anything overlapping LIVE TRADES / HOLDERS
-    setTimeout(() => {
-      const lth = document.querySelector("[data-lth]"); const mc = document.querySelector("[data-mchart]");
-      if (!lth || !mc) return;
-      const over = mc.getBoundingClientRect().bottom - (lth.getBoundingClientRect().top - 8);
-      if (over > 4) setMobChartH((h) => Math.max(400, Math.round(h - over)));
-    }, 340);
+    // conservative first paint — no overshoot, no scrunch under the header
+    setMobChartH(Math.max(360, Math.round(vpH() * 0.55)));
+    // measure the REAL available space once layout settles, then expand to it
+    let tries = 0;
+    const fit = () => {
+      const mc = document.querySelector("[data-mchart]");
+      if (!mc) { if (++tries < 6) setTimeout(fit, 120); return; }
+      const top = mc.getBoundingClientRect().top;
+      const avail = Math.round(vpH() - top - 96);   // pull-bar + hotbar clearance
+      if (avail > 360) setMobChartH(Math.min(Math.max(400, avail), vpH() - 80));
+    };
+    setTimeout(fit, 160);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile, sel]);
+  // toolbars showing/hiding (PWA + Safari) change the viewport — re-clamp so
+  // the chart never extends past the screen and "scrunches" under the header
+  useEffect(() => {
+    if (!isMobile || typeof window === "undefined" || !window.visualViewport) return;
+    const onVp = () => {
+      setMobChartH((h) => {
+        const mc = document.querySelector("[data-mchart]");
+        const top = mc ? mc.getBoundingClientRect().top : 104;
+        const max = Math.round(vpH() - Math.max(0, top) - 80);
+        return h > max && max > 300 ? max : h;
+      });
+    };
+    window.visualViewport.addEventListener("resize", onVp);
+    return () => window.visualViewport.removeEventListener("resize", onVp);
+  }, [isMobile]);
   const [priceMode, setPriceMode] = useState(0);
   const priceTapRef = useRef(0);          // separates a tap from a hold on mobile // header price tap: 0 price · 1 market cap · 2 your tokens
   const chartDrag = useRef(null);
