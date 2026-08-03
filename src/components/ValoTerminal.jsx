@@ -8334,13 +8334,27 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
   let list = cand.filter((t) => !ql || t.sym.toLowerCase().includes(ql) || (t.name || "").toLowerCase().includes(ql) || (t.ca || "").toLowerCase().includes(ql));
   if (plat !== "all") list = list.filter((t) => platOf(t) === plat);
   if (flags.trend) list = list.filter(isHotTok);
-  if (flags.top) list = list.filter((t) => t.traders > 900);
+  const heatOf = (t) => {
+    const winMin = t.statWin === "5m" ? 5 : t.statWin === "1h" ? 60 : 1440;
+    const tx = (t.buys || 0) + (t.sells || 0);
+    return { winMin, tx, txRate: tx / winMin, volRate: (t.vol24 || 0) / 1440 };
+  };
+  if (flags.top) list = list.filter((t) => {
+    const h = heatOf(t);
+    // 100s of trades within a ≤12h window (a 24h-only window must prove it
+    // harder), plus fast money: ≥$150/min flowing or ≥$250K daily volume
+    const recentOk = h.winMin <= 720 ? h.tx >= 100 : h.tx >= 400;
+    const fastVol = h.volRate >= 150 || (t.vol24 || 0) >= 250000;
+    return recentOk && fastVol;
+  });
   if (flags.fresh) list = list.filter((t) => t.isNew || t.ageMin < 90);
   if (flags.safe) list = list.filter((t) => scoreToken(t) >= 62);
   if (flags.risky) list = list.filter((t) => scoreToken(t) < 50);
   // pump/rh picked with nothing else → trending & movers float first
   list = flags.fresh
     ? [...list].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))   // 🍼 newest launch first, real time
+    : flags.top
+    ? [...list].sort((a, b) => heatOf(b).txRate - heatOf(a).txRate)       // 🔥 hottest tape first
     : [...list].sort((a, b) => (isHotTok(b) ? 1 : 0) - (isHotTok(a) ? 1 : 0) || b.momentum - a.momentum);
   const fbtn = (on, label, click, col) => (
     <button onClick={click} style={{ ...chip(on), padding: isMobile ? "5px 9px" : "5px 12px", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 900, letterSpacing: 0.5,
