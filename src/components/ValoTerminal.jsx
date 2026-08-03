@@ -4161,7 +4161,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
               <div style={{ display: "flex", gap: 1, background: T.border }}>
                 {[["SOL", chainWallet.sol != null ? chainWallet.sol.toFixed(2) : "—", T.text],
                   ["TOKENS", chainWallet.tokensUsd ? fmt$(chainWallet.tokensUsd) : "$0", T.green],
-                  ["POSITIONS", String(chainWallet.holdingsCount || 0), VALO_PURPLE]].map(([k, v, c]) => (
+                  ["POSITIONS", String(visHolds(chainWallet.holdings).length || chainWallet.holdingsCount || 0), VALO_PURPLE]].map(([k, v, c]) => (
                   <div key={k} style={{ flex: 1, background: "#0c0f16", padding: "6px 8px" }}>
                     <div style={{ fontFamily: T.mono, fontSize: 7, letterSpacing: 1, color: T.faint }}>{k}</div>
                     <div style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: c }}>{v}</div>
@@ -5242,8 +5242,8 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
     <div style={{ marginTop: 10, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 12, padding: 11 }}>
       <button onClick={() => setOpen((v) => !v)}
         style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", border: "none", background: "transparent", cursor: "pointer", padding: 0, fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: T.text }}>
-        <span>{open ? "▾" : "▸"} MY POSITIONS · {liveMode ? chainHoldings.length + runsLive.length : tickets.length + runsLive.length}</span>
-        {(() => { const v = liveMode ? chainHoldings.reduce((s, h) => s + (h.pnlUsd || 0), 0) : ticketPnl + botPnl;
+        <span>{open ? "▾" : "▸"} MY POSITIONS · {liveMode ? visHolds(chainHoldings).length + runsLive.length : tickets.length + runsLive.length}</span>
+        {(() => { const v = liveMode ? visHolds(chainHoldings).reduce((s, h) => s + (h.pnlUsd || 0), 0) : ticketPnl + botPnl;
           return <span style={{ color: v >= 0 ? T.green : T.red, fontWeight: 900 }}>{v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}</span>; })()}
       </button>
       {open && (
@@ -6206,7 +6206,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   const chainOn = !!(liveMode && ((wallet && wallet.address) || (turboState && turboState.pubkey)) && walletChain);
   const chSol = (walletChain && walletChain.sol) || 0;
   const chTokensUsd = (walletChain && walletChain.tokensUsd) || 0;
-  const chCount = (walletChain && walletChain.holdingsCount) || 0;
+  const chCount = walletChain ? visHolds(walletChain.holdings).length : 0;
   const chEquity = chSol * SOL_USD + chTokensUsd;
   // ⛓ PnL — from fills placed through VALO. Coins bought elsewhere have no
   // basis here, so they're valued but not scored; that's stated, not hidden.
@@ -7230,6 +7230,7 @@ function CardMiniChart({ candles, hue, mode, tfMin = 15, count = 90, full = fals
   return <canvas ref={ref} style={{ width: full ? "100%" : "128%", height: full ? "100%" : 52, display: "block" }} />;
 }
 
+const visHolds = (arr) => (arr || []).filter((h) => h && !h.spam && !h.dust);
 function fmtAge(createdAt) {
   if (!(createdAt > 0)) return null;
   const m = Math.max(1, Math.floor((Date.now() - createdAt) / 60000));
