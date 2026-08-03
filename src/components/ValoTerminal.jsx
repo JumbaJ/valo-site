@@ -1766,7 +1766,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
         </>
       )}
       <div style={{ position: "absolute", bottom: 30, right: 84, zIndex: 3, fontFamily: T.mono, fontSize: 9, letterSpacing: 1, color: synthetic ? T.amber : T.faint, pointerEvents: "none" }}>
-        {synthetic ? "⟲ SYNTH" : "DEXSCREENER"} · drag ⇄ pan · run the axis ⤢ time zoom · scroll ⇱ zoom
+        {synthetic ? "⟲ SYNTH" : (candles && candles.length < 6 ? "🕯 FRESH LAUNCH — chart builds live from real trades" : "DEXSCREENER")} · drag ⇄ pan · run the axis ⤢ time zoom · scroll ⇱ zoom
       </div>
       {lineMenu && (
         <>
@@ -11837,30 +11837,34 @@ export default function App() {
         const r = await fetch(`/api/candles?pool=${encodeURIComponent(pool)}&tf=${tf}${mintQ}`);
         if (!r.ok) return;
         const j = await r.json();
-        if (stale || !Array.isArray(j) || j.length < 10) return;
+        if (stale || !Array.isArray(j) || !j.length) return;
         let mapped = j.slice(-260).map((c) => ({ t: +c.t || undefined, o: +c.o, h: +c.h, l: +c.l, c: +c.c, v: +c.v || 0 }))
           .filter((c) => [c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v) && v > 0));
-        if (mapped.length < 3) return;      // 3 candles is a chart; 10 was too strict
+        if (!mapped.length) return;         // even ONE real candle beats fake history
         // drop wild prints: anything ±50× off the median close distorts the scale
         const med = [...mapped].map((c) => c.c).sort((a, b) => a - b)[Math.floor(mapped.length / 2)];
         mapped = mapped.filter((c) => c.h <= med * 50 && c.l >= med / 50);
-        if (mapped.length < 3) return;
+        if (!mapped.length) return;
         candleCache.current[pool + ":" + tf] = mapped;
         setTokens((Ts) => Ts.map((x) => (x.id === sel ? { ...x, candles: sanitizeCandles(mapped), realCandles: true, price: mapped[mapped.length - 1].c } : x)));
       } catch (e) { /* keep what's drawn */ }
     };
     let tries = 0;
     const pullWithRetry = async () => {
-      const before = (tokensRef.current.find((x) => x.id === sel) || {}).candles || [];
       await pull();
-      const after = (tokensRef.current.find((x) => x.id === sel) || {}).candles || [];
-      if (!stale && after.length === before.length && after.length < 3 && tries < 6) {
+      const cur = tokensRef.current.find((x) => x.id === sel) || {};
+      if (stale) return;
+      if (!cur.realCandles && tries < 6) {
         tries++;
         setTimeout(pullWithRetry, Math.min(8000, 800 * tries));   // ~30s of trying
-      } else if (!stale && after.length < 3 && tries >= 6) {
-        // OHLCV genuinely isn't available for this pool — let the trade tape be
-        // the chart rather than showing nothing at all
-        setTokens((Ts) => Ts.map((x) => (x.id === sel ? { ...x, tapeOk: true } : x)));
+      } else if (!cur.realCandles) {
+        // no real history exists (token minutes old) → the chart starts NOW at
+        // the real live price and builds forward from real trades — exactly
+        // what DexScreener shows, never a fabricated backstory
+        setTokens((Ts) => Ts.map((x) => (x.id === sel
+          ? { ...x, candles: (x.price > 0 ? [{ t: Date.now(), o: x.price, h: x.price, l: x.price, c: x.price, v: 0 }] : []),
+              realCandles: true, tapeOk: true, freshChart: true }
+          : x)));
       }
     };
     pullWithRetry();
