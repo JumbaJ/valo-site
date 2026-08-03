@@ -10014,6 +10014,25 @@ export default function App() {
         const sol = selling ? ((+q2.outAmount || 0) / 1e9 || size * ((token.price || 0) / SOL_USD)) : Math.min(size, onchain.maxSol || size);
         try { if (qty > 0 && sol > 0) recordRealFill({ at: Date.now(), side, mint: token.liveMint, sym: token.sym, qty, sol, sig, px: (sol * SOL_USD) / qty }); } catch (e) {}
         try { if (landed && landed.ok && sol > 0) payTurboFee(sol, j.quote || j); } catch (e) {}
+        // 🧾 after-sell truth: mark-to-market said one thing; the pool paid
+        // another. When impact+fees moved the result, spell it out.
+        if (selling && landed && landed.ok) {
+          try {
+            const markUsd = (token.price || 0) * qty;              // what the chart valued it at
+            const gotUsd = sol * SOL_USD;                            // what the sell actually returned
+            const led = chainLedger.byMint[token.liveMint];
+            const basisUsd = led && led.qty > 0 ? (led.costSol * SOL_USD) * Math.min(1, qty / led.qty) : null;
+            const slipUsd = markUsd - gotUsd;                        // impact + fees, in dollars
+            if (markUsd > 0 && Math.abs(slipUsd) > Math.max(0.005, markUsd * 0.02)) {
+              const markPnl = basisUsd != null ? markUsd - basisUsd : null;
+              const netPnl = basisUsd != null ? gotUsd - basisUsd : null;
+              const flip = markPnl != null && netPnl != null && markPnl > 0 && netPnl < 0;
+              pushNotif({ type: "system", user: null, tokenId: token.id,
+                text: `🧾 sold ${token.sym}: chart valued it $${markUsd.toFixed(2)} but the pool paid $${gotUsd.toFixed(2)} — impact+fees −$${slipUsd.toFixed(2)} on thin liquidity${
+                  netPnl != null ? `. Net P/L ${netPnl >= 0 ? "+" : "−"}$${Math.abs(netPnl).toFixed(2)}${flip ? ` (mark showed +$${markPnl.toFixed(2)})` : ""}` : ""}` });
+            }
+          } catch (e) {}
+        }
         // ⚡ instant sellability — insert the holding the moment the buy lands
         if (!selling && landed && landed.ok) {
           const addQty = qty > 0 ? qty : 1;
@@ -12516,6 +12535,34 @@ export default function App() {
     return out;
   }, [realFills]);
 
+  // 🫙 what the pool would ACTUALLY pay right now, per mint (quote-driven)
+  const [netIfSold, setNetIfSold] = useState({});
+  useEffect(() => {
+    if (!liveData || !onchain.enabled) return;
+    let stop = false;
+    const SOLM = "So11111111111111111111111111111111111111112";
+    const pull = async () => {
+      try {
+        const holds = ((walletChain && walletChain.holdings) || []).filter((h) => h.qty > 0 && !h.spam && !h.dust).slice(0, 4);
+        for (const h of holds) {
+          if (stop) return;
+          const tk = (tokensRef.current || []).find((t2) => t2.liveMint === h.mint);
+          const dec = 6;   // pump tokens are 6-dec; quote amount is approximate anyway
+          const amt = Math.floor(h.qty * Math.pow(10, dec));
+          if (!(amt > 0)) continue;
+          const r = await fetch(`/api/swap?mode=quote&inputMint=${h.mint}&outputMint=${SOLM}&amount=${amt}&slippageBps=100`);
+          if (!r.ok) continue;
+          const j = await r.json();
+          const outSol = j && j.quote && (+j.quote.outAmount || 0) / 1e9;
+          if (outSol > 0 && !stop) setNetIfSold((N) => ({ ...N, [h.mint]: { netUsd: outSol * SOL_USD, at: Date.now() } }));
+        }
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 25000);
+    return () => { stop = true; clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData, onchain.enabled, walletChain && walletChain.holdings && walletChain.holdings.length]);
   const chainHoldingsLive = useMemo(() => {
     const tHolds = ((walletChain && walletChain.holdings) || []).map((h) => ({ ...h,
       owner: tradeAddr, src: (turbo && tradeAddr === turbo.pubkey) ? "turbo" : "phantom" }));
@@ -12530,7 +12577,9 @@ export default function App() {
       const q = Math.min(h.qty, led.qty);
       const basisUsd = led.costSol * SOL_USD * (q / led.qty);
       const pnlUsd = price * q - basisUsd;
-      return { ...h, livePrice: price,
+      const net = netIfSold[h.mint];
+      const netPnlUsd = net && net.netUsd > 0 ? net.netUsd - basisUsd : null;
+      return { ...h, livePrice: price, netUsd: net ? net.netUsd : null, netPnlUsd,
         avgCostUsd: q > 0 ? basisUsd / q : null,
         pnlUsd, pnlPct: basisUsd > 0 ? (pnlUsd / basisUsd) * 100 : null };
     });
@@ -15805,6 +15854,13 @@ export default function App() {
                             <b style={{ color: h.pnlUsd >= 0 ? T.green : T.red, marginLeft: 6 }}>
                               {h.pnlUsd >= 0 ? "▲+" : "▼−"}${Math.abs(h.pnlUsd).toFixed(2)}
                             </b>
+                          )}
+                          {h.netPnlUsd != null && Math.abs(h.netPnlUsd - (h.pnlUsd || 0)) > 0.005 && (
+                            <span title="Quoted from the real pool route — impact + fees included. This is what a sell would actually net."
+                              style={{ display: "block", fontFamily: T.mono, fontSize: 7.5, fontWeight: 800,
+                                color: h.netPnlUsd >= 0 ? T.green : T.amber, opacity: 0.9, marginTop: 1 }}>
+                              🫙 pool pays ≈ ${(h.netUsd || 0).toFixed(2)} → net {h.netPnlUsd >= 0 ? "+" : "−"}${Math.abs(h.netPnlUsd).toFixed(2)}
+                            </span>
                           )}
                         </div>
                       </div>
