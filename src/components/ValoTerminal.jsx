@@ -8510,7 +8510,50 @@ function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, ec
 }
 
 // ---------------- marker receipt — single trade OR a consolidated badge group ----------------
-function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {}, setTraderPref, myName, onOpenUser, token = null }) {
+function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {}, setTraderPref, myName, onOpenUser, token = null, liveMode = false }) {
+  // ⛓ real per-mint trades for the trader in this receipt (live site)
+  const [realTr, setRealTr] = useState(null);
+  const [realHold, setRealHold] = useState(null);   // their true qty of THIS mint
+  useEffect(() => {
+    setRealTr(null); setRealHold(null);
+    const tr = info && info.tr;
+    const trader = tr && (tr.trader || tr.user);
+    if (!liveMode || !trader || !token || !token.liveMint) return;
+    const reg = (typeof window !== "undefined" && window.__VALO_WALLETS__) || {};
+    const w = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trader) ? trader : (reg[trader] || (tr && tr.wallet) || null);
+    if (!w) return;
+    let stop = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/trader?wallet=${encodeURIComponent(w)}&mint=${encodeURIComponent(token.liveMint)}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        // their actual current balance of this token (includes transfers)
+        try {
+          const rw = await fetch(`/api/wallet?address=${encodeURIComponent(w)}`);
+          if (rw.ok) {
+            const jw = await rw.json();
+            const hh = jw && Array.isArray(jw.holdings) && jw.holdings.find((h2) => h2.mint === token.liveMint);
+            if (!stop) setRealHold(hh ? { qty: hh.qty || 0, usd: hh.usd != null ? hh.usd : (hh.qty || 0) * (token.price || 0) } : { qty: 0, usd: 0 });
+          }
+        } catch (e) {}
+        if (!stop && j && Array.isArray(j.trades)) {
+          // avg-cost walk → per-sell realized pnl, matching the sim row shape
+          let q = 0, cost = 0;
+          const rows = j.trades.map((t2) => {
+            if (t2.side === "buy") { q += t2.tokenAmt; cost += t2.solAmt; return { t: t2.t, side: "buy", amt: t2.solAmt, unit: "SOL", pnlMoney: null }; }
+            const p2 = q > 0 ? Math.min(1, t2.tokenAmt / q) : 0;
+            const basis = cost * p2; cost -= basis; q = Math.max(0, q - t2.tokenAmt);
+            return { t: t2.t, side: "sell", amt: t2.solAmt, unit: "SOL", pnlMoney: t2.solAmt - basis };
+          });
+          setRealTr(rows.reverse());
+          setRealHold((H) => H || { qty: q, usd: q * (token.price || 0), est: true });
+        }
+      } catch (e) {}
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveMode, info && info.tr && (info.tr.trader || info.tr.user), token && token.liveMint]);
   const list = info.list && info.list.length ? info.list : [info];
   const [pg, setPg] = useState(0);
   const i = Math.max(0, Math.min(list.length - 1, pg));
@@ -8629,14 +8672,19 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
         {/* trader dossier — holdings + name/pfp, mini chart, every trade here */}
         {(() => {
           if (!token || !traderKey || traderKey === "__me__" || (tr.sym && token.sym !== tr.sym)) return null;
-          const trades = (traderTradesFor(token, traderKey) || []).slice().sort((a, b) => b.t - a.t);
+          const trades = realTr || (liveMode ? [] : (traderTradesFor(token, traderKey) || []).slice().sort((a, b) => b.t - a.t));
           let hq = info.holderQty, hu = info.holderUsd;
-          if (hq == null) { // seeded fallback when opened from a live-trade tx
+          if (liveMode) {
+            // ⛓ chain truth only: their real balance, or the net of their real
+            // trades — never an invented figure
+            hq = realHold ? realHold.qty : null;
+            hu = realHold ? realHold.usd : null;
+          } else if (hq == null) { // demo keeps its seeded cast
             let s3 = hashStr("hold-" + traderKey + token.sym);
             const r3 = () => { s3 = (s3 * 1664525 + 1013904223) >>> 0; return s3 / 4294967296; };
             hq = Math.floor(4000 + r3() * 420000);
           }
-          if (hu == null) hu = hq * token.price;
+          if (hu == null && hq != null) hu = hq * token.price;
           const ago2 = (ms) => { const m = Math.floor((Date.now() - ms) / 60000); return m < 60 ? `${m}m` : m < 1440 ? `${(m / 60).toFixed(1)}h` : `${(m / 1440).toFixed(1)}d`; };
           return (
             <div style={{ border: `1px solid ${T.border2}`, borderRadius: 11, background: "rgba(255,255,255,0.02)", padding: "9px 10px", marginBottom: 10 }}>
@@ -8654,7 +8702,9 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
                 {/* current holdings on this token */}
                 <span style={{ textAlign: "right", lineHeight: 1.3 }}>
                   <span style={{ display: "block", fontFamily: T.mono, fontSize: 6.5, letterSpacing: 1.2, color: T.faint }}>CURRENT HOLDINGS</span>
-                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: T.text }}>{fmtQty(hq)} <span style={{ color: accent(token.hue) }}>${token.sym}</span> · {fmt$(hu)}</span>
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: T.text }}>
+                    {hq == null ? "⛓ …" : <>{fmtQty(hq)} <span style={{ color: accent(token.hue) }}>${token.sym}</span> · {fmt$(hu || 0)}{realHold && realHold.est ? " ~" : ""}</>}
+                  </span>
                 </span>
               </div>
               <TraceMini candles={token.candles} hue={token.hue} h={62} />
@@ -10320,9 +10370,13 @@ export default function App() {
   // build → wallet signs → network. VALO never signs.
   const submitRealOrder = async () => {
     const o = realOrder;
-    if (!o || o.stage !== "review" || !wallet) return;
+    if (!o || o.stage !== "review") return;
+    if (!walletReady) { setRealOrder({ ...o, stage: "error", msg: "no wallet — unlock ⚡ TURBO (portfolio) or connect Phantom" }); return; }
     const ph = getProvider();
-    if (!ph && !turboActive) { setRealOrder({ ...o, stage: "error", msg: "Phantom not found" }); return; }
+    const ordOwner0 = o.owner || tradeAddr;
+    const ownerIsTurbo0 = !!(turbo && ordOwner0 === turbo.pubkey);
+    if (!ownerIsTurbo0 && !ph) { setRealOrder({ ...o, stage: "error", msg: "this order signs with Phantom, which isn't available here — use ⚡ TURBO instead" }); return; }
+    if (ownerIsTurbo0 && !turboActive) { setRealOrder({ ...o, stage: "error", msg: "⚡ turbo is locked — unlock with your PIN (portfolio → ⚡ TURBO), then confirm again" }); return; }
     setRealOrder({ ...o, stage: "signing" });
     try {
       const ordOwner = o.owner || tradeAddr;
@@ -15388,7 +15442,7 @@ export default function App() {
 
       {/* TRADE MARKER RECEIPT */}
       {markerInfo && (
-        <MarkerReceipt info={markerInfo} token={selected} isMobile={isMobile} onClose={() => setMarkerInfo(null)}
+        <MarkerReceipt liveMode={liveData} info={markerInfo} token={selected} isMobile={isMobile} onClose={() => setMarkerInfo(null)}
           onOpenUser={(u) => setProfileUser(u)}
           onHighlight={(tx) => setHighlightTx(tx)}
           traderPrefs={traderPrefs} setTraderPref={setTraderPref} myName={username} />
