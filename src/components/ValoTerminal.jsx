@@ -790,7 +790,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     const range = Math.max(trueHi - trueLo, trueHi * 0.02);   // never a zero range
     const padTop = range * 0.34;     // generous headroom over the tallest wick
     const padBot = range * 0.16;     // a little under the lowest
-    lo = trueLo > 0 ? Math.max(1e-15, trueLo - padBot) : Math.max(1e-15, trueHi * 1e-6);
+    lo = trueLo > 0 ? Math.max(trueLo * 0.55, trueLo - padBot) : Math.max(1e-15, trueHi * 1e-6);
     if (!(lo > 0)) lo = Math.max(1e-15, trueHi * 1e-6);
     hi = trueHi > 0 ? trueHi + padTop : hi + p8;
     // vertical zoom: stretch the visible price range around its centre. This is
@@ -1757,7 +1757,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
         </>
       )}
       <div style={{ position: "absolute", bottom: 30, right: 84, zIndex: 3, fontFamily: T.mono, fontSize: 9, letterSpacing: 1, color: synthetic ? T.amber : T.faint, pointerEvents: "none" }}>
-        {synthetic ? "⟲ SYNTH" : "DEXSCREENER"} · drag ⇄ pan · drag price axis ↕ stretch · scroll ⇱ zoom
+        {synthetic ? "⟲ SYNTH" : "DEXSCREENER"} · drag ⇄ pan · run the axis ⤢ time zoom · scroll ⇱ zoom
       </div>
       {lineMenu && (
         <>
@@ -5439,10 +5439,23 @@ function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phanto
               style={{ ...inp, width: "100%", boxSizing: "border-box", padding: "7px", fontSize: 9, marginBottom: 6 }} />
           )}
           <div style={{ display: "flex", gap: 6 }}>
-            <button disabled={busy || (!phantomOk && !sweepDest.trim())}
-              onClick={() => run(async () => { const r = await onSweep(phantomOk ? undefined : sweepDest.trim()); if (!r.ok) throw new Error(r.err); })}
-              style={{ flex: 1, border: `1px solid ${T.amber}66`, borderRadius: 8, padding: "7px", background: "rgba(240,185,11,0.08)",
-                color: T.amber, fontFamily: T.mono, fontSize: 9, fontWeight: 900, cursor: "pointer" }}>↑ SWEEP SOL {phantomOk ? "→ PHANTOM" : "→ ADDRESS"}</button>
+            {(() => {
+              const sweepSol = Math.max(0, turboSol - 0.000005);   // balance minus the 5000-lamport network fee
+              const canSweep = sweepSol > 0 && !busy && (phantomOk || sweepDest.trim());
+              return (
+                <button disabled={!canSweep}
+                  title={sweepSol > 0 ? `Sends your ENTIRE turbo balance (${sweepSol.toFixed(4)} SOL ≈ $${(sweepSol * SOL_USD).toFixed(2)}) ${phantomOk ? "back to your Phantom wallet" : "to the pasted address"} — turbo goes to exactly 0` : "Nothing to sweep — the turbo wallet is empty"}
+                  onClick={() => run(async () => { const r = await onSweep(phantomOk ? undefined : sweepDest.trim()); if (!r.ok) throw new Error(r.err); })}
+                  style={{ flex: 1, border: `1px solid ${T.amber}66`, borderRadius: 8, padding: "6px", background: "rgba(240,185,11,0.08)",
+                    color: canSweep ? T.amber : T.faint, fontFamily: T.mono, fontSize: 9, fontWeight: 900,
+                    cursor: canSweep ? "pointer" : "not-allowed", lineHeight: 1.35, opacity: canSweep ? 1 : 0.7 }}>
+                  <div>↑ SWEEP {phantomOk ? "→ PHANTOM" : "→ ADDRESS"}</div>
+                  <div style={{ fontSize: 8, fontWeight: 800, opacity: 0.9 }}>
+                    {sweepSol > 0 ? `${sweepSol.toFixed(4)} SOL · $${(sweepSol * SOL_USD).toFixed(2)}` : "empty — nothing to sweep"}
+                  </div>
+                </button>
+              );
+            })()}
             <button disabled={busy} onClick={onLock}
               style={{ flex: "0 0 auto", border: `1px solid ${T.border2}`, borderRadius: 8, padding: "7px 11px", background: "transparent",
                 color: T.faint, fontFamily: T.mono, fontSize: 9, fontWeight: 800, cursor: "pointer" }}>🔒 LOCK</button>
