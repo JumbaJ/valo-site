@@ -1067,15 +1067,10 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
             const mine = traderKey === "__me__";
             const hiIn = highlightTx && list.some((t) => t.tx === highlightTx);
             const rankC = Math.min(rank, 2);   // three tiers max — never a tower
-            // LIVE last bar → trace the candle itself (rides the bounce, stays
-            // out of the action). Settled bars → pinned to the fill price.
-            const isLiveBar = s === total - 1 - winStart || idxOf(s) === total - 1;
-            const withPx = list.filter((t2) => Number.isFinite(+t2.price || +t2.p) && (+t2.price || +t2.p) > 0);
-            const fillP = withPx.length
-              ? withPx.reduce((s2, t2) => s2 + (+t2.price || +t2.p), 0) / withPx.length
-              : (isBuy ? c.l : c.h);
-            const anchorP = isLiveBar ? (isBuy ? c.l : c.h) : fillP;
-            // 🟢 buys UNDER the bar, 🔴 sells ABOVE it
+            // 🟢 buys hang UNDER the bar's LOW, 🔴 sells sit ABOVE its HIGH —
+            // always at the bar's own extreme, so the live candle carries its
+            // badge with it as it bounces, and history reads clean.
+            const anchorP = isBuy ? c.l : c.h;
             const baseY = (isBuy ? y(anchorP) + 16 : y(anchorP) - 16) + (isBuy ? rankC * 19 : -rankC * 19);
             // badge body is always the gain/loss colour (green buy / red sell) so
             // direction reads instantly; the trader's own colour becomes the ring.
