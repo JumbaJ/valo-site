@@ -456,7 +456,7 @@ function adoptMarketToken(x) {
     id: ++mktNid,                       // numeric id — every helper expects one
     pool: x.id, liveMint: x.mint || null, market: true,
     sym, name: x.name || sym, chain: "pump",
-    isNew: ageMin < 60, hasDex: true, createdAt: x.createdAt || (Date.now() - ageMin * 60000),
+    isNew: ageMin < 60, hasDex: true, createdAt: x.createdAt || null,
     traders: +x.traders || flow, tvl, greenUsd: green, redUsd: red,
     momentum, buyPressure,
     liq: tvl, vol24: (+x.vol24 || green + red),   // real reserve + real 24h volume
@@ -6205,7 +6205,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   // No toggle: the two books never appear on the same screen, ever.
   const chainOn = !!(liveMode && ((wallet && wallet.address) || (turboState && turboState.pubkey)) && walletChain);
   const chSol = (walletChain && walletChain.sol) || 0;
-  const chTokensUsd = (walletChain && walletChain.tokensUsd) || 0;
+  const chTokensUsd = walletChain ? visHolds(walletChain.holdings).reduce((s, h) => s + (h.usd || 0), 0) : 0;
   const chCount = walletChain ? visHolds(walletChain.holdings).length : 0;
   const chEquity = chSol * SOL_USD + chTokensUsd;
   // ⛓ PnL — from fills placed through VALO. Coins bought elsewhere have no
@@ -6396,22 +6396,31 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           ⏳ {nameErr} · tap to dismiss
         </div>
       )}
-      {((walletConnected && wallet) || (turboState && turboState.pubkey)) && (
+      {(liveMode || (walletConnected && wallet) || (turboState && turboState.pubkey)) && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, paddingBottom: 10,
           borderBottom: `1px solid ${T.border}`, flexWrap: "wrap" }}>
-          {walletConnected && wallet && (<>
+          {walletConnected && wallet ? (<>
           <a href={`https://solscan.io/account/${wallet.address}`} target="_blank" rel="noopener noreferrer"
+            title="Logged in with Phantom — open this address on Solscan"
             style={{ display: "inline-flex", alignItems: "center", gap: 5, fontFamily: T.mono, fontSize: 8.5,
-              fontWeight: 800, color: T.dim, textDecoration: "none", border: `1px solid ${T.border}`,
-              borderRadius: 999, padding: "2px 9px", background: "rgba(255,255,255,0.02)" }}>
-            👻 {wallet.address.slice(0, 4)}…{wallet.address.slice(-4)}
+              fontWeight: 800, color: "#AB9FF2", textDecoration: "none", border: "1px solid rgba(125,92,240,0.45)",
+              borderRadius: 999, padding: "2px 9px", background: "rgba(125,92,240,0.08)" }}>
+            👻 {wallet.address.slice(0, 4)}…{wallet.address.slice(-4)} ↗
+            {(() => { const ps = (walletChain && walletChain.solVault) != null ? walletChain.solVault
+                : (!turboState && walletChain && walletChain.sol) || 0;
+              return <span style={{ color: ps > 0 ? T.green : T.faint }}>· ◎{(+ps || 0).toFixed(4)}</span>; })()}
             {wallet.verified && <span style={{ color: T.green, fontSize: 7.5 }}>✓</span>}
           </a>
-          <button onClick={onDisconnectWallet}
+          <button onClick={onDisconnectWallet} title="Log the Phantom wallet out of VALO"
             style={{ border: `1px solid ${T.border}`, background: "transparent", color: T.faint,
               borderRadius: 999, padding: "2px 9px", cursor: "pointer", fontFamily: T.mono,
-              fontSize: 8, fontWeight: 800, letterSpacing: 0.5 }}>DISCONNECT</button>
-          </>)}
+              fontSize: 8, fontWeight: 800, letterSpacing: 0.5 }}>👻 LOG OUT</button>
+          </>) : liveMode ? (
+            <button onClick={onConnectWallet} title="Log in with Phantom — its balance and address track across the site"
+              style={{ border: "1px solid rgba(125,92,240,0.5)", background: "rgba(125,92,240,0.1)", color: "#AB9FF2",
+                borderRadius: 999, padding: "3px 11px", cursor: "pointer", fontFamily: T.mono,
+                fontSize: 8.5, fontWeight: 900, letterSpacing: 0.5 }}>👻 LOG IN WITH PHANTOM</button>
+          ) : null}
           {turboState && turboState.pubkey && (
             <a href={`https://solscan.io/account/${turboState.pubkey}`} target="_blank" rel="noopener noreferrer"
               title="Your Turbo trading wallet — balance live"
@@ -6492,7 +6501,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                 <>
                   {(() => {
                     const holdsW = (walletChain && walletChain.holdings) || [];
-                    const tokUsdOf = (side) => holdsW.filter((h) => (side === "phantom") === (h.src === "phantom")).reduce((s2, h) => s2 + (h.usd || 0), 0);
+                    const tokUsdOf = (side) => visHolds(holdsW).filter((h) => (side === "phantom") === (h.src === "phantom")).reduce((s2, h) => s2 + (h.usd || 0), 0);
                     const vSol = walletView === "phantom"
                       ? ((walletChain && walletChain.solVault) || 0)
                       : (walletChain && walletChain.solTrading != null ? walletChain.solTrading : chSol);
@@ -13306,6 +13315,14 @@ export default function App() {
           if (typeof window !== "undefined") {
             window.__VALO_CREATORS__ = { ...(window.__VALO_CREATORS__ || {}), [selected.liveMint]: j };
           }
+          // the token's TRUE launch time (pump created_timestamp) overrides the
+          // pool date — a graduated token's pool is days younger than the coin
+          if (j.createdAt > 0) {
+            const mintFix = selected.liveMint;
+            setTokens((Ts) => Ts.map((x) => (x.liveMint === mintFix && Math.abs((x.createdAt || 0) - j.createdAt) > 3600e3
+              ? { ...x, createdAt: j.createdAt, ageMin: Math.max(1, Math.round((Date.now() - j.createdAt) / 60000)) }
+              : x)));
+          }
         }
       } catch (e) {}
     })();
@@ -14273,7 +14290,7 @@ export default function App() {
         sbLive
           ? ["⛓ TOKENS", <b onClick={() => setPortfolioDrawer(true)}
               style={{ color: T.amber, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
-              ${((walletChain && walletChain.tokensUsd) || 0).toFixed(0)}</b>]
+              ${(walletChain ? visHolds(walletChain.holdings).reduce((s3, h3) => s3 + (h3.usd || 0), 0) : 0).toFixed(0)}</b>]
           : ["$VALO", <b onClick={() => { setPay("VALO"); setAmount(String(feeSafe(valoWallet, "VALO"))); }}
               style={{ color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(valoWallet)}</b>],
         [mobPnlMode === "live" ? "LIVE BOT PNL" : `BOT PNL · ${mobPnlMode}`, (() => {
@@ -14296,7 +14313,7 @@ export default function App() {
               transition: "background .15s, border-color .15s, box-shadow .15s" }}>
             {v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}</button>;
         })()],
-        ["TOTAL", <b style={{ color: T.text }}>${((sbLive ? sbSol * SOL_USD + ((walletChain && walletChain.tokensUsd) || 0) : solBalance * SOL_USD + valoWallet * 0.0125) + (sbLive ? 0 : strategyEquityUsd)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b>],
+        ["TOTAL", <b style={{ color: T.text }}>${((sbLive ? sbSol * SOL_USD + (walletChain ? visHolds(walletChain.holdings).reduce((s3, h3) => s3 + (h3.usd || 0), 0) : 0) : solBalance * SOL_USD + valoWallet * 0.0125) + (sbLive ? 0 : strategyEquityUsd)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b>],
       ]; })().map(([k, v], i) => (
         <div key={i} data-wtotal={k === "TOTAL" ? "1" : undefined} style={{ flex: 1, textAlign: "center", padding: "6px 2px", borderLeft: i ? `1px solid ${T.border}` : "none", minWidth: 0 }}>
           <div style={{ color: T.faint, fontSize: 6.5, letterSpacing: 0.8, marginBottom: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k}</div>
