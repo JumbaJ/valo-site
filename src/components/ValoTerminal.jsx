@@ -5291,11 +5291,11 @@ function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phanto
           <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
             <input value={fundAmt} onChange={(e) => setFundAmt(e.target.value)} inputMode="decimal" placeholder="0.05"
               style={{ ...inp, flex: 1, padding: "7px", fontSize: 10.5, textAlign: "center" }} />
-            <button disabled={busy || !phantomOk || !(parseFloat(fundAmt) > 0)}
-              title={phantomOk ? "One-click transfer from your connected Phantom" : "Connect Phantom, or copy the deposit address above"}
+            <button disabled={busy || !(parseFloat(fundAmt) > 0)}
+              title={phantomOk ? "One-click transfer from your connected Phantom" : "Open Phantom to send SOL to your turbo wallet"}
               onClick={() => run(async () => { const r = await onFund(parseFloat(fundAmt)); if (!r.ok) throw new Error(r.err); })}
               style={{ flex: "0 0 auto", border: `1px solid ${T.green}66`, borderRadius: 8, padding: "7px 11px", background: "rgba(22,199,132,0.1)",
-                color: T.green, fontFamily: T.mono, fontSize: 9, fontWeight: 900, cursor: "pointer" }}>↓ FUND FROM PHANTOM</button>
+                color: T.green, fontFamily: T.mono, fontSize: 9, fontWeight: 900, cursor: "pointer" }}>↓ {phantomOk ? "FUND FROM PHANTOM" : "OPEN PHANTOM TO SEND"}</button>
           </div>
           {!phantomOk && (
             <input value={sweepDest} onChange={(e) => setSweepDest(e.target.value)} placeholder="withdraw address (paste any SOL wallet)"
@@ -8449,7 +8449,7 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
               ["AMOUNT", `${tr.amt} ${tr.unit}`],
               ["FILL PRICE", `$${fmtP(tr.price)}`],
               ...(isBuy ? [] : [["EXIT PRICE", `$${fmtP(tr.price)}`]]),
-              ["MARKET CAP", fmt$(tr.mc)],
+              ["MARKET CAP", tr.mc > 0 ? `${tr.mcEstimated ? "~" : ""}${fmt$(tr.mc)}` : "—"],
               ...(tr.side === "sell" && tr.pnlPct != null
                 ? [["ENTRY", `$${fmtP(tr.entry)}`], ["PNL %", null], ["PNL SOL", null], ["PNL USD", null]]
                 : []),
@@ -9322,7 +9322,18 @@ export default function App() {
   const realFillsRef = useRef([]);
   useEffect(() => { realFillsRef.current = realFills; }, [realFills]);
   const recordRealFill = (f) => setRealFills((F) => {
-    const next = [...F, f].slice(-500);
+    // stamp the token's live market cap at THIS instant, so the marker can show
+    // the exact MC the trade happened at (not a later, recomputed value)
+    let mcAtFill = f.mcAtFill;
+    if (!(mcAtFill > 0) && f.mint) {
+      const tk = (tokensRef.current || []).find((t) => t.liveMint === f.mint);
+      if (tk && tk.mc > 0 && tk.price > 0 && f.px > 0) {
+        const supply = tk.mc / tk.price;           // supply is ~constant
+        mcAtFill = f.px * supply;                   // MC at the fill's own price
+      } else if (tk && tk.mc > 0) mcAtFill = tk.mc; // best available
+    }
+    const stamped = mcAtFill > 0 ? { ...f, mcAtFill } : f;
+    const next = [...F, stamped].slice(-500);
     try { localStorage.setItem("valo-real-fills-v1", JSON.stringify(next)); } catch (e) {}
     return next;
   });
@@ -9547,7 +9558,20 @@ export default function App() {
   // fund: Phantom → turbo (the ONE Phantom approval this whole system needs)
   const turboFund = async (sol) => {
     const ph = getProvider();
-    if (!ph || !wallet || !wallet.address || !turbo) return { ok: false, err: "connect Phantom first" };
+    // no injected Phantom (Home Screen PWA / no extension) → deeplink Phantom's
+    // own send flow to the turbo address; the user approves in Phantom and taps
+    // back to the app. No in-app browser, no full-screen break.
+    if (!ph) {
+      if (turbo && turbo.pubkey && typeof window !== "undefined") {
+        const amt = Math.max(0, sol || 0);
+        // Phantom universal link to send SOL to an address
+        const url = `https://phantom.app/ul/v1/send?recipient=${turbo.pubkey}&amount=${amt}&token=SOL`;
+        window.location.href = url;   // same-tab hand-off; returns to the PWA after
+        return { ok: true, deeplink: true };
+      }
+      return { ok: false, err: "no Phantom — copy the deposit address above and send SOL from any wallet" };
+    }
+    if (!wallet || !wallet.address || !turbo) return { ok: false, err: "connect Phantom first" };
     try {
       const web3 = await loadWeb3();
       const bhx = await getBlockhash();
@@ -11416,7 +11440,10 @@ export default function App() {
   const [walletChain, setWalletChain] = useState(null); // real on-chain balances
   // what trading surfaces DISPLAY as balance. On the live site paper numbers
   // never appear — connected shows the real wallet, unconnected shows zero.
-  const dispSol = liveData ? ((wallet && wallet.address && walletChain && walletChain.sol) || 0) : solBalance;
+  // live site → the TRADING wallet's real SOL. walletChain already follows the
+  // turbo wallet when armed (else Phantom), so this is the true spendable
+  // balance — never the paper balance, and never gated on a Phantom connection.
+  const dispSol = liveData ? ((walletChain && walletChain.sol) || 0) : solBalance;
   const dispValo = liveData ? 0 : valoWallet;
   // ⚡ signing needs an UNLOCKED turbo; viewing needs only that one EXISTS.
   // Once created, the turbo wallet IS the trading wallet — positions, balances
@@ -11474,9 +11501,20 @@ export default function App() {
   const connectPhantom = async () => {
     const ph = getProvider();
     if (!ph) {
-      // no extension: send them to Phantom rather than pretending it worked
+      // Home Screen PWA (standalone) has no injected wallet. DON'T browse-deeplink
+      // into Phantom's in-app browser — that throws the user out of full screen.
+      // Turbo is the site's wallet and needs no Phantom, so steer there instead.
+      const isPhone = typeof navigator !== "undefined" && /iPhone|iPad|Android/i.test(navigator.userAgent);
+      const inStandalone = typeof window !== "undefined" &&
+        (window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true);
+      if (inStandalone && isPhone) {
+        pushNotif({ type: "system", user: null, tokenId: null,
+          text: "⚡ In the installed app, use your TURBO wallet (portfolio → ⚡ TURBO) — it trades with no popups and needs no Phantom. Deposit SOL to its address from Phantom or any wallet." });
+        // open the portfolio drawer straight to the turbo panel
+        try { setPortfolioDrawer(true); } catch (e) {}
+        return;
+      }
       if (typeof window !== "undefined") {
-        const isPhone = /iPhone|iPad|Android/i.test(navigator.userAgent);
         window.open(isPhone
           ? `https://phantom.app/ul/browse/${encodeURIComponent(window.location.href)}`
           : "https://phantom.app/download", "_blank", "noopener");
@@ -12073,7 +12111,10 @@ export default function App() {
         sym: f.sym, tx: f.sig, real: true, mine: true,
         trader: "__me__",
         fillPrice: px, entry: entryAvg,
-        mc: supply > 0 ? px * supply : (selected.mc || null),   // MC at this fill's price
+        // the TRUE MC recorded at fill time wins; else derive from supply × fill
+        // price; else (no data) null so the receipt shows "—" not a wrong number
+        mc: (f.mcAtFill > 0) ? f.mcAtFill : (supply > 0 && px > 0 ? px * supply : null),
+        mcEstimated: !(f.mcAtFill > 0),
         pnlMoney, pnlPct,
         qtyTokens: f.qty, solValue: f.sol, est: !!f.est,
       };
@@ -13747,7 +13788,11 @@ export default function App() {
     };
     const setPct = (p, ofHoldings) => {
       if (ofHoldings) setAmount(pay === "SOL" ? (held * p / 100).toFixed(4) : Math.floor(held * p / 100).toString());
-      else { const bal = pay === "SOL" ? solBalance : myHoldings; setAmount(String(feeSafe(bal * p / 100, pay))); }
+      else {
+        // live → % of the REAL trading-wallet SOL (minus rent reserve); demo → paper
+        const bal = pay === "SOL" ? (liveData ? Math.max(0, mChainSol - 0.0065) : solBalance) : myHoldings;
+        setAmount(String(feeSafe(bal * p / 100, pay)));
+      }
     };
     return (
     <div>
@@ -13782,7 +13827,7 @@ export default function App() {
             {pay === "SOL" ? "$SOL" : "$VALO"} ⇅
           </span>
           <span style={{ display: "block", fontSize: 7, color: T.faint }}>
-            {pay === "SOL" ? `${solBalance.toFixed(1)}` : fmtQty(valoWallet)} held
+            {pay === "SOL" ? `${(liveData ? mChainSol : solBalance).toFixed(liveData ? 4 : 1)}` : fmtQty(valoWallet)} held
           </span>
         </button>
         <input value={amount} onChange={(e) => { setAmount(e.target.value); setPctSel(null); }}
