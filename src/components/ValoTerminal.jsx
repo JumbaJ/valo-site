@@ -6263,6 +6263,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   const walletUsd = solBalance * SOL_USD + valoWallet * valoUsd;
   const [chainOpen, setChainOpen] = useState(false);   // real wallet holdings, expanded
   const [walletView, setWalletView] = useState("turbo"); // headline flips turbo ⇄ phantom
+  const [turboPop, setTurboPop] = useState(false);       // ⚡ turbo overlay off the Wallet tab
   const totalPnl = realizedPnl + unrealizedPnl;
   const totalEquity = walletUsd + Math.max(0, liveValue) + (extraEquity || 0); // + live bots & escrowed arms
   const [swapAmt, setSwapAmt] = useState("1");
@@ -6433,12 +6434,43 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           <b style={{ color: T.text, fontSize: 12 }}>{followingCount}</b> Following
         </span>
       </div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-        {[["wallet", "💼 Wallet"], ["performance", "📈 Performance"]].map(([k, l]) => (
-          <button key={k} onClick={() => setTab(k)}
-            style={{ ...chip(tab === k), flex: 1, textAlign: "center", padding: "7px", fontSize: 11 }}>{l}</button>
-        ))}
-
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, position: "relative" }}>
+        {/* 💼 Wallet + ⚡ turbo segment: green = armed & ready, red = disarmed */}
+        <span style={{ flex: 1, display: "flex" }}>
+          <button onClick={() => setTab("wallet")}
+            style={{ ...chip(tab === "wallet"), flex: 1, textAlign: "center", padding: "7px", fontSize: 11,
+              borderTopRightRadius: liveMode && turboState ? 0 : undefined, borderBottomRightRadius: liveMode && turboState ? 0 : undefined }}>💼 Wallet</button>
+          {liveMode && (
+            <button onClick={() => setTurboPop((v) => !v)}
+              title={!turboState ? "Set up your ⚡ TURBO wallet" : turboState.unlocked ? "⚡ TURBO armed — tap to manage" : "⚡ TURBO locked (disarmed) — tap to unlock"}
+              style={{ flex: "0 0 auto", padding: "7px 11px", fontSize: 11, fontFamily: T.mono, fontWeight: 900, cursor: "pointer",
+                borderRadius: "0 8px 8px 0", borderLeft: "none",
+                border: `1px solid ${!turboState ? T.border2 : turboState.unlocked ? T.green : T.red}`,
+                background: !turboState ? "rgba(255,255,255,0.03)" : turboState.unlocked ? "rgba(22,199,132,0.14)" : "rgba(234,57,67,0.12)",
+                color: !turboState ? T.faint : turboState.unlocked ? T.green : T.red,
+                boxShadow: turboState && turboState.unlocked ? `0 0 9px ${T.green}44` : turboState ? `0 0 8px ${T.red}33` : "none" }}>
+              ⚡{turboPop ? "▴" : ""}
+            </button>
+          )}
+        </span>
+        <button onClick={() => setTab("performance")}
+          style={{ ...chip(tab === "performance"), flex: 1, textAlign: "center", padding: "7px", fontSize: 11 }}>📈 Performance</button>
+        {/* ⚡ TURBO popover — floats OVER the wallet, pushes nothing */}
+        {liveMode && turboPop && (
+          <>
+            <div onClick={() => setTurboPop(false)} style={{ position: "fixed", inset: 0, zIndex: 44 }} />
+            <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 45,
+              maxHeight: "62vh", overflowY: "auto", borderRadius: 12,
+              boxShadow: "0 18px 50px rgba(0,0,0,0.7)", border: `1px solid ${turboState && turboState.unlocked ? T.green : T.red}55`,
+              background: T.panel }}>
+              <TurboPanel turbo={turboState} onCreate={onTurboCreate} onUnlock={onTurboUnlock}
+                onLock={onTurboLock} onFund={onTurboFund} onSweep={onTurboSweep}
+                phantomOk={!!(wallet && wallet.address)} turboSol={turboSol}
+                autoOn={turboAutoOn} onToggleAuto={onTurboToggleAuto}
+                phantomSol={(walletChain && walletChain.solVault) || 0} valoMint={valoMint} />
+            </div>
+          </>
+        )}
       </div>
 
       {tab === "wallet" ? (
@@ -6545,39 +6577,6 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               </div>
             )}
           </div>
-          {liveMode && (
-            <TurboPanel turbo={turboState} onCreate={onTurboCreate} onUnlock={onTurboUnlock}
-              onLock={onTurboLock} onFund={onTurboFund} onSweep={onTurboSweep}
-              phantomOk={!!(wallet && wallet.address)} turboSol={turboSol}
-              autoOn={turboAutoOn} onToggleAuto={onTurboToggleAuto}
-              phantomSol={(walletChain && walletChain.solVault) || 0} valoMint={valoMint} />
-          )}
-          {/* epoch rewards — on the live site claims pay REAL $VALO to the
-              connected Phantom wallet from the epoch vault at epoch close */}
-          <div style={{ background: "linear-gradient(120deg, rgba(240,185,11,0.08), rgba(125,92,240,0.06))", border: "1px solid rgba(240,185,11,0.3)", borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <span style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 800, letterSpacing: 1, color: T.amber }}>🎁 EPOCH REWARDS</span>
-              <button onClick={() => onOpenClaim && onOpenClaim()}
-                style={{ ...chip(false), padding: "4px 10px", fontSize: 9.5, color: T.amber, borderColor: "rgba(240,185,11,0.4)", background: "rgba(240,185,11,0.1)" }}>Claim →</button>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <div>
-                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>LAST HOUR</div>
-                <div style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 800, color: T.green }}>{mask(`${epochLastHour.toFixed(3)}`)}</div>
-                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>{mask(`$${(epochLastHour * valoUsdForEpoch).toFixed(2)} · $VALO`)}</div>
-              </div>
-              <div>
-                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>TOTAL EARNED · all-time</div>
-                <div style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 800, color: VALO_PURPLE }}>{mask(`${epochTotalEarned.toFixed(3)}`)}</div>
-                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>{mask(`$${(epochTotalEarned * valoUsdForEpoch).toFixed(2)} · incl. withdrawn`)}</div>
-              </div>
-            </div>
-          </div>
-          {liveMode && (
-            <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.dim, margin: "-6px 0 10px", lineHeight: 1.5 }}>
-              ⛓ Claims here are <b style={{ color: T.amber }}>real</b> — paid in $VALO to {wallet && wallet.address ? `👻 ${wallet.address.slice(0, 4)}…${wallet.address.slice(-4)}` : "your connected wallet"} from the epoch vault at epoch close.
-            </div>
-          )}
           {chainOn ? (
             <div style={{ background: "#0c0f16", border: `1px solid ${T.amber}44`, borderRadius: 9, padding: "8px 10px", marginBottom: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 10.5 }}>
