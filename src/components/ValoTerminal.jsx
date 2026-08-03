@@ -5311,8 +5311,10 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
 }
 
 // ⚡ TURBO WALLET — the popup-free trading key, entirely on this device.
-function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phantomOk, turboSol = 0, autoOn = false, onToggleAuto = null }) {
+function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phantomOk, turboSol = 0, autoOn = false, onToggleAuto = null, phantomSol = 0, valoMint = null }) {
   const [autoConfirm, setAutoConfirm] = useState(false);   // two-tap arm
+  const [sweepConfirm, setSweepConfirm] = useState(false); // two-tap sweep
+  const [depositCcy, setDepositCcy] = useState("SOL");     // SOL | VALO (post-launch)
   const [pin, setPin] = useState("");
   const [fundAmt, setFundAmt] = useState("0.05");
   const [sweepDest, setSweepDest] = useState("");
@@ -5425,7 +5427,45 @@ function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phanto
           <div style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, marginBottom: 5 }}>
             fund ≥ 0.03 — Solana reserves ~0.002/token account for rent, and buys keep ~0.0065 aside automatically
           </div>
+          {/* 👻 what Phantom actually holds — the source of the deposit */}
+          {phantomSol > 0 && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: T.mono,
+              fontSize: 8.5, fontWeight: 800, color: "#AB9FF2", background: "rgba(125,92,240,0.07)",
+              border: "1px solid rgba(125,92,240,0.3)", borderRadius: 8, padding: "5px 8px", marginBottom: 5 }}>
+              <span>👻 phantom holds ◎{phantomSol.toFixed(4)}</span>
+              <span style={{ opacity: 0.8 }}>${(phantomSol * SOL_USD).toFixed(2)}</span>
+            </div>
+          )}
+          {/* % of the phantom balance to bring over (small fee buffer kept) */}
+          {phantomSol > 0.002 && (
+            <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
+              {[25, 50, 75, 100].map((pc) => {
+                const v = Math.max(0, (phantomSol - 0.001) * pc / 100);
+                return (
+                  <button key={pc} onClick={() => setFundAmt(v.toFixed(4))}
+                    title={`Deposit ${v.toFixed(4)} SOL (${pc}% of your Phantom balance)`}
+                    style={{ flex: 1, border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.02)", color: pc === 100 ? T.amber : T.dim,
+                      borderRadius: 7, padding: "4px 0", cursor: "pointer", fontFamily: T.mono, fontSize: 8.5, fontWeight: 800 }}>
+                    {pc === 100 ? "ALL" : pc + "%"}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+            {/* deposit currency — $VALO switches on the moment the token launches */}
+            <span style={{ display: "flex", gap: 3, flex: "0 0 auto" }}>
+              <button onClick={() => setDepositCcy("SOL")}
+                style={{ border: `1px solid ${depositCcy === "SOL" ? T.blue : T.border}`, background: depositCcy === "SOL" ? "rgba(76,154,255,0.12)" : "transparent",
+                  color: depositCcy === "SOL" ? T.blue : T.faint, borderRadius: 7, padding: "4px 8px", cursor: "pointer",
+                  fontFamily: T.mono, fontSize: 8.5, fontWeight: 900 }}>SOL</button>
+              <button onClick={() => valoMint && setDepositCcy("VALO")} disabled={!valoMint}
+                title={valoMint ? "Deposit $VALO to trade with" : "$VALO deposits unlock when the token launches"}
+                style={{ border: `1px solid ${depositCcy === "VALO" ? VALO_PURPLE : T.border}`, background: depositCcy === "VALO" ? "rgba(125,92,240,0.12)" : "transparent",
+                  color: !valoMint ? T.faint : depositCcy === "VALO" ? VALO_PURPLE : T.dim, borderRadius: 7, padding: "4px 8px",
+                  cursor: valoMint ? "pointer" : "not-allowed", opacity: valoMint ? 1 : 0.55,
+                  fontFamily: T.mono, fontSize: 8.5, fontWeight: 900 }}>$VALO{!valoMint ? " 🔒" : ""}</button>
+            </span>
             <input value={fundAmt} onChange={(e) => setFundAmt(e.target.value)} inputMode="decimal" placeholder="0.05"
               style={{ ...inp, flex: 1, padding: "7px", fontSize: 10.5, textAlign: "center" }} />
             <button disabled={busy || !(parseFloat(fundAmt) > 0)}
@@ -5445,13 +5485,19 @@ function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phanto
               return (
                 <button disabled={!canSweep}
                   title={sweepSol > 0 ? `Sends your ENTIRE turbo balance (${sweepSol.toFixed(4)} SOL ≈ $${(sweepSol * SOL_USD).toFixed(2)}) ${phantomOk ? "back to your Phantom wallet" : "to the pasted address"} — turbo goes to exactly 0` : "Nothing to sweep — the turbo wallet is empty"}
-                  onClick={() => run(async () => { const r = await onSweep(phantomOk ? undefined : sweepDest.trim()); if (!r.ok) throw new Error(r.err); })}
-                  style={{ flex: 1, border: `1px solid ${T.amber}66`, borderRadius: 8, padding: "6px", background: "rgba(240,185,11,0.08)",
-                    color: canSweep ? T.amber : T.faint, fontFamily: T.mono, fontSize: 9, fontWeight: 900,
-                    cursor: canSweep ? "pointer" : "not-allowed", lineHeight: 1.35, opacity: canSweep ? 1 : 0.7 }}>
-                  <div>↑ SWEEP {phantomOk ? "→ PHANTOM" : "→ ADDRESS"}</div>
+                  onClick={() => {
+                    if (!sweepConfirm) { setSweepConfirm(true); setTimeout(() => setSweepConfirm(false), 3400); return; }
+                    setSweepConfirm(false);
+                    run(async () => { const r = await onSweep(phantomOk ? undefined : sweepDest.trim()); if (!r.ok) throw new Error(r.err); });
+                  }}
+                  style={{ flex: 1, border: `1.5px solid ${sweepConfirm ? T.red : `${T.amber}66`}`, borderRadius: 8, padding: "6px",
+                    background: sweepConfirm ? "rgba(234,57,67,0.14)" : "rgba(240,185,11,0.08)",
+                    color: !canSweep ? T.faint : sweepConfirm ? T.red : T.amber, fontFamily: T.mono, fontSize: 9, fontWeight: 900,
+                    cursor: canSweep ? "pointer" : "not-allowed", lineHeight: 1.35, opacity: canSweep ? 1 : 0.7,
+                    boxShadow: sweepConfirm ? `0 0 12px ${T.red}55` : "none", transition: "border-color .15s, background .15s" }}>
+                  <div>{sweepConfirm ? "⚠ TAP AGAIN TO CONFIRM" : `↑ SWEEP ${phantomOk ? "→ PHANTOM" : "→ ADDRESS"}`}</div>
                   <div style={{ fontSize: 8, fontWeight: 800, opacity: 0.9 }}>
-                    {sweepSol > 0 ? `${sweepSol.toFixed(4)} SOL · $${(sweepSol * SOL_USD).toFixed(2)}` : "empty — nothing to sweep"}
+                    {sweepSol > 0 ? `${sweepConfirm ? "sends " : ""}${sweepSol.toFixed(4)} SOL · $${(sweepSol * SOL_USD).toFixed(2)}${sweepConfirm ? " — turbo → 0" : ""}` : "empty — nothing to sweep"}
                   </div>
                 </button>
               );
@@ -6160,6 +6206,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   }, 0);
   const walletUsd = solBalance * SOL_USD + valoWallet * valoUsd;
   const [chainOpen, setChainOpen] = useState(false);   // real wallet holdings, expanded
+  const [walletView, setWalletView] = useState("turbo"); // headline flips turbo ⇄ phantom
   const totalPnl = realizedPnl + unrealizedPnl;
   const totalEquity = walletUsd + Math.max(0, liveValue) + (extraEquity || 0); // + live bots & escrowed arms
   const [swapAmt, setSwapAmt] = useState("1");
@@ -6347,16 +6394,32 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               {hideBalance ? "🙈" : "👁"}
             </button>
             <div style={{ userSelect: "none" }}>
-              <div style={{ fontFamily: T.mono, fontSize: 9, color: chainOn ? T.amber : T.faint, letterSpacing: 1,
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                {chainOn ? (turboState ? "⚡ TURBO WALLET · ON-CHAIN" : "⛓ ON-CHAIN WALLET") : liveMode ? "⛓ ON-CHAIN WALLET" : "TOTAL EQUITY"}
+              <div onClick={() => chainOn && turboState && setWalletView((v) => (v === "turbo" ? "phantom" : "turbo"))}
+                title={chainOn && turboState ? "Tap to flip between your TURBO and PHANTOM wallet values" : undefined}
+                style={{ fontFamily: T.mono, fontSize: 9, color: chainOn ? (walletView === "phantom" ? "#AB9FF2" : T.amber) : T.faint, letterSpacing: 1,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: chainOn && turboState ? "pointer" : "default" }}>
+                {chainOn ? (turboState ? (walletView === "phantom" ? "👻 PHANTOM WALLET · ON-CHAIN ⇄" : "⚡ TURBO WALLET · ON-CHAIN ⇄") : "⛓ ON-CHAIN WALLET") : liveMode ? "⛓ ON-CHAIN WALLET" : "TOTAL EQUITY"}
               </div>
               {chainOn ? (
                 <>
-                  <div style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 800, color: T.amber }}>
-                    {mask(`$${chEquity.toLocaleString(undefined, { maximumFractionDigits: 0 })}`)}
-                  </div>
                   {(() => {
+                    const holdsW = (walletChain && walletChain.holdings) || [];
+                    const tokUsdOf = (side) => holdsW.filter((h) => (side === "phantom") === (h.src === "phantom")).reduce((s2, h) => s2 + (h.usd || 0), 0);
+                    const vSol = walletView === "phantom"
+                      ? ((walletChain && walletChain.solVault) || 0)
+                      : (walletChain && walletChain.solTrading != null ? walletChain.solTrading : chSol);
+                    const vEq = vSol * SOL_USD + tokUsdOf(walletView === "phantom" ? "phantom" : "turbo");
+                    const showEq = turboState ? vEq : chEquity;
+                    return (
+                      <div onClick={() => turboState && setWalletView((v) => (v === "turbo" ? "phantom" : "turbo"))}
+                        title={turboState ? "Tap to flip turbo ⇄ phantom" : undefined}
+                        style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 800, cursor: turboState ? "pointer" : "default",
+                          color: walletView === "phantom" ? "#AB9FF2" : T.amber }}>
+                        {mask(`$${showEq.toLocaleString(undefined, { maximumFractionDigits: showEq < 100 ? 2 : 0 })}`)}
+                      </div>
+                    );
+                  })()}
+                  {walletView !== "phantom" && (() => {
                     const holdsL = chainHoldingsLive2 || [];
                     const unreal = holdsL.reduce((s, h) => s + (h.pnlUsd || 0), 0);
                     const realized = (chainLedger.realizedSol || 0) * SOL_USD;
@@ -6372,7 +6435,9 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                     );
                   })()}
                   <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 700, color: T.dim }}>
-                    {mask(`${chSol.toFixed(3)} SOL + ${chCount} token${chCount === 1 ? "" : "s"} · read-only`)}
+                    {walletView === "phantom" && turboState
+                      ? mask(`${(((walletChain && walletChain.solVault) || 0)).toFixed(4)} SOL · $VALO joins at launch · read-only`)
+                      : mask(`${chSol.toFixed(3)} SOL + ${chCount} token${chCount === 1 ? "" : "s"} · read-only`)}
                   </div>
                   {walletChain && walletChain.dual && (
                     <div style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 700, color: T.faint }}>
@@ -6428,7 +6493,8 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
             <TurboPanel turbo={turboState} onCreate={onTurboCreate} onUnlock={onTurboUnlock}
               onLock={onTurboLock} onFund={onTurboFund} onSweep={onTurboSweep}
               phantomOk={!!(wallet && wallet.address)} turboSol={turboSol}
-              autoOn={turboAutoOn} onToggleAuto={onTurboToggleAuto} />
+              autoOn={turboAutoOn} onToggleAuto={onTurboToggleAuto}
+              phantomSol={(walletChain && walletChain.solVault) || 0} valoMint={valoMint} />
           )}
           {/* epoch rewards — on the live site claims pay REAL $VALO to the
               connected Phantom wallet from the epoch vault at epoch close */}
