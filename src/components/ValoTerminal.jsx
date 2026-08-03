@@ -3162,7 +3162,7 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
     }).filter(Boolean);
     const liveOn = typeof window !== "undefined" && window.__VALO_LIVE_ON__;
     // live mode → only real callouts rank; demo mode keeps the simulated field
-    const all = liveOn ? [...realBoard, ...mine] : [...genLeaderboard(period), ...realBoard, ...mine];
+    const all = liveOn ? [...realBoard] : [...genLeaderboard(period), ...realBoard, ...mine];
     // collapse to each trader's best call in this window, and remember how many
     // calls they landed so the row can show it
     const best = new Map();
@@ -3879,7 +3879,8 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
         const live = (tokens || []).find((t) => t.liveMint === L.mint);
         return live || {
           id: "L:" + L.mint, liveMint: L.mint, pool: null, sym: L.sym, name: L.name,
-          hue: symbolHue(L.sym || "?"), img: null, price: 0, mc: 0, tvl: 0,
+          hue: symbolHue(L.sym || "?"), img: L.img || null,
+          price: 0, mc: +L.mc || 0, tvl: 0, offMarket: true,
           candles: [], ageMin: L.createdAt ? Math.max(1, Math.round((Date.now() - L.createdAt) / 60000)) : 0,
           greenUsd: 0, redUsd: 0, traders: 0, offMarket: true,
         };
@@ -3950,6 +3951,25 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   }, [name, tokens, cloudProfile, chainWallet]); // async sources — all must retrigger the memo
   // 🔒 closed positions: every sell, paired with its buy-in date and PnL
   const closedRows = useMemo(() => {
+    // ⛓ chain truth first: walk their real swaps, avg-cost per mint
+    if (realTx && realTx.length) {
+      const book = {};
+      const out = [];
+      for (const tr of realTx) {
+        const b = book[tr.mint] || (book[tr.mint] = { qty: 0, costSol: 0, since: tr.t });
+        if (tr.side === "buy") { b.qty += tr.tokenAmt; b.costSol += tr.solAmt; if (!b.since) b.since = tr.t; }
+        else if (b.qty > 0) {
+          const p2 = Math.min(1, tr.tokenAmt / b.qty);
+          const basisSol = b.costSol * p2;
+          const pnlUsd = (tr.solAmt - basisSol) * SOL_USD;
+          const tk = (tokens || []).find((t2) => t2.liveMint === tr.mint) || null;
+          out.push({ t: tk || { id: null, sym: (tr.mint || "").slice(0, 5), hue: symbolHue(tr.mint || "?"), liveMint: tr.mint },
+            soldTs: tr.t, boughtTs: b.since, inUsd: basisSol * SOL_USD, outUsd: tr.solAmt * SOL_USD, pnlUsd, chain: true, mint: tr.mint });
+          b.costSol -= basisSol; b.qty = Math.max(0, b.qty - tr.tokenAmt);
+        }
+      }
+      return out.reverse();
+    }
     const src2 = cloudProfile ? (cloudProfile.activity || []) : txAll;
     const sells = src2.filter((x) => !x.isBuy);
     return sells.map((s, i) => {
@@ -3961,7 +3981,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
       return { t: s.t, soldTs: s.ts, boughtTs: priorBuy ? priorBuy.ts : s.ts,
         inUsd: Math.max(0, outUsd - pnlUsd), outUsd, pnlUsd };
     });
-  }, [cloudProfile, txAll, name]);
+  }, [cloudProfile, txAll, name, realTx, tokens]);
   const closedTotal = closedRows.reduce((s2, r) => s2 + r.pnlUsd, 0);
   // ⛓ real swaps win over the simulated set the moment they arrive
   const txReal = useMemo(() => {
@@ -4180,15 +4200,22 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
           {/* 💼 PORTFOLIO HOLDINGS — one professional box: total balance, top
               holding, and a dropdown with every token they hold */}
           {(() => {
-            const rows = holds.map((h) => {
-              const val = h.qty * h.t.price;
-              const pnl = (h.t.price - h.entry) * h.qty;
-              const pnlPct = h.entry > 0 ? ((h.t.price - h.entry) / h.entry) * 100 : 0;
-              const days = Math.max(0, (Date.now() - (h.since || Date.now())) / 86400e3);
-              const held = days >= 1 ? `${Math.floor(days)}d` : `${Math.max(1, Math.floor(days * 24))}h`;
-              return { ...h, val, pnl, pnlPct, held };
-            }).sort((a, b) => b.val - a.val);
-            const onChain = chainWallet && !cloudProfile;
+            const onChain = !!chainWallet;   // a real wallet ALWAYS outranks paper
+            const rows = onChain
+              ? (chainWallet.holdings || []).filter((h) => !h.spam && !h.dust).map((h) => {
+                  const live = (tokens || []).find((t2) => t2.liveMint === h.mint);
+                  const t2 = live || { id: null, sym: h.sym || h.mint.slice(0, 4), hue: symbolHue(h.sym || "?"), price: h.price || 0, liveMint: h.mint };
+                  const val = h.usd != null ? h.usd : h.qty * (t2.price || 0);
+                  return { t: t2, qty: h.qty, val, pnl: 0, pnlPct: 0, held: "", mint: h.mint, chain: true };
+                }).sort((a, b) => b.val - a.val)
+              : holds.map((h) => {
+                  const val = h.qty * h.t.price;
+                  const pnl = (h.t.price - h.entry) * h.qty;
+                  const pnlPct = h.entry > 0 ? ((h.t.price - h.entry) / h.entry) * 100 : 0;
+                  const days = Math.max(0, (Date.now() - (h.since || Date.now())) / 86400e3);
+                  const held = days >= 1 ? `${Math.floor(days)}d` : `${Math.max(1, Math.floor(days * 24))}h`;
+                  return { ...h, val, pnl, pnlPct, held };
+                }).sort((a, b) => b.val - a.val);
             const solUsd = onChain && chainWallet.sol != null ? chainWallet.sol * SOL_USD : 0;
             const totalBal = rows.reduce((s, x) => s + x.val, 0) + solUsd;
             const top = rows[0];
@@ -4203,11 +4230,14 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                         on-chain · {chainWallet.sol != null ? chainWallet.sol.toFixed(2) + " SOL" : ""} + tokens
                       </div>
                     )}
-                    {(() => { const livePnl = rows.reduce((s2, h) => s2 + h.pnl, 0); return (
+                    {!onChain && (() => { const livePnl = rows.reduce((s2, h) => s2 + h.pnl, 0); return (
                       <div style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: livePnl >= 0 ? T.green : T.red }}>
                         {livePnl >= 0 ? "▲ +" : "▼ −"}${Math.abs(livePnl).toLocaleString(undefined, { maximumFractionDigits: 2 })} <span style={{ color: T.faint, fontWeight: 700 }}>LIVE PNL</span>
                       </div>
                     ); })()}
+                    {onChain && (
+                      <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.green }}>⛓ live on-chain balance</div>
+                    )}
                   </div>
                   {top && (
                     <div onClick={() => onOpenToken(top.t.id)} title={`Open the $${top.t.sym} chart`}
@@ -8192,8 +8222,13 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
                   {(() => { const v = liveViewersOf(t, "pump"); return v != null ? <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>💬{v}</span> : null; })()}
                   <span style={{ fontSize: 6.5, fontWeight: 800, color: platOf(t) === "pump" ? T.green : "#c6f24e", marginLeft: "auto" }}>{platOf(t) === "pump" ? "PUMP" : "RH"}</span>
                 </div>
-                <button onClick={(e) => { e.stopPropagation(); onOpenUser && onOpenUser(dev.name); }}
-                  title="Open the dev's VALO profile"
+                <button onClick={(e) => {
+                    e.stopPropagation();
+                    if (dev.real && dev.wallet) window.open(`https://solscan.io/account/${dev.wallet}`, "_blank", "noopener");
+                    else if (t && t.liveMint) window.open(`https://solscan.io/token/${t.liveMint}`, "_blank", "noopener");
+                    else onOpenUser && onOpenUser(dev.name);
+                  }}
+                  title={dev.real ? "Open the developer's Solscan account" : "Open this token on Solscan"}
                   style={{ border: "none", background: "none", padding: 0, marginTop: 4, fontFamily: T.mono, fontSize: 7.5, color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
                   {dev.unknown ? <>DEV <span style={{ opacity: 0.7 }}>unverified</span> · {dev.short}</>
                     : dev.real ? <>DEV {dev.short} <span style={{ color: T.green }}>✓</span></>
@@ -13365,9 +13400,13 @@ export default function App() {
                       if (!d) return null;
                       const label = d.real ? d.short : (d.unknown ? d.short : `@${d.name}`);
                       return (
-                        <button onClick={() => setProfileUser(d.name)}
-                          title={d.real ? `Launched by ${d.wallet} — see everything they've launched`
-                                        : `Dev @${d.name} — see their launches`}
+                        <button onClick={() => {
+                            if (d.real && d.wallet) window.open(`https://solscan.io/account/${d.wallet}`, "_blank", "noopener");
+                            else if (selected && selected.liveMint) window.open(`https://solscan.io/token/${selected.liveMint}`, "_blank", "noopener");
+                            else setProfileUser(d.name);
+                          }}
+                          title={d.real ? `Launched by ${d.wallet} — open their Solscan account`
+                                        : `Creator not resolved yet — open the token on Solscan (deployer visible in its first txs)`}
                           style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap", flex: "0 0 auto",
                             height: isMobile ? 26 : "auto", boxSizing: "border-box",
                             border: `1px solid ${d.real ? T.amber + "77" : T.border2}`,

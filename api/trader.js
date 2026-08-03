@@ -4,9 +4,9 @@
 // price, amount, and timestamp. Live and historical alike, straight from chain.
 export default async function handler(req, res) {
   const wallet = String(req.query.wallet || "").trim();
-  const mint = String(req.query.mint || "").trim();
+  const mint = String(req.query.mint || "").trim();   // optional: empty = ALL swaps
   const key = process.env.HELIUS_API_KEY;
-  if (!wallet || !mint) return res.status(400).json({ error: "wallet + mint required" });
+  if (!wallet) return res.status(400).json({ error: "wallet required" });
   if (!key) return res.status(200).json({ trades: [], note: "no key" });
 
   const SOL = "So11111111111111111111111111111111111111112";
@@ -23,16 +23,19 @@ export default async function handler(req, res) {
       // token inputs/outputs on this swap
       const ins = se.tokenInputs || [];
       const outs = se.tokenOutputs || [];
-      const touchesMint = [...ins, ...outs].some((t) => t && t.mint === mint);
-      if (!touchesMint) continue;
+      if (mint) {
+        const touchesMint = [...ins, ...outs].some((t) => t && t.mint === mint);
+        if (!touchesMint) continue;
+      }
 
       // native SOL legs (lamports) tell us the SOL side of the trade
       const solIn = (se.nativeInput && +se.nativeInput.amount) || 0;
       const solOut = (se.nativeOutput && +se.nativeOutput.amount) || 0;
 
       // did the wallet RECEIVE the mint (buy) or SEND it (sell)?
-      const gotMint = outs.find((t) => t.mint === mint && t.userAccount === wallet);
-      const sentMint = ins.find((t) => t.mint === mint && t.userAccount === wallet);
+      const SOLM = "So11111111111111111111111111111111111111112";
+      const gotMint = outs.find((t) => (mint ? t.mint === mint : (t.mint && t.mint !== SOLM)) && t.userAccount === wallet);
+      const sentMint = ins.find((t) => (mint ? t.mint === mint : (t.mint && t.mint !== SOLM)) && t.userAccount === wallet);
       let side = null, tokenAmt = 0, solAmt = 0;
       if (gotMint) { side = "buy"; tokenAmt = +gotMint.rawTokenAmount?.tokenAmount / Math.pow(10, gotMint.rawTokenAmount?.decimals || 0) || +gotMint.tokenAmount || 0; solAmt = solIn / 1e9; }
       else if (sentMint) { side = "sell"; tokenAmt = +sentMint.rawTokenAmount?.tokenAmount / Math.pow(10, sentMint.rawTokenAmount?.decimals || 0) || +sentMint.tokenAmount || 0; solAmt = solOut / 1e9; }
@@ -43,6 +46,7 @@ export default async function handler(req, res) {
       const priceSol = tokenAmt > 0 ? solAmt / tokenAmt : 0;
       trades.push({
         t: at, side, tokenAmt, solAmt, priceSol,
+        mint: (gotMint || sentMint).mint,
         sig: tx.signature,
       });
     }
