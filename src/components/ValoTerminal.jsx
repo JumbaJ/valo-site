@@ -8880,7 +8880,7 @@ export default function App() {
   // and as many as you like
   // wallet escrow: arming a BUY takes the funds instantly; cancelling refunds.
   // No phantom balances — you can never arm more than the wallet holds.
-  const refundEscrow = (amt, payK) => { if (amt > 0) { if (payK === "SOL") setSolBalance((b) => b + amt); else setValoWallet((v) => v + amt); TestLog.push("escrow_refund", { amt, pay: payK }); } };
+  const refundEscrow = (amt, payK) => { if (amt > 0 && !liveData) { if (payK === "SOL") setSolBalance((b) => b + amt); else setValoWallet((v) => v + amt); TestLog.push("escrow_refund", { amt, pay: payK }); } };
   const takeEscrow = (amt, payK, extraCredit = 0) => {
     const bal = (payK === "SOL" ? solBalance : valoWallet) + extraCredit;
     if (bal < amt - 1e-9) {
@@ -12348,10 +12348,17 @@ export default function App() {
 
   // core execute — marker always lands on the live candle at fill price
   const execute = (t, o, spot) => {
-    if (liveData) {
-      // the live site does not write paper trades — the last door is closed.
+    if (liveData && o && o.mode !== "auto") {
+      // instant paper fills stay closed on live — real market orders go through
+      // the ⚡ ticket/hotbar. BOTS fall through: arming levels is exactly how
+      // live automation works (their triggers fire REAL turbo fills).
       pushNotif({ type: "system", user: null, tokenId: t && t.id,
-        text: "⛓ this is the live site — trades here are real. Connect Phantom to trade; paper trading lives on the demo site." });
+        text: "⛓ live site — use the ⚡ BUY/SELL buttons for real orders, or launch a bot: its triggers fire real turbo fills." });
+      return;
+    }
+    if (liveData && o && o.mode === "auto" && !walletReady) {
+      pushNotif({ type: "system", user: null, tokenId: t && t.id,
+        text: "🤖 set up your ⚡ TURBO wallet (portfolio) before launching live bots — triggers sign with it." });
       return;
     }
     TestLog.push("order", { sym: t && t.sym, side: o.side, mode: o.mode, amt: o.amt, pay: o.pay, px: t && t.price });
@@ -12382,7 +12389,7 @@ export default function App() {
         sayPrivate({ type: "note", text: `⛔ insufficient ${o.pay} — tried to buy ${o.amt}, wallet holds ${bal.toFixed(3)}` });
         return;
       }
-      if (o.pay === "SOL") setSolBalance((b) => Math.max(0, b - o.amt)); else setValoWallet((v) => Math.max(0, v - o.amt));
+      if (!liveData) { if (o.pay === "SOL") setSolBalance((b) => Math.max(0, b - o.amt)); else setValoWallet((v) => Math.max(0, v - o.amt)); }
     }
     const fee = splitFee(o.amt, o.pay);
     setBurned((b) => b + fee.burn);        // burn pool only
