@@ -694,6 +694,8 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   }, [winStart, count, onNeedHistory]);
 
   const geom = useRef({});
+  const pressureRef = useRef({ dir: 0, at: 0, prevC: null });   // live tick pressure
+  const pressureRafRef = useRef(0);
 
   const draw = useCallback(() => {
     const cvs = cvsRef.current, wrap = wrapRef.current;
@@ -771,21 +773,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     }
     // ⚓ hold the axis still while panning: the range is locked per
     // token · timeframe · zoom level, and only grows if price runs past it
-    // the visible window's TRUE extremes — the axis must always contain these
-    const visLo = lo, visHi = hi;
-    const sKey = `${sym || ""}|${tfMin}|${count}|${scaleStart}`;
-    const sc = scaleRef.current;
-    // only reuse a locked range when it still fully frames the current view;
-    // the moment the visible candles exceed it (panned to a new region), refit
-    if (sc.key && sc.key.startsWith(`${sym || ""}|${tfMin}|${count}|`)
-        && Number.isFinite(sc.lo) && Number.isFinite(sc.hi) && sc.hi > sc.lo
-        && sc.lo <= visLo && sc.hi >= visHi
-        && (visHi - visLo) > (sc.hi - sc.lo) * 0.4) {
-      // the locked range still comfortably contains the view → keep it steady
-      lo = sc.lo; hi = sc.hi;
-    }
-    // else: lo/hi stay the freshly-computed visible extremes (auto-refit)
-    scaleRef.current = { key: sKey, lo, hi };
+    // pure fit — no locks, no memory: the axis is exactly the visible window
     // floor the range: a series that barely moves stays a flat line instead of
     // stretching every candle across the whole plot
     const mid = (hi + lo) / 2 || hi || 1;
@@ -807,14 +795,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     hi = trueHi > 0 ? trueHi + padTop : hi + p8;
     // vertical zoom: stretch the visible price range around its centre. This is
     // what gives headroom above the candles for placing bot and visual lines.
-    const pz = Math.max(0.5, Math.min(6, view.priceZoom || 1));
-    if (pz !== 1) {
-      const midP = (hi + lo) / 2;
-      const halfP = ((hi - lo) / 2) * pz;
-      // the floor never drops below a slice of the price itself — the axis can
-      // stretch, but it can never blow out into log-scale absurdity
-      lo = Math.max(midP * 0.05, midP - halfP); hi = midP + halfP;
-    }
+    // (vertical stretch removed — the axis is ALWAYS the visible candles' fit)
     // NO vertical drag — the axis always auto-fits the visible candles so the
     // chart is fully on-screen wherever you pan left/right (DexScreener-style).
     // switch to log automatically once the range is too wide to read linearly
@@ -844,6 +825,40 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       const lt = lastC && Number.isFinite(lastC.t) ? lastC.t : baseT + Math.max(0, total - 1) * tfMs;
       return lt + (i - (total - 1)) * tfMs;
     };
+    // 🫁 tick-pressure pulse on the live bar: green at the top on an up-tick,
+    // red at the bottom on a down-tick, breathing out over ~1.2s
+    try {
+      const lastC = agg[total - 1];
+      const lastSlot = (total - 1) - winStart;
+      if (lastC && lastSlot >= 0 && lastSlot < count) {
+        const pr = pressureRef.current;
+        if (pr.prevC != null && lastC.c !== pr.prevC) {
+          pr.dir = lastC.c > pr.prevC ? 1 : -1; pr.at = Date.now();
+          if (!pressureRafRef.current) {
+            const loop = () => {
+              pressureRafRef.current = 0;
+              if (Date.now() - pressureRef.current.at < 1250) {
+                safeDrawRef.current && safeDrawRef.current();
+                pressureRafRef.current = requestAnimationFrame(loop);
+              }
+            };
+            pressureRafRef.current = requestAnimationFrame(loop);
+          }
+        }
+        pr.prevC = lastC.c;
+        const age = Date.now() - pr.at;
+        if (pr.dir !== 0 && age < 1250) {
+          const p2 = age / 1250;                       // 0 → 1 breath
+          const cxp = x(lastSlot);
+          const cyp = pr.dir > 0 ? y(lastC.h) : y(lastC.l);
+          const col = pr.dir > 0 ? "22,199,132" : "234,57,67";
+          ctx.beginPath(); ctx.arc(cxp, cyp, 2.5 + 9 * p2, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(${col},${(0.55 * (1 - p2)).toFixed(3)})`; ctx.lineWidth = 1.6; ctx.stroke();
+          ctx.beginPath(); ctx.arc(cxp, cyp, 2.2, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(${col},${(0.9 * (1 - p2 * 0.6)).toFixed(3)})`; ctx.fill();
+        }
+      }
+    } catch (e) {}
     geom.current = { y, x, step, lo, hi, padT, chartH, plotW, slotOf, idxOf, inData, timeAtSlot, aggLen: agg.length,
       hiLoRange: hi - lo, logOn, lgLo, lgSpan };
 
@@ -1179,6 +1194,9 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     }
   }, [draw, height]);
 
+  const safeDrawRef = useRef(null);
+  useEffect(() => { safeDrawRef.current = safeDraw; });
+  useEffect(() => () => { if (pressureRafRef.current) cancelAnimationFrame(pressureRafRef.current); }, []);
   // keep repainting while a marker is highlighted so its ring pulses
   useEffect(() => {
     if (!highlightTx) return;
@@ -1573,12 +1591,13 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     }
     const ax = axisRef.current;
     if (ax) {
-      // up (negative dy) → fewer candles (zoom in); down → more (zoom out)
+      // the strip now zooms TIME: run up = zoom into the bars, down = out.
+      // (vertical is pure auto-fit and cannot be touched)
       const dy = cy - ax.sy;
       if (Math.abs(dy) > 4) ax.moved = true;
-      // down = open the range up (see more above and below), up = tighten it
       const factor = Math.pow(1.9, dy / 160);
-      setView((v) => ({ ...v, priceZoom: Math.max(0.5, Math.min(6, (ax.z0 || 1) * factor)) }));
+      const capNow = Math.max(60, Math.min(4000, Math.round((geom.current.aggLen || 600) * 1.1) + 12));
+      setView((v) => ({ ...v, count: Math.max(12, Math.min(capNow, Math.round((ax.c0 || 60) * factor))) }));
       return;
     }
     if (pinCross && e.touches) { setPinCross({ cx, cy }); setCross({ cx, cy }); return; }
@@ -3783,22 +3802,31 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     }
     // a full address used as the handle resolves to itself
     if (/^[A-Za-z0-9]{32,50}$/.test(name || "")) return name;
+    // a VALO account that published its trading wallet
+    if (cloudProfile && cloudProfile.wallet && /^[A-Za-z0-9]{32,50}$/.test(cloudProfile.wallet)) return cloudProfile.wallet;
     return null;
-  }, [tokens, name]);
+  }, [tokens, name, cloudProfile]);
   const [chainWallet, setChainWallet] = useState(null);   // real balance + holdings + trades
+  const [realTx, setRealTx] = useState(null);             // real swap activity, live-polled
   useEffect(() => {
-    setChainWallet(null);
+    setChainWallet(null); setRealTx(null);
     if (!devWallet) return;
     let stop = false;
-    (async () => {
+    // register for pinned-trader markers everywhere
+    try { if (typeof window !== "undefined") window.__VALO_WALLETS__ = { ...(window.__VALO_WALLETS__ || {}), [name]: devWallet }; } catch (e) {}
+    const pull = async () => {
       try {
-        const r = await fetch(`/api/wallet?address=${encodeURIComponent(devWallet)}`);
-        if (!r.ok) return;
-        const j = await r.json();
-        if (!stop && j && !j.error) setChainWallet(j);
+        const r = await fetch(`/api/wallet?address=${encodeURIComponent(devWallet)}&t=${Date.now()}`);
+        if (r.ok) { const j = await r.json(); if (!stop && j && !j.error) setChainWallet(j); }
       } catch (e) {}
-    })();
-    return () => { stop = true; };
+      try {
+        const r2 = await fetch(`/api/trader?wallet=${encodeURIComponent(devWallet)}`);
+        if (r2.ok) { const j2 = await r2.json(); if (!stop && j2 && Array.isArray(j2.trades)) setRealTx(j2.trades.slice().reverse()); }
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 25000);   // the profile TRACES live while open
+    return () => { stop = true; clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devWallet]);
   const calls = (!cloudProfile && chainWallet) ? []       // no VALO account → no callouts
@@ -3940,7 +3968,17 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     });
   }, [cloudProfile, txAll, name]);
   const closedTotal = closedRows.reduce((s2, r) => s2 + r.pnlUsd, 0);
-  const txShown = txShowAll ? txAll : txAll.filter((x) => {
+  // ⛓ real swaps win over the simulated set the moment they arrive
+  const txReal = useMemo(() => {
+    if (!realTx || !realTx.length) return null;
+    return realTx.map((tr) => {
+      const tk = (tokens || []).find((t2) => t2.liveMint === tr.mint) || null;
+      return { t: tk, sym: tk ? tk.sym : (tr.mint || "").slice(0, 5), isBuy: tr.side === "buy",
+        sol: +(+tr.solAmt || 0).toFixed(4), qty: tr.tokenAmt, ts: tr.t, sig: tr.sig, real: true, mint: tr.mint };
+    });
+  }, [realTx, tokens]);
+  const txBase = txReal || txAll;
+  const txShown = txShowAll ? txBase : txBase.filter((x) => {
     const a = txFrom ? new Date(txFrom + "T00:00:00").getTime() : -Infinity;
     const b = txTo ? new Date(txTo + "T23:59:59").getTime() : Infinity;
     return x.ts >= a && x.ts <= b;                            // inclusive range, e.g. 7/3–7/9
@@ -3958,7 +3996,12 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
           boxShadow: "0 24px 70px rgba(0,0,0,0.7)", overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 13px", borderBottom: `1px solid ${T.border}` }}>
           <span style={{ fontSize: 13 }}>✉️</span>
-          <span style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{name}</span>
+          {devWallet ? (
+            <a href={`https://solscan.io/account/${devWallet}`} target="_blank" rel="noopener noreferrer"
+              style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>@{name} ↗</a>
+          ) : (
+            <span style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{name}</span>
+          )}
           <button onClick={() => setDmOpen(false)} style={{ ...chip(false), padding: "3px 9px", fontSize: 10 }}>✕</button>
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: "10px 12px", minHeight: 120 }}>
@@ -4000,7 +4043,13 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
             <span style={{ width: 40, height: 40, borderRadius: "50%", background: `linear-gradient(135deg, ${accent(symbolHue(name))}, ${T.blue})`, display: "grid", placeItems: "center", fontFamily: T.mono, fontWeight: 900, fontSize: 17, color: "#0a0713" }}>{name[0].toUpperCase()}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
-                <span style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{name}</span>
+                {devWallet ? (
+                  <a href={`https://solscan.io/account/${devWallet}`} target="_blank" rel="noopener noreferrer"
+                    title="Open this account on Solscan"
+                    style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.text, textDecoration: "underline dotted", textUnderlineOffset: 3 }}>@{name} ↗</a>
+                ) : (
+                  <span style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{name}</span>
+                )}
                 {cloudProfile && <span title="Verified VALO account — real holdings shown"
                   style={{ fontFamily: T.mono, fontSize: 7, fontWeight: 900, letterSpacing: 1, color: T.blue, flexShrink: 0,
                     border: `1px solid ${T.blue}66`, background: "rgba(59,130,246,0.12)", borderRadius: 6, padding: "2px 6px" }}>☁ REAL</span>}
@@ -4391,7 +4440,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
         )}
         {/* activity — full tx log with an inclusive date-range filter or show-all */}
         <div style={{ padding: "11px 14px", borderBottom: `1px solid ${T.border}` }}>
-          <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1.5, marginBottom: 6 }}>⚡ ACTIVITY · {txShown.length} TX</div>
+          <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1.5, marginBottom: 6 }}>⚡ ACTIVITY · {txShown.length} TX{txReal ? <span style={{ color: T.green }}> · ⛓ LIVE</span> : ""}</div>
           {/* one uniform line: [from] → [to] [SHOW ALL] */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7, flexWrap: "nowrap" }}>
             <input type="date" value={txFrom} onChange={(e) => { setTxFrom(e.target.value); setTxShowAll(false); }}
@@ -4403,7 +4452,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
           </div>
           <div style={{ maxHeight: 180, overflowY: "auto" }}>
             {txShown.length === 0 && <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center", padding: 14 }}>No transactions in that range.</div>}
-            {(() => { const syms = [...new Set(txShown.map((x) => x.t.sym))].slice(0, 10);
+            {(() => { const syms = [...new Set(txShown.map((x) => (x.t ? x.t.sym : x.sym)).filter(Boolean))].slice(0, 10);
               return syms.length > 1 && (
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 5 }}>
                 <button onClick={() => setTxFilter(null)} style={{ border: `1px solid ${!txFilter ? VALO_PURPLE + "88" : T.border}`, background: !txFilter ? "rgba(125,92,240,0.1)" : "transparent", color: !txFilter ? VALO_PURPLE : T.faint, borderRadius: 999, padding: "2px 8px", fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, cursor: "pointer" }}>ALL</button>
@@ -4413,18 +4462,19 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                 ))}
               </div>
             ); })()}
-            {txShown.filter((x) => !txFilter || x.t.sym === txFilter).map((x, i) => {
-              const qty = x.tokQty != null ? x.tokQty : (x.sol * SOL_USD) / ((x.priceAt || x.t.price) || 1);
+            {txShown.filter((x) => !txFilter || (x.t ? x.t.sym : x.sym) === txFilter).map((x, i) => {
+              const xsym = x.t ? xsym : x.sym;
+              const qty = x.qty != null ? x.qty : x.tokQty != null ? x.tokQty : (x.sol * SOL_USD) / ((x.priceAt || (x.t && x.t.price)) || 1);
               const qtyTxt = qty >= 1e6 ? (qty / 1e6).toFixed(1) + "M" : qty >= 1e3 ? (qty / 1e3).toFixed(1) + "K" : qty.toFixed(qty >= 10 ? 0 : 2);
               return (
               <div key={i} onClick={() => {
                   if (onOpenTrade) { onOpenTrade(x); return; }
                   if (x.t && x.t.offMarket && x.t.liveMint && onOpenByMint) { onOpenByMint(x.t.liveMint); onClose && onClose(); return; }
-                  if (x.t && x.t.id != null) onOpenToken(x.t.id);
-                }} title={`Open the $${x.t.sym} chart at this ${x.isBuy ? "buy" : "sell"}`}
+                  if (x.t && x.t.id != null) x.t ? onOpenToken(x.t.id) : (x.mint && onOpenByMint && onOpenByMint(x.mint));
+                }} title={`Open the $${xsym} chart at this ${x.isBuy ? "buy" : "sell"}`}
                 style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 8, marginBottom: 2, cursor: "pointer", background: i % 2 ? "rgba(255,255,255,0.015)" : "transparent" }}>
                 <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: x.isBuy ? T.green : T.red, width: 30, flex: "0 0 auto" }}>{x.isBuy ? "BUY" : "SELL"}</span>
-                <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: accent(x.t.hue), flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>${x.t.sym}
+                <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: accent((x.t ? x.t.hue : symbolHue(xsym))), flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>${xsym}
                   <span style={{ color: T.dim, fontSize: 8, fontWeight: 700, marginLeft: 5 }}>{qtyTxt} tok</span></span>
                 <span style={{ fontFamily: T.mono, fontSize: 9, color: T.text, whiteSpace: "nowrap" }}>{(+x.sol).toFixed(2)} SOL <span style={{ color: T.faint }}>· ${(x.sol * SOL_USD).toFixed(0)}</span></span>
                 <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, flex: "0 0 auto" }}>{new Date(x.ts).toLocaleDateString(undefined, { month: "numeric", day: "numeric" })} {new Date(x.ts).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</span>
@@ -10424,7 +10474,7 @@ export default function App() {
           return { t: t2, isBuy: r.side === "buy", sol: usd / SOL_USD, valUsd: usd, pnlUsd, key: String(r.token_key), ts: new Date(r.ts).getTime(),
             tokQty: r.tok_qty != null ? +r.tok_qty : null, priceAt: +r.price || t2.price || 0 };
         });
-        setProfileCloud({ id: prof.id, handle: prof.handle, icon: prof.icon, holds, activity,
+        setProfileCloud({ id: prof.id, handle: prof.handle, icon: prof.icon, wallet: prof.wallet || null, holds, activity,
           followers: fCount && fCount.count != null ? fCount.count : 0,
           following: gCount && gCount.count != null ? gCount.count : 0,
           callouts: (cos || []).map((r) => ({ sym: r.sym, mcAt: +r.mc_at || 0, ts: new Date(r.ts).getTime(),
@@ -10434,7 +10484,10 @@ export default function App() {
     };
     (async () => {
       try {
-        const { data: profs } = await sb.from("profiles").select("id, handle, icon").ilike("handle", profileUser).limit(1);
+        let profs = null;
+        try { const r0 = await sb.from("profiles").select("id, handle, icon, wallet").ilike("handle", profileUser).limit(1); profs = r0.data; }
+        catch (e) {}
+        if (!profs) { const r1 = await sb.from("profiles").select("id, handle, icon").ilike("handle", profileUser).limit(1); profs = r1.data; }
         const prof = profs && profs[0];
         if (stop || !prof) { if (!stop) setProfileCloud(null); return; }
         await load(prof);
@@ -11550,6 +11603,16 @@ export default function App() {
   // a wallet is "ready" if EITHER exists — Phantom is optional once turbo does
   const walletReady = !!((wallet && wallet.address) || (liveData && turbo && turbo.pubkey));
   const tradeAddr = (liveData && turbo && turbo.pubkey) ? turbo.pubkey : (wallet && wallet.address) || null;
+  // 📡 publish the trading wallet to the profile so other users' views of you
+  // resolve to REAL chain data (balance, activity, markers). Fails silently
+  // until the `wallet` column exists (see migration note).
+  useEffect(() => {
+    if (!liveData || !tradeAddr || !cloudUser || !sb) return;
+    (async () => {
+      try { await sb.from("profiles").update({ wallet: tradeAddr }).eq("id", cloudUser.id); } catch (e) {}
+    })();
+  }, [liveData, tradeAddr, cloudUser && cloudUser.id]);
+
   // ⚡ the turbo wallet's own SOL balance — polled whenever a turbo exists,
   // locked or not, so the panel always shows what's in it
   const [turboSolBal, setTurboSolBal] = useState(0);
