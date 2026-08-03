@@ -3998,7 +3998,9 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     if (!realTx || !realTx.length) return null;
     return realTx.map((tr) => {
       const tk = (tokens || []).find((t2) => t2.liveMint === tr.mint) || null;
-      return { t: tk, sym: tk ? tk.sym : (tr.mint || "").slice(0, 5), isBuy: tr.side === "buy",
+      const move = tr.side === "in" || tr.side === "out" || tr.side === "tin" || tr.side === "tout";
+      return { t: tk, sym: tk ? tk.sym : tr.mint ? (tr.mint || "").slice(0, 5) : "SOL", isBuy: tr.side === "buy" || tr.side === "in" || tr.side === "tin",
+        move, moveLbl: tr.side === "in" ? "↓ IN" : tr.side === "out" ? "↑ OUT" : tr.side === "tin" ? "↓ RECV" : tr.side === "tout" ? "↑ SENT" : null,
         sol: +(+tr.solAmt || 0).toFixed(4), qty: tr.tokenAmt, ts: tr.t, sig: tr.sig, real: true, mint: tr.mint };
     });
   }, [realTx, tokens]);
@@ -4189,12 +4191,21 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                   <div style={{ fontFamily: T.mono, fontSize: 7, letterSpacing: 1, color: T.faint, marginBottom: 3 }}>
                     ON-CHAIN TRADES · {chainWallet.trades.length}
                   </div>
-                  {chainWallet.trades.slice(0, 6).map((t3, i) => (
+                  {(realTx && realTx.length ? realTx.slice(-6).reverse().map((tr) => ({
+                      at: tr.t, sig: tr.sig,
+                      lbl: tr.side === "buy" ? "BUY" : tr.side === "sell" ? "SELL" : tr.side === "in" ? "↓ IN" : tr.side === "out" ? "↑ OUT" : tr.side === "tin" ? "↓ TOKEN" : "↑ TOKEN",
+                      col: tr.side === "buy" || tr.side === "in" || tr.side === "tin" ? T.green : tr.side === "sell" ? T.red : T.amber,
+                      sym: tr.mint ? ((tokens || []).find((t4) => t4.liveMint === tr.mint) || {}).sym || tr.mint.slice(0, 4) : "SOL",
+                      sol: tr.solAmt || 0, usd: (tr.solAmt || 0) * SOL_USD,
+                    })) : chainWallet.trades.slice(0, 6).map((t3) => ({ at: t3.at, lbl: "TX", col: T.dim, sym: t3.sym || "—", sol: 0, usd: t3.usd || 0 }))
+                  ).map((r3, i) => (
                     <div key={i} style={{ display: "flex", gap: 6, fontFamily: T.mono, fontSize: 8.5, color: T.dim, lineHeight: 1.7 }}>
-                      <span style={{ color: accent(symbolHue(t3.sym || "?")), fontWeight: 800 }}>${t3.sym}</span>
-                      <span>{fmt$(t3.usd)}</span>
+                      <span style={{ color: r3.col, fontWeight: 900, width: 44 }}>{r3.lbl}</span>
+                      <span style={{ color: accent(symbolHue(r3.sym || "?")), fontWeight: 800 }}>${r3.sym}</span>
+                      {r3.sol > 0 && <span style={{ color: T.text, fontWeight: 800 }}>{r3.sol.toFixed(3)} SOL</span>}
+                      <span>{r3.usd > 0 ? fmt$(r3.usd) : ""}</span>
                       <span style={{ marginLeft: "auto", color: T.faint }}>
-                        {t3.at ? new Date(t3.at).toLocaleDateString([], { month: "short", day: "numeric" }) : ""}
+                        {r3.at ? new Date(r3.at).toLocaleDateString([], { month: "short", day: "numeric" }) : ""}
                       </span>
                     </div>
                   ))}
@@ -4508,7 +4519,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                   if (x.t && x.t.id != null) x.t ? onOpenToken(x.t.id) : (x.mint && onOpenByMint && onOpenByMint(x.mint));
                 }} title={`Open the $${xsym} chart at this ${x.isBuy ? "buy" : "sell"}`}
                 style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 8, marginBottom: 2, cursor: "pointer", background: i % 2 ? "rgba(255,255,255,0.015)" : "transparent" }}>
-                <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: x.isBuy ? T.green : T.red, width: 30, flex: "0 0 auto" }}>{x.isBuy ? "BUY" : "SELL"}</span>
+                <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: x.move ? T.amber : x.isBuy ? T.green : T.red, width: x.move ? 44 : 30, flex: "0 0 auto" }}>{x.move ? x.moveLbl : x.isBuy ? "BUY" : "SELL"}</span>
                 <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: accent((x.t ? x.t.hue : symbolHue(xsym))), flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>${xsym}
                   <span style={{ color: T.dim, fontSize: 8, fontWeight: 700, marginLeft: 5 }}>{qtyTxt} tok</span></span>
                 <span style={{ fontFamily: T.mono, fontSize: 9, color: T.text, whiteSpace: "nowrap" }}>{(+x.sol).toFixed(2)} SOL <span style={{ color: T.faint }}>· ${(x.sol * SOL_USD).toFixed(0)}</span></span>
