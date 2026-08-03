@@ -11387,14 +11387,23 @@ export default function App() {
         if (Array.isArray(j) && j.length) {
           morePage.current = page;
           setMoreToks((M) => {
-            const seen = new Set([...M.map((m) => m.pool), ...(tokensRef.current || []).map((t) => t.pool).filter(Boolean)]);
+            // one card per TOKEN: dedupe across everything already shown by
+            // MINT (big tokens like $PUMP have dozens of pools — one is enough)
+            const seenMint = new Set([
+              ...M.map((m) => m.liveMint || m.mint).filter(Boolean),
+              ...(tokensRef.current || []).map((t) => t.liveMint).filter(Boolean),
+            ]);
+            const seenPool = new Set([...M.map((m) => m.pool), ...(tokensRef.current || []).map((t) => t.pool).filter(Boolean)]);
             const byMint2 = new Map();
             for (const x of j) {
+              if ((+x.mc || 0) > 1e11) continue;              // broken trillion-dollar FDV rows
               const key = x.mint || x.id;
               const prev = byMint2.get(key);
               if (!prev || (+x.tvl || 0) > (+prev.tvl || 0)) byMint2.set(key, x);
             }
-            const add = [...byMint2.values()].filter((x) => !seen.has(x.id)).map(adoptMarketToken)
+            const add = [...byMint2.values()]
+              .filter((x) => !seenPool.has(x.id) && !(x.mint && seenMint.has(x.mint)))
+              .map(adoptMarketToken)
               // never re-create a card the board already holds — that orphaned
               // the current selection and froze the chart
               .filter((t) => !(tokensRef.current || []).some((b) => String(b.pool || "") === String(t.pool)));

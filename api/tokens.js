@@ -66,6 +66,17 @@ export default async function handler(req, res) {
         page, feed,
       });
     }
+    // one row per TOKEN (a big token has many pools) + drop broken FDV rows
+    const seenMint = new Set();
+    const deduped = [];
+    for (const t of out) {
+      if ((+t.mc || 0) > 1e11) continue;
+      const k = t.mint || t.id;
+      if (seenMint.has(k)) continue;
+      seenMint.add(k);
+      deduped.push(t);
+    }
+    out.length = 0; out.push(...deduped);
     res.setHeader("Cache-Control", feed === "new" ? "s-maxage=8, stale-while-revalidate=20" : "s-maxage=15, stale-while-revalidate=45");
     res.status(200).json(out);
   } catch (e) {
