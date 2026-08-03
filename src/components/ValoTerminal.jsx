@@ -289,7 +289,8 @@ function makeToken([sym, name, chain], isNew = false) {
     traders, tvl, greenUsd: tvl * greenPct, redUsd: tvl * (1 - greenPct),
     momentum, buyPressure: Math.round(rnd(15, 92)),
     liq: tvl * rnd(0.15, 0.6), vol24: tvl * rnd(0.4, 3),
-    ageMin: isNew ? Math.floor(rnd(1, 30)) : Math.floor(rnd(60, 20000)),
+    ageMin: (() => { const a = isNew ? Math.floor(rnd(1, 30)) : Math.floor(rnd(60, 20000)); return a; })(),
+    createdAt: Date.now() - (isNew ? Math.floor(rnd(1, 30)) : Math.floor(rnd(60, 20000))) * 60000,
     hue: symbolHue(sym), candles, price: candles[candles.length - 1].c,
     supply: rnd(2e8, 1e9),
     // contract address (mint) — API: real pump.fun mint address
@@ -455,7 +456,7 @@ function adoptMarketToken(x) {
     id: ++mktNid,                       // numeric id — every helper expects one
     pool: x.id, liveMint: x.mint || null, market: true,
     sym, name: x.name || sym, chain: "pump",
-    isNew: ageMin < 60, hasDex: true,
+    isNew: ageMin < 60, hasDex: true, createdAt: x.createdAt || (Date.now() - ageMin * 60000),
     traders: +x.traders || flow, tvl, greenUsd: green, redUsd: red,
     momentum, buyPressure,
     liq: tvl, vol24: (+x.vol24 || green + red),   // real reserve + real 24h volume
@@ -583,7 +584,7 @@ const ratingColor = (s) => (s >= 66 ? T.green : s >= 40 ? T.amber : T.red);
 // ================================================================
 // CHART
 // ================================================================
-function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null, shiftArm = false, onCancelLine = null, onNeedHistory = null, historyShift = null, mcRatio = 0 }) {
+function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null, shiftArm = false, onCancelLine = null, onNeedHistory = null, historyShift = null, mcRatio = 0 }, createdAt = null) {
   const wrapRef = useRef(null);
   const cvsRef = useRef(null);
   const [cross, setCross] = useState(null);
@@ -1237,6 +1238,12 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   const botSetRef = useRef({}); botSetRef.current = { on: botSetMode, draft: onBotDraft, set: onBotSet, arm: onBotArm, lineDrag: onBotLineDrag, shiftArm };
   const lineHitsRef = useRef([]);      // grabbable bot lines: {id, y}
   const [lineMenu, setLineMenu] = useState(null); // { id, x, y } — cancel bubble
+  const [, setAgeTick2] = useState(0);   // ⏱ minute tick so the pill age moves
+  useEffect(() => {
+    if (!(createdAt > 0)) return;
+    const iv = setInterval(() => setAgeTick2((x) => x + 1), 30000);
+    return () => clearInterval(iv);
+  }, [createdAt]);
   const holdRef = useRef(null);        // touch press-and-hold timer
   const lineDragRef = useRef(null);    // active line drag: {id}
   const touchIntentRef = useRef(null); // first-move decision: chart gesture vs page scroll
@@ -1711,6 +1718,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
               fontFamily: T.mono, fontSize: 8.5, color: T.dim,
               background: "rgba(12,15,22,0.88)", border: `1px solid ${T.border}`, borderRadius: 20, padding: "4px 11px" }}>
               <span>O <b style={{ color: T.text }}>{fmtP(ohlc.o)}</b></span>
+              {fmtAge(createdAt) && <span title="Token age — live">⏱ <b style={{ color: T.text }}>{fmtAge(createdAt)}</b></span>}
               <span>H <b style={{ color: T.green }}>{fmtP(ohlc.h)}</b></span>
               <span>L <b style={{ color: T.red }}>{fmtP(ohlc.l)}</b></span>
               <span>C <b style={{ color: chg >= 0 ? T.green : T.red }}>{fmtP(ohlc.c)}</b></span>
@@ -1737,6 +1745,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
           <div style={{ position: "absolute", top: 8, left: 10, zIndex: 3, fontFamily: T.mono, fontSize: 10.5, color: T.dim, display: "flex", gap: 10, flexWrap: "wrap", pointerEvents: "none" }}>
             {ohlc && (<>
               <span>O <b style={{ color: T.text }}>{fmtP(ohlc.o)}</b></span>
+              {fmtAge(createdAt) && <span title="Token age — live">⏱ <b style={{ color: T.text }}>{fmtAge(createdAt)}</b></span>}
               <span>H <b style={{ color: T.green }}>{fmtP(ohlc.h)}</b></span>
               <span>L <b style={{ color: T.red }}>{fmtP(ohlc.l)}</b></span>
               <span>C <b style={{ color: chg >= 0 ? T.green : T.red }}>{fmtP(ohlc.c)}</b></span>
@@ -1845,6 +1854,7 @@ const ProChart = React.memo(ProChartBase, (a, b) => (
   && a.editLineReq === b.editLineReq && a.eyesToken === b.eyesToken
   && a.shiftArm === b.shiftArm && a.historyShift === b.historyShift
   && a.mcRatio === b.mcRatio && a.synthetic === b.synthetic && a.isMobile === b.isMobile
+  && a.createdAt === b.createdAt
   && sameLevels(a.pendingLevels, b.pendingLevels) && sameLevels(a.botRuns, b.botRuns)
 ));
 
@@ -4938,6 +4948,7 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
   const [trail, setTrail] = useState(0);
   const [flash, setFlash] = useState(0);
   const [vtQuick, setVtQuick] = useState([0.5, 1, 2, 5]);   // dbl-tap a chip to retype it
+  const [vtPctMode, setVtPctMode] = useState(false);        // chips as % of on-chain balance
   const [vArmEdit, setVArmEdit] = useState(false);  // right-click ARM PAIR → retype the amount
   const [vArmDraft, setVArmDraft] = useState("");
   const vArmCtx = (e) => { e.preventDefault(); e.stopPropagation(); setVArmDraft(String(amount)); setVArmEdit(true); };
@@ -5049,11 +5060,25 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
           )}
           ≈ ${(amt * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
       </div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
-        {vtQuick.map((v, ci) => (
-          <button className="qchip" key={ci} onClick={() => setAmount && setAmount(String(v))}
-            {...chipEditProps(() => { askAmt(v, (nv) => setVtQuick((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
-            style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "4px 0", fontSize: 9, fontWeight: 800 }}>{v}</button>
+      <div style={{ display: "flex", gap: 4, marginBottom: 5, alignItems: "center" }}>
+        <button onClick={() => setVtPctMode((m) => !m)}
+          title={vtPctMode ? "Chips are % of your on-chain balance — tap for fixed SOL amounts" : "Chips are fixed amounts — tap for % of your on-chain balance"}
+          style={{ flex: "0 0 auto", border: `1px solid ${vtPctMode ? T.amber : T.border}`, background: vtPctMode ? "rgba(240,185,11,0.1)" : "transparent",
+            color: vtPctMode ? T.amber : T.faint, borderRadius: 7, padding: "4px 7px", cursor: "pointer",
+            fontFamily: T.mono, fontSize: 8.5, fontWeight: 900 }}>{vtPctMode ? "%" : "#"}</button>
+        {(vtPctMode ? [10, 25, 50, 75] : vtQuick).map((v, ci) => (
+          <button className="qchip" key={ci}
+            onClick={() => {
+              if (vtPctMode) {
+                const bal2 = pay === "SOL" ? solBalance : valoWallet;
+                const usable = pay === "SOL" ? Math.max(0, bal2 - 0.0065) : bal2;
+                setAmount && setAmount(String(feeSafe(usable * v / 100, pay)));
+              } else setAmount && setAmount(String(v));
+            }}
+            {...(vtPctMode ? {} : chipEditProps(() => { askAmt(v, (nv) => setVtQuick((A) => A.map((x, j) => (j === ci ? nv : x)))); }))}
+            style={{ ...chip(!vtPctMode && parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "4px 0", fontSize: 9, fontWeight: 800 }}>
+            {vtPctMode ? v + "%" : v}
+          </button>
         ))}
       </div>
       {!compactArm && (() => {
@@ -5398,113 +5423,133 @@ function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phanto
       )}
       {active && !collapsed && (
         <>
-          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.dim, lineHeight: 1.6, marginBottom: 7 }}>
-            All trades now sign instantly with this key — buys land here, sells sell from here. Positions below are this wallet's. Fund it small; sweep back to Phantom anytime.
+          <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, lineHeight: 1.75, margin: "2px 0 12px" }}>
+            All trades sign instantly with this key — buys land here, sells sell from here. Positions below are this wallet's. Fund it small; sweep back anytime.
           </div>
+
+          {/* ── AUTOMATION ─────────────────────────────── */}
           {onToggleAuto && (
-            <button
-              onClick={() => {
-                if (autoOn) { onToggleAuto(false); setAutoConfirm(false); return; }
-                if (!autoConfirm) { setAutoConfirm(true); setTimeout(() => setAutoConfirm(false), 3200); return; }
-                setAutoConfirm(false); onToggleAuto(true);
-              }}
-              style={{ width: "100%", marginBottom: 7, border: `1.5px solid ${autoOn ? T.red : autoConfirm ? T.red : T.border2}`,
-                borderRadius: 8, padding: "8px", cursor: "pointer", fontFamily: T.mono, fontSize: 9, fontWeight: 900,
-                letterSpacing: 0.5, background: autoOn ? "rgba(234,57,67,0.16)" : autoConfirm ? "rgba(234,57,67,0.1)" : "rgba(255,255,255,0.03)",
-                color: autoOn || autoConfirm ? T.red : T.faint,
-                boxShadow: autoOn ? `0 0 10px ${T.red}55` : "none" }}>
-              {autoOn ? "🤖 LIVE AUTOMATION ARMED — tap to disarm"
-                : autoConfirm ? "⚠ CONFIRM — bots will spend REAL SOL on triggers"
-                : "🤖 ARM LIVE AUTOMATION (bots fire real trades)"}
-            </button>
-          )}
-          <div onClick={() => { try { navigator.clipboard.writeText(turbo.pubkey); setErr("address copied ✓"); setTimeout(() => setErr(null), 1500); } catch (e) {} }}
-            title="Tap to copy — send SOL here from any wallet or exchange"
-            style={{ fontFamily: T.mono, fontSize: 7.5, color: T.dim, background: "#090b10", border: `1px dashed ${T.border}`,
-              borderRadius: 8, padding: "6px 8px", marginBottom: 6, cursor: "pointer", wordBreak: "break-all", lineHeight: 1.5 }}>
-            <b style={{ color: T.amber }}>DEPOSIT ADDRESS</b> (tap to copy — send SOL from any wallet or exchange):<br />{turbo.pubkey}
-          </div>
-          <div style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, marginBottom: 5 }}>
-            fund ≥ 0.03 — Solana reserves ~0.002/token account for rent, and buys keep ~0.0065 aside automatically
-          </div>
-          {/* 👻 what Phantom actually holds — the source of the deposit */}
-          {phantomSol > 0 && (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: T.mono,
-              fontSize: 8.5, fontWeight: 800, color: "#AB9FF2", background: "rgba(125,92,240,0.07)",
-              border: "1px solid rgba(125,92,240,0.3)", borderRadius: 8, padding: "5px 8px", marginBottom: 5 }}>
-              <span>👻 phantom holds ◎{phantomSol.toFixed(4)}</span>
-              <span style={{ opacity: 0.8 }}>${(phantomSol * SOL_USD).toFixed(2)}</span>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.5, color: T.faint, marginBottom: 6 }}>AUTOMATION</div>
+              <button
+                onClick={() => {
+                  if (autoOn) { onToggleAuto(false); setAutoConfirm(false); return; }
+                  if (!autoConfirm) { setAutoConfirm(true); setTimeout(() => setAutoConfirm(false), 3200); return; }
+                  setAutoConfirm(false); onToggleAuto(true);
+                }}
+                style={{ width: "100%", border: `1.5px solid ${autoOn ? T.red : autoConfirm ? T.red : T.border2}`,
+                  borderRadius: 10, padding: "11px 10px", cursor: "pointer", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900,
+                  letterSpacing: 0.5, background: autoOn ? "rgba(234,57,67,0.16)" : autoConfirm ? "rgba(234,57,67,0.1)" : "rgba(255,255,255,0.03)",
+                  color: autoOn || autoConfirm ? T.red : T.faint, lineHeight: 1.5,
+                  boxShadow: autoOn ? `0 0 10px ${T.red}55` : "none" }}>
+                {autoOn ? "🤖 LIVE AUTOMATION ARMED — tap to disarm"
+                  : autoConfirm ? "⚠ CONFIRM — bots will spend REAL SOL on triggers"
+                  : "🤖 ARM LIVE AUTOMATION (bots fire real trades)"}
+              </button>
             </div>
           )}
-          {/* % of the phantom balance to bring over (small fee buffer kept) */}
-          {phantomSol > 0.002 && (
-            <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
-              {[25, 50, 75, 100].map((pc) => {
-                const v = Math.max(0, (phantomSol - 0.001) * pc / 100);
-                return (
-                  <button key={pc} onClick={() => setFundAmt(v.toFixed(4))}
-                    title={`Deposit ${v.toFixed(4)} SOL (${pc}% of your Phantom balance)`}
-                    style={{ flex: 1, border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.02)", color: pc === 100 ? T.amber : T.dim,
-                      borderRadius: 7, padding: "4px 0", cursor: "pointer", fontFamily: T.mono, fontSize: 8.5, fontWeight: 800 }}>
-                    {pc === 100 ? "ALL" : pc + "%"}
-                  </button>
-                );
-              })}
+
+          {/* ── DEPOSIT ─────────────────────────────────── */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.5, color: T.faint, marginBottom: 6 }}>DEPOSIT · from any wallet or exchange</div>
+            <div onClick={() => { try { navigator.clipboard.writeText(turbo.pubkey); setErr("address copied ✓"); setTimeout(() => setErr(null), 1500); } catch (e) {} }}
+              title="Tap to copy — send SOL here from any wallet or exchange"
+              style={{ fontFamily: T.mono, fontSize: 8.5, color: T.text, background: "#090b10", border: `1px dashed ${T.amber}55`,
+                borderRadius: 10, padding: "10px 11px", cursor: "pointer", wordBreak: "break-all", lineHeight: 1.7 }}>
+              <div style={{ color: T.amber, fontWeight: 900, fontSize: 8, letterSpacing: 1, marginBottom: 4 }}>📋 TAP TO COPY ADDRESS</div>
+              {turbo.pubkey}
             </div>
-          )}
-          <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-            {/* deposit currency — $VALO switches on the moment the token launches */}
-            <span style={{ display: "flex", gap: 3, flex: "0 0 auto" }}>
-              <button onClick={() => setDepositCcy("SOL")}
-                style={{ border: `1px solid ${depositCcy === "SOL" ? T.blue : T.border}`, background: depositCcy === "SOL" ? "rgba(76,154,255,0.12)" : "transparent",
-                  color: depositCcy === "SOL" ? T.blue : T.faint, borderRadius: 7, padding: "4px 8px", cursor: "pointer",
-                  fontFamily: T.mono, fontSize: 8.5, fontWeight: 900 }}>SOL</button>
-              <button onClick={() => valoMint && setDepositCcy("VALO")} disabled={!valoMint}
-                title={valoMint ? "Deposit $VALO to trade with" : "$VALO deposits unlock when the token launches"}
-                style={{ border: `1px solid ${depositCcy === "VALO" ? VALO_PURPLE : T.border}`, background: depositCcy === "VALO" ? "rgba(125,92,240,0.12)" : "transparent",
-                  color: !valoMint ? T.faint : depositCcy === "VALO" ? VALO_PURPLE : T.dim, borderRadius: 7, padding: "4px 8px",
-                  cursor: valoMint ? "pointer" : "not-allowed", opacity: valoMint ? 1 : 0.55,
-                  fontFamily: T.mono, fontSize: 8.5, fontWeight: 900 }}>$VALO{!valoMint ? " 🔒" : ""}</button>
-            </span>
-            <input value={fundAmt} onChange={(e) => setFundAmt(e.target.value)} inputMode="decimal" placeholder="0.05"
-              style={{ ...inp, flex: 1, padding: "7px", fontSize: 10.5, textAlign: "center" }} />
+            <div style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, marginTop: 6, lineHeight: 1.6 }}>
+              fund ≥ 0.03 — Solana reserves ~0.002/token account for rent; buys keep ~0.0065 aside automatically
+            </div>
+          </div>
+
+          {/* ── FUND FROM PHANTOM ───────────────────────── */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.5, color: T.faint, marginBottom: 6 }}>FUND FROM PHANTOM</div>
+            {phantomSol > 0 && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: T.mono,
+                fontSize: 9.5, fontWeight: 800, color: "#AB9FF2", background: "rgba(125,92,240,0.07)",
+                border: "1px solid rgba(125,92,240,0.3)", borderRadius: 9, padding: "8px 11px", marginBottom: 8 }}>
+                <span>👻 phantom holds ◎{phantomSol.toFixed(4)}</span>
+                <span style={{ opacity: 0.85 }}>${(phantomSol * SOL_USD).toFixed(2)}</span>
+              </div>
+            )}
+            {phantomSol > 0.002 && (
+              <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                {[25, 50, 75, 100].map((pc) => {
+                  const v = Math.max(0, (phantomSol - 0.001) * pc / 100);
+                  return (
+                    <button key={pc} onClick={() => setFundAmt(v.toFixed(4))}
+                      title={`Deposit ${v.toFixed(4)} SOL (${pc}% of your Phantom balance)`}
+                      style={{ flex: 1, border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.02)", color: pc === 100 ? T.amber : T.dim,
+                        borderRadius: 8, padding: "7px 0", cursor: "pointer", fontFamily: T.mono, fontSize: 9, fontWeight: 800 }}>
+                      {pc === 100 ? "ALL" : pc + "%"}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 6, marginBottom: 8, alignItems: "stretch" }}>
+              <span style={{ display: "flex", gap: 4, flex: "0 0 auto" }}>
+                <button onClick={() => setDepositCcy("SOL")}
+                  style={{ border: `1px solid ${depositCcy === "SOL" ? T.blue : T.border}`, background: depositCcy === "SOL" ? "rgba(76,154,255,0.12)" : "transparent",
+                    color: depositCcy === "SOL" ? T.blue : T.faint, borderRadius: 8, padding: "0 11px", cursor: "pointer",
+                    fontFamily: T.mono, fontSize: 9, fontWeight: 900 }}>SOL</button>
+                <button onClick={() => valoMint && setDepositCcy("VALO")} disabled={!valoMint}
+                  title={valoMint ? "Deposit $VALO to trade with" : "$VALO deposits unlock when the token launches"}
+                  style={{ border: `1px solid ${depositCcy === "VALO" ? VALO_PURPLE : T.border}`, background: depositCcy === "VALO" ? "rgba(125,92,240,0.12)" : "transparent",
+                    color: !valoMint ? T.faint : depositCcy === "VALO" ? VALO_PURPLE : T.dim, borderRadius: 8, padding: "0 10px",
+                    cursor: valoMint ? "pointer" : "not-allowed", opacity: valoMint ? 1 : 0.55,
+                    fontFamily: T.mono, fontSize: 9, fontWeight: 900 }}>$VALO{!valoMint ? " 🔒" : ""}</button>
+              </span>
+              <input value={fundAmt} onChange={(e) => setFundAmt(e.target.value)} inputMode="decimal" placeholder="0.05"
+                style={{ ...inp, flex: 1, padding: "9px", fontSize: 11.5, textAlign: "center" }} />
+            </div>
             <button disabled={busy || !(parseFloat(fundAmt) > 0)}
               title={phantomOk ? "One-click transfer from your connected Phantom" : "Open Phantom to send SOL to your turbo wallet"}
               onClick={() => run(async () => { const r = await onFund(parseFloat(fundAmt)); if (!r.ok) throw new Error(r.err); })}
-              style={{ flex: "0 0 auto", border: `1px solid ${T.green}66`, borderRadius: 8, padding: "7px 11px", background: "rgba(22,199,132,0.1)",
-                color: T.green, fontFamily: T.mono, fontSize: 9, fontWeight: 900, cursor: "pointer" }}>↓ {phantomOk ? "FUND FROM PHANTOM" : "OPEN PHANTOM TO SEND"}</button>
+              style={{ width: "100%", border: `1px solid ${T.green}66`, borderRadius: 9, padding: "10px", background: "rgba(22,199,132,0.1)",
+                color: T.green, fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, cursor: "pointer", letterSpacing: 0.5 }}>
+              ↓ {phantomOk ? "FUND FROM PHANTOM" : "OPEN PHANTOM TO SEND"}{parseFloat(fundAmt) > 0 ? ` · ${parseFloat(fundAmt)} SOL` : ""}
+            </button>
           </div>
-          {!phantomOk && (
-            <input value={sweepDest} onChange={(e) => setSweepDest(e.target.value)} placeholder="withdraw address (paste any SOL wallet)"
-              style={{ ...inp, width: "100%", boxSizing: "border-box", padding: "7px", fontSize: 9, marginBottom: 6 }} />
-          )}
-          <div style={{ display: "flex", gap: 6 }}>
-            {(() => {
-              const sweepSol = Math.max(0, turboSol - 0.000005);   // balance minus the 5000-lamport network fee
-              const canSweep = sweepSol > 0 && !busy && (phantomOk || sweepDest.trim());
-              return (
-                <button disabled={!canSweep}
-                  title={sweepSol > 0 ? `Sends your ENTIRE turbo balance (${sweepSol.toFixed(4)} SOL ≈ $${(sweepSol * SOL_USD).toFixed(2)}) ${phantomOk ? "back to your Phantom wallet" : "to the pasted address"} — turbo goes to exactly 0` : "Nothing to sweep — the turbo wallet is empty"}
-                  onClick={() => {
-                    if (!sweepConfirm) { setSweepConfirm(true); setTimeout(() => setSweepConfirm(false), 3400); return; }
-                    setSweepConfirm(false);
-                    run(async () => { const r = await onSweep(phantomOk ? undefined : sweepDest.trim()); if (!r.ok) throw new Error(r.err); });
-                  }}
-                  style={{ flex: 1, border: `1.5px solid ${sweepConfirm ? T.red : `${T.amber}66`}`, borderRadius: 8, padding: "6px",
-                    background: sweepConfirm ? "rgba(234,57,67,0.14)" : "rgba(240,185,11,0.08)",
-                    color: !canSweep ? T.faint : sweepConfirm ? T.red : T.amber, fontFamily: T.mono, fontSize: 9, fontWeight: 900,
-                    cursor: canSweep ? "pointer" : "not-allowed", lineHeight: 1.35, opacity: canSweep ? 1 : 0.7,
-                    boxShadow: sweepConfirm ? `0 0 12px ${T.red}55` : "none", transition: "border-color .15s, background .15s" }}>
-                  <div>{sweepConfirm ? "⚠ TAP AGAIN TO CONFIRM" : `↑ SWEEP ${phantomOk ? "→ PHANTOM" : "→ ADDRESS"}`}</div>
-                  <div style={{ fontSize: 8, fontWeight: 800, opacity: 0.9 }}>
-                    {sweepSol > 0 ? `${sweepConfirm ? "sends " : ""}${sweepSol.toFixed(4)} SOL · $${(sweepSol * SOL_USD).toFixed(2)}${sweepConfirm ? " — turbo → 0" : ""}` : "empty — nothing to sweep"}
-                  </div>
-                </button>
-              );
-            })()}
-            <button disabled={busy} onClick={onLock}
-              style={{ flex: "0 0 auto", border: `1px solid ${T.border2}`, borderRadius: 8, padding: "7px 11px", background: "transparent",
-                color: T.faint, fontFamily: T.mono, fontSize: 9, fontWeight: 800, cursor: "pointer" }}>🔒 LOCK</button>
+
+          {/* ── WITHDRAW ────────────────────────────────── */}
+          <div style={{ marginBottom: 4 }}>
+            <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.5, color: T.faint, marginBottom: 6 }}>WITHDRAW · empties turbo to exactly 0</div>
+            {!phantomOk && (
+              <input value={sweepDest} onChange={(e) => setSweepDest(e.target.value)} placeholder="withdraw address (paste any SOL wallet)"
+                style={{ ...inp, width: "100%", boxSizing: "border-box", padding: "9px", fontSize: 9.5, marginBottom: 8 }} />
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              {(() => {
+                const sweepSol = Math.max(0, turboSol - 0.000005);
+                const canSweep = sweepSol > 0 && !busy && (phantomOk || sweepDest.trim());
+                return (
+                  <button disabled={!canSweep}
+                    title={sweepSol > 0 ? `Sends your ENTIRE turbo balance (${sweepSol.toFixed(4)} SOL ≈ $${(sweepSol * SOL_USD).toFixed(2)}) ${phantomOk ? "back to your Phantom wallet" : "to the pasted address"} — turbo goes to exactly 0` : "Nothing to sweep — the turbo wallet is empty"}
+                    onClick={() => {
+                      if (!sweepConfirm) { setSweepConfirm(true); setTimeout(() => setSweepConfirm(false), 3400); return; }
+                      setSweepConfirm(false);
+                      run(async () => { const r = await onSweep(phantomOk ? undefined : sweepDest.trim()); if (!r.ok) throw new Error(r.err); });
+                    }}
+                    style={{ flex: 1, border: `1.5px solid ${sweepConfirm ? T.red : `${T.amber}66`}`, borderRadius: 9, padding: "9px",
+                      background: sweepConfirm ? "rgba(234,57,67,0.14)" : "rgba(240,185,11,0.08)",
+                      color: !canSweep ? T.faint : sweepConfirm ? T.red : T.amber, fontFamily: T.mono, fontSize: 9.5, fontWeight: 900,
+                      cursor: canSweep ? "pointer" : "not-allowed", lineHeight: 1.5, opacity: canSweep ? 1 : 0.7,
+                      boxShadow: sweepConfirm ? `0 0 12px ${T.red}55` : "none", transition: "border-color .15s, background .15s" }}>
+                    <div>{sweepConfirm ? "⚠ TAP AGAIN TO CONFIRM" : `↑ SWEEP ${phantomOk ? "→ PHANTOM" : "→ ADDRESS"}`}</div>
+                    <div style={{ fontSize: 8.5, fontWeight: 800, opacity: 0.9, marginTop: 2 }}>
+                      {sweepSol > 0 ? `${sweepConfirm ? "sends " : ""}${sweepSol.toFixed(4)} SOL · $${(sweepSol * SOL_USD).toFixed(2)}${sweepConfirm ? " — turbo → 0" : ""}` : "empty — nothing to sweep"}
+                    </div>
+                  </button>
+                );
+              })()}
+              <button disabled={busy} onClick={onLock}
+                style={{ flex: "0 0 auto", border: `1px solid ${T.border2}`, borderRadius: 9, padding: "9px 15px", background: "transparent",
+                  color: T.faint, fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, cursor: "pointer" }}>🔒 LOCK</button>
+            </div>
           </div>
         </>
       )}
@@ -7175,7 +7220,23 @@ function CardMiniChart({ candles, hue, mode, tfMin = 15, count = 90, full = fals
   return <canvas ref={ref} style={{ width: full ? "100%" : "128%", height: full ? "100%" : 52, display: "block" }} />;
 }
 
+function fmtAge(createdAt) {
+  if (!(createdAt > 0)) return null;
+  const m = Math.max(1, Math.floor((Date.now() - createdAt) / 60000));
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  const d = Math.floor(h / 24);
+  return d < 30 ? `${d}d ${h % 24}h` : `${Math.floor(d / 30)}mo ${d % 30}d`;
+}
 function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf = 15, isMobile = false, onHover, onLeave }) {
+  // ⏱ live age — re-renders each minute so the clock actually moves on screen
+  const [, setAgeTick] = useState(0);
+  useEffect(() => {
+    if (!(t && t.createdAt > 0)) return;
+    const iv = setInterval(() => setAgeTick((x) => x + 1), 30000);
+    return () => clearInterval(iv);
+  }, [t && t.createdAt]);
   const liveEyes = liveViewersOf(t, "pump"); // re-renders ride the price ticks
   const score = scoreToken(t);
   const rug = rugState(t);
@@ -7237,6 +7298,12 @@ function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line",
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
         <Meter label="MOMENTUM" value={Math.round(t.momentum)} color={accent(t.hue)} />
         <Meter label="B/S PRESSURE" value={Math.round(t.buyPressure)} color={t.buyPressure >= 50 ? T.green : T.red} />
+        {fmtAge(t.createdAt) && (
+          <span title={`Launched ${new Date(t.createdAt).toLocaleString()}`}
+            style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 800, color: (t.ageMin || 0) < 60 ? T.green : T.faint, whiteSpace: "nowrap" }}>
+            ⏱ {fmtAge(t.createdAt)}
+          </span>
+        )}
       </div>
       {/* mirrored chart riding the bottom border, clipped by the card */}
       <div style={{ marginTop: 8, marginLeft: -14, marginRight: -14, marginBottom: 0, opacity: 0.9, pointerEvents: "none", borderBottomLeftRadius: 12, borderBottomRightRadius: 12, overflow: "hidden" }}>
@@ -8910,7 +8977,7 @@ export default function App() {
   const sellAllRuns = () => botRuns.filter((r) => r.status === "live").forEach((r) => sellRun(r.id));
   const sellPos = (t) => {
     // live + a real on-chain holding of this token → real sell with review
-    if (liveData && onchain.enabled && wallet && wallet.address && t && t.liveMint) {
+    if (liveData && onchain.enabled && walletReady && t && t.liveMint) {
       const held = chainHeldOf(t);
       if (held > 0) { quoteRealOrder(t, "sell", held); return; }
     }
@@ -9578,16 +9645,27 @@ export default function App() {
     return { byMint, realizedSol };
   }, [realFills]);
   const [realOrder, setRealOrder] = useState(null);   // the order awaiting confirmation
+  const onchainRef = useRef(onchain);
+  useEffect(() => { onchainRef.current = onchain; }, [onchain]);
   useEffect(() => {
-    (async () => {
+    let stop = false;
+    const check = async () => {
       try {
         const r = await fetch("/api/swap?mode=status");
         const j = await r.json();
         // only "on" when the feature is enabled AND Jupiter is actually reachable
         const ok = !!(j && j.enabled && j.jupiter === "reachable");
-        setOnchain({ enabled: ok, maxSol: (j && j.maxSol) || 0, jupiter: j && j.jupiter, feeBps: (j && j.feeBps) || 0, feeVia: (j && j.feeVia) || "none" });
-      } catch (e) { setOnchain({ enabled: false, maxSol: 0 }); }
-    })();
+        if (!stop) setOnchain({ enabled: ok, maxSol: (j && j.maxSol) || 0, jupiter: j && j.jupiter, feeBps: (j && j.feeBps) || 0, feeVia: (j && j.feeVia) || "none" });
+      } catch (e) { /* keep last state; retry below */ }
+    };
+    check();
+    // retry every 20s while routing is down — one bad boot fetch must never
+    // kill live trading for the whole session
+    const iv = setInterval(() => { if (!onchainRef.current.enabled) check(); }, 20000);
+    // PWA/phone wake → re-verify immediately
+    const onVis = () => { if (document.visibilityState === "visible" && !onchainRef.current.enabled) check(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { stop = true; clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
   }, []);
 
   // ask for a quote, then let the user decide. Two separate steps, always.
@@ -11543,7 +11621,13 @@ export default function App() {
       try {
         const r = await fetch("/api/tokens");
         if (r.ok) {
-          const arr = await r.json();
+          const arr0 = await r.json();
+          // boot list: one row per token, no broken-FDV pools
+          const seenM = new Set(); const arr = [];
+          for (const x of (Array.isArray(arr0) ? arr0 : [])) {
+            if ((+x.mc || 0) > 1e11) continue;
+            const k = x.mint || x.id; if (seenM.has(k)) continue; seenM.add(k); arr.push(x);
+          }
           if (!stop && Array.isArray(arr) && arr.length) {
             const mapped = arr.slice(0, 14).map((x) => ({
               sym: (x.sym || "???").toUpperCase().slice(0, 10), name: x.name || "live token",
@@ -12688,8 +12772,10 @@ export default function App() {
           const why = !liveAuto ? "live automation is disarmed (arm 🤖 in portfolio → ⚡ TURBO)"
             : turboLockedButPresent ? "⚡ turbo wallet is locked — unlock it with your PIN so bots can sign"
             : !walletReady ? "no wallet — set up ⚡ turbo or connect Phantom"
+            : !onchain.enabled ? "live routing is reconnecting — retrying automatically, next trigger will fire"
             : o.pay !== "SOL" ? "live orders are SOL-only"
-            : "this token has no live route";
+            : !t.liveMint ? "this token has no live route"
+            : "route check failed — retrying";
           pushNotif({ type: "system", user: null, tokenId: t.id,
             text: `🤖 bot trigger hit on ${t.sym} but was SKIPPED — ${why}. Nothing was bought.` });
           sayPrivate({ type: "note", text: `⚠ bot skipped on ${t.sym}: ${why}` });
@@ -13711,7 +13797,7 @@ export default function App() {
                         style={{ position: "absolute", right: -4, top: 0, bottom: 0, width: 9, cursor: "col-resize", zIndex: 6 }} />
                     </>
                   )}
-                  <ProChart candles={selected.candles} hue={selected.hue} synthetic={!selected.hasDex}
+                  <ProChart candles={selected.candles} hue={selected.hue} synthetic={!selected.hasDex} createdAt={selected.createdAt || null}
                     mode={chartMode} tfMin={tf} trades={chartTrades} traderPrefs={traderPrefs} theme={themeIdx}
                     clickMode={clickMode} onChartTrade={chartTrade} onMarkerClick={(tr) => { setMarkerInfo(tr); if (tr && tr.tx) setHighlightTx(tr.tx); }}
                     highlightTx={highlightTx}
@@ -13730,7 +13816,7 @@ export default function App() {
                     botSetMode={!isMobile && ticketTab === "auto" && botDragSet}
                     shiftArm={!isMobile && ticketTab === "auto"}
                     onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
-                    onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop({ ...at, level: lvl, side: botSide }); }}
+                    onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at) setArmPop({ ...(at || {}), level: lvl, side: botSide }); }}
                     onBotArm={(lvl) => armAtLevel(lvl)}
                     onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq} eyesToken={selected}
                     onCancelLine={(id) => { cancelBot(id); setSelLineId(null); }}
@@ -13960,7 +14046,7 @@ export default function App() {
       style={{ display: "flex", gap: 0, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, overflow: "hidden", marginBottom: 8, fontFamily: T.mono,
         userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" }}>
       {(() => {
-        const sbLive = !!(liveData && wallet && wallet.address && walletChain);
+        const sbLive = !!(liveData && walletChain && (turbo || (wallet && wallet.address)));
         const sbSol = sbLive ? ((walletChain && walletChain.sol) || 0) : solBalance;
         return [
         [posArm ? "TAP TO OPEN" : sbLive ? "⛓ SOL" : "SOL", posArm
@@ -15355,6 +15441,26 @@ export default function App() {
       {wpOpen && <WhitepaperModal onClose={() => setWpOpen(false)} isMobile={isMobile} />}
       {calloutHubOpen && <CalloutHubModal onClose={closeAllPages} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
         onOpenUser={(u) => { setCalloutHubOpen(false); setProfileUser(u); }} />}
+      {isMobile && quickArmOn && armPop && (
+        <button data-armpop="1" onClick={() => { const fn = quickArmRef.current; fn && fn(); setArmPop(null); }}
+          title="Arm this strategy at the line you just set"
+          style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: 96, zIndex: 137,
+            border: "none", borderRadius: 999, padding: "10px 20px", fontFamily: T.mono, fontWeight: 900, letterSpacing: 1.2,
+            background: T.blue, color: "#07101d", cursor: "pointer",
+            boxShadow: `0 6px 24px rgba(46,112,204,0.6), 0 0 14px ${T.blue}77`,
+            animation: "coPop .18s ease", textAlign: "center", lineHeight: 1.3, maxWidth: "86vw" }}>
+          {(() => {
+            const amtN = parseFloat(amount) || 0;
+            const lvl = armPop.level || (selected && selected.price) || 0;
+            return (
+              <>
+                <span style={{ fontSize: 12 }}>⚡ ARM {armPop.side === "sell" ? "EXIT" : "BUY-IN"} @ ${fmtP(lvl)}</span>
+                <span style={{ display: "block", fontSize: 8.5, fontWeight: 800, opacity: 0.85 }}>{amtN} {pay} · tap to arm · line stays until hit</span>
+              </>
+            );
+          })()}
+        </button>
+      )}
       {!isMobile && quickArmOn && armPop && (
         <button data-armpop="1" onClick={() => { const fn = quickArmRef.current; fn && fn(); setArmPop(null); }}
           title="Arm this strategy at the line you just set"
@@ -15956,7 +16062,7 @@ export default function App() {
             <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 800 }}>🤖 AUTO-TRADER · <span style={{ color: accent(selected.hue) }}>${selected.sym}</span></div>
             <button onClick={() => { setMobileBotScreen(false); setEditingBotId(null); setBotDraftLevel(null); }} style={{ ...chip(false), padding: "5px 11px", fontSize: 12 }}>✕ Close</button>
           </div>
-          <ProChart candles={selected.candles} hue={selected.hue} synthetic={!selected.hasDex}
+          <ProChart candles={selected.candles} hue={selected.hue} synthetic={!selected.hasDex} createdAt={selected.createdAt || null}
             mode="candles" tfMin={tf} trades={chartTrades} traderPrefs={traderPrefs} theme={themeIdx}
             onMarkerClick={(tr) => { setMarkerInfo(tr); if (tr && tr.tx) setHighlightTx(tr.tx); }} highlightTx={highlightTx}
             price={selected.price} sym={selected.sym} isMobile height={Math.round((typeof window !== "undefined" ? window.innerHeight : 800) * 0.38)}
@@ -15975,7 +16081,7 @@ export default function App() {
             onCancelLine={(id) => { cancelBot(id); setSelLineId(null); }}
             onLineSelect={(id) => setSelLineId(id)}
             onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
-            onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop({ ...at, level: lvl, side: botSide }); }} />
+            onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at) setArmPop({ ...(at || {}), level: lvl, side: botSide }); }} />
           {/* SKINNY PILL BAR — one line, sits right under the chart where the
               times live. drag-set · trader · visual · all bots · watchlist.
               HOLD the watchlist pill and it swaps into 📊 POSITIONS (the auto
