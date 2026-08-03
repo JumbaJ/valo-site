@@ -632,7 +632,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   const total = agg.length;
   // room to zoom past what's loaded — the gap is what pulls older candles in
   // frame everything we hold plus a small margin — never more
-  const zoomCap = Math.max(60, Math.min(4000, Math.round(agg.length * 1.5) + 20));
+  const zoomCap = Math.max(60, Math.min(4000, Math.round(agg.length * 1.1) + 12));
   const count = Math.max(12, Math.min(view.count, zoomCap));
   // a small, fixed margin rather than most of a screen: enough to feel free,
   // not enough to strand the candles in a corner
@@ -801,11 +801,13 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     hi = trueHi > 0 ? trueHi + padTop : hi + p8;
     // vertical zoom: stretch the visible price range around its centre. This is
     // what gives headroom above the candles for placing bot and visual lines.
-    const pz = Math.max(0.15, Math.min(40, view.priceZoom || 1));
+    const pz = Math.max(0.5, Math.min(6, view.priceZoom || 1));
     if (pz !== 1) {
       const midP = (hi + lo) / 2;
       const halfP = ((hi - lo) / 2) * pz;
-      lo = Math.max(1e-12, midP - halfP); hi = midP + halfP;
+      // the floor never drops below a slice of the price itself — the axis can
+      // stretch, but it can never blow out into log-scale absurdity
+      lo = Math.max(midP * 0.05, midP - halfP); hi = midP + halfP;
     }
     // NO vertical drag — the axis always auto-fits the visible candles so the
     // chart is fully on-screen wherever you pan left/right (DexScreener-style).
@@ -836,7 +838,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       const lt = lastC && Number.isFinite(lastC.t) ? lastC.t : baseT + Math.max(0, total - 1) * tfMs;
       return lt + (i - (total - 1)) * tfMs;
     };
-    geom.current = { y, x, step, lo, hi, padT, chartH, plotW, slotOf, idxOf, inData, timeAtSlot,
+    geom.current = { y, x, step, lo, hi, padT, chartH, plotW, slotOf, idxOf, inData, timeAtSlot, aggLen: agg.length,
       hiLoRange: hi - lo, logOn, lgLo, lgSpan };
 
     ctx.font = `10px ${T.mono}`; ctx.textBaseline = "middle";
@@ -1430,7 +1432,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     const g = geom.current;
     // touch/press starting in the right-hand price-number strip = zoom mode:
     // run finger UP to zoom in, DOWN to zoom out. No pinch, no browser fight.
-    if (g.plotW != null && cx >= g.plotW - (isMobile ? 26 : 4)) {
+    if (g.plotW != null && cx >= g.plotW - (isMobile ? 16 : 4)) {
       axisRef.current = { sy: cy, c0: count, z0: view.priceZoom || 1, t0: Date.now(), moved: false };
       dragRef.current = null;
       setCross(null);
@@ -1515,7 +1517,8 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       const pz = pinchRef.current;
       const [a, b] = [e.touches[0], e.touches[1]];
       const dist = Math.max(20, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY));
-      const nextCount = Math.max(12, Math.min(60000, Math.round(pz.c0 * (pz.d0 / dist))));
+      const capNow = Math.max(60, Math.min(4000, Math.round((geom.current.aggLen || 600) * 1.1) + 12));
+      const nextCount = Math.max(12, Math.min(capNow, Math.round(pz.c0 * (pz.d0 / dist))));
       const ratio = nextCount / pz.c0;
       const slotsRight0 = pz.c0 - pz.midSlot;
       const dOff = Math.round(slotsRight0 * ratio - slotsRight0);
@@ -1566,7 +1569,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       if (Math.abs(dy) > 4) ax.moved = true;
       // down = open the range up (see more above and below), up = tighten it
       const factor = Math.pow(1.9, dy / 160);
-      setView((v) => ({ ...v, priceZoom: Math.max(0.15, Math.min(40, (ax.z0 || 1) * factor)) }));
+      setView((v) => ({ ...v, priceZoom: Math.max(0.5, Math.min(6, (ax.z0 || 1) * factor)) }));
       return;
     }
     if (pinCross && e.touches) { setPinCross({ cx, cy }); setCross({ cx, cy }); return; }
