@@ -639,7 +639,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       ? { ...v, priceZoom: Math.max(0.5, Math.min(6, v.priceZoom || 1)) } : v);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const zoomCap = Math.max(60, Math.min(4000, Math.round(agg.length * 1.1) + 12));
+  const zoomCap = Math.max(60, Math.min(4000, Math.round(agg.length * 1.28) + 18));
   const count = Math.max(12, Math.min(view.count, zoomCap));
   // a small, fixed margin rather than most of a screen: enough to feel free,
   // not enough to strand the candles in a corner
@@ -1214,16 +1214,29 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     const cvs = cvsRef.current; if (!cvs) return;
     const onWheel = (e) => {
       e.preventDefault();
+      // where under the plot is the cursor? that bar must not move (DexScreener feel)
+      const r = cvs.getBoundingClientRect();
+      const g = geom.current || {};
+      const frac = g.chartW > 0 ? Math.max(0, Math.min(1, (e.clientX - r.left - (g.padL || 0)) / g.chartW)) : 1;
       setView((v) => {
         const f = e.deltaY > 0 ? 1.07 : 1 / 1.07;               // fine notches, not jumps
         const next = v.count * f;
         // always move at least one bar so small counts still respond
         const stepped = Math.abs(next - v.count) < 1 ? v.count + (e.deltaY > 0 ? 1 : -1) : next;
-        return { ...v, count: Math.max(12, Math.min(60000, Math.round(stepped))) };
+        const count2 = Math.max(12, Math.min(60000, Math.round(stepped)));
+        // shift the window so the bar under the cursor keeps its screen x
+        const off2 = Math.max(0, Math.round(v.offset + (1 - frac) * (v.count - count2)));
+        return { ...v, count: count2, offset: off2, follow: off2 === 0 ? v.follow : false };
       });
     };
+    const onDbl = (e) => {
+      // double-click the plot → reset to the fitted view
+      e.preventDefault();
+      setView({ count: 90, offset: 0, priceOff: 0, priceZoom: 1, follow: true });
+    };
+    cvs.addEventListener("dblclick", onDbl);
     cvs.addEventListener("wheel", onWheel, { passive: false });
-    return () => cvs.removeEventListener("wheel", onWheel);
+    return () => { cvs.removeEventListener("wheel", onWheel); cvs.removeEventListener("dblclick", onDbl); };
   }, []);
 
   // Lock the page while a finger is on the chart. React binds touch events as
@@ -1546,7 +1559,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       const pz = pinchRef.current;
       const [a, b] = [e.touches[0], e.touches[1]];
       const dist = Math.max(20, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY));
-      const capNow = Math.max(60, Math.min(4000, Math.round((geom.current.aggLen || 600) * 1.1) + 12));
+      const capNow = Math.max(60, Math.min(4000, Math.round((geom.current.aggLen || 600) * 1.28) + 18));
       const nextCount = Math.max(12, Math.min(capNow, Math.round(pz.c0 * (pz.d0 / dist))));
       const ratio = nextCount / pz.c0;
       const slotsRight0 = pz.c0 - pz.midSlot;
@@ -1598,7 +1611,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       const dy = cy - ax.sy;
       if (Math.abs(dy) > 4) ax.moved = true;
       const factor = Math.pow(1.9, dy / 160);
-      const capNow = Math.max(60, Math.min(4000, Math.round((geom.current.aggLen || 600) * 1.1) + 12));
+      const capNow = Math.max(60, Math.min(4000, Math.round((geom.current.aggLen || 600) * 1.28) + 18));
       setView((v) => ({ ...v, count: Math.max(12, Math.min(capNow, Math.round((ax.c0 || 60) * factor))) }));
       return;
     }
@@ -6198,7 +6211,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   valoMint = null, onRealSwap = null, chainHoldingsLive2 = null,
   turboState = null, onTurboCreate = null, onTurboUnlock = null, onTurboLock = null,
   onTurboFund = null, onTurboSweep = null, phantomOk = false, turboSol = 0,
-  turboAutoOn = false, onTurboToggleAuto = null }) {
+  turboAutoOn = false, onTurboToggleAuto = null, onCreatorSplit = null, creatorAddr = null }) {
   const bestCalloutPeak = Object.values(myCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0);
   const mask = (s) => (hideBalance ? "••••••" : s);
   // ⛓/📝 the SITE decides the wallet. Live mode = on-chain, demo = paper.
@@ -6395,6 +6408,15 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           style={{ fontFamily: T.mono, fontSize: 8.5, color: T.red, cursor: "pointer", margin: "-4px 0 8px", opacity: 0.9 }}>
           ⏳ {nameErr} · tap to dismiss
         </div>
+      )}
+      {liveMode && wallet && wallet.address && onCreatorSplit && creatorAddr && wallet.address === creatorAddr && (
+        <button onClick={onCreatorSplit}
+          title="Split this wallet's SOL: 25% burned · 50% to the epoch vault · 25% stays. One Phantom signature."
+          style={{ width: "100%", border: `1px solid ${T.amber}66`, background: "rgba(240,185,11,0.08)", color: T.amber,
+            borderRadius: 9, padding: "8px", cursor: "pointer", fontFamily: T.mono, fontSize: 9, fontWeight: 900,
+            letterSpacing: 0.5, marginBottom: 10 }}>
+          👑 SPLIT CREATOR FEES · 25% 🔥 burn · 50% 🎁 vault · 25% keep
+        </button>
       )}
       {(liveMode || (walletConnected && wallet) || (turboState && turboState.pubkey)) && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, paddingBottom: 10,
@@ -8556,6 +8578,7 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
     const reg = (typeof window !== "undefined" && window.__VALO_WALLETS__) || {};
     const w = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trader) ? trader : (reg[trader] || (tr && tr.wallet) || null);
     if (!w) return;
+    try { if (typeof window !== "undefined") window.__VALO_WALLETS__ = { ...(window.__VALO_WALLETS__ || {}), [trader]: w }; } catch (e) {}
     let stop = false;
     (async () => {
       try {
@@ -9720,6 +9743,11 @@ export default function App() {
   const [supplyHeld] = useState(() => rnd(4e7, 9e7));     // circulating held by all claimants
   const [pendingEpochs, setPendingEpochs] = useState([]); // [{epoch, amount, root, weightPct, holdPct, volPct}]
   const [claimOpen, setClaimOpen] = useState(false);
+  const [payoutWallet, setPayoutWallet] = useState(() => { try { return localStorage.getItem("valo-payout-wallet") || null; } catch (e) { return null; } });
+  const [payoutDraft, setPayoutDraft] = useState("");
+  const [payoutMsg, setPayoutMsg] = useState("");
+  useEffect(() => { try { payoutWallet ? localStorage.setItem("valo-payout-wallet", payoutWallet) : localStorage.removeItem("valo-payout-wallet"); } catch (e) {} }, [payoutWallet]);
+  useEffect(() => { if (claimOpen) setPayoutDraft(payoutWallet || ""); /* eslint-disable-next-line */ }, [claimOpen]);
   // ⛓ real trading (off unless the server enables it)
   const [onchain, setOnchain] = useState({ enabled: false, maxSol: 0 });
   const [valoMint, setValoMint] = useState(null);   // real $VALO mint, once launched
@@ -9777,7 +9805,7 @@ export default function App() {
         const j = await r.json();
         // only "on" when the feature is enabled AND Jupiter is actually reachable
         const ok = !!(j && j.enabled && j.jupiter === "reachable");
-        if (!stop) setOnchain({ enabled: ok, maxSol: (j && j.maxSol) || 0, jupiter: j && j.jupiter, feeBps: (j && j.feeBps) || 0, feeVia: (j && j.feeVia) || "none" });
+        if (!stop) setOnchain({ enabled: ok, maxSol: (j && j.maxSol) || 0, jupiter: j && j.jupiter, feeBps: (j && j.feeBps) || 0, feeVia: (j && j.feeVia) || "none", feeSplit: (j && j.feeSplit) || null });
       } catch (e) { /* keep last state; retry below */ }
     };
     check();
@@ -9928,24 +9956,55 @@ export default function App() {
   // 🏦 site fee → treasury, turbo-signed, after a confirmed fill. Skipped when
   // Jupiter already collected in-swap (feeVia "jupiter"). From the treasury,
     // the epoch-rewards / VALO-burn split is the operator's move.
+  // 👑 creator fee split — 25% burn · 50% epoch vault · 25% stays. Signed by
+  // the creator's own Phantom; only rendered for that wallet.
+  const doCreatorSplit = async () => {
+    try {
+      const split = (onchain && onchain.feeSplit) || {};
+      if (!wallet || !wallet.address || !split.burn || !split.epoch) { pushNotif({ type: "system", text: "⚠ creator split needs VALO_BURN + VALO_EPOCH configured" }); return; }
+      const web3 = await loadWeb3();
+      const conn = null;
+      const balR = await fetch(`/api/wallet?address=${wallet.address}&t=${Date.now()}`);
+      const balJ = await balR.json();
+      const solBal = (balJ && balJ.sol) || 0;
+      const distributable = Math.max(0, solBal - 0.01);            // keep rent + fees
+      if (distributable < 0.001) { pushNotif({ type: "system", text: "👑 creator wallet has nothing to split yet" }); return; }
+      const lam = Math.floor(distributable * 1e9);
+      const burnLam = Math.floor(lam * 0.25), vaultLam = Math.floor(lam * 0.5);
+      const bhx = await getBlockhash();
+      const tx = new web3.Transaction({ feePayer: new web3.PublicKey(wallet.address), recentBlockhash: bhx });
+      tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(wallet.address), toPubkey: new web3.PublicKey(split.burn), lamports: burnLam }));
+      tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(wallet.address), toPubkey: new web3.PublicKey(split.epoch), lamports: vaultLam }));
+      const ph = getProvider();
+      if (!ph) { pushNotif({ type: "system", text: "👻 Phantom not available to sign the split" }); return; }
+      const { signature } = await ph.signAndSendTransaction(tx);
+      pushNotif({ type: "system", text: `👑 creator fees split: 🔥 ${(burnLam / 1e9).toFixed(4)} burned · 🎁 ${(vaultLam / 1e9).toFixed(4)} → epoch vault · kept ${((lam - burnLam - vaultLam) / 1e9).toFixed(4)} · ${signature.slice(0, 8)}…` });
+    } catch (e) { pushNotif({ type: "system", text: `👑 split failed: ${String(e.message || e).slice(0, 80)}` }); }
+  };
   const payTurboFee = async (notionalSol, feeMeta) => {
     try {
-      if (!turboActive || !valoTreasury) return;
+      if (!turboActive) return;
       const bps = (feeMeta && feeMeta.feeBps) || (onchain && onchain.feeBps) || 0;
       const via = (feeMeta && feeMeta.feeVia) || (onchain && onchain.feeVia) || "none";
       if (!(bps > 0) || via === "jupiter") return;   // none configured, or already taken in-swap
       const lam = Math.floor(notionalSol * 1e9 * (bps / 10000));
-      if (lam < 1000) return;                        // dust isn't worth a tx fee
+      if (lam < 2000) return;                        // dust isn't worth a tx fee
+      const split = (onchain && onchain.feeSplit) || {};
       const web3 = await loadWeb3();
       const bhx = await getBlockhash();
       const tx = new web3.Transaction({ feePayer: new web3.PublicKey(turbo.pubkey), recentBlockhash: bhx });
-      tx.add(web3.SystemProgram.transfer({
-        fromPubkey: new web3.PublicKey(turbo.pubkey),
-        toPubkey: new web3.PublicKey(valoTreasury),
-        lamports: lam,
-      }));
-      await turboSignSend(tx);
-      sayPrivate({ type: "note", text: `🏦 site fee ${(lam / 1e9).toFixed(6)} SOL → VALO treasury (${bps / 100}%)` });
+      if (split.burn && split.epoch) {
+        // 🔥 50% burned forever · 🎁 50% to the epoch vault — one tx, two legs
+        const half = Math.floor(lam / 2);
+        tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(split.burn), lamports: half }));
+        tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(split.epoch), lamports: lam - half }));
+        await turboSignSend(tx);
+        sayPrivate({ type: "note", text: `⚖ site fee ${(lam / 1e9).toFixed(6)} SOL (${bps / 100}%) → 🔥 ${(half / 1e9).toFixed(6)} burned · 🎁 ${((lam - half) / 1e9).toFixed(6)} epoch vault` });
+      } else if (valoTreasury) {
+        tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(valoTreasury), lamports: lam }));
+        await turboSignSend(tx);
+        sayPrivate({ type: "note", text: `🏦 site fee ${(lam / 1e9).toFixed(6)} SOL → VALO treasury (${bps / 100}%)` });
+      }
     } catch (e) { /* the trade already succeeded — a fee hiccup never surfaces as a failure */ }
   };
 
@@ -13543,13 +13602,18 @@ export default function App() {
     const reg = (typeof window !== "undefined" && window.__VALO_WALLETS__) || {};
     const walletOf = (trader) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trader) ? trader : (reg[trader] || null);
     const pins = Object.entries(traderPrefs).filter(([, p]) => p && p.following).map(([k]) => k).filter((k) => k !== "__me__");
-    if (!pins.length) return;
-    const pull = () => pins.forEach((tr) => { const w = walletOf(tr); if (w) fetchPinnedTraderTrades(tr, w, selected.liveMint, selected); });
+    // 👨‍💻 dev-trades chip on → the creator wallet joins the tracked set
+    const devW = showDevTrades ? (((typeof window !== "undefined" && window.__VALO_CREATORS__) || {})[selected.liveMint] || {}).creator : null;
+    if (!pins.length && !devW) return;
+    const pull = () => {
+      pins.forEach((tr) => { const w = walletOf(tr); if (w) fetchPinnedTraderTrades(tr, w, selected.liveMint, selected); });
+      if (devW) fetchPinnedTraderTrades("__dev__", devW, selected.liveMint, selected);
+    };
     pull();
     const iv = setInterval(pull, 30000);
     return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveData, selected && selected.liveMint, JSON.stringify(Object.entries(traderPrefs).filter(([, p]) => p && p.following).map(([k]) => k))]);
+  }, [liveData, selected && selected.liveMint, showDevTrades, tokCreator && tokCreator.creator, JSON.stringify(Object.entries(traderPrefs).filter(([, p]) => p && p.following).map(([k]) => k))]);
 
   const chartTrades = useMemo(() => {
     if (!selected) return [];
@@ -13574,8 +13638,11 @@ export default function App() {
       return (pinnedTrades[`${w}|${selected.liveMint}`] || []);
     });
     const liveReal = liveData && selected.pool;
+    // 👨‍💻 the creator's REAL trades on this mint (dev-trades chip)
+    const devW2 = liveReal && showDevTrades ? (((typeof window !== "undefined" && window.__VALO_CREATORS__) || {})[selected.liveMint] || {}).creator : null;
+    const devReal = devW2 ? (pinnedTrades[`${devW2}|${selected.liveMint}`] || []).map((m) => ({ ...m, trader: (tokCreator && tokCreator.short) || "dev", dev: true })) : [];
     const all = liveReal
-      ? [...mine, ...hist, ...chartRealMarkers, ...followed]   // your fills + pinned traders' real trades
+      ? [...mine, ...hist, ...chartRealMarkers, ...followed, ...devReal]   // your fills + pinned + the dev, all real
       : [...mine, ...dev, ...hist, ...followed];  // simulation keeps its own cast
     // de-dupe by tx so a followed dev doesn't double-draw
     const seen = new Set();
@@ -15274,7 +15341,7 @@ export default function App() {
               realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={combinedChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger} chainHoldingsLive2={chainHoldingsLive}
               turboState={turbo} onTurboCreate={turboCreate} onTurboUnlock={turboUnlock} onTurboLock={turboLock}
               onTurboFund={turboFund} onTurboSweep={turboSweep} phantomOk={!!(wallet && wallet.address)}
-              turboSol={turboSolBal} turboAutoOn={liveAuto} onTurboToggleAuto={setLiveAuto}
+              turboSol={turboSolBal} turboAutoOn={liveAuto} onTurboToggleAuto={setLiveAuto} onCreatorSplit={doCreatorSplit} creatorAddr={(onchain && onchain.feeSplit && onchain.feeSplit.creator) || null}
               valoMint={valoMint}
               onRealSwap={() => {
                 if (!valoMint) return;
@@ -15883,7 +15950,9 @@ export default function App() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "8px 10px 2px", padding: "7px 13px", borderRadius: 20,
             border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)", fontFamily: T.mono, flexShrink: 0 }}>
-            <span style={{ fontSize: 8, color: T.faint }}>💼 <b style={{ color: T.text, fontSize: 10.5 }}>${(solBalance * SOL_USD + valoWallet * 0.0125).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b></span>
+            <span style={{ fontSize: 8, color: liveData ? T.amber : T.faint }}>{liveData ? "⚡" : "💼"} <b style={{ color: T.text, fontSize: 10.5 }}>${(liveData && combinedChain
+              ? ((combinedChain.solTrading != null ? combinedChain.solTrading : combinedChain.sol) || 0) * SOL_USD + visHolds(combinedChain.holdings).filter((h) => h.src !== "phantom").reduce((s2, h) => s2 + (h.usd || 0), 0)
+              : solBalance * SOL_USD + valoWallet * 0.0125).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b></span>
             <span style={{ fontSize: 8, color: T.faint }}>🤖 <b style={{ color: botUnrealized >= 0 ? T.green : T.red, fontSize: 10.5 }}>{botUnrealized >= 0 ? "+" : "−"}${Math.abs(botUnrealized).toFixed(2)}</b></span>
             <button onClick={() => setPosDrawer(true)}
               style={{ marginLeft: "auto", border: `1px solid ${VALO_PURPLE}`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE,
@@ -15912,10 +15981,16 @@ export default function App() {
         const tickReal = realizedPnl - botRealAll;
         const showBots = posTab !== "tickets", showTix = posTab !== "bots";
         const drawerHolds = liveData ? chainHoldingsLive.filter((h) => !h.spam && !h.dust) : [];
-        const unreal = (showTix ? tix.reduce((s, x) => s + x.pnl, 0) : 0) + (showBots ? runsL.reduce((s, x) => s + x.pnl, 0) : 0);
-        const real = (showTix ? tickReal : 0) + (showBots ? botRealAll : 0);
+        const chainUnreal = liveData ? drawerHolds.reduce((s, h) => s + (h.pnlUsd || 0), 0) : 0;
+        const unreal = liveData ? chainUnreal + (showBots ? runsL.reduce((s, x) => s + x.pnl, 0) : 0)
+          : (showTix ? tix.reduce((s, x) => s + x.pnl, 0) : 0) + (showBots ? runsL.reduce((s, x) => s + x.pnl, 0) : 0);
+        const real = liveData ? (chainLedger.realizedSol || 0) * SOL_USD : (showTix ? tickReal : 0) + (showBots ? botRealAll : 0);
         const scoped = unreal;
-        const walletUsd = solBalance * SOL_USD + valoWallet * 0.0125;
+        // ⚡ live: the wallet figure IS the turbo wallet — SOL + visible tokens
+        const walletUsd = liveData && combinedChain
+          ? ((combinedChain.solTrading != null ? combinedChain.solTrading : combinedChain.sol) || 0) * SOL_USD
+            + visHolds(combinedChain.holdings).filter((h) => h.src !== "phantom").reduce((s, h) => s + (h.usd || 0), 0)
+          : solBalance * SOL_USD + valoWallet * 0.0125;
         const walletTxt = posUnit === "sol" ? `${(walletUsd / SOL_USD).toFixed(2)} SOL` : posUnit === "valo" ? `${fmtQty(walletUsd / 0.0125)} $VALO` : `$${walletUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
         const sellScope = () => { if (showTix) closeAllTickets(); if (showBots) runsL.forEach((x) => sellRun(x.r.id)); };
         const pctChips = (row, isBot) => (
@@ -15955,7 +16030,7 @@ export default function App() {
               <div onClick={() => setPosUnit((u) => (u === "usd" ? "sol" : u === "sol" ? "valo" : "usd"))}
                 title="Tap: $ → SOL → $VALO"
                 style={{ border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 11, padding: "9px 12px", marginBottom: 8, cursor: "pointer" }}>
-                <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.2, color: T.faint }}>WALLET · tap to flip units</div>
+                <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.2, color: liveData ? T.amber : T.faint }}>{liveData ? "⚡ TURBO WALLET · LIVE" : "WALLET"} · tap to flip units</div>
                 <div style={{ fontFamily: T.mono, fontSize: 19, fontWeight: 900, color: T.text }}>{walletTxt}</div>
                 <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: scoped >= 0 ? T.green : T.red }}>
                   OPEN PNL {scoped >= 0 ? "+" : "−"}${Math.abs(scoped).toFixed(2)}
@@ -16726,6 +16801,29 @@ export default function App() {
               <b style={{ color: T.text }}> you pay your own SOL gas</b>, tokens land directly in your wallet.
             </div>
 
+            {/* 🎯 payout wallet — rewards land wherever the user points them */}
+            <div style={{ background: "#0c0f16", border: `1px solid ${VALO_PURPLE}44`, borderRadius: 10, padding: "9px 11px", marginBottom: 12 }}>
+              <div style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: VALO_PURPLE, marginBottom: 5 }}>🎯 PAYOUT WALLET · where your $VALO lands</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input value={payoutDraft} onChange={(e) => setPayoutDraft(e.target.value)}
+                  placeholder={tradeAddr ? `default: connected wallet ${tradeAddr.slice(0, 4)}…${tradeAddr.slice(-4)}` : "paste any Solana address"}
+                  style={{ ...inp, flex: 1, padding: "8px", fontSize: 9.5 }} />
+                <button onClick={async () => {
+                    const v = payoutDraft.trim();
+                    if (v && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v)) { setPayoutMsg("that's not a valid Solana address"); return; }
+                    setPayoutWallet(v || null);
+                    setPayoutMsg(v ? "saved ✓ — epoch payouts go here" : "cleared — payouts go to your connected wallet");
+                    try {
+                      const sb2 = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
+                      if (sb2 && cloudUser) await sb2.from("profiles").update({ payout_wallet: v || null }).eq("id", cloudUser.id);
+                    } catch (e) {}
+                    setTimeout(() => setPayoutMsg(""), 2600);
+                  }}
+                  style={{ ...chip(false), padding: "8px 12px", fontSize: 9, fontWeight: 900, color: VALO_PURPLE, borderColor: `${VALO_PURPLE}55` }}>SAVE</button>
+              </div>
+              {payoutMsg && <div style={{ fontFamily: T.mono, fontSize: 8, color: payoutMsg.includes("✓") || payoutMsg.includes("cleared") ? T.green : T.red, marginTop: 5 }}>{payoutMsg}</div>}
+              {payoutWallet && !payoutMsg && <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 5 }}>→ {payoutWallet.slice(0, 6)}…{payoutWallet.slice(-6)}</div>}
+            </div>
             <button onClick={() => doClaim(false)} disabled={claimable <= 0 || claiming}
               style={{
                 width: "100%", border: "none", borderRadius: 10, padding: "14px", fontFamily: T.mono,
@@ -16927,7 +17025,7 @@ export default function App() {
               realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={combinedChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger} chainHoldingsLive2={chainHoldingsLive}
               turboState={turbo} onTurboCreate={turboCreate} onTurboUnlock={turboUnlock} onTurboLock={turboLock}
               onTurboFund={turboFund} onTurboSweep={turboSweep} phantomOk={!!(wallet && wallet.address)}
-              turboSol={turboSolBal} turboAutoOn={liveAuto} onTurboToggleAuto={setLiveAuto}
+              turboSol={turboSolBal} turboAutoOn={liveAuto} onTurboToggleAuto={setLiveAuto} onCreatorSplit={doCreatorSplit} creatorAddr={(onchain && onchain.feeSplit && onchain.feeSplit.creator) || null}
               valoMint={valoMint}
               onRealSwap={() => {
                 if (!valoMint) return;
