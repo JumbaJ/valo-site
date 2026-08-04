@@ -8414,7 +8414,7 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
           const dev = devOf(t); const desc = descOf(t); const hot = isHotTok(t);
           const g = gainOf(t);
           return (
-            <div key={t.id} onClick={() => onPick && onPick(t.id)}
+            <div key={t.id} onClick={() => onPick && onPick(t.id, t)}
               {...(tdProps ? tdProps(t) : {})}
               onMouseEnter={() => !isMobile && setHov(t.id)} onMouseLeave={() => !isMobile && setHov((h) => (h === t.id ? null : h))}
               className={hot ? "goldb" : undefined}
@@ -8520,7 +8520,7 @@ function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, ec
           opacity: (typeof window !== "undefined" && window.__valoEcoDim) ? 0.07 : 1, pointerEvents: (typeof window !== "undefined" && window.__valoEcoDim) ? "none" : "auto", transition: "opacity .22s ease" }}>
           <TokenEcosystem tokens={mktExtra && mktExtra.length ? [...tokens, ...mktExtra] : tokens}
             q={q} isMobile={false} maxH="min(72vh, 760px)" tdProps={(typeof window !== "undefined" && window.__valoTdProps) || null}
-            onPick={(id) => { onPickToken && onPickToken(id); setOpen(false); setQ(""); }}
+            onPick={(id, tokObj) => { onPickToken && onPickToken(id, tokObj); setOpen(false); setQ(""); }}
             onWatchAdd={typeof window !== "undefined" && window.__valoWatchAdd ? window.__valoWatchAdd : undefined}
             onOpenUser={(u) => { onPickUser && onPickUser(u); }} />
         </div>
@@ -11747,7 +11747,7 @@ export default function App() {
       setSel(card.id); setClickMode(null);
     } catch (e) {}
   }, []);
-  const openAnyToken = useCallback((id) => {
+  const openAnyToken = useCallback((id, tokObj = null) => {
     holdScroll();
     const board = tokensRef.current || [];
     // paint instantly from cache if we've already seen this pool
@@ -11761,8 +11761,10 @@ export default function App() {
     };
     const local = board.find((t) => t.id === id);
     if (local) { paintCached(local); setSel(local.id); setClickMode(null); return; }
-    const hit = [...mktHits, ...moreToks].find((t) => t.id === id);
+    let hit = [...mktHits, ...moreToks].find((t) => t.id === id);
+    if (!hit && tokObj) hit = tokObj;               // search-local tokens (fresh feed) open too
     if (!hit) return;
+    if (!hit.pool && hit.liveMint) { openTokenByMint(hit.liveMint); setClickMode(null); return; }
     // resolve everything BEFORE touching state, so we never select an id that
     // isn't on the board (that mismatch is what froze the chart)
     const dupe = board.find((t) => (hit.pool && String(t.pool || "") === String(hit.pool))
@@ -15960,7 +15962,7 @@ export default function App() {
           </div>
           <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
             <TokenEcosystem tokens={[...tokens, ...moreToks, ...mktHits]} q={ecoQ} isMobile maxH="100%" tdProps={tdProps}
-              onPick={(id) => { setEcoFull(false); setEcoQ(""); openAnyToken(id); }}
+              onPick={(id, tokObj) => { setEcoFull(false); setEcoQ(""); openAnyToken(id, tokObj); }}
               onWatchAdd={(id) => { watchAdd(id, null); popPlus(); }}
               onOpenUser={(u) => setProfileUser(u)} />
           </div>
