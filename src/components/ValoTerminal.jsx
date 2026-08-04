@@ -11624,6 +11624,71 @@ export default function App() {
 
   // ♾ ENDLESS SCANNER — more real tokens append as you reach the bottom
   const [moreToks, setMoreToks] = useState([]);
+  const [scanMode, setScanMode] = useState(() => { try { return localStorage.getItem("valo-scan-mode") || "trending"; } catch (e) { return "trending"; } });
+  const [scanModeOpen, setScanModeOpen] = useState(false);
+  const scanShuffleRef = useRef(Math.random());
+  useEffect(() => { try { localStorage.setItem("valo-scan-mode", scanMode); } catch (e) {} if (scanMode === "random") scanShuffleRef.current = Math.random(); }, [scanMode]);
+  const SCAN_MODES = [
+    ["trending", "🔥 TRENDING", "the market's main stage"],
+    ["hot", "💪 HOT", "big buy-ins · low sell pressure"],
+    ["new", "🍼 NEW", "newest launches, arriving live"],
+    ["movers", "📈 MOVERS", "sustained green for 15m+ · any LP"],
+    ["random", "🎲 RANDOM", "shuffled discovery"],
+  ];
+  const scanModeDropdown = (
+    <div style={{ position: "relative", zIndex: 6 }}>
+      <button onClick={() => setScanModeOpen((v) => !v)}
+        title="How the scanner picks and orders tokens"
+        style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6,
+          border: `1px solid ${VALO_PURPLE}55`, background: "rgba(125,92,240,0.1)", color: VALO_PURPLE,
+          borderRadius: 9, padding: "7px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 0.5 }}>
+        <span>📡 {(SCAN_MODES.find(([k]) => k === scanMode) || SCAN_MODES[0])[1]}</span>
+        <span style={{ fontSize: 8 }}>{scanModeOpen ? "▲" : "▼"}</span>
+      </button>
+      {scanModeOpen && (
+        <>
+          <div onClick={() => setScanModeOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 5 }} />
+          <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 7,
+            background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 10, overflow: "hidden",
+            boxShadow: "0 14px 40px rgba(0,0,0,0.6)" }}>
+            {SCAN_MODES.map(([k, l, d]) => (
+              <button key={k} onClick={() => { setScanMode(k); setScanModeOpen(false); }}
+                style={{ display: "block", width: "100%", textAlign: "left", border: "none", cursor: "pointer",
+                  background: scanMode === k ? "rgba(125,92,240,0.16)" : "transparent",
+                  padding: "8px 11px", borderBottom: `1px solid ${T.border}` }}>
+                <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: scanMode === k ? VALO_PURPLE : T.text }}>{l}</div>
+                <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint }}>{d}</div>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  // 🍼 NEW mode pulls fresh launches straight from the source while active
+  useEffect(() => {
+    if (scanMode !== "new" || !liveData) return;
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch(`/api/tokens?feed=new&t=${Math.floor(Date.now() / 8000)}`);
+        if (!r.ok) return;
+        const rows = await r.json();
+        if (stop || !Array.isArray(rows)) return;
+        const fresh = rows.filter((x) => (+x.mc || 0) < 1e11).map(adoptMarketToken);
+        setMoreToks((M) => {
+          const seen = new Set([...(tokensRef.current || []), ...M].map((t) => t.liveMint || t.pool));
+          const add = fresh.filter((t) => !seen.has(t.liveMint || t.pool));
+          return add.length ? [...add, ...M].slice(0, 200) : M;
+        });
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 12000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [scanMode, liveData]);
+
   const [pageScrolled, setPageScrolled] = useState(false);
   const [scanScrolled, setScanScrolled] = useState(false);  // PC scanner column
   const [topFlash, setTopFlash] = useState(false);          // ▲ pressed → purple
@@ -13236,8 +13301,28 @@ export default function App() {
       if (seen.has(k)) continue;
       seen.add(k); out.push(t);
     }
-    return out;
-  }, [shownLive]);
+    // 📡 the scan-mode lens: order (and lightly filter) the board
+    const seedSort = (arr) => {
+      const sd = scanShuffleRef.current;
+      return [...arr].sort((a, b) => (hashStr(sd + "" + (a.liveMint || a.id)) % 997) - (hashStr(sd + "" + (b.liveMint || b.id)) % 997));
+    };
+    const heat2 = (t) => { const w = t.statWin === "5m" ? 5 : t.statWin === "1h" ? 60 : 1440; return ((t.buys || 0) + (t.sells || 0)) / w; };
+    if (scanMode === "random") return seedSort(out);
+    if (scanMode === "new") return [...out].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    if (scanMode === "hot") {
+      // 💪 big buy-ins, low sell pressure — buyers outweigh sellers decisively
+      const hot = out.filter((t) => (t.greenUsd || 0) > (t.redUsd || 0) * 1.25 && (t.buys || 0) > (t.sells || 0));
+      const rest = out.filter((t) => !hot.includes(t));
+      return [...hot.sort((a, b) => ((b.greenUsd || 0) - (b.redUsd || 0)) - ((a.greenUsd || 0) - (a.redUsd || 0))), ...rest];
+    }
+    if (scanMode === "movers") {
+      // 📈 sustained positive movement (short window AND day both green) — any LP
+      const mv = out.filter((t) => (t.ch || 0) > 1.5 && (t.ch24 || 0) > 0);
+      const rest = out.filter((t) => !mv.includes(t));
+      return [...mv.sort((a, b) => (b.ch || 0) - (a.ch || 0) || heat2(b) - heat2(a)), ...rest];
+    }
+    return out;   // trending: feed order
+  }, [shownLive, scanMode]);
   shownRef.current = shown;
 
   const gTvl = tokens.reduce((a, t) => a + t.tvl, 0);
@@ -15032,6 +15117,7 @@ export default function App() {
             </StickySearch>
 
             <div style={{ display: "grid", gap: compactList ? 6 : 10, paddingRight: 6 }}>
+              <div>{scanModeDropdown}</div>
               {secBanner}
               {shown.map((t) => (
                 compactList
@@ -15101,6 +15187,7 @@ export default function App() {
             <button onClick={() => setScanCollapsed(true)} title="Fold the scanner into a rail"
               style={{ position: "sticky", top: 0, zIndex: 3, justifySelf: "end", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center",
                 background: "rgba(15,19,28,0.9)", border: `1px solid ${T.border2}`, borderRadius: 7, cursor: "pointer", color: T.dim, fontSize: 12, marginBottom: -34 }}>‹</button>
+            <div style={{ marginBottom: 8 }}>{scanModeDropdown}</div>
             {secBanner}
             {shown.map((t) => (
               <div key={t.id} data-slot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ position: "relative", opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s, transform .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
