@@ -1041,11 +1041,11 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       const c = agg[i], up = c.c >= c.o;
       ctx.fillStyle = up ? "rgba(22,199,132,0.28)" : "rgba(234,57,67,0.28)";
       const vh = (c.v / vMax) * volH;
-      ctx.fillRect(x(s) - Math.max(0.5, step * 0.34), volTop + volH - vh, Math.max(1, step * 0.68), vh);
+      ctx.fillRect(x(s) - Math.max(0.5, Math.min(step - 1.2, step * 0.82) / 2), volTop + volH - vh, Math.max(1, Math.min(step - 1.2, step * 0.82)), vh);
     }
 
     if (mode === "candles") {
-      const bw = Math.max(1, Math.min(19, step * 0.68));   // slim bodies, breathing gaps — DexScreener proportions
+      const bw = Math.max(1, Math.min(24, Math.min(step - 1.2, step * 0.82)));   // DexScreener spacing: near, never touching
       for (let s = 0; s < count; s++) {
         const i = idxOf(s); if (!inData(i)) continue;
         const c = agg[i];
