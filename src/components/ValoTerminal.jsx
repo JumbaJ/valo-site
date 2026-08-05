@@ -16868,14 +16868,21 @@ export default function App() {
                         {fmtAge(selected.createdAt) && <> · ⏱ <b style={{ color: T.text }}>{fmtAge(selected.createdAt)}</b></>}
                       </div>
                       {(() => {
-                        const tw = (tokLinks && tokLinks.socials && tokLinks.socials.twitter) || selected.socials.x;
-                        return tw ? (
-                          <a href={tw} target="_blank" rel="noopener noreferrer"
-                            style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 9, textDecoration: "none",
-                              border: `1px solid ${T.border2}`, borderRadius: 999, padding: "5px 12px",
-                              fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: "#e6e9ef", background: "rgba(255,255,255,0.03)" }}>
-                            𝕏 their real X → </a>
-                        ) : <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, marginTop: 8 }}>no 𝕏 published for this token</div>;
+                        const so = (tokLinks && tokLinks.socials) || {};
+                        const links = [
+                          ["𝕏", so.twitter || selected.socials.x],
+                          ["✈ TG", so.telegram || selected.socials.tg],
+                          ["🌐 Site", so.website || selected.socials.site],
+                          ["💊 pump", selected.socials.pump || (selected.liveMint && /pump$/i.test(selected.liveMint) ? `https://pump.fun/coin/${selected.liveMint}` : null)],
+                        ].filter(([, u]) => u);
+                        return links.length ? (
+                          <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
+                            {links.map(([l, u], i2) => (
+                              <a key={i2} href={u} target="_blank" rel="noopener noreferrer"
+                                style={{ ...chip(false), textDecoration: "none", fontSize: 10, padding: "5px 11px", fontWeight: 800 }}>{l}</a>
+                            ))}
+                          </div>
+                        ) : <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, marginTop: 8 }}>no socials published for this token — chips appear here the moment they add any</div>;
                       })()}
                     </div>
                   )}
@@ -16896,20 +16903,6 @@ export default function App() {
                     </div>
                   </div>
                   )}
-                  {/* description */}
-                  <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 12, padding: 14 }}>
-                    <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: VALO_PURPLE, letterSpacing: 1, marginBottom: 7 }}>DESCRIPTION</div>
-                    <div style={{ fontFamily: T.sans, fontSize: 13, color: T.dim, lineHeight: 1.7 }}>
-                      {(tokLinks && tokLinks.description)
-                        || (selected.trending && selected.trending.desc)
-                        || `$${selected.sym} — live Solana pool. No published description; the numbers above are the token.`}
-                    </div>
-                    <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                      {[["𝕏", selected.socials.x], ["✈ TG", selected.socials.tg], ["🌐 Site", selected.socials.site], ["💊 pump", selected.socials.pump]].filter(([, u]) => u).map(([l, u], i) => (
-                        <a key={i} href={u} target="_blank" rel="noopener noreferrer" style={{ ...chip(false), textDecoration: "none", fontSize: 10, padding: "5px 9px" }}>{l}</a>
-                      ))}
-                    </div>
-                  </div>
                 </>
               ) : (
                 <>
@@ -16918,9 +16911,9 @@ export default function App() {
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
                         <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>CREATOR WALLET</div>
-                        <div style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 700, color: T.text }}>{selected.dev.wallet}</div>
+                        <div style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 700, color: T.text }}>{(tokCreator && tokCreator.short) || selected.dev.wallet}</div>
                       </div>
-                      <a href={"https://solscan.io/"} target="_blank" rel="noopener noreferrer" style={{ ...chip(false), textDecoration: "none", fontSize: 10, padding: "5px 9px" }}>solscan →</a>
+                      <a href={tokCreator && tokCreator.creator ? `https://solscan.io/account/${tokCreator.creator}` : "https://solscan.io/"} target="_blank" rel="noopener noreferrer" style={{ ...chip(false), textDecoration: "none", fontSize: 10, padding: "5px 9px" }}>solscan →</a>
                     </div>
                   </div>
                   {/* launched tokens / trust */}
