@@ -593,7 +593,7 @@ const ratingColor = (s) => (s >= 66 ? T.green : s >= 40 ? T.amber : T.red);
 // ================================================================
 // CHART
 // ================================================================
-function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null, shiftArm = false, onCancelLine = null, onNeedHistory = null, historyShift = null, mcRatio = 0 }, createdAt = null) {
+function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null, shiftArm = false, onCancelLine = null, onNeedHistory = null, historyShift = null, mcRatio = 0, createdAt = null }) {
   const wrapRef = useRef(null);
   const cvsRef = useRef(null);
   const [cross, setCross] = useState(null);
@@ -1334,22 +1334,8 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       const p0 = e.touches && e.touches[0]; if (!p0) return;
       touchIntentRef.current = { x: p0.clientX, y: p0.clientY, decided: false, scroll: false };
       if (chartForced()) { touchIntentRef.current.decided = true; e.preventDefault(); }
-      else if (!pendGrabRef.current) {
-        // hold still ~350ms → TRACER: crosshair follows the finger, chart holds still
-        if (pendTraceRef.current) clearTimeout(pendTraceRef.current.timer);
-        const sx = p0.clientX, sy = p0.clientY;
-        pendTraceRef.current = { x: sx, y: sy, timer: setTimeout(() => {
-          pendTraceRef.current = null;
-          const it2 = touchIntentRef.current;
-          if (it2 && !it2.decided) {
-            traceRef.current = true; it2.decided = true; it2.scroll = false;
-            if (navigator.vibrate) navigator.vibrate(8);
-            const r2 = cvs.getBoundingClientRect();
-            const sc2 = r2.width / (cvs.clientWidth || r2.width) || 1;
-            setCross({ cx: (sx - r2.left) / sc2, cy: (sy - r2.top) / sc2 });
-          }
-        }, 350) };
-      }
+      // (the quick 350ms tracer is retired — the held crosshair below is the
+      // one and only crosshair on mobile, so ordinary taps stay clean)
     };
     const onTM = (e) => {
       const it = touchIntentRef.current; const p0 = e.touches && e.touches[0];
@@ -1548,17 +1534,29 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     dragRef.current = { sx: cx, sy: cy, startOffset: offset, startPriceOff: view.priceOff || 0, moved: false, t0: Date.now(), touch: !!e.touches };
     if (e.touches) {
       // already reading the chart → keep the crosshair under the finger
-      if (pinCross) { setPinCross({ cx, cy }); setCross({ cx, cy }); return; }
+      if (pinCross) {
+        if (e.touches) {
+          clearTimeout(holdRef.current);
+          holdRef.current = setTimeout(() => {   // hold again ~2s → crosshair goes away
+            if (dragRef.current && dragRef.current.moved) return;
+            if (navigator.vibrate) navigator.vibrate(12);
+            setPinCross(null); setCross(null);
+          }, 1900);
+        }
+        setPinCross({ cx, cy }); setCross({ cx, cy }); return;
+      }
     }
     if (e.touches) {                       // press-and-hold a line → cancel bubble
       const hit = lineAt(cy);
       clearTimeout(holdRef.current);
-      if (!hit) {                          // hold on open chart → crosshair mode
+      const g2 = geom.current || {};
+      const inPlot2 = g2.chartW > 0 ? (cx > (g2.padL || 0) && cx < (g2.padL || 0) + g2.chartW) : true;
+      if (!hit && inPlot2) {               // hold the chart ~2s → crosshair mode
         holdRef.current = setTimeout(() => {
           if (dragRef.current && dragRef.current.moved) return;
           if (navigator.vibrate) navigator.vibrate(12);
           setPinCross({ cx, cy }); setCross({ cx, cy });
-        }, 480);
+        }, 1900);
       }
       if (hit) {
         const p0 = e.touches[0];
@@ -1634,7 +1632,12 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       setView((v) => ({ ...v, count: Math.max(12, Math.min(capNow, Math.round((ax.c0 || 60) * factor))) }));
       return;
     }
-    if (pinCross && e.touches) { setPinCross({ cx, cy }); setCross({ cx, cy }); return; }
+    if (pinCross && e.touches) {
+      // dragging the crosshair is USE, not dismissal — real movement keeps it
+      const it3 = touchIntentRef.current;
+      if (it3 && (Math.abs((e.touches[0] && e.touches[0].clientX) - it3.x) > 10 || Math.abs((e.touches[0] && e.touches[0].clientY) - it3.y) > 10)) clearTimeout(holdRef.current);
+      setPinCross({ cx, cy }); setCross({ cx, cy }); return;
+    }
     const d = dragRef.current;
     if (d) {
       const dx = cx - d.sx;
@@ -1710,7 +1713,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     const d = dragRef.current;
     dragRef.current = null;
     clearTimeout(holdRef.current);
-    if (pinCross && d && !d.moved) { setPinCross(null); setCross(null); return; }  // tap → back to drag mode
+    // (tap no longer dismisses the crosshair — hold ~2s again to put it away)
     // a clean tap on a $ marker opens its receipt — takes priority over trading
     if (d && !d.moved) {
       const { cx, cy } = ptOf(e);
