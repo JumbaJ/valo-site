@@ -767,6 +767,16 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       const pHi = highs[Math.floor(highs.length * 0.98)];
       if (pLo > 0 && pHi > pLo) { lo = pLo; hi = pHi; }
     }
+    // 🗜 a single monster buy/sell bar can't own the fit: when ONE candle's
+    // extreme dwarfs everything else, clip toward the runner-up so the rest
+    // of the chart keeps its space (the spike still shows, just runs the edge)
+    if (scaleWin.length > 8) {
+      const highs2 = scaleWin.map((c) => c.h).sort((a, b) => b - a);
+      const lows2 = scaleWin.map((c) => c.l).filter((v) => v > 0).sort((a, b) => a - b);
+      const base = Math.max(1e-15, (highs2[1] || hi) - (lows2[1] || lo));
+      if (highs2[1] && highs2[0] - highs2[1] > base * 0.9) hi = Math.min(hi, highs2[1] + base * 0.3);
+      if (lows2[1] && lows2[1] - lows2[0] > base * 0.9) lo = Math.max(lo, lows2[1] - base * 0.3);
+    }
     // one absurd print can't own the axis: cap the range around the median close
     if (anyVisible && hi / Math.max(lo, 1e-12) > 1e4) {
       const win = [];
@@ -1756,6 +1766,10 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
           <div style={{ position: "absolute", top: -15, right: 4, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 14, lineHeight: 1 }}>
             <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: 18, offset: 0, priceOff: 0, priceZoom: 1, follow: true }); }}
               style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 7.5, fontWeight: 800, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>◉ LIVE</button>
+            <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: Math.max(15, Math.round(total * 1.12) + 8), offset: 0, priceOff: 0, priceZoom: 1, follow: true }); }}
+              title="Zoom out to the whole chart — every candle this token has"
+              style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.9)", color: T.dim, cursor: "pointer", fontSize: 7.5, fontWeight: 800, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>⛰ ALL</button>
+
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
               <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, priceZoom: 1, follow: false }); }}
                 style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.9)", color: T.dim, cursor: "pointer", fontSize: 7.5, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>⤢ fit</button>
@@ -1780,6 +1794,10 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
             <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: 18, offset: 0, priceOff: 0, priceZoom: 1, follow: true }); }}
               title="Zoom to the live edge and follow the price"
               style={{ height: 24, padding: "0 10px", borderRadius: 6, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.15)", color: T.blue, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: T.mono }}>◉ LIVE</button>
+            <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: Math.max(15, Math.round(total * 1.12) + 8), offset: 0, priceOff: 0, priceZoom: 1, follow: true }); }}
+              title="Zoom out to the whole chart — every candle this token has"
+              style={{ height: 24, padding: "0 8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.85)", color: T.dim, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: T.mono }}>⛰ ALL</button>
+
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
               <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, priceZoom: 1, follow: false }); }}
                 style={{ height: 24, padding: "0 8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.85)", color: T.dim, cursor: "pointer", fontSize: 10, fontFamily: T.mono }}>⤢ fit</button>
@@ -9830,6 +9848,7 @@ export default function App() {
   // ⛓ real trading (off unless the server enables it)
   const [onchain, setOnchain] = useState({ enabled: false, maxSol: 0 });
   const [valoMint, setValoMint] = useState(null);   // real $VALO mint, once launched
+  useEffect(() => { try { if (typeof window !== "undefined") window.__VALO_MINT__ = valoMint || null; } catch (e) {} }, [valoMint]);
   const [valoTreasury, setValoTreasury] = useState(null);   // fee destination
   // every confirmed real order, recorded from the quote at fill time.
   // Quote ≠ exact fill (slippage), so everything derived is labeled estimated.
@@ -14688,6 +14707,13 @@ export default function App() {
     const mLive = !!(onchain.enabled && walletReady && selected && selected.liveMint);
     const mChainHeld = mLive ? chainHeldOf(selected) : 0;
     const mChainSol = (walletChain && walletChain.sol) || 0;
+    // real turbo $VALO holding (0 until the token launches — and that's the truth)
+    const mChainValo = (() => {
+      const vm = typeof window !== "undefined" && window.__VALO_MINT__;
+      if (!walletChain || !vm) return 0;
+      const h = (walletChain.holdings || []).find((x) => x.mint === vm && x.src !== "phantom");
+      return h ? h.qty || 0 : 0;
+    })();
     const mBuySize = Math.min(a, onchain.maxSol || 0);
     const mSpendable = Math.max(0, mChainSol - 0.0065);
     const mNoWallet = liveData && !turbo && !(wallet && wallet.address);
@@ -14754,7 +14780,7 @@ export default function App() {
             {pay === "SOL" ? "$SOL" : "$VALO"} ⇅
           </span>
           <span style={{ display: "block", fontSize: 7, color: T.faint }}>
-            {pay === "SOL" ? `${(liveData ? mChainSol : solBalance).toFixed(liveData ? 4 : 1)}` : fmtQty(valoWallet)} held
+            {pay === "SOL" ? `${(liveData ? mChainSol : solBalance).toFixed(liveData ? 4 : 1)}` : fmtQty(liveData ? mChainValo : valoWallet)} held
           </span>
         </button>
         <input value={amount} onChange={(e) => { setAmount(e.target.value); setPctSel(null); }}
