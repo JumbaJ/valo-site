@@ -251,7 +251,19 @@ function tickCandles(candles, momentum, buyP) {
   return [...candles.slice(-HISTORY_MIN), { t: bucket, o: last.c, h: Math.max(last.c, nc), l: Math.min(last.c, nc), c: nc, v: rnd(50, 800) }];
 }
 function aggregate(candles, tfMin) {
-  if (tfMin <= 1) return candles;
+  const stitch = (arr) => {
+    // 🧵 DexScreener-style continuity: each candle opens where the last one
+    // closed. Bucket gaps stop drawing as tall detached bricks.
+    if (arr.length < 2) return arr;
+    const out2 = [arr[0]];
+    for (let i = 1; i < arr.length; i++) {
+      const prev = out2[i - 1], c = arr[i];
+      const o2 = prev.c > 0 ? prev.c : c.o;
+      out2.push(o2 === c.o ? c : { ...c, o: o2, h: Math.max(c.h, o2), l: Math.min(c.l, o2) });
+    }
+    return out2;
+  };
+  if (tfMin <= 1) return stitch(candles);
   const out = []; const ms = tfMin * 60000; let cur = null;
   for (const c of candles) {
     const b = Math.floor(c.t / ms) * ms;
@@ -259,7 +271,7 @@ function aggregate(candles, tfMin) {
     else { cur.h = Math.max(cur.h, c.h); cur.l = Math.min(cur.l, c.l); cur.c = c.c; cur.v += c.v; }
   }
   if (cur) out.push(cur);
-  return out;
+  return stitch(out);
 }
 const TIMEFRAMES = [
   { k: "1m", m: 1 }, { k: "5m", m: 5 }, { k: "15m", m: 15 }, { k: "30m", m: 30 },
@@ -1029,11 +1041,11 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       const c = agg[i], up = c.c >= c.o;
       ctx.fillStyle = up ? "rgba(22,199,132,0.28)" : "rgba(234,57,67,0.28)";
       const vh = (c.v / vMax) * volH;
-      ctx.fillRect(x(s) - Math.max(0.8, (step - Math.max(0.6, step * 0.08)) / 2), volTop + volH - vh, Math.max(1.5, step - Math.max(0.6, step * 0.08)), vh);
+      ctx.fillRect(x(s) - Math.max(0.5, step * 0.34), volTop + volH - vh, Math.max(1, step * 0.68), vh);
     }
 
     if (mode === "candles") {
-      const bw = Math.max(1.5, Math.min(26, step - Math.max(0.6, step * 0.08)));  // near-touching bodies
+      const bw = Math.max(1, Math.min(19, step * 0.68));   // slim bodies, breathing gaps — DexScreener proportions
       for (let s = 0; s < count; s++) {
         const i = idxOf(s); if (!inData(i)) continue;
         const c = agg[i];
@@ -1050,8 +1062,8 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
         const yo = y(c.o), yc = y(c.c);
         if (!Number.isFinite(yo) || !Number.isFinite(yc)) continue;
         const top = Math.min(yo, yc);
-        const bodyH = Math.max(1.5, Math.abs(yc - yo));           // a doji still shows
-        ctx.fillRect(Math.round(x(s) - bw / 2), Math.round(top), Math.max(1.5, Math.round(bw)), bodyH);
+        const bodyH = Math.max(1, Math.abs(yc - yo));             // a doji is a hairline, not a stub
+        ctx.fillRect(Math.round(x(s) - bw / 2), Math.round(top), Math.max(1, Math.round(bw)), bodyH);
       }
     } else if (anyVisible) {
       const g = ctx.createLinearGradient(0, padT, 0, padT + chartH);
