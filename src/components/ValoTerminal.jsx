@@ -206,7 +206,7 @@ const fakeRoot = (seed) => {
 const fmt$ = (raw) => {
   const n = Number(raw);
   if (!isFinite(n)) return "$0.00";
-  return n >= 1e6 ? `$${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n / 1e3).toFixed(1)}K` : `$${n.toFixed(2)}`;
+  return n >= 1e9 ? `$${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `$${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n / 1e3).toFixed(1)}K` : `$${n.toFixed(2)}`;
 };
 function subZeros(p) {
   const s = p.toFixed(12).replace("0.", "");
@@ -442,6 +442,13 @@ function buysSellsFor(t, tfMin, count = 90) {
 
 // real market pool → a complete VALO token card
 let mktNid = 900000;
+function saneMc(x) {
+  const mc = +x.mc || 0, price = +x.price || 0;
+  const isPump = !!(x.mint && /pump$/i.test(x.mint));
+  // pump tokens: 1B fixed supply → any FDV wildly above price×1B is feed junk
+  if (isPump && price > 0 && (mc <= 0 || mc > price * 1e9 * 3)) return price * 1e9;
+  return mc;
+}
 function adoptMarketToken(x) {
   const sym = String(x.sym || "???").toUpperCase().slice(0, 12);
   const buys = +x.buys24 || 0, sells = +x.sells24 || 0;
@@ -452,6 +459,7 @@ function adoptMarketToken(x) {
   const ch = +x.ch24 || 0;
   const momentum = Math.max(1, Math.min(99, Math.round(50 + ch / 2 + (buyPressure - 50) * 0.4)));
   const ageMin = x.createdAt ? Math.max(1, Math.round((Date.now() - x.createdAt) / 60000)) : 600;
+  x = { ...x, mc: saneMc(x) };
   return {
     id: ++mktNid,                       // numeric id — every helper expects one
     pool: x.id, liveMint: x.mint || null, market: true,
@@ -11773,6 +11781,73 @@ export default function App() {
     const iv = setInterval(pull, 12000);
     return () => { stop = true; clearInterval(iv); };
   }, [scanMode, liveData]);
+  const [scanPull, setScanPull] = useState(0);            // ⤓ live pull distance (px)
+  const [scanRefreshing, setScanRefreshing] = useState(false);
+  const scanPullRef = useRef({ y0: 0, on: false, acc: 0, accAt: 0 });
+  const refreshScanNow = useCallback(async () => {
+    if (scanRefreshing) return;
+    setScanRefreshing(true);
+    try {
+      if (scanMode === "lucky") scanShuffleRef.current = Math.random();   // 🍀 fresh draw
+      const feeds = scanMode === "new" ? ["new"] : ["trending", "new", "top"];
+      const bust = `&t=${Date.now()}`;
+      const rs = await Promise.allSettled(feeds.map((f) => fetch(`/api/tokens?feed=${f}${bust}`)));
+      const rows = [];
+      for (const rr of rs) if (rr.status === "fulfilled" && rr.value.ok) {
+        try { const a = await rr.value.json(); if (Array.isArray(a)) rows.push(...a); } catch (e) {}
+      }
+      const fresh = rows.filter((x) => (+x.mc || 0) < 1e11).map(adoptMarketToken);
+      setMoreToks((M) => {
+        const seen = new Set([...(tokensRef.current || []), ...M].map((t) => t.liveMint || t.pool));
+        const add = []; const seenNew = new Set();
+        for (const t of fresh) { const k = t.liveMint || t.pool; if (seen.has(k) || seenNew.has(k)) continue; seenNew.add(k); add.push(t); }
+        return add.length ? [...add, ...M].slice(0, 220) : M;
+      });
+    } catch (e) {}
+    setTimeout(() => setScanRefreshing(false), 500);
+  }, [scanMode, scanRefreshing]);
+  // shared handlers: touch pull (mobile + PC trackpads) and wheel overscroll (PC)
+  const scanPullTouch = {
+    onTouchStart: (e) => {
+      const sc = e.currentTarget.closest("[data-scanscroll]");
+      const top = sc ? sc.scrollTop <= 2 : (document.scrollingElement || document.documentElement).scrollTop <= 2;
+      const t0 = e.touches && e.touches[0];
+      scanPullRef.current = { ...scanPullRef.current, y0: t0 ? t0.clientY : 0, on: top };
+    },
+    onTouchMove: (e) => {
+      const st = scanPullRef.current; if (!st.on) return;
+      const t0 = e.touches && e.touches[0]; if (!t0) return;
+      const dy = t0.clientY - st.y0;
+      if (dy > 0) setScanPull(Math.min(110, dy * 0.6));
+    },
+    onTouchEnd: () => {
+      const fire = scanPull >= 64;
+      setScanPull(0); scanPullRef.current.on = false;
+      if (fire) refreshScanNow();
+    },
+  };
+  const scanPullWheel = (e) => {
+    const sc = e.currentTarget;
+    const st = scanPullRef.current;
+    if (sc.scrollTop > 0 || e.deltaY >= 0) { st.acc = 0; if (scanPull) setScanPull(0); return; }
+    const now = Date.now();
+    if (now - st.accAt > 700) st.acc = 0;
+    st.accAt = now; st.acc += -e.deltaY;
+    setScanPull(Math.min(110, st.acc * 0.35));
+    if (st.acc >= 240) { st.acc = 0; setScanPull(0); refreshScanNow(); }
+  };
+  const scanPullStrip = (
+    <div style={{ height: scanRefreshing ? 30 : scanPull, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center",
+      transition: scanPull ? "none" : "height .22s ease", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.2,
+      color: scanRefreshing || scanPull >= 64 ? T.green : T.faint }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <span style={{ display: "inline-block", animation: scanRefreshing ? "spin 0.8s linear infinite" : "none",
+          transform: !scanRefreshing ? `rotate(${Math.min(180, scanPull * 2.2)}deg)` : undefined }}>↻</span>
+        {scanRefreshing ? "DEALING FRESH TOKENS…" : scanPull >= 64 ? "RELEASE TO REFRESH" : "PULL FOR FRESH " + ((SCAN_MODES.find(([k]) => k === scanMode) || [])[1] || "").replace(/^\S+ /, "")}
+      </span>
+    </div>
+  );
+
 
   const [pageScrolled, setPageScrolled] = useState(false);
   const [scanScrolled, setScanScrolled] = useState(false);  // PC scanner column
@@ -11997,7 +12072,7 @@ export default function App() {
           if (!stop && Array.isArray(arr) && arr.length) {
             const mapped = arr.slice(0, 24).map((x) => ({
               sym: (x.sym || "???").toUpperCase().slice(0, 10), name: x.name || "live token",
-              price: +x.price || 0, mc: +x.mc || 0, tvl: +x.tvl || 0,
+              price: +x.price || 0, mc: saneMc(x), tvl: +x.tvl || 0,
               img: x.img || null, pool: x.id, mint: x.mint || null,
               greenUsd: +x.greenUsd || 0, redUsd: +x.redUsd || 0,
               traders: +x.traders || 0, ch24: +x.ch24 || 0,
@@ -15235,7 +15310,8 @@ export default function App() {
                   letterSpacing: 2, backdropFilter: "blur(3px)" }}>▲</div>
             </StickySearch>
 
-            <div style={{ display: "grid", gap: compactList ? 6 : 10, paddingRight: 6 }}>
+            <div {...scanPullTouch} style={{ display: "grid", gap: compactList ? 6 : 10, paddingRight: 6 }}>
+              {scanPullStrip}
               <div>{scanModeDropdown}</div>
               {secBanner}
               {shown.map((t) => (
@@ -15284,8 +15360,8 @@ export default function App() {
             </button>
           </div>
           ) : (
-          <div ref={scannerRef}
-            onWheel={(e) => e.stopPropagation()}
+          <div ref={scannerRef} data-scanscroll="1" {...scanPullTouch}
+            onWheel={(e) => { e.stopPropagation(); scanPullWheel(e); }}
             onScroll={(e) => { const el = e.currentTarget;
               setScanScrolled(el.scrollTop > 180);
               if (el.scrollHeight - el.scrollTop - el.clientHeight < 380) loadMoreTokens(); }}
@@ -15306,6 +15382,7 @@ export default function App() {
             <button onClick={() => setScanCollapsed(true)} title="Fold the scanner into a rail"
               style={{ position: "sticky", top: 0, zIndex: 3, justifySelf: "end", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center",
                 background: "rgba(15,19,28,0.9)", border: `1px solid ${T.border2}`, borderRadius: 7, cursor: "pointer", color: T.dim, fontSize: 12, marginBottom: -34 }}>‹</button>
+            {scanPullStrip}
             <div style={{ margin: "0 34px 8px 0" }}>{scanModeDropdown}</div>
             {secBanner}
             {shown.map((t) => (
@@ -17436,6 +17513,7 @@ export default function App() {
         @keyframes tierPop4 { 0%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1); } 22%{ transform: scale(1.42) rotate(-9deg); filter: brightness(1.9) saturate(1.5); } 48%{ transform: scale(1.12) rotate(7deg); filter: brightness(1.3) saturate(1.2); } 74%{ transform: scale(1.22) rotate(-3deg); filter: brightness(1.5); } 100%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1); } }
         @keyframes tierPop5 { 0%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1) hue-rotate(0); } 18%{ transform: scale(1.55) rotate(-12deg); filter: brightness(2.2) saturate(1.8) hue-rotate(18deg); } 40%{ transform: scale(1.15) rotate(9deg); filter: brightness(1.4) saturate(1.4) hue-rotate(-12deg); } 62%{ transform: scale(1.35) rotate(-5deg); filter: brightness(1.9) saturate(1.6) hue-rotate(10deg); } 82%{ transform: scale(1.08) rotate(3deg); filter: brightness(1.2); } 100%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1) hue-rotate(0); } }
         @keyframes diamond3d { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .lucky-charm { display: inline-block; animation: luckyCharm 2.6s ease-in-out infinite; filter: drop-shadow(0 0 4px rgba(74,222,128,0.8)); }
         @keyframes luckyCharm {
           0%, 100% { transform: rotate(0deg) scale(1); }
