@@ -7306,6 +7306,25 @@ function CardMiniChart({ candles, hue, mode, tfMin = 15, count = 90, full = fals
 }
 
 const visHolds = (arr) => (arr || []).filter((h) => h && !h.spam && !h.dust);
+// ✅ only OFFICIAL, valid links ever render: https + the platform's real domain
+const legitSocial = (kind, url) => {
+  if (!url || typeof url !== "string") return null;
+  let u;
+  try { u = new URL(url); } catch (e) { return null; }
+  if (u.protocol !== "https:") return null;
+  const h = u.hostname.toLowerCase().replace(/^www\./, "");
+  const ok = {
+    x: ["x.com", "twitter.com", "mobile.twitter.com"],
+    tg: ["t.me", "telegram.me", "telegram.org"],
+    dc: ["discord.gg", "discord.com"],
+    pump: ["pump.fun"],
+    dex: ["dexscreener.com"],
+    site: null,   // any https site counts as a website
+  }[kind];
+  if (ok === undefined) return null;
+  if (ok === null) return url;
+  return ok.some((d) => h === d || h.endsWith("." + d)) ? url : null;
+};
 // 📐 per-token trading metrics, derived from the shortest live stat window
 const tokMetrics = (t) => {
   const winMin = t.statWin === "5m" ? 5 : t.statWin === "1h" ? 60 : 1440;
@@ -13663,6 +13682,37 @@ export default function App() {
   }, [selected && selected.liveMint]);
   // 👤 who actually launched the selected token (real creator wallet)
   const [tokCreator, setTokCreator] = useState(null);
+  // ⛓ chain truth for the dev panel: their real launches + real wallet moves
+  const [devPanel, setDevPanel] = useState(null);        // {w, launches, moves, sol, loading}
+  useEffect(() => {
+    if (!devView || !liveData || !tokCreator || !tokCreator.creator) return;
+    const w = tokCreator.creator;
+    if (devPanel && devPanel.w === w && !devPanel.loading) return;
+    let stop = false;
+    setDevPanel({ w, launches: null, moves: null, sol: null, loading: true });
+    (async () => {
+      try {
+        const [rl, rt, rw] = await Promise.allSettled([
+          fetch(`/api/creator?wallet=${encodeURIComponent(w)}`),
+          fetch(`/api/trader?wallet=${encodeURIComponent(w)}`),
+          fetch(`/api/wallet?address=${encodeURIComponent(w)}`),
+        ]);
+        const jl = rl.status === "fulfilled" && rl.value.ok ? await rl.value.json() : null;
+        const jt = rt.status === "fulfilled" && rt.value.ok ? await rt.value.json() : null;
+        const jw = rw.status === "fulfilled" && rw.value.ok ? await rw.value.json() : null;
+        if (stop) return;
+        setDevPanel({
+          w,
+          launches: (jl && jl.launches) || [],
+          moves: (jt && Array.isArray(jt.trades)) ? jt.trades.filter((t2) => t2.side === "out" || t2.side === "in").slice(0, 8) : [],
+          sol: jw ? jw.sol || 0 : null,
+          loading: false,
+        });
+      } catch (e) { if (!stop) setDevPanel({ w, launches: [], moves: [], sol: null, loading: false }); }
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devView, liveData, tokCreator && tokCreator.creator]);
   useEffect(() => {
     setTokCreator(null);
     if (!selected || !selected.liveMint) return;
@@ -14164,17 +14214,17 @@ export default function App() {
                           fontSize: 12, textDecoration: "none", padding: "0 5px" }}>{ic}</a>
                     ))}
                     {tokLinks && [
-                      ["𝕏", tokLinks.socials && tokLinks.socials.twitter, "#e6e9ef", "Their X"],
-                      ["✈", tokLinks.socials && tokLinks.socials.telegram, "#4c9aff", "Their Telegram"],
-                      ["🎮", tokLinks.socials && tokLinks.socials.discord, "#8b9cff", "Their Discord"],
-                      ["🌐", tokLinks.websites && tokLinks.websites[0], "#a98fff", "Their website"],
+                      ["𝕏", legitSocial("x", tokLinks.socials && tokLinks.socials.twitter), "#e6e9ef", "Their official X"],
+                      ["✈", legitSocial("tg", tokLinks.socials && tokLinks.socials.telegram), "#4c9aff", "Their official Telegram"],
+                      ["🎮", legitSocial("dc", tokLinks.socials && tokLinks.socials.discord), "#8b9cff", "Their official Discord"],
+                      ["🌐", legitSocial("site", tokLinks.websites && tokLinks.websites[0]), "#a98fff", "Their official website"],
                     ].filter(([, u]) => u).map(([ic, url, col, tip], i) => (
                       <a key={"S" + i} href={url} target="_blank" rel="noopener noreferrer" title={tip}
                         style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 26, minWidth: 26,
                           borderRadius: 7, border: `1px solid ${col}55`, background: `${col}14`, color: col,
                           fontSize: 11.5, textDecoration: "none", padding: "0 5px" }}>{ic}</a>
                     ))}
-                    {!tokLinks && [["𝕏", selected.socials.x, "#e6e9ef"], ["✈", selected.socials.tg, "#4c9aff"], ["🌐", selected.socials.site, "#a98fff"], ["💊", selected.socials.pump, "#16c784"]].filter(([, url]) => url).map(([ic, url, col], i) => (
+                    {!tokLinks && !liveData && [["𝕏", selected.socials.x, "#e6e9ef"], ["✈", selected.socials.tg, "#4c9aff"], ["🌐", selected.socials.site, "#a98fff"], ["💊", selected.socials.pump, "#16c784"]].filter(([, url]) => url).map(([ic, url, col], i) => (
                       <a key={i} href={url} target="_blank" rel="noopener noreferrer" title="Open social"
                         style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 7, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)", color: col, fontSize: 12, textDecoration: "none", cursor: "pointer" }}>{ic}</a>
                     ))}
@@ -16873,10 +16923,10 @@ export default function App() {
                       {(() => {
                         const so = (tokLinks && tokLinks.socials) || {};
                         const links = [
-                          ["𝕏", so.twitter || selected.socials.x],
-                          ["✈ TG", so.telegram || selected.socials.tg],
-                          ["🌐 Site", so.website || selected.socials.site],
-                          ["💊 pump", selected.socials.pump || (selected.liveMint && /pump$/i.test(selected.liveMint) ? `https://pump.fun/coin/${selected.liveMint}` : null)],
+                          ["𝕏", legitSocial("x", so.twitter)],
+                          ["✈ TG", legitSocial("tg", so.telegram)],
+                          ["🌐 Site", legitSocial("site", (tokLinks && tokLinks.websites && tokLinks.websites[0]) || so.website)],
+                          ["💊 pump", legitSocial("pump", selected.liveMint && /pump$/i.test(selected.liveMint) ? `https://pump.fun/coin/${selected.liveMint}` : selected.socials.pump)],
                         ].filter(([, u]) => u);
                         return links.length ? (
                           <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
@@ -16914,9 +16964,14 @@ export default function App() {
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
                         <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>CREATOR WALLET</div>
-                        <div style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 700, color: T.text }}>{(tokCreator && tokCreator.short) || selected.dev.wallet}</div>
+                        <div style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 700, color: T.text }}>
+                          {liveData ? ((tokCreator && tokCreator.short) || "⛓ resolving…") : selected.dev.wallet}
+                          {liveData && devPanel && devPanel.sol != null && <span style={{ color: T.amber, fontSize: 10, marginLeft: 8 }}>◎{devPanel.sol.toFixed(3)}</span>}
+                        </div>
                       </div>
-                      <a href={tokCreator && tokCreator.creator ? `https://solscan.io/account/${tokCreator.creator}` : "https://solscan.io/"} target="_blank" rel="noopener noreferrer" style={{ ...chip(false), textDecoration: "none", fontSize: 10, padding: "5px 9px" }}>solscan →</a>
+                      {(!liveData || (tokCreator && tokCreator.creator)) && (
+                        <a href={tokCreator && tokCreator.creator ? `https://solscan.io/account/${tokCreator.creator}` : "https://solscan.io/"} target="_blank" rel="noopener noreferrer" style={{ ...chip(false), textDecoration: "none", fontSize: 10, padding: "5px 9px" }}>solscan →</a>
+                      )}
                     </div>
                   </div>
                   {/* launched tokens / trust */}
@@ -16924,13 +16979,25 @@ export default function App() {
                     <button onClick={() => setCreatedOpen((v) => !v)}
                       style={{ textAlign: "left", background: "#0c0f16", border: `1px solid ${createdOpen ? accent(selected.hue) : T.border2}`, borderRadius: 10, padding: "10px 12px", cursor: "pointer" }}>
                       <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>CREATED TOKENS {createdOpen ? "▲" : "▼"}</div>
-                      <div style={{ fontFamily: T.mono, fontSize: 18, fontWeight: 800, color: accent(selected.hue) }}>{selected.dev.tokensLaunched}</div>
+                      <div style={{ fontFamily: T.mono, fontSize: 18, fontWeight: 800, color: accent(selected.hue) }}>
+                        {liveData ? (devPanel && devPanel.launches ? devPanel.launches.length : "…") : selected.dev.tokensLaunched}
+                      </div>
                       <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>tap to view all</div>
                     </button>
-                    <div style={{ background: "#0c0f16", border: `1px solid ${selected.dev.rugged > 0 ? "rgba(234,57,67,0.4)" : T.border}`, borderRadius: 10, padding: "10px 12px" }}>
-                      <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>PRIOR RUGS / DEAD</div>
-                      <div style={{ fontFamily: T.mono, fontSize: 18, fontWeight: 800, color: selected.dev.rugged > 0 ? T.red : T.green }}>{selected.dev.rugged}</div>
-                    </div>
+                    {(() => {
+                      const deadN = liveData
+                        ? (devPanel && devPanel.launches
+                            ? devPanel.launches.filter((l2) => !l2.complete && (l2.mc || 0) < 3000 && l2.createdAt && Date.now() - l2.createdAt > 86400e3).length
+                            : null)
+                        : selected.dev.rugged;
+                      return (
+                        <div style={{ background: "#0c0f16", border: `1px solid ${(deadN || 0) > 0 ? "rgba(234,57,67,0.4)" : T.border}`, borderRadius: 10, padding: "10px 12px" }}
+                          title={liveData ? "Launches older than a day that never graduated and sit under $3K MC — the chain can show dead, not intent" : undefined}>
+                          <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>{liveData ? "DEAD / FADED" : "PRIOR RUGS / DEAD"}</div>
+                          <div style={{ fontFamily: T.mono, fontSize: 18, fontWeight: 800, color: (deadN || 0) > 0 ? T.red : T.green }}>{deadN == null ? "…" : deadN}</div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* created-tokens sub-section — each clickable to open its chart */}
@@ -16947,7 +17014,31 @@ export default function App() {
                           <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>MC {fmt$(mcOf(selected))}</div>
                         </span>
                       </div>
-                      {selected.dev.launches.map((l, i) => {
+                      {liveData && devPanel && devPanel.launches && devPanel.launches
+                        .filter((l2) => l2.mint !== selected.liveMint)
+                        .sort((a2, b2) => (b2.createdAt || 0) - (a2.createdAt || 0))
+                        .map((l2, i2) => {
+                          const dead2 = !l2.complete && (l2.mc || 0) < 3000 && l2.createdAt && Date.now() - l2.createdAt > 86400e3;
+                          return (
+                            <div key={"r" + i2} onClick={() => { openTokenByMint(l2.mint); setTrendOpen(false); }}
+                              style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px", borderRadius: 9, marginBottom: 5, cursor: "pointer", border: `1px solid ${T.border}`, background: "transparent", opacity: dead2 ? 0.55 : 1 }}>
+                              <TokenAvatar sym={l2.sym || "?"} hue={symbolHue(l2.sym || "?")} img={l2.img} size={22} />
+                              <span style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 700, color: T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {l2.sym} {l2.complete && <span style={{ color: T.green, fontSize: 8 }}>● GRADUATED</span>}{dead2 && <span style={{ color: T.red, fontSize: 8 }}>● DEAD</span>}
+                              </span>
+                              <span style={{ textAlign: "right" }}>
+                                <div style={{ fontFamily: T.mono, fontSize: 10.5, color: T.text }}>MC {fmt$(l2.mc)}</div>
+                                {fmtAge(l2.createdAt) && <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>⏱ {fmtAge(l2.createdAt)}</div>}
+                              </span>
+                              <span style={{ fontFamily: T.mono, fontSize: 9, color: T.blue, flexShrink: 0 }}>open →</span>
+                            </div>
+                          );
+                        })}
+                      {liveData && devPanel && devPanel.loading && <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, padding: 6 }}>⛓ loading their launches…</div>}
+                      {liveData && devPanel && devPanel.launches && !devPanel.launches.filter((l2) => l2.mint !== selected.liveMint).length && !devPanel.loading && (
+                        <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, padding: 6 }}>this is their only launch on record</div>
+                      )}
+                      {!liveData && selected.dev.launches.map((l, i) => {
                         const existing = tokens.find((x) => x.sym === l.sym);
                         return (
                           <div key={i} onClick={() => { if (existing) { setSel(existing.id); setClickMode(null); setTrendOpen(false); } }}
@@ -16980,15 +17071,31 @@ export default function App() {
                       </div>
                     ))}
                   </div>
-                  {/* traceable fee chart */}
+                  {/* traceable fee chart — SIMULATION ONLY: no honest per-day
+                      creator-fee series exists on live, so live shows nothing */}
+                  {!liveData && (
                   <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 10, padding: 12, marginBottom: 12 }}>
                     <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1, marginBottom: 8 }}>FEES COLLECTED · LAST 30 DAYS</div>
                     <PerfChart series={selected.dev.feeHistory.map((v, i) => selected.dev.feeHistory.slice(0, i + 1).reduce((a, b) => a + b, 0))} mode="line" height={140} />
                   </div>
-                  {/* withdrawals */}
+                  )}
+                  {/* withdrawals — live: the wallet's real SOL movements */}
                   <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 10, padding: 12 }}>
-                    <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1, marginBottom: 8 }}>DEV WITHDRAWALS · how much & when</div>
-                    {selected.dev.withdrawals.map((w, i) => (
+                    <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1, marginBottom: 8 }}>
+                      {liveData ? "⛓ WALLET MOVEMENTS · real, recent" : "DEV WITHDRAWALS · how much & when"}
+                    </div>
+                    {liveData && devPanel && (devPanel.moves || []).map((mv, i3) => (
+                      <a key={"m" + i3} href={`https://solscan.io/tx/${mv.sig}`} target="_blank" rel="noopener noreferrer"
+                        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: T.mono, fontSize: 11, padding: "8px 0", borderBottom: `1px solid ${T.border}`, textDecoration: "none" }}>
+                        <span style={{ color: T.faint }}>{new Date(mv.t).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} <span style={{ color: T.blue, fontSize: 9 }}>🔗 solscan</span></span>
+                        <span style={{ color: mv.side === "out" ? T.amber : T.green, fontWeight: 700 }}>{mv.side === "out" ? "−" : "+"} {mv.solAmt.toFixed(3)} SOL</span>
+                      </a>
+                    ))}
+                    {liveData && devPanel && !devPanel.loading && !(devPanel.moves || []).length && (
+                      <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>no plain SOL movements in their recent history — trades show on the chart via DEV TRADES</div>
+                    )}
+                    {liveData && devPanel && devPanel.loading && <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>⛓ reading the wallet…</div>}
+                    {!liveData && selected.dev.withdrawals.map((w, i) => (
                       <a key={i} href={`https://solscan.io/tx/${w.tx}`} target="_blank" rel="noopener noreferrer"
                         style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: T.mono, fontSize: 11, padding: "8px 0", borderBottom: i < selected.dev.withdrawals.length - 1 ? `1px solid ${T.border}` : "none", textDecoration: "none" }}>
                         <span style={{ color: T.faint }}>{w.when} <span style={{ color: T.blue, fontSize: 9 }}>🔗 solscan</span></span>
