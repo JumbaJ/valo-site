@@ -559,6 +559,22 @@ function mergeTapeCandles(history, tape) {
   return sanitizeCandles(out);
 }
 function scoreToken(t) {
+  // ⛓ live tokens: the number is built from REAL metrics only
+  if (t && t.pool) {
+    const m = tokMetrics(t);
+    const tvl = t.tvl || 0, mc = t.mc || 0;
+    let sc = 0;
+    sc += Math.min(25, (tvl / 20000) * 25);                       // LP depth (full at $20K)
+    sc += Math.min(15, ((t.traders || 0) / 150) * 15);            // real participants
+    const g = ((t.greenUsd || 0) + (t.redUsd || 0)) > 0 ? (t.greenUsd || 0) / ((t.greenUsd || 0) + (t.redUsd || 0)) : 0.5;
+    sc += Math.max(0, 20 - Math.abs(g - 0.62) * 60);              // healthy buy-lean, not wash-pure
+    sc += Math.min(15, (m.ageMs / 86400e3) * 15);                 // survived time (full at 24h)
+    const to = m.turnover;                                        // vol/mc sanity band
+    sc += to >= 0.05 && to <= 3 ? 10 : to > 20 ? 0 : 5;
+    sc += t.img ? 5 : 0;                                          // published metadata
+    sc += (!m.isPump || m.curvePct >= 100) ? 10 : m.curvePct >= 60 ? 6 : 2;  // graduation distance
+    return Math.max(1, Math.min(99, Math.round(sc)));
+  }
   const g = t.greenUsd / (t.greenUsd + t.redUsd);
   const liq = Math.min(100, (t.liq / t.tvl) * 180);
   const age = Math.min(100, t.ageMin / 14);
@@ -7360,7 +7376,7 @@ const tokMetrics = (t) => {
   const isPump = !!(t.liveMint && /pump$/i.test(t.liveMint || ""));
   const curvePct = isPump ? Math.min(100, ((t.mc || 0) / 69000) * 100) : 100;
   const turnover = (t.mc || 0) > 0 ? (t.vol24 || 0) / t.mc : 0;
-  return { winMin, tx, txRate: tx / winMin, flow, buyRatio, accel, ageMs, isPump, curvePct, turnover };
+  return { winMin, tx, txRate: tx / winMin, flow, buyRatio, accel, rateNow, ageMs, isPump, curvePct, turnover };
 };
 // 🍀 weighted lottery order — health-biased randomness for hidden gems
 const luckyOrder = (list, seed, onlyElig = false) => {
@@ -7461,7 +7477,7 @@ function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line",
             boxShadow: `inset 0 0 10px ${rc}18` }}>
           <span style={{ fontSize: isMobile ? 13 : 12, fontWeight: 900, color: rc, fontFamily: T.mono, letterSpacing: -0.3,
             textShadow: `0 0 9px ${rc}55` }}>{score}</span>
-          <span style={{ fontSize: isMobile ? 6.5 : 6, letterSpacing: 1.1, color: rc, fontWeight: 800, opacity: 0.85 }}>{rug.rugged ? "RUGGED" : rug.dying ? "DYING" : rating(score)}</span>
+          {(rug.rugged || rug.dying) && <span style={{ fontSize: isMobile ? 6.5 : 6, letterSpacing: 1.1, color: rc, fontWeight: 800, opacity: 0.85 }}>{rug.rugged ? "RUGGED" : "DYING"}</span>}
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
@@ -12961,6 +12977,18 @@ export default function App() {
   }, [sel]);
 
   const selected = tokens.find((t) => t.id === sel) || null;
+  const [scorePop, setScorePop] = useState(false);       // vitals popup off the score chip
+  const [scoreBig, setScoreBig] = useState("price");     // which figure leads: price | mc
+  const minAgoRef = useRef({});                          // tokenId → [{ts, price, mc}] ring for 1-min deltas
+  useEffect(() => {
+    if (!selected) return;
+    const arr = minAgoRef.current[selected.id] || (minAgoRef.current[selected.id] = []);
+    const now = Date.now();
+    arr.push({ ts: now, price: selected.price || 0, mc: selected.mc || 0 });
+    while (arr.length && now - arr[0].ts > 95000) arr.shift();
+    if (arr.length > 60) arr.splice(0, arr.length - 60);
+  }, [selected && selected.id, selected && selected.price]);
+  useEffect(() => { setScorePop(false); }, [sel]);
   // 📍 real-fill markers for the OPEN token — buys & sells on its chart,
   // rebuilt from the persistent fills ledger so they survive a refresh/relogin
   const chartRealMarkers = useMemo(() => {
@@ -14239,9 +14267,64 @@ export default function App() {
                         {caCopied === selected.id ? "✓" : "⧉"}
                       </span>
                     )}
-                    <span style={{ fontSize: 8.5, border: `1px solid ${ratingColor(scoreToken(selected))}66`, background: `${ratingColor(scoreToken(selected))}14`, color: ratingColor(scoreToken(selected)), padding: "2px 7px", borderRadius: 5, fontFamily: T.mono, fontWeight: 800 }}>
-                      {scoreToken(selected)} {rating(scoreToken(selected))}
+                    <span onClick={() => setScorePop((v) => !v)} role="button"
+                      title="Live vitals — tap for the breakdown"
+                      style={{ fontSize: 10, border: `1px solid ${ratingColor(scoreToken(selected))}88`, background: `${ratingColor(scoreToken(selected))}18`, color: ratingColor(scoreToken(selected)), padding: "2px 9px", borderRadius: 6, fontFamily: T.mono, fontWeight: 900, cursor: "pointer", position: "relative" }}>
+                      {scoreToken(selected)}{scorePop ? " ▴" : ""}
                     </span>
+                    {scorePop && (() => {
+                      const buys = selected.buys || 0, sells = selected.sells || 0;
+                      const gU = selected.greenUsd || 0, rU = selected.redUsd || 0;
+                      const bp = (gU + rU) > 0 ? gU / (gU + rU) : 0.5;
+                      const ring = minAgoRef.current[selected.id] || [];
+                      const now = Date.now();
+                      const past = ring.find((x) => now - x.ts >= 58000) || ring[0];
+                      const dP = past && past.price > 0 ? ((selected.price - past.price) / past.price) * 100 : null;
+                      const dM = past && past.mc > 0 ? ((selected.mc - past.mc) / past.mc) * 100 : null;
+                      const m = tokMetrics(selected);
+                      const big = scoreBig === "mc";
+                      const sc2 = scoreToken(selected);
+                      return (
+                        <div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 60, width: 236,
+                          background: T.panel, border: `1px solid ${ratingColor(sc2)}55`, borderRadius: 12, padding: 12,
+                          boxShadow: "0 18px 50px rgba(0,0,0,0.65)", cursor: "default", textAlign: "left" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
+                            <span style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 900, color: ratingColor(sc2) }}>{sc2}</span>
+                            <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, lineHeight: 1.5 }}>LP · traders · flow · age<br/>turnover · metadata · curve</span>
+                          </div>
+                          {/* B/S pressure bar — live window */}
+                          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, letterSpacing: 1, marginBottom: 3 }}>B/S PRESSURE · {selected.statWin || "24h"}</div>
+                          <div style={{ height: 10, borderRadius: 6, overflow: "hidden", display: "flex", border: `1px solid ${T.border}`, marginBottom: 3 }}>
+                            <div style={{ width: `${Math.round(bp * 100)}%`, background: "linear-gradient(90deg,#0f9d63,#16c784)" }} />
+                            <div style={{ flex: 1, background: "linear-gradient(90deg,#c62f3b,#ea3943)" }} />
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 8, marginBottom: 9 }}>
+                            <span style={{ color: T.green }}>▲ {buys} · {fmt$(gU)}</span>
+                            <span style={{ color: T.red }}>{sells} ▼ · {fmt$(rU)}</span>
+                          </div>
+                          {/* live price / MC — tap to swap the lead figure */}
+                          <div onClick={() => setScoreBig(big ? "price" : "mc")} title="Tap to swap price / market cap"
+                            style={{ cursor: "pointer", background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: "8px 10px", marginBottom: 8 }}>
+                            <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, letterSpacing: 1 }}>{big ? "MARKET CAP" : "LIVE PRICE"} · tap to swap ⇄</div>
+                            <div style={{ fontFamily: T.mono, fontSize: 15, fontWeight: 900, color: T.text }}>
+                              {big ? fmt$(selected.mc) : `$${fmtP(selected.price)}`}
+                            </div>
+                            <div style={{ fontFamily: T.mono, fontSize: 8.5, color: (big ? dM : dP) == null ? T.faint : (big ? dM : dP) >= 0 ? T.green : T.red }}>
+                              {(big ? dM : dP) == null ? "1m Δ — warming up…" : `1m Δ ${(big ? dM : dP) >= 0 ? "+" : ""}${(big ? dM : dP).toFixed(2)}%`}
+                            </div>
+                            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 2 }}>
+                              {big ? `price $${fmtP(selected.price)}` : `MC ${fmt$(selected.mc)}`}
+                            </div>
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, fontFamily: T.mono, fontSize: 8, color: T.dim }}>
+                            <span>LP <b style={{ color: T.text }}>{fmt$(selected.tvl)}</b></span>
+                            <span>vol/min <b style={{ color: T.text }}>{fmt$(m.rateNow || 0)}</b></span>
+                            <span>traders <b style={{ color: T.text }}>{selected.traders || 0}</b></span>
+                            <span>age <b style={{ color: T.text }}>{fmtAge(selected.createdAt) || "—"}</b></span>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div style={{ display: "flex", gap: 5, alignItems: "center",
                     flexWrap: isMobile ? "nowrap" : "wrap",
