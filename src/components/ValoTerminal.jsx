@@ -474,7 +474,8 @@ function adoptMarketToken(x) {
     socials: (x.mint && /pump$/i.test(x.mint)) ? { pump: `https://pump.fun/coin/${x.mint}` } : {},
     trending: { reason: `$${sym} is live on Solana — real market data streaming from the pool.`,
       tweet: null, desc: `${x.name || sym} (${sym}) — live pool tracked by VALO.` },
-    dev: { trades: [] },
+    dev: { wallet: "", trades: [], launches: [], withdrawals: [], feeHistory: [],
+      tokensLaunched: 0, rugged: 0, creatorRewardsSol: 0, feesDay: 0, feesMonth: 0, feesYear: 0 },
   };
 }
 // build candles straight from the trade tape: [{at, price, usd, isBuy}] → OHLCV
@@ -775,7 +776,8 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       const lows2 = scaleWin.map((c) => c.l).filter((v) => v > 0).sort((a, b) => a - b);
       const base = Math.max(1e-15, (highs2[1] || hi) - (lows2[1] || lo));
       if (highs2[1] && highs2[0] - highs2[1] > base * 0.9) hi = Math.min(hi, highs2[1] + base * 0.3);
-      if (lows2[1] && lows2[1] - lows2[0] > base * 0.9) lo = Math.max(lo, lows2[1] - base * 0.3);
+      // the LOW side stays honest: the launch bar's origin is always in frame
+      // (a little air under it comes from padBot below)
     }
     // one absurd print can't own the axis: cap the range around the median close
     if (anyVisible && hi / Math.max(lo, 1e-12) > 1e4) {
@@ -784,7 +786,9 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       if (win.length) {
         win.sort((a, b) => a - b);
         const med = win[Math.floor(win.length / 2)];
-        lo = Math.max(lo, med / 20); hi = Math.min(hi, med * 20);
+        // corrupt 1e-12 prints die; real launch origins (within 1000× of the
+        // median) stay in frame — the log axis handles the depth gracefully
+        lo = Math.max(lo, med / 1000); hi = Math.min(hi, med * 20);
       }
     }
     if (!anyVisible) {
@@ -13992,7 +13996,7 @@ export default function App() {
     const followed = followedKeys.flatMap((trader) => {
       if (trader === "__me__") return [];
       if (!liveData) {
-        if (trader === selected.dev.wallet) return showDevTrades ? [] : (selected.dev.trades || []);
+        if (selected.dev && trader === selected.dev.wallet) return showDevTrades ? [] : (selected.dev.trades || []);
         return traderTradesFor(selected, trader);
       }
       const w = walletOf(trader);
@@ -16974,7 +16978,7 @@ export default function App() {
                       <div>
                         <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>CREATOR WALLET</div>
                         <div style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 700, color: T.text }}>
-                          {liveData ? ((tokCreator && tokCreator.short) || "⛓ resolving…") : selected.dev.wallet}
+                          {liveData ? ((tokCreator && tokCreator.short) || "⛓ resolving…") : (selected.dev && selected.dev.wallet) || "—"}
                           {liveData && devPanel && devPanel.sol != null && <span style={{ color: T.amber, fontSize: 10, marginLeft: 8 }}>◎{devPanel.sol.toFixed(3)}</span>}
                         </div>
                       </div>
