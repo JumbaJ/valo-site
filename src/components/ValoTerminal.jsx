@@ -462,7 +462,8 @@ function adoptMarketToken(x) {
     liq: tvl, vol24: (+x.vol24 || green + red),   // real reserve + real 24h volume
     ageMin, hue: symbolHue(sym), img: x.img || null, ch24: ch,
     candles: [], price, supply: price > 0 && mc > 0 ? mc / price : 1e9,
-    ca: x.mint || x.id, socials: {},
+    ca: x.mint || x.id,
+    socials: (x.mint && /pump$/i.test(x.mint)) ? { pump: `https://pump.fun/coin/${x.mint}` } : {},
     trending: { reason: `$${sym} is live on Solana — real market data streaming from the pool.`,
       tweet: null, desc: `${x.name || sym} (${sym}) — live pool tracked by VALO.` },
     dev: { trades: [] },
@@ -4202,7 +4203,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
               {chainWallet.trades && chainWallet.trades.length > 0 && (
                 <div style={{ borderTop: `1px solid ${T.border}`, background: "#0c0f16", padding: "5px 8px" }}>
                   <div style={{ fontFamily: T.mono, fontSize: 7, letterSpacing: 1, color: T.faint, marginBottom: 3 }}>
-                    ON-CHAIN TRADES · {chainWallet.trades.length}
+                    ⛓ TRADES · {chainWallet.trades.length}
                   </div>
                   {(realTx && realTx.length ? realTx.slice(-6).reverse().map((tr) => ({
                       at: tr.t, sig: tr.sig,
@@ -4261,7 +4262,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                     <div style={{ fontFamily: T.mono, fontSize: 17, fontWeight: 900, color: T.text }}>${totalBal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
                     {onChain && (
                       <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint }}>
-                        on-chain · {chainWallet.sol != null ? chainWallet.sol.toFixed(2) + " SOL" : ""} + tokens
+                        {chainWallet.sol != null ? chainWallet.sol.toFixed(2) + " SOL" : ""} + tokens
                       </div>
                     )}
                     {!onChain && (() => { const livePnl = rows.reduce((s2, h) => s2 + h.pnl, 0); return (
@@ -4270,7 +4271,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                       </div>
                     ); })()}
                     {onChain && (
-                      <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.green }}>⛓ live on-chain balance</div>
+                      <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.green }}>⛓ live balance</div>
                     )}
                   </div>
                   {top && (
@@ -5802,7 +5803,7 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
         {chainHold && chainHold.pnlUsd == null ? (
           <>
             <div style={{ fontFamily: T.mono, fontSize: 15, fontWeight: 900, color: T.text, marginTop: 4 }}>{fmtQty(chainHold.qty)} {token.sym}</div>
-            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, marginTop: 3 }}>holding on-chain · no VALO cost basis to price P/L</div>
+            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, marginTop: 3 }}>holding · no VALO cost basis to price P/L</div>
           </>
         ) : held ? (
           <>
@@ -5995,7 +5996,7 @@ function TreasuryPanel({ isMobile }) {
   return (
     <div style={{ border: `1px solid ${T.border2}`, borderRadius: 12, background: "#0c0f16", overflow: "hidden", marginTop: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: `1px solid ${T.border}` }}>
-        <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, color: T.text }}>⛓ VALO ON-CHAIN</span>
+        <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, color: T.text }}>⛓ VALO LIVE</span>
         <span style={{ fontFamily: T.mono, fontSize: 7.5, color: d.live ? T.green : T.faint, letterSpacing: 1 }}>
           {d.live ? "● TOKEN LIVE" : "○ TOKEN PENDING"}
         </span>
@@ -6517,7 +6518,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                 title={chainOn && turboState ? "Tap to flip between your TURBO and PHANTOM wallet values" : undefined}
                 style={{ fontFamily: T.mono, fontSize: 9, color: chainOn ? (walletView === "phantom" ? "#AB9FF2" : T.amber) : T.faint, letterSpacing: 1,
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: chainOn && turboState ? "pointer" : "default" }}>
-                {chainOn ? (turboState ? (walletView === "phantom" ? "👻 PHANTOM WALLET · ON-CHAIN ⇄" : "⚡ TURBO WALLET · ON-CHAIN ⇄") : "⛓ ON-CHAIN WALLET") : liveMode ? "⛓ ON-CHAIN WALLET" : "TOTAL EQUITY"}
+                {chainOn ? (turboState ? (walletView === "phantom" ? "👻 PHANTOM WALLET ⇄" : "⚡ TURBO WALLET ⇄") : "⛓ WALLET") : liveMode ? "⛓ WALLET" : "TOTAL EQUITY"}
               </div>
               {chainOn ? (
                 <>
@@ -6585,19 +6586,19 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           {/* balance breakdown */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
             <div style={{ background: "#0c0f16", border: `1px solid ${chainOn ? `${T.amber}55` : T.border}`, borderRadius: 9, padding: "8px 10px" }}>
-              <div style={{ fontFamily: T.mono, fontSize: 8.5, color: (chainOn || liveMode) ? T.amber : T.faint }}>{(chainOn || liveMode) ? "⛓ SOL · ON-CHAIN" : "SOL BALANCE"}</div>
+              <div style={{ fontFamily: T.mono, fontSize: 8.5, color: (chainOn || liveMode) ? T.amber : T.faint }}>{(chainOn || liveMode) ? "⛓ SOL" : "SOL BALANCE"}</div>
               <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>{mask(chainOn ? chSol.toFixed(3) : liveMode ? "—" : solBalance.toFixed(2))}</div>
               <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{mask(chainOn ? `$${(chSol * SOL_USD).toFixed(0)}` : liveMode ? "connect wallet" : `$${(solBalance * SOL_USD).toFixed(0)}`)}</div>
             </div>
             {chainOn ? (
               <div style={{ background: "#0c0f16", border: `1px solid ${T.amber}55`, borderRadius: 9, padding: "8px 10px" }}>
-                <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.amber }}>⛓ TOKENS · ON-CHAIN</div>
+                <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.amber }}>⛓ TOKENS</div>
                 <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>{mask(`$${chTokensUsd.toFixed(0)}`)}</div>
                 <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{mask(`${chCount} position${chCount === 1 ? "" : "s"}`)}</div>
               </div>
             ) : liveMode ? (
               <div style={{ background: "#0c0f16", border: `1px dashed ${T.amber}44`, borderRadius: 9, padding: "8px 10px" }}>
-                <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.amber }}>⛓ TOKENS · ON-CHAIN</div>
+                <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.amber }}>⛓ TOKENS</div>
                 <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 700, color: T.faint }}>connect wallet</div>
               </div>
             ) : (
@@ -6611,7 +6612,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           {chainOn ? (
             <div style={{ background: "#0c0f16", border: `1px solid ${T.amber}44`, borderRadius: 9, padding: "8px 10px", marginBottom: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 10.5 }}>
-                <span style={{ color: T.amber }}>⛓ ON-CHAIN POSITIONS · {chCount}</span>
+                <span style={{ color: T.amber }}>⛓ POSITIONS · {chCount}</span>
                 <b style={{ color: T.text }}>{mask(`$${chTokensUsd.toFixed(0)}`)}</b>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 10.5, marginTop: 4 }}>
@@ -15660,7 +15661,7 @@ export default function App() {
             border: `1.5px solid ${T.amber}77`, borderRadius: 14, overflow: "hidden" }}>
             <div style={{ padding: "10px 13px", borderBottom: `1px solid ${T.border}`, background: "rgba(240,185,11,0.08)" }}>
               <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1, color: T.amber }}>
-                ⛓ REAL ORDER · ON-CHAIN
+                ⛓ REAL ORDER
               </div>
               <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 3 }}>
                 This spends actual funds from your wallet. It is not paper trading.
@@ -15783,7 +15784,7 @@ export default function App() {
                 <div style={{ textAlign: "center", padding: "10px 0" }}>
                   <div style={{ fontSize: 26 }}>✓</div>
                   <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: T.green, marginTop: 4 }}>
-                    {realOrder.confirmed ? "CONFIRMED ON-CHAIN" : "SENT · STILL CONFIRMING"}
+                    {realOrder.confirmed ? "CONFIRMED" : "SENT · STILL CONFIRMING"}
                   </div>
                   {realOrder.sig && (
                     <a href={`https://solscan.io/tx/${realOrder.sig}`} target="_blank" rel="noopener noreferrer"
@@ -15934,14 +15935,6 @@ export default function App() {
             padding: "11px 13px", fontFamily: T.mono, fontSize: 10, lineHeight: 1.5, color: T.text,
             boxShadow: "0 12px 40px rgba(0,0,0,0.65)" }}>
           ⛶ {fsHint}
-        </div>
-      )}
-      {liveData && (
-        <div style={{ position: "fixed", bottom: 8, left: "50%", transform: "translateX(-50%)", zIndex: 54, pointerEvents: "none",
-          background: "rgba(15,19,28,0.85)", border: `1px solid ${T.amber}55`, borderRadius: 999, padding: "4px 14px",
-          fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.5, color: T.amber,
-          boxShadow: "0 6px 20px rgba(0,0,0,0.5)" }}>
-          📄 PAPER TRADING — LIVE PRICES · NO REAL FUNDS
         </div>
       )}
       {/* rail tabs — one row so they can never overlap each other, parked
@@ -16141,7 +16134,7 @@ export default function App() {
                     style={{ width: "100%", boxSizing: "border-box", border: "none", borderRadius: 9, padding: "10px", margin: "8px 0",
                       fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
                       background: T.red, color: "#170808", cursor: "pointer" }}>
-                    ⛓ SELL ALL · {drawerHolds.filter((x) => !x.spam).length} on-chain · one approval
+                    ⛓ SELL ALL · {drawerHolds.filter((x) => !x.spam).length} · one approval
                   </button>
                   {drawerHolds.map((h) => (
                     <div key={h.mint} style={{ display: "flex", alignItems: "center", gap: 8, background: "#0c0f16",
@@ -16643,8 +16636,29 @@ export default function App() {
                       return <div style={{ fontFamily: T.sans, fontSize: 13, color: T.dim, lineHeight: 1.7 }}>{(selected.trending && selected.trending.reason) || ""}</div>;
                     })()}
                   </div>
-                  {/* social tweet — simulated tokens only; real ones have none */}
-                  {selected.trending && selected.trending.tweet && (
+                  {/* ⛓ live: real facts, real links — no invented posts */}
+                  {liveData && selected.pool && (
+                    <div style={{ background: "#0c0f16", border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
+                      <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: T.amber, letterSpacing: 1, marginBottom: 7 }}>⛓ FACTS</div>
+                      <div style={{ fontFamily: T.mono, fontSize: 11, color: T.dim, lineHeight: 2 }}>
+                        MC <b style={{ color: T.text }}>{fmt$(selected.mc)}</b> · LP <b style={{ color: T.text }}>{fmt$(selected.tvl)}</b> · 24h vol <b style={{ color: T.text }}>{fmt$(selected.vol24 || 0)}</b><br />
+                        24h <b style={{ color: (selected.ch24 || 0) >= 0 ? T.green : T.red }}>{(selected.ch24 || 0) >= 0 ? "+" : ""}{(selected.ch24 || 0).toFixed(1)}%</b>
+                        · buys <b style={{ color: T.green }}>{selected.buys || 0}</b> / sells <b style={{ color: T.red }}>{selected.sells || 0}</b>
+                        {fmtAge(selected.createdAt) && <> · ⏱ <b style={{ color: T.text }}>{fmtAge(selected.createdAt)}</b></>}
+                      </div>
+                      {(() => {
+                        const tw = (tokLinks && tokLinks.socials && tokLinks.socials.twitter) || selected.socials.x;
+                        return tw ? (
+                          <a href={tw} target="_blank" rel="noopener noreferrer"
+                            style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 9, textDecoration: "none",
+                              border: `1px solid ${T.border2}`, borderRadius: 999, padding: "5px 12px",
+                              fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: "#e6e9ef", background: "rgba(255,255,255,0.03)" }}>
+                            𝕏 their real X → </a>
+                        ) : <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, marginTop: 8 }}>no 𝕏 published for this token</div>;
+                      })()}
+                    </div>
+                  )}
+                  {!liveData && selected.trending && selected.trending.tweet && (
                   <div style={{ background: "#0c0f16", border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                       <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: "50%", background: accent(selected.hue), color: "#0a0713", fontFamily: T.mono, fontWeight: 800, fontSize: 12 }}>{selected.sym[0]}</span>
