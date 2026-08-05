@@ -786,9 +786,9 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       if (win.length) {
         win.sort((a, b) => a - b);
         const med = win[Math.floor(win.length / 2)];
-        // corrupt 1e-12 prints die; real launch origins (within 1000× of the
-        // median) stay in frame — the log axis handles the depth gracefully
-        lo = Math.max(lo, med / 1000); hi = Math.min(hi, med * 20);
+        // corrupt prints die; real launches AND real repricings (within 1000×
+        // of the median) stay in frame — the log axis handles the depth
+        lo = Math.max(lo, med / 1000); hi = Math.min(hi, med * 1000);
       }
     }
     if (!anyVisible) {
@@ -804,6 +804,13 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     const minRange = mid * 0.02;                     // never tighter than ±1%
     if (hi - lo < minRange) { hi = mid + minRange / 2; lo = mid - minRange / 2; }
     // remember the true range before padding — the log decision depends on it
+    // ⚓ the live close is always visible: whatever the clips decided, the
+    // frame stretches to include where the price IS right now
+    {
+      const lastC = agg[Math.min(total, scaleStart + count) - 1];
+      const liveC = lastC && lastC.c > 0 ? lastC.c : 0;
+      if (liveC > 0) { hi = Math.max(hi, liveC * 1.04); lo = Math.min(lo, liveC * 0.96); }
+    }
     const trueLo = lo, trueHi = hi;
     const p8 = (hi - lo) * 0.12 || hi * 0.01;
     // never let padding drive the floor to (or below) zero: on a wide range that
@@ -13536,7 +13543,19 @@ export default function App() {
       out = out.filter((t) => !(t.createdAt && Date.now() - t.createdAt < 12 * 60e3)
         || keepIds.has(t.id) || (t.liveMint && chainLedger.byMint[t.liveMint] && chainLedger.byMint[t.liveMint].qty > 0));
     }
-    if (scanMode === "lucky") return luckyOrder(out, "lucky" + scanShuffleRef.current, true);
+    // ⛑ backfill: whatever the lens, an empty scanner helps no one — thin
+    // matches get topped up with tokens that are actually MOVING right now
+    const movingRank = (arr) => [...arr].sort((a, b) =>
+      (Math.abs(b.ch || 0) + tokMetrics(b).txRate * 2) - (Math.abs(a.ch || 0) + tokMetrics(a).txRate * 2));
+    const withBackfill = (matches) => {
+      if (matches.length >= 6) return matches;
+      const restMv = movingRank(out.filter((t) => !matches.includes(t) && ((Math.abs(t.ch || 0) > 0.3) || tokMetrics(t).tx > 0)));
+      return [...matches, ...restMv];
+    };
+    if (scanMode === "lucky") {
+      const picked = luckyOrder(out, "lucky" + scanShuffleRef.current, true);
+      return withBackfill(picked);
+    }
     if (scanMode === "new") {
       // 🍼 1–15min old · ≥5 baseline tx (deployed AND trading) · curve <15% =
       // ground floor. Strictly newest first.
@@ -13544,7 +13563,7 @@ export default function App() {
         const m = tokMetrics(t);
         return (m.ageMs <= 15 * 60e3 && m.tx >= 5 && (!m.isPump || m.curvePct < 15)) || t.id === sel;
       });
-      return fresh.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      return withBackfill(fresh.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
     }
     if (scanMode === "hot") {
       // 💪 nearing graduation (curve 60–95%) · real velocity (>50 tx / 5min
@@ -13554,14 +13573,14 @@ export default function App() {
         const curveOk = !m.isPump || (m.curvePct >= 60 && m.curvePct <= 95);
         return (curveOk && m.txRate >= 10 && (m.turnover > 0.4 || m.accel > 1.4) && (t.traders || 0) >= 80) || t.id === sel;
       });
-      return hot.sort((a, b) => tokMetrics(b).txRate - tokMetrics(a).txRate);
+      return withBackfill(hot.sort((a, b) => tokMetrics(b).txRate - tokMetrics(a).txRate));
     }
     if (scanMode === "movers") {
       // 📈 price velocity over the rolling short window · ≥$2K liquidity so
       // dust trades can't fake a spike · gainers ⇄ losers toggle
       const mv = out.filter((t) => ((t.tvl || 0) >= 2000 && Math.abs(t.ch || 0) > 1
         && (moversSide === "lose" ? (t.ch || 0) < 0 : (t.ch || 0) > 0)) || t.id === sel);
-      return mv.sort((a, b) => Math.abs(b.ch || 0) - Math.abs(a.ch || 0) || heat2(b) - heat2(a));
+      return withBackfill(mv.sort((a, b) => Math.abs(b.ch || 0) - Math.abs(a.ch || 0) || heat2(b) - heat2(a)));
     }
     // 🔥 trending: volume acceleration (now ≥3× the day's pace) + net buy
     // pressure (>70%) + freshness (<1h) — scored, hottest composite first
