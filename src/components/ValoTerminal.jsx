@@ -10829,7 +10829,8 @@ export default function App() {
         ]);
         if (stop) return;
         // 🪪 one identity everywhere: portfolio name = chat name = search handle
-        const emailDefault = ((cloudUser.email || "").split("@")[0] || "").toLowerCase();
+        const wAddr = cloudUser.user_metadata && cloudUser.user_metadata.custom_claims && cloudUser.user_metadata.custom_claims.address;
+        const emailDefault = ((cloudUser.email || "").split("@")[0] || (wAddr ? String(wAddr).slice(0, 6).toLowerCase() : "")).toLowerCase();
         const ph = prof.data && prof.data.handle;
         if (ph && ph.toLowerCase() !== emailDefault) setUsername(ph); // your name follows you to this device
         else if (username) sb.from("profiles").update({ handle: username }).eq("id", uid)
@@ -13111,6 +13112,20 @@ export default function App() {
       pushNotif({ type: "system", user: null, tokenId: t && t.id,
         text: "🤖 set up your ⚡ TURBO wallet (portfolio) before launching live bots — triggers sign with it." });
       return;
+    }
+    if (liveData && o && o.mode === "auto" && o.side !== "sell") {
+      // ⛔ not enough funds → no arm. Required: buy-in + 0.6% site fee + tx/rent buffer.
+      const amtSol = o.pay === "SOL" ? (+o.amt || 0) : 0;
+      if (amtSol > 0) {
+        const feeBpsNow = ((onchain && onchain.feeBps) || 60) / 10000;
+        const need = amtSol * (1 + feeBpsNow) + 0.004;   // swap tx + fee tx + rent headroom
+        const have = (walletChain && (walletChain.solTrading != null ? walletChain.solTrading : walletChain.sol)) || 0;
+        if (have < need) {
+          pushNotif({ type: "system", user: null, tokenId: t && t.id,
+            text: `⛔ not enough funds to arm — need ◎${need.toFixed(4)} (◎${amtSol} buy-in + ${(feeBpsNow * 100).toFixed(1)}% site fee + tx fees), turbo has ◎${have.toFixed(4)}.` });
+          return;
+        }
+      }
     }
     TestLog.push("order", { sym: t && t.sym, side: o.side, mode: o.mode, amt: o.amt, pay: o.pay, px: t && t.price });
     // AUTO STRATEGY = a bot, full stop. It arms at the user's buy-in price and
@@ -16288,7 +16303,10 @@ export default function App() {
             <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, letterSpacing: 1.5, color: VALO_PURPLE, marginBottom: 4 }}>☁ VALO ACCOUNT</div>
             {cloudUser ? (
               <>
-                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.text, marginBottom: 4 }}>Signed in as <b>{cloudUser.email}</b></div>
+                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.text, marginBottom: 4 }}>Signed in as <b>{cloudUser.email
+                  || (cloudUser.user_metadata && cloudUser.user_metadata.custom_claims && cloudUser.user_metadata.custom_claims.address
+                      ? `👻 ${String(cloudUser.user_metadata.custom_claims.address).slice(0, 4)}…${String(cloudUser.user_metadata.custom_claims.address).slice(-4)}`
+                      : "wallet account")}</b></div>
                 <div style={{ fontFamily: T.mono, fontSize: 8.5, color: cloudSynced ? T.green : T.amber, marginBottom: 12 }}>{cloudSynced ? "● portfolio synced to the cloud" : "● syncing…"}</div>
                 <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, lineHeight: 1.6, marginBottom: 12 }}>Wallet, positions, activity, watchlist and live bots follow this account on any device.</div>
                 <button onClick={async () => { try { await sb.auth.signOut(); } catch (e) {} setCloudOpen(false); }}
@@ -16296,6 +16314,37 @@ export default function App() {
               </>
             ) : (
               <>
+                <button onClick={async () => {
+                    try {
+                      setCloudMsg("");
+                      if (!sb) { setCloudMsg("cloud not configured"); return; }
+                      if (typeof sb.auth.signInWithWeb3 !== "function") {
+                        setCloudMsg("wallet sign-in needs a newer @supabase/supabase-js — using email for now");
+                        return;
+                      }
+                      const ph = typeof window !== "undefined" && (window.phantom?.solana || window.solana);
+                      if (!ph) { setCloudMsg("Phantom not detected — install it or use email below"); return; }
+                      const { error } = await sb.auth.signInWithWeb3({
+                        chain: "solana", wallet: ph,
+                        statement: "Sign in to VALO — this signature only proves wallet ownership. No transaction, no fees.",
+                      });
+                      if (error) setCloudMsg(String(error.message || error).slice(0, 90));
+                      else setCloudOpen(false);
+                    } catch (e) { setCloudMsg(String(e && e.message || e).slice(0, 90)); }
+                  }}
+                  style={{ width: "100%", border: `1px solid ${VALO_PURPLE}88`, background: "rgba(125,92,240,0.16)", color: VALO_PURPLE,
+                    borderRadius: 9, padding: "11px", fontFamily: T.mono, fontSize: 11, fontWeight: 900, cursor: "pointer",
+                    letterSpacing: 0.5, marginBottom: 10, boxShadow: `0 0 14px ${VALO_PURPLE}33` }}>
+                  👻 SIGN IN WITH YOUR WALLET
+                </button>
+                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, textAlign: "center", marginBottom: 10 }}>
+                  one signature · no transaction · no email needed
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                  <div style={{ flex: 1, height: 1, background: T.border }} />
+                  <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint }}>or use email</span>
+                  <div style={{ flex: 1, height: 1, background: T.border }} />
+                </div>
                 <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, lineHeight: 1.6, marginBottom: 10 }}>
                   Enter your email — you'll get a one-tap magic link. Your paper wallet, positions, watchlist and bots then sync across devices.
                 </div>
