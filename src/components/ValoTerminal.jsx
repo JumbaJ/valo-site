@@ -6474,14 +6474,25 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               borderTopRightRadius: liveMode && turboState ? 0 : undefined, borderBottomRightRadius: liveMode && turboState ? 0 : undefined }}>💼 Wallet</button>
           {liveMode && (
             <button onClick={() => setTurboPop((v) => !v)}
-              title={!turboState ? "Set up your ⚡ TURBO wallet" : turboState.unlocked ? "⚡ TURBO armed — tap to manage" : "⚡ TURBO locked (disarmed) — tap to unlock"}
+              title={!turboState ? "Set up your ⚡ TURBO wallet" : turboState.unlocked ? "◆ TURBO armed & ready — tap to manage" : "⚡ TURBO locked (disarmed) — tap to unlock"}
               style={{ flex: "0 0 auto", padding: "7px 11px", fontSize: 11, fontFamily: T.mono, fontWeight: 900, cursor: "pointer",
+                display: "inline-flex", alignItems: "center", gap: 3,
                 borderRadius: "0 8px 8px 0", borderLeft: "none",
-                border: `1px solid ${!turboState ? T.border2 : turboState.unlocked ? T.green : T.red}`,
-                background: !turboState ? "rgba(255,255,255,0.03)" : turboState.unlocked ? "rgba(22,199,132,0.14)" : "rgba(234,57,67,0.12)",
-                color: !turboState ? T.faint : turboState.unlocked ? T.green : T.red,
-                boxShadow: turboState && turboState.unlocked ? `0 0 9px ${T.green}44` : turboState ? `0 0 8px ${T.red}33` : "none" }}>
-              ⚡{turboPop ? "▴" : ""}
+                border: `1px solid ${!turboState ? T.border2 : turboState.unlocked ? VALO_PURPLE : T.red}`,
+                background: !turboState ? "rgba(255,255,255,0.03)" : turboState.unlocked ? "rgba(125,92,240,0.14)" : "rgba(234,57,67,0.12)",
+                color: !turboState ? T.faint : turboState.unlocked ? VALO_PURPLE : T.red,
+                boxShadow: turboState && turboState.unlocked ? `0 0 11px ${VALO_PURPLE}66` : turboState ? `0 0 8px ${T.red}33` : "none" }}>
+              {turboState && turboState.unlocked ? (
+                // ◆ the brand diamond, armed & spinning — same stone as the wordmark
+                <span style={{ position: "relative", width: 13, height: 13, display: "inline-block", perspective: 60 }}>
+                  <span style={{ position: "absolute", inset: 0, display: "block", transformStyle: "preserve-3d", animation: "diamond3d 5s linear infinite" }}>
+                    <span style={{ position: "absolute", inset: 1, display: "block", transform: "rotate(45deg)", borderRadius: 3.5,
+                      background: "linear-gradient(135deg, #a07ff2, #5b93ec)", boxShadow: `0 0 8px ${VALO_PURPLE}aa` }} />
+                    <span style={{ position: "absolute", left: 1, right: 1, top: 1, height: "42%", display: "block", transform: "rotate(45deg)", transformOrigin: "center", borderRadius: 3.5, background: "rgba(255,255,255,0.25)" }} />
+                  </span>
+                </span>
+              ) : "⚡"}
+              {turboPop ? "▴" : ""}
             </button>
           )}
         </span>
@@ -6493,7 +6504,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
             <div onClick={() => setTurboPop(false)} style={{ position: "fixed", inset: 0, zIndex: 44 }} />
             <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 45,
               maxHeight: "62vh", overflowY: "auto", borderRadius: 12,
-              boxShadow: "0 18px 50px rgba(0,0,0,0.7)", border: `1px solid ${turboState && turboState.unlocked ? T.green : T.red}55`,
+              boxShadow: "0 18px 50px rgba(0,0,0,0.7)", border: `1px solid ${turboState && turboState.unlocked ? VALO_PURPLE : T.red}55`,
               background: T.panel }}>
               <TurboPanel turbo={turboState} onCreate={onTurboCreate} onUnlock={onTurboUnlock}
                 onLock={onTurboLock} onFund={onTurboFund} onSweep={onTurboSweep}
@@ -8365,6 +8376,8 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
     return [...seen.values()];
   })();
   let list = cand.filter((t) => !ql || t.sym.toLowerCase().includes(ql) || (t.name || "").toLowerCase().includes(ql) || (t.ca || "").toLowerCase().includes(ql));
+  // 🍼 brand-new launches live under the NEW filter (or an explicit search), not the default view
+  if (!flags.fresh && !ql) list = list.filter((t) => !(t.createdAt && Date.now() - t.createdAt < 12 * 60e3));
   if (plat !== "all") list = list.filter((t) => platOf(t) === plat);
   if (flags.trend) list = list.filter(isHotTok);
   const heatOf = (t) => {
@@ -9418,6 +9431,8 @@ export default function App() {
   // right-edge tab positions — draggable up/down so users park them where comfy
   const [chatTabTop, setChatTabTop] = useState(42);    // % of viewport height
   const [walletTabTop, setWalletTabTop] = useState(60);
+  const [railPeek, setRailPeek] = useState(false);       // hold the wallet tab → 👻 phantom amount
+  const railPeekFired = useRef(false);
   const tabDrag = useRef(null);
   const tabJustDragged = useRef(false);
   const tabTouchStart = (which, cur) => (e) => { tabDrag.current = { which, y0: e.touches[0].clientY, top0: cur, moved: false }; };
@@ -13295,7 +13310,7 @@ export default function App() {
     : shownRaw;
   // one card per pool / mint / symbol — duplicates from different feeds collapse
   const shown = useMemo(() => {
-    const seen = new Set(); const out = [];
+    const seen = new Set(); let out = [];
     for (const t of shownLive) {
       if (!t) continue;
       const k = String(t.pool || t.liveMint || t.ca || ("id" + t.id)).toLowerCase();
@@ -13308,6 +13323,13 @@ export default function App() {
       return [...arr].sort((a, b) => (hashStr(sd + "" + (a.liveMint || a.id)) % 997) - (hashStr(sd + "" + (b.liveMint || b.id)) % 997));
     };
     const heat2 = (t) => { const w = t.statWin === "5m" ? 5 : t.statWin === "1h" ? 60 : 1440; return ((t.buys || 0) + (t.sells || 0)) / w; };
+    // 🍼 just-launched tokens only show under the NEW lens — everywhere else
+    // they'd crowd out charts that are actually moving
+    if (scanMode !== "new") {
+      const keepIds = new Set([sel, ...Object.keys(positions || {}).map(Number)]);
+      out = out.filter((t) => !(t.createdAt && Date.now() - t.createdAt < 12 * 60e3)
+        || keepIds.has(t.id) || (t.liveMint && chainLedger.byMint[t.liveMint] && chainLedger.byMint[t.liveMint].qty > 0));
+    }
     if (scanMode === "random") return seedSort(out);
     if (scanMode === "new") return [...out].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     if (scanMode === "hot") {
@@ -15154,7 +15176,7 @@ export default function App() {
           width: `calc(100%/1.13 + ${Math.round(pullR / 1.13)}px)`, "--stkTop": `${Math.round((headerH + 8) / 1.13)}px`, zoom: 1.13 }}>
           {/* scanner — slides left as the chart is pulled over, stays same width */}
           {scanCollapsed ? (
-          <div ref={scannerRef} style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start", transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s" }}>
+          <div ref={scannerRef} style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start", zIndex: 5, transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s" }}>
             <button onClick={() => setScanCollapsed(false)} title="Expand the scanner"
               style={{ width: 40, height: 250, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10,
                 background: T.panel, border: `1px solid ${VALO_PURPLE}44`, borderRadius: 12, cursor: "pointer", color: T.dim, padding: 0,
@@ -15171,7 +15193,7 @@ export default function App() {
             onScroll={(e) => { const el = e.currentTarget;
               setScanScrolled(el.scrollTop > 180);
               if (el.scrollHeight - el.scrollTop - el.clientHeight < 380) loadMoreTokens(); }}
-            style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start",
+            style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start", zIndex: 5,
             transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s", display: "grid", gap: 10,
             maxHeight: "calc((100vh - 30px) / 1.13 - var(--stkTop))", overflowY: "auto", padding: "2px 10px 2px 2px" }}>
             <button onClick={() => { flashTop(); const el = scannerRef.current; if (el) el.scrollTo({ top: 0, behavior: "smooth" }); }}
@@ -15188,7 +15210,7 @@ export default function App() {
             <button onClick={() => setScanCollapsed(true)} title="Fold the scanner into a rail"
               style={{ position: "sticky", top: 0, zIndex: 3, justifySelf: "end", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center",
                 background: "rgba(15,19,28,0.9)", border: `1px solid ${T.border2}`, borderRadius: 7, cursor: "pointer", color: T.dim, fontSize: 12, marginBottom: -34 }}>‹</button>
-            <div style={{ marginBottom: 8 }}>{scanModeDropdown}</div>
+            <div style={{ margin: "0 34px 8px 0" }}>{scanModeDropdown}</div>
             {secBanner}
             {shown.map((t) => (
               <div key={t.id} data-slot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ position: "relative", opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s, transform .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
@@ -17093,8 +17115,15 @@ export default function App() {
       {/* MOBILE PORTFOLIO DRAWER — right-edge tab below chat, full PortfolioPanel */}
       {isMobile && (
         <>
-          <button onClick={() => { if (tabJustDragged.current) return; setPortfolioDrawer((v) => !v); }} aria-label="Open portfolio — drag to reposition"
-            onTouchStart={tabTouchStart("wallet", walletTabTop)}
+          <button onClick={() => { if (tabJustDragged.current) return; if (railPeekFired.current) { railPeekFired.current = false; return; } setPortfolioDrawer((v) => !v); }} aria-label="Open portfolio — drag to reposition · hold to peek Phantom"
+            onTouchStart={(e) => { tabTouchStart("wallet", walletTabTop)(e);
+              if (liveData && wallet && wallet.address) {
+                const n = e.currentTarget;
+                n._pk = setTimeout(() => { n._pk = null; railPeekFired.current = true; if (navigator.vibrate) navigator.vibrate(8); setRailPeek(true); }, 430);
+              } }}
+            onTouchMove={(e) => { const n = e.currentTarget; if (n._pk) { clearTimeout(n._pk); n._pk = null; } }}
+            onTouchEnd={(e) => { const n = e.currentTarget; if (n._pk) { clearTimeout(n._pk); n._pk = null; } setRailPeek(false); }}
+            onTouchCancel={(e) => { const n = e.currentTarget; if (n._pk) { clearTimeout(n._pk); n._pk = null; } setRailPeek(false); }}
             style={{
               position: "fixed", right: 0, top: `${walletTabTop}%`, zIndex: 52, touchAction: "none",
               background: portfolioDrawer ? "rgba(17,21,29,0.96)" : (totalEquity > 0 ? (platformPnl >= 0 ? "rgba(22,199,132,0.16)" : "rgba(234,57,67,0.16)") : "rgba(17,21,29,0.96)"),
@@ -17104,7 +17133,18 @@ export default function App() {
               writingMode: "vertical-rl", fontFamily: T.mono, fontSize: 10, letterSpacing: 1.5, fontWeight: 700,
               boxShadow: "-4px 0 18px rgba(0,0,0,0.45)",
             }}>
-            {portfolioDrawer ? "CLOSE ›" : (totalEquity > 0 ? (hideBalance ? "•••••" : `$${totalEquity.toLocaleString(undefined, { maximumFractionDigits: 0 })}`) : "‹ WALLET")}
+            {portfolioDrawer ? "CLOSE ›" : (() => {
+              if (liveData && combinedChain) {
+                if (railPeek && wallet && wallet.address) {
+                  const ph = ((combinedChain.solVault || 0) * SOL_USD) + visHolds(combinedChain.holdings).filter((h) => h.src === "phantom").reduce((s, h) => s + (h.usd || 0), 0);
+                  return hideBalance ? "👻•••" : `👻$${ph.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+                }
+                const tb = ((combinedChain.solTrading != null ? combinedChain.solTrading : combinedChain.sol) || 0) * SOL_USD
+                  + visHolds(combinedChain.holdings).filter((h) => h.src !== "phantom").reduce((s, h) => s + (h.usd || 0), 0);
+                return hideBalance ? "⚡•••" : `⚡$${tb.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+              }
+              return totalEquity > 0 ? (hideBalance ? "•••••" : `$${totalEquity.toLocaleString(undefined, { maximumFractionDigits: 0 })}`) : "‹ WALLET";
+            })()}
           </button>
 
           <div onClick={() => setPortfolioDrawer(false)}
