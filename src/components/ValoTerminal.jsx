@@ -7356,7 +7356,7 @@ const tokMetrics = (t) => {
   return { winMin, tx, txRate: tx / winMin, flow, buyRatio, accel, ageMs, isPump, curvePct, turnover };
 };
 // 🍀 weighted lottery order — health-biased randomness for hidden gems
-const luckyOrder = (list, seed) => {
+const luckyOrder = (list, seed, onlyElig = false) => {
   const elig = list.filter((t) => {
     const m = tokMetrics(t);
     if (!t.img) return false;                        // zero-metadata tokens are out
@@ -7378,6 +7378,7 @@ const luckyOrder = (list, seed) => {
   pool.forEach((x) => { x.key = Math.pow(x.r || 0.0001, 1 / x.w); });     // weighted-lottery key
   pool.sort((a, b) => b.key - a.key);
   const picked = pool.map((x) => x.t);
+  if (onlyElig) return picked;
   const rest = list.filter((t) => !picked.includes(t));
   return [...picked, ...rest];
 };
@@ -11816,24 +11817,31 @@ export default function App() {
 
   // 🍼 NEW mode pulls fresh launches straight from the source while active
   useEffect(() => {
-    if (scanMode !== "new" || !liveData) return;
+    if (!liveData) return;
+    // 📡 every lens streams its own candidate pool while active — the tabs
+    // stop being reshuffles of one shared board
+    const FEEDS = { new: ["new"], hot: ["trending", "top"], movers: ["top", "trending"], lucky: ["new", "trending"], trending: ["trending"] };
+    const feeds = FEEDS[scanMode] || ["trending"];
     let stop = false;
     const pull = async () => {
       try {
-        const r = await fetch(`/api/tokens?feed=new&t=${Math.floor(Date.now() / 8000)}`);
-        if (!r.ok) return;
-        const rows = await r.json();
-        if (stop || !Array.isArray(rows)) return;
+        const rs = await Promise.allSettled(feeds.map((f) => fetch(`/api/tokens?feed=${f}&t=${Math.floor(Date.now() / 8000)}`)));
+        const rows = [];
+        for (const rr of rs) if (rr.status === "fulfilled" && rr.value.ok) {
+          try { const a = await rr.value.json(); if (Array.isArray(a)) rows.push(...a); } catch (e) {}
+        }
+        if (stop || !rows.length) return;
         const fresh = rows.filter((x) => (+x.mc || 0) < 1e11).map(adoptMarketToken);
         setMoreToks((M) => {
           const seen = new Set([...(tokensRef.current || []), ...M].map((t) => t.liveMint || t.pool));
-          const add = fresh.filter((t) => !seen.has(t.liveMint || t.pool));
-          return add.length ? [...add, ...M].slice(0, 200) : M;
+          const add = []; const sN = new Set();
+          for (const t of fresh) { const k = t.liveMint || t.pool; if (seen.has(k) || sN.has(k)) continue; sN.add(k); add.push(t); }
+          return add.length ? [...add, ...M].slice(0, 260) : M;
         });
       } catch (e) {}
     };
     pull();
-    const iv = setInterval(pull, 12000);
+    const iv = setInterval(pull, scanMode === "new" ? 12000 : 25000);
     return () => { stop = true; clearInterval(iv); };
   }, [scanMode, liveData]);
   const [scanPull, setScanPull] = useState(0);            // ⤓ live pull distance (px)
@@ -13528,16 +13536,15 @@ export default function App() {
       out = out.filter((t) => !(t.createdAt && Date.now() - t.createdAt < 12 * 60e3)
         || keepIds.has(t.id) || (t.liveMint && chainLedger.byMint[t.liveMint] && chainLedger.byMint[t.liveMint].qty > 0));
     }
-    if (scanMode === "lucky") return luckyOrder(out, "lucky" + scanShuffleRef.current);
+    if (scanMode === "lucky") return luckyOrder(out, "lucky" + scanShuffleRef.current, true);
     if (scanMode === "new") {
       // 🍼 1–15min old · ≥5 baseline tx (deployed AND trading) · curve <15% =
       // ground floor. Strictly newest first.
       const fresh = out.filter((t) => {
         const m = tokMetrics(t);
-        return m.ageMs <= 15 * 60e3 && m.tx >= 5 && (!m.isPump || m.curvePct < 15);
+        return (m.ageMs <= 15 * 60e3 && m.tx >= 5 && (!m.isPump || m.curvePct < 15)) || t.id === sel;
       });
-      const rest = out.filter((t) => !fresh.includes(t)).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      return [...fresh.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)), ...rest];
+      return fresh.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     }
     if (scanMode === "hot") {
       // 💪 nearing graduation (curve 60–95%) · real velocity (>50 tx / 5min
@@ -13545,18 +13552,16 @@ export default function App() {
       const hot = out.filter((t) => {
         const m = tokMetrics(t);
         const curveOk = !m.isPump || (m.curvePct >= 60 && m.curvePct <= 95);
-        return curveOk && m.txRate >= 10 && (m.turnover > 0.4 || m.accel > 1.4) && (t.traders || 0) >= 80;
+        return (curveOk && m.txRate >= 10 && (m.turnover > 0.4 || m.accel > 1.4) && (t.traders || 0) >= 80) || t.id === sel;
       });
-      const rest = out.filter((t) => !hot.includes(t));
-      return [...hot.sort((a, b) => tokMetrics(b).txRate - tokMetrics(a).txRate), ...rest];
+      return hot.sort((a, b) => tokMetrics(b).txRate - tokMetrics(a).txRate);
     }
     if (scanMode === "movers") {
       // 📈 price velocity over the rolling short window · ≥$2K liquidity so
       // dust trades can't fake a spike · gainers ⇄ losers toggle
-      const mv = out.filter((t) => (t.tvl || 0) >= 2000 && Math.abs(t.ch || 0) > 1
-        && (moversSide === "lose" ? (t.ch || 0) < 0 : (t.ch || 0) > 0));
-      const rest = out.filter((t) => !mv.includes(t));
-      return [...mv.sort((a, b) => Math.abs(b.ch || 0) - Math.abs(a.ch || 0) || heat2(b) - heat2(a)), ...rest];
+      const mv = out.filter((t) => ((t.tvl || 0) >= 2000 && Math.abs(t.ch || 0) > 1
+        && (moversSide === "lose" ? (t.ch || 0) < 0 : (t.ch || 0) > 0)) || t.id === sel);
+      return mv.sort((a, b) => Math.abs(b.ch || 0) - Math.abs(a.ch || 0) || heat2(b) - heat2(a));
     }
     // 🔥 trending: volume acceleration (now ≥3× the day's pace) + net buy
     // pressure (>70%) + freshness (<1h) — scored, hottest composite first
@@ -13714,9 +13719,19 @@ export default function App() {
         const jt = rt.status === "fulfilled" && rt.value.ok ? await rt.value.json() : null;
         const jw = rw.status === "fulfilled" && rw.value.ok ? await rw.value.json() : null;
         if (stop) return;
+        let launches = (jl && jl.launches) || [];
+        // ⚓ floor of truth: THIS token is theirs by definition — if the pump
+        // catalog omitted it (or came back empty), it still shows
+        const selNow = selected;
+        if (selNow && selNow.liveMint && tokCreator && tokCreator.creator === w && !launches.some((l2) => l2.mint === selNow.liveMint)) {
+          launches = [{ mint: selNow.liveMint, sym: selNow.sym, name: selNow.name || selNow.sym,
+            createdAt: selNow.createdAt || null, mc: selNow.mc || 0,
+            complete: !(/pump$/i.test(selNow.liveMint)) || ((selNow.mc || 0) / 69000) * 100 >= 100,
+            img: selNow.img || null }, ...launches];
+        }
         setDevPanel({
           w,
-          launches: (jl && jl.launches) || [],
+          launches,
           moves: (jt && Array.isArray(jt.trades)) ? jt.trades.filter((t2) => t2.side === "out" || t2.side === "in").slice(0, 14) : [],
           sol: jw ? jw.sol || 0 : null,
           loading: false,

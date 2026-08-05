@@ -9,26 +9,35 @@ export default async function handler(req, res) {
 
   // 🧪 launches mode: every token this wallet created (pump.fun catalog)
   if (wallet && !mint) {
-    try {
-      const r = await fetch(`https://frontend-api.pump.fun/coins/user-created-coins/${wallet}?offset=0&limit=50&includeNsfw=true`, {
-        headers: { accept: "application/json" }, signal: AbortSignal.timeout(5000),
-      });
-      if (r.ok) {
+    const HOSTS = ["frontend-api-v3.pump.fun", "frontend-api-v2.pump.fun", "frontend-api.pump.fun"];
+    const HEADERS = {
+      accept: "application/json",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+      origin: "https://pump.fun", referer: "https://pump.fun/",
+    };
+    for (const host of HOSTS) {
+      try {
+        const r = await fetch(`https://${host}/coins/user-created-coins/${wallet}?offset=0&limit=100&includeNsfw=true`, {
+          headers: HEADERS, signal: AbortSignal.timeout(5000),
+        });
+        if (!r.ok) continue;
         const j = await r.json();
-        const arr = Array.isArray(j) ? j : (j && j.coins) || [];
+        // pump has shipped: bare array · {coins} · {data} · {items}
+        const arr = Array.isArray(j) ? j : (j && (j.coins || j.data || j.items)) || [];
+        if (!arr.length && host !== HOSTS[HOSTS.length - 1]) continue;  // empty? try next host before believing it
         const launches = arr.map((c) => ({
-          mint: c.mint, sym: c.symbol, name: c.name,
-          createdAt: c.created_timestamp || null,
-          mc: +c.usd_market_cap || 0,
-          complete: !!c.complete,        // graduated to Raydium
-          img: c.image_uri || null,
-        }));
+          mint: c.mint || c.address, sym: c.symbol || c.sym, name: c.name,
+          createdAt: c.created_timestamp || c.createdAt || null,
+          mc: +c.usd_market_cap || +c.usdMarketCap || 0,
+          complete: !!(c.complete || c.raydium_pool || c.raydiumPool),   // graduated
+          img: c.image_uri || c.imageUri || c.image || null,
+        })).filter((l) => l.mint);
         res.setHeader("Cache-Control", "s-maxage=120, stale-while-revalidate=600");
-        return res.status(200).json({ wallet, launches });
-      }
-    } catch (e) {}
-    res.setHeader("Cache-Control", "s-maxage=120");
-    return res.status(200).json({ wallet, launches: [] });
+        return res.status(200).json({ wallet, launches, src: host });
+      } catch (e) {}
+    }
+    res.setHeader("Cache-Control", "s-maxage=60");
+    return res.status(200).json({ wallet, launches: [], src: "none" });
   }
   if (!mint) return res.status(400).json({ error: "mint or wallet required" });
 

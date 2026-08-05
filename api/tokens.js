@@ -58,7 +58,13 @@ export default async function handler(req, res) {
         id: a.address, mint: meta.address || null, sym, name: meta.name || sym,
         img: meta.image_url && meta.image_url !== "missing.png" ? meta.image_url : null,
         hue: hueOf(sym), price,
-        mc: parseFloat(a.market_cap_usd) || parseFloat(a.fdv_usd) || 0,
+        mc: (() => {
+          const mc0 = parseFloat(a.market_cap_usd) || parseFloat(a.fdv_usd) || 0;
+          const mint0 = meta.address || null;
+          // pump tokens: fixed 1B supply - feed FDV far above price*1B is junk
+          if (mint0 && /pump$/i.test(mint0) && price > 0 && (mc0 <= 0 || mc0 > price * 1e9 * 3)) return price * 1e9;
+          return mc0;
+        })(),
         tvl: parseFloat(a.reserve_in_usd) || 0,
         // the card's flow stats — from the SHORT window, so they actually move
         greenUsd: winVol * (buys / txTotal), redUsd: winVol * (sells / txTotal),
