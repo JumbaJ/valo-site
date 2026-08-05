@@ -6474,15 +6474,18 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               borderTopRightRadius: liveMode && turboState ? 0 : undefined, borderBottomRightRadius: liveMode && turboState ? 0 : undefined }}>💼 Wallet</button>
           {liveMode && (
             <button onClick={() => setTurboPop((v) => !v)}
-              title={!turboState ? "Set up your ⚡ TURBO wallet" : turboState.unlocked ? "◆ TURBO armed & ready — tap to manage" : "⚡ TURBO locked (disarmed) — tap to unlock"}
+              title={!turboState ? "Set up your ⚡ TURBO wallet"
+                : turboState.unlocked && turboAutoOn ? "◆ single-tap trading ARMED — bots + one-tap buys/sells fire instantly"
+                : turboState.unlocked ? "⚡ TURBO unlocked — arm automation for single-tap trading"
+                : "⚡ TURBO locked (disarmed) — tap to unlock"}
               style={{ flex: "0 0 auto", padding: "7px 11px", fontSize: 11, fontFamily: T.mono, fontWeight: 900, cursor: "pointer",
                 display: "inline-flex", alignItems: "center", gap: 3,
                 borderRadius: "0 8px 8px 0", borderLeft: "none",
-                border: `1px solid ${!turboState ? T.border2 : turboState.unlocked ? VALO_PURPLE : T.red}`,
-                background: !turboState ? "rgba(255,255,255,0.03)" : turboState.unlocked ? "rgba(125,92,240,0.14)" : "rgba(234,57,67,0.12)",
-                color: !turboState ? T.faint : turboState.unlocked ? VALO_PURPLE : T.red,
-                boxShadow: turboState && turboState.unlocked ? `0 0 11px ${VALO_PURPLE}66` : turboState ? `0 0 8px ${T.red}33` : "none" }}>
-              {turboState && turboState.unlocked ? (
+                border: `1px solid ${!turboState ? T.border2 : turboState.unlocked && turboAutoOn ? VALO_PURPLE : turboState.unlocked ? T.green : T.red}`,
+                background: !turboState ? "rgba(255,255,255,0.03)" : turboState.unlocked && turboAutoOn ? "rgba(125,92,240,0.14)" : turboState.unlocked ? "rgba(22,199,132,0.14)" : "rgba(234,57,67,0.12)",
+                color: !turboState ? T.faint : turboState.unlocked && turboAutoOn ? VALO_PURPLE : turboState.unlocked ? T.green : T.red,
+                boxShadow: turboState && turboState.unlocked && turboAutoOn ? `0 0 11px ${VALO_PURPLE}66` : turboState && turboState.unlocked ? `0 0 9px ${T.green}44` : turboState ? `0 0 8px ${T.red}33` : "none" }}>
+              {turboState && turboState.unlocked && turboAutoOn ? (
                 // ◆ the brand diamond, armed & spinning — same stone as the wordmark
                 <span style={{ position: "relative", width: 13, height: 13, display: "inline-block", perspective: 60 }}>
                   <span style={{ position: "absolute", inset: 0, display: "block", transformStyle: "preserve-3d", animation: "diamond3d 5s linear infinite" }}>
@@ -6504,7 +6507,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
             <div onClick={() => setTurboPop(false)} style={{ position: "fixed", inset: 0, zIndex: 44 }} />
             <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 45,
               maxHeight: "62vh", overflowY: "auto", borderRadius: 12,
-              boxShadow: "0 18px 50px rgba(0,0,0,0.7)", border: `1px solid ${turboState && turboState.unlocked ? VALO_PURPLE : T.red}55`,
+              boxShadow: "0 18px 50px rgba(0,0,0,0.7)", border: `1px solid ${turboState && turboState.unlocked && turboAutoOn ? VALO_PURPLE : turboState && turboState.unlocked ? T.green : T.red}55`,
               background: T.panel }}>
               <TurboPanel turbo={turboState} onCreate={onTurboCreate} onUnlock={onTurboUnlock}
                 onLock={onTurboLock} onFund={onTurboFund} onSweep={onTurboSweep}
@@ -7274,6 +7277,48 @@ function CardMiniChart({ candles, hue, mode, tfMin = 15, count = 90, full = fals
 }
 
 const visHolds = (arr) => (arr || []).filter((h) => h && !h.spam && !h.dust);
+// 📐 per-token trading metrics, derived from the shortest live stat window
+const tokMetrics = (t) => {
+  const winMin = t.statWin === "5m" ? 5 : t.statWin === "1h" ? 60 : 1440;
+  const tx = (t.buys || 0) + (t.sells || 0);
+  const flow = (t.greenUsd || 0) + (t.redUsd || 0);
+  const buyRatio = tx > 0 ? (t.buys || 0) / tx : 0;
+  const rateNow = winMin <= 60 ? flow / winMin : (t.vol24 || 0) / 1440;   // $/min lately
+  const rateDay = (t.vol24 || 0) / 1440;                                  // $/min baseline
+  const accel = rateDay > 1 ? rateNow / rateDay : rateNow > 0 ? 3 : 0;    // volume acceleration
+  const ageMs = t.createdAt ? Date.now() - t.createdAt : Infinity;
+  // pump bonding curve ≈ mc / $69K graduation; graduated pools read 100
+  const isPump = !!(t.liveMint && /pump$/i.test(t.liveMint || ""));
+  const curvePct = isPump ? Math.min(100, ((t.mc || 0) / 69000) * 100) : 100;
+  const turnover = (t.mc || 0) > 0 ? (t.vol24 || 0) / t.mc : 0;
+  return { winMin, tx, txRate: tx / winMin, flow, buyRatio, accel, ageMs, isPump, curvePct, turnover };
+};
+// 🍀 weighted lottery order — health-biased randomness for hidden gems
+const luckyOrder = (list, seed) => {
+  const elig = list.filter((t) => {
+    const m = tokMetrics(t);
+    if (!t.img) return false;                        // zero-metadata tokens are out
+    if (m.winMin > 60 || m.tx < 3) return false;     // anti-dead: real recent trades
+    return true;
+  });
+  const weightOf = (t) => {
+    const m = tokMetrics(t);
+    let w = 1;
+    if ((t.mc || 0) < 50000) w += 1.6;               // undervalued bias
+    if (m.curvePct >= 5 && m.curvePct <= 60) w += 1.2; // ground-floor-but-alive curve
+    if ((t.ch || 0) > 0) w += 0.8;                   // quietly climbing
+    if (m.buyRatio > 0.6) w += 0.8;                  // accumulation over distribution
+    w += Math.min(1.5, (t.traders || 0) / Math.max(10, m.ageMs / 60000) * 0.4); // holders growing vs age
+    return w;
+  };
+  // sample without replacement by weight, deterministic per seed
+  const pool = elig.map((t) => ({ t, w: weightOf(t), r: (hashStr(seed + (t.liveMint || t.id)) % 1000) / 1000 }));
+  pool.forEach((x) => { x.key = Math.pow(x.r || 0.0001, 1 / x.w); });     // weighted-lottery key
+  pool.sort((a, b) => b.key - a.key);
+  const picked = pool.map((x) => x.t);
+  const rest = list.filter((t) => !picked.includes(t));
+  return [...picked, ...rest];
+};
 function fmtAge(createdAt) {
   if (!(createdAt > 0)) return null;
   const m = Math.max(1, Math.floor((Date.now() - createdAt) / 60000));
@@ -8331,7 +8376,8 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
   // from the source every 12s so the list grows in real time
   const [freshX, setFreshX] = useState([]);
   const [plat, setPlat] = useState("all");        // all | pump | rh (exclusive)
-  const [flags, setFlags] = useState({ trend: false, top: false, fresh: false, safe: false, risky: false });
+  const [flags, setFlags] = useState({ trend: false, top: false, fresh: false, safe: false, risky: false, hot: false, lucky: false });
+  const [luckySeed, setLuckySeed] = useState(0.5);
   useEffect(() => {
     if (!flags.fresh) return;
     let stop = false;
@@ -8385,22 +8431,24 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
     const tx = (t.buys || 0) + (t.sells || 0);
     return { winMin, tx, txRate: tx / winMin, volRate: (t.vol24 || 0) / 1440 };
   };
-  if (flags.top) list = list.filter((t) => {
-    const h = heatOf(t);
-    // 100s of trades within a ≤12h window (a 24h-only window must prove it
-    // harder), plus fast money: ≥$150/min flowing or ≥$250K daily volume
-    const recentOk = h.winMin <= 720 ? h.tx >= 100 : h.tx >= 400;
-    const fastVol = h.volRate >= 150 || (t.vol24 || 0) >= 250000;
-    return recentOk && fastVol;
+  if (flags.hot) list = list.filter((t) => {
+    // 💪 curve 60–95% · velocity · 80+ traders (matches the scanner lens)
+    const m = tokMetrics(t);
+    const curveOk = !m.isPump || (m.curvePct >= 60 && m.curvePct <= 95);
+    return curveOk && m.txRate >= 10 && (m.turnover > 0.4 || m.accel > 1.4) && (t.traders || 0) >= 80;
   });
+  // 📈 MOVERS (took over the old TOP TRADERS chip): velocity + $2K LP floor
+  if (flags.top) list = list.filter((t) => (t.tvl || 0) >= 2000 && Math.abs(t.ch || 0) > 1);
   if (flags.fresh) list = list.filter((t) => t.isNew || t.ageMin < 90);
   if (flags.safe) list = list.filter((t) => scoreToken(t) >= 62);
   if (flags.risky) list = list.filter((t) => scoreToken(t) < 50);
   // pump/rh picked with nothing else → trending & movers float first
-  list = flags.fresh
+  list = flags.lucky
+    ? luckyOrder(list, "eco" + luckySeed)                                 // 🍀 weighted-lottery gems first
+    : flags.fresh
     ? [...list].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))   // 🍼 newest launch first, real time
     : flags.top
-    ? [...list].sort((a, b) => heatOf(b).txRate - heatOf(a).txRate)       // 🔥 hottest tape first
+    ? [...list].sort((a, b) => Math.abs(b.ch || 0) - Math.abs(a.ch || 0)) // 📈 movers: velocity first
     : [...list].sort((a, b) => (isHotTok(b) ? 1 : 0) - (isHotTok(a) ? 1 : 0) || b.momentum - a.momentum);
   const fbtn = (on, label, click, col) => (
     <button onClick={click} style={{ ...chip(on), padding: isMobile ? "5px 9px" : "5px 12px", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 900, letterSpacing: 0.5,
@@ -8410,14 +8458,21 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
   return (
     <div style={{ display: "flex", flexDirection: "column", maxHeight: maxH, minHeight: 0 }}>
       <div style={{ display: "flex", gap: 5, flexWrap: "wrap", padding: "9px 10px", borderBottom: `1px solid ${T.border}`, flexShrink: 0, position: "sticky", top: 0, background: T.panel, zIndex: 2 }}>
-        {fbtn(plat === "all", "ALL", () => setPlat("all"), T.blue)}
-        {fbtn(plat === "pump", "PUMP.FUN", () => setPlat("pump"), T.green)}
+        {isMobile && fbtn(plat === "all", "ALL", () => setPlat("all"), T.blue)}
+        {fbtn(plat === "pump", "PUMP.FUN", () => setPlat(plat === "pump" ? "all" : "pump"), T.green)}
 
         <span style={{ width: 1, background: T.border, margin: "0 2px" }} />
         {fbtn(flags.trend, "🔥 TRENDING", () => flag("trend"), T.amber)}
-        {fbtn(flags.top, "TOP TRADERS", () => flag("top"), VALO_PURPLE)}
+        {fbtn(flags.hot, "💪 HOT", () => flag("hot"), "#ff9f43")}
+        {fbtn(flags.top, "📈 MOVERS", () => flag("top"), VALO_PURPLE)}
         {fbtn(flags.fresh, "NEW", () => flag("fresh"), T.amber)}
-        {fbtn(flags.safe, "SAFE", () => flag("safe"), T.green)}
+        <button onClick={() => { setLuckySeed(Math.random()); flag("lucky"); }}
+          style={{ ...chip(flags.lucky), display: "inline-flex", alignItems: "center", gap: 4, padding: "5px 10px",
+            fontSize: 9.5, fontWeight: 900, color: flags.lucky ? "#4ade80" : T.dim,
+            borderColor: flags.lucky ? "#4ade8066" : undefined }}>
+          <span className="lucky-charm">🍀</span> LUCKY
+        </button>
+        {isMobile && fbtn(flags.safe, "SAFE", () => flag("safe"), T.green)}
         {fbtn(flags.risky, "RISKY", () => flag("risky"), T.red)}
       </div>
       <div data-ecozone="1" style={{ overflowY: "auto", padding: "8px 8px 12px", minHeight: 0 }}>
@@ -11640,16 +11695,17 @@ export default function App() {
 
   // ♾ ENDLESS SCANNER — more real tokens append as you reach the bottom
   const [moreToks, setMoreToks] = useState([]);
-  const [scanMode, setScanMode] = useState(() => { try { return localStorage.getItem("valo-scan-mode") || "trending"; } catch (e) { return "trending"; } });
+  const [scanMode, setScanMode] = useState(() => { try { const v0 = localStorage.getItem("valo-scan-mode") || "trending"; return v0 === "random" ? "lucky" : v0; } catch (e) { return "trending"; } });
   const [scanModeOpen, setScanModeOpen] = useState(false);
+  const [moversSide, setMoversSide] = useState("gain");   // 📈 gainers ⇄ 📉 losers
   const scanShuffleRef = useRef(Math.random());
   useEffect(() => { try { localStorage.setItem("valo-scan-mode", scanMode); } catch (e) {} if (scanMode === "random") scanShuffleRef.current = Math.random(); }, [scanMode]);
   const SCAN_MODES = [
-    ["trending", "🔥 TRENDING", "the market's main stage"],
-    ["hot", "💪 HOT", "big buy-ins · low sell pressure"],
-    ["new", "🍼 NEW", "newest launches, arriving live"],
-    ["movers", "📈 MOVERS", "sustained green for 15m+ · any LP"],
-    ["random", "🎲 RANDOM", "shuffled discovery"],
+    ["trending", "🔥 TRENDING", "volume accelerating ≥3× · buy pressure >70% · fresh <1h"],
+    ["hot", "💪 HOT", "curve 60–95% to graduation · 50+ tx pace · 80+ traders"],
+    ["new", "🍼 NEW", "1–15min old · trading confirmed · curve <15% ground floor"],
+    ["movers", "📈 MOVERS", "price velocity · $2K+ LP so dust can't fake spikes"],
+    ["lucky", "🍀 LUCKY PICK", "weighted lottery — hidden gems with healthy vitals"],
   ];
   const scanModeDropdown = (
     <div style={{ position: "relative", zIndex: 6 }}>
@@ -11658,7 +11714,11 @@ export default function App() {
         style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6,
           border: `1px solid ${VALO_PURPLE}55`, background: "rgba(125,92,240,0.1)", color: VALO_PURPLE,
           borderRadius: 9, padding: "7px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 0.5 }}>
-        <span>📡 {(SCAN_MODES.find(([k]) => k === scanMode) || SCAN_MODES[0])[1]}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+          {scanMode === "lucky"
+            ? <><span className="lucky-charm">🍀</span> LUCKY PICK</>
+            : <>📡 {(SCAN_MODES.find(([k]) => k === scanMode) || SCAN_MODES[0])[1]}</>}
+        </span>
         <span style={{ fontSize: 8 }}>{scanModeOpen ? "▲" : "▼"}</span>
       </button>
       {scanModeOpen && (
@@ -11668,11 +11728,20 @@ export default function App() {
             background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 10, overflow: "hidden",
             boxShadow: "0 14px 40px rgba(0,0,0,0.6)" }}>
             {SCAN_MODES.map(([k, l, d]) => (
-              <button key={k} onClick={() => { setScanMode(k); setScanModeOpen(false); }}
+              <button key={k} onClick={() => { setScanMode(k); if (k === "lucky") scanShuffleRef.current = Math.random(); setScanModeOpen(false); }}
                 style={{ display: "block", width: "100%", textAlign: "left", border: "none", cursor: "pointer",
                   background: scanMode === k ? "rgba(125,92,240,0.16)" : "transparent",
                   padding: "8px 11px", borderBottom: `1px solid ${T.border}` }}>
-                <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: scanMode === k ? VALO_PURPLE : T.text }}>{l}</div>
+                <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: scanMode === k ? VALO_PURPLE : T.text, display: "flex", alignItems: "center", gap: 5 }}>
+                  {k === "lucky" ? <><span className="lucky-charm">🍀</span> LUCKY PICK</> : l}
+                  {k === "movers" && scanMode === "movers" && (
+                    <span onClick={(e) => { e.stopPropagation(); setMoversSide((s2) => (s2 === "gain" ? "lose" : "gain")); }}
+                      style={{ marginLeft: "auto", border: `1px solid ${moversSide === "gain" ? T.green : T.red}66`,
+                        color: moversSide === "gain" ? T.green : T.red, borderRadius: 999, padding: "1px 8px", fontSize: 8 }}>
+                      {moversSide === "gain" ? "📈 GAINERS" : "📉 LOSERS"}
+                    </span>
+                  )}
+                </div>
                 <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint }}>{d}</div>
               </button>
             ))}
@@ -13330,22 +13399,49 @@ export default function App() {
       out = out.filter((t) => !(t.createdAt && Date.now() - t.createdAt < 12 * 60e3)
         || keepIds.has(t.id) || (t.liveMint && chainLedger.byMint[t.liveMint] && chainLedger.byMint[t.liveMint].qty > 0));
     }
-    if (scanMode === "random") return seedSort(out);
-    if (scanMode === "new") return [...out].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    if (scanMode === "lucky") return luckyOrder(out, "lucky" + scanShuffleRef.current);
+    if (scanMode === "new") {
+      // 🍼 1–15min old · ≥5 baseline tx (deployed AND trading) · curve <15% =
+      // ground floor. Strictly newest first.
+      const fresh = out.filter((t) => {
+        const m = tokMetrics(t);
+        return m.ageMs <= 15 * 60e3 && m.tx >= 5 && (!m.isPump || m.curvePct < 15);
+      });
+      const rest = out.filter((t) => !fresh.includes(t)).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      return [...fresh.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)), ...rest];
+    }
     if (scanMode === "hot") {
-      // 💪 big buy-ins, low sell pressure — buyers outweigh sellers decisively
-      const hot = out.filter((t) => (t.greenUsd || 0) > (t.redUsd || 0) * 1.25 && (t.buys || 0) > (t.sells || 0));
+      // 💪 nearing graduation (curve 60–95%) · real velocity (>50 tx / 5min
+      // pace) · turnover rising · ≥80 unique traders
+      const hot = out.filter((t) => {
+        const m = tokMetrics(t);
+        const curveOk = !m.isPump || (m.curvePct >= 60 && m.curvePct <= 95);
+        return curveOk && m.txRate >= 10 && (m.turnover > 0.4 || m.accel > 1.4) && (t.traders || 0) >= 80;
+      });
       const rest = out.filter((t) => !hot.includes(t));
-      return [...hot.sort((a, b) => ((b.greenUsd || 0) - (b.redUsd || 0)) - ((a.greenUsd || 0) - (a.redUsd || 0))), ...rest];
+      return [...hot.sort((a, b) => tokMetrics(b).txRate - tokMetrics(a).txRate), ...rest];
     }
     if (scanMode === "movers") {
-      // 📈 sustained positive movement (short window AND day both green) — any LP
-      const mv = out.filter((t) => (t.ch || 0) > 1.5 && (t.ch24 || 0) > 0);
+      // 📈 price velocity over the rolling short window · ≥$2K liquidity so
+      // dust trades can't fake a spike · gainers ⇄ losers toggle
+      const mv = out.filter((t) => (t.tvl || 0) >= 2000 && Math.abs(t.ch || 0) > 1
+        && (moversSide === "lose" ? (t.ch || 0) < 0 : (t.ch || 0) > 0));
       const rest = out.filter((t) => !mv.includes(t));
-      return [...mv.sort((a, b) => (b.ch || 0) - (a.ch || 0) || heat2(b) - heat2(a)), ...rest];
+      return [...mv.sort((a, b) => Math.abs(b.ch || 0) - Math.abs(a.ch || 0) || heat2(b) - heat2(a)), ...rest];
     }
-    return out;   // trending: feed order
-  }, [shownLive, scanMode]);
+    // 🔥 trending: volume acceleration (now ≥3× the day's pace) + net buy
+    // pressure (>70%) + freshness (<1h) — scored, hottest composite first
+    const scoreOf = (t) => {
+      const m = tokMetrics(t);
+      let s2 = 0;
+      if (m.accel >= 3) s2 += 3; else s2 += Math.min(2.5, m.accel);
+      if (m.buyRatio >= 0.7) s2 += 2; else s2 += m.buyRatio;
+      if (m.ageMs < 3600e3) s2 += 1.5;
+      if ((t.ch || 0) > 0) s2 += 0.5;             // curve climbing proxy
+      return s2;
+    };
+    return [...out].sort((a, b) => scoreOf(b) - scoreOf(a));
+  }, [shownLive, scanMode, moversSide]);
   shownRef.current = shown;
 
   const gTvl = tokens.reduce((a, t) => a + t.tvl, 0);
@@ -17340,6 +17436,16 @@ export default function App() {
         @keyframes tierPop4 { 0%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1); } 22%{ transform: scale(1.42) rotate(-9deg); filter: brightness(1.9) saturate(1.5); } 48%{ transform: scale(1.12) rotate(7deg); filter: brightness(1.3) saturate(1.2); } 74%{ transform: scale(1.22) rotate(-3deg); filter: brightness(1.5); } 100%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1); } }
         @keyframes tierPop5 { 0%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1) hue-rotate(0); } 18%{ transform: scale(1.55) rotate(-12deg); filter: brightness(2.2) saturate(1.8) hue-rotate(18deg); } 40%{ transform: scale(1.15) rotate(9deg); filter: brightness(1.4) saturate(1.4) hue-rotate(-12deg); } 62%{ transform: scale(1.35) rotate(-5deg); filter: brightness(1.9) saturate(1.6) hue-rotate(10deg); } 82%{ transform: scale(1.08) rotate(3deg); filter: brightness(1.2); } 100%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1) hue-rotate(0); } }
         @keyframes diamond3d { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
+        .lucky-charm { display: inline-block; animation: luckyCharm 2.6s ease-in-out infinite; filter: drop-shadow(0 0 4px rgba(74,222,128,0.8)); }
+        @keyframes luckyCharm {
+          0%, 100% { transform: rotate(0deg) scale(1); }
+          12% { transform: rotate(-18deg) scale(1.15); }
+          24% { transform: rotate(14deg) scale(1.12); }
+          36% { transform: rotate(-8deg) scale(1.05); }
+          48% { transform: rotate(0deg) scale(1); }
+          62% { transform: rotate(0deg) scale(1.22); filter: drop-shadow(0 0 9px rgba(74,222,128,1)); }
+          74% { transform: rotate(0deg) scale(1); }
+        }
         @keyframes diamond3dBurst { 0% { transform: rotateY(0deg) scale(1); } 55% { transform: rotateY(540deg) scale(1.22); } 100% { transform: rotateY(720deg) scale(1); } }
         @keyframes starFly1 { 0% { transform: translate(-42px, 16px) scale(0.4); opacity: 0; } 12% { opacity: 0.95; } 88% { opacity: 0.8; } 100% { transform: translate(44px, -20px) scale(1.05); opacity: 0; } }
         @keyframes starFly2 { 0% { transform: translate(38px, 22px) scale(0.5); opacity: 0; } 14% { opacity: 0.85; } 100% { transform: translate(-46px, -12px) scale(0.9); opacity: 0; } }
