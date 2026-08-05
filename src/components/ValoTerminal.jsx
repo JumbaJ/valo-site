@@ -13713,7 +13713,7 @@ export default function App() {
         setDevPanel({
           w,
           launches: (jl && jl.launches) || [],
-          moves: (jt && Array.isArray(jt.trades)) ? jt.trades.filter((t2) => t2.side === "out" || t2.side === "in").slice(0, 8) : [],
+          moves: (jt && Array.isArray(jt.trades)) ? jt.trades.filter((t2) => t2.side === "out" || t2.side === "in").slice(0, 14) : [],
           sol: jw ? jw.sol || 0 : null,
           loading: false,
         });
@@ -17066,14 +17066,25 @@ export default function App() {
                       })}
                     </div>
                   )}
-                  {/* creator rewards + fees */}
+                  {/* creator money — chain truth on live, sim cast in demo */}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
-                    {[
+                    {(liveData ? (() => {
+                      const mv = (devPanel && devPanel.moves) || [];
+                      const inSol = mv.filter((m2) => m2.side === "in").reduce((s2, m2) => s2 + (m2.solAmt || 0), 0);
+                      const outSol = mv.filter((m2) => m2.side === "out").reduce((s2, m2) => s2 + (m2.solAmt || 0), 0);
+                      const dot = devPanel && devPanel.loading ? "…" : null;
+                      return [
+                        ["WALLET BALANCE", dot || `◎ ${devPanel && devPanel.sol != null ? devPanel.sol.toFixed(3) : "—"}`, T.green],
+                        ["LAUNCHES", dot || String(devPanel && devPanel.launches ? devPanel.launches.length : "—"), T.blue],
+                        ["RECENT SOL IN", dot || `+${inSol.toFixed(3)} SOL`, T.green],
+                        ["RECENT SOL OUT", dot || `−${outSol.toFixed(3)} SOL`, T.amber],
+                      ];
+                    })() : [
                       ["CREATOR REWARDS", `${selected.dev.creatorRewardsSol.toFixed(1)} SOL`, T.green],
                       ["FEES · 24H", `${selected.dev.feesDay.toFixed(2)} SOL`, T.text],
                       ["FEES · 30D", `${selected.dev.feesMonth.toFixed(0)} SOL`, T.text],
                       ["FEES · 1Y", `${selected.dev.feesYear.toFixed(0)} SOL`, T.text],
-                    ].map(([k, v, c]) => (
+                    ]).map(([k, v, c]) => (
                       <div key={k} style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 12px" }}>
                         <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>{k}</div>
                         <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 800, color: c }}>{v}</div>
