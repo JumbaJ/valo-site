@@ -7343,6 +7343,13 @@ function CardMiniChart({ candles, hue, mode, tfMin = 15, count = 90, full = fals
 }
 
 const visHolds = (arr) => (arr || []).filter((h) => h && !h.spam && !h.dust);
+// 🚫 pump curve launches at ≈$4.2K MC — a pump token priced BELOW that floor
+// (mayhem-mode territory) is broken, drained, or abandoned. Not scanner material.
+const belowLaunch = (t) => {
+  if (!t || !t.liveMint || !/pump$/i.test(t.liveMint)) return false;
+  const mc = t.mc || 0;
+  return mc > 0 && mc < 3800;
+};
 // ✅ only OFFICIAL, valid links ever render: https + the platform's real domain
 const legitSocial = (kind, url) => {
   if (!url || typeof url !== "string") return null;
@@ -7414,7 +7421,59 @@ function fmtAge(createdAt) {
   const d = Math.floor(h / 24);
   return d < 30 ? `${d}d ${h % 24}h` : `${Math.floor(d / 30)}mo ${d % 30}d`;
 }
+function TokenVitalsPop({ t, isMobile = false, onClose, style = {} }) {
+  const [big, setBig] = React.useState("price");
+  const buys = t.buys || 0, sells = t.sells || 0;
+  const gU = t.greenUsd || 0, rU = t.redUsd || 0;
+  const bp = (gU + rU) > 0 ? gU / (gU + rU) : 0.5;
+  const m = tokMetrics(t);
+  const sc2 = scoreToken(t);
+  const isBig = big === "mc";
+  const d = isBig ? (t.ch24 || t.ch || 0) : (t.ch || 0);
+  return (
+    <div onClick={(e) => e.stopPropagation()}
+      style={{ position: "absolute", zIndex: 40, width: isMobile ? "calc(100% - 12px)" : 232,
+        background: T.panel, border: `1px solid ${ratingColor(sc2)}66`, borderRadius: 12, padding: 12,
+        boxShadow: "0 18px 50px rgba(0,0,0,0.7)", cursor: "default", textAlign: "left", ...style }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
+        <span style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 900, color: ratingColor(sc2) }}>{sc2}</span>
+        <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, lineHeight: 1.5 }}>LP · traders · flow · age<br/>turnover · metadata · curve</span>
+        <span onClick={(e) => { e.stopPropagation(); onClose && onClose(); }} role="button"
+          style={{ marginLeft: "auto", color: T.faint, cursor: "pointer", fontFamily: T.mono, fontSize: 11, padding: "0 2px" }}>✕</span>
+      </div>
+      <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, letterSpacing: 1, marginBottom: 3 }}>B/S PRESSURE · {t.statWin || "24h"}</div>
+      <div style={{ height: 10, borderRadius: 6, overflow: "hidden", display: "flex", border: `1px solid ${T.border}`, marginBottom: 3 }}>
+        <div style={{ width: `${Math.round(bp * 100)}%`, background: "linear-gradient(90deg,#0f9d63,#16c784)" }} />
+        <div style={{ flex: 1, background: "linear-gradient(90deg,#c62f3b,#ea3943)" }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 8, marginBottom: 9 }}>
+        <span style={{ color: T.green }}>▲ {buys} · {fmt$(gU)}</span>
+        <span style={{ color: T.red }}>{sells} ▼ · {fmt$(rU)}</span>
+      </div>
+      <div onClick={() => setBig(isBig ? "price" : "mc")} title="Tap to swap price / market cap"
+        style={{ cursor: "pointer", background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: "8px 10px", marginBottom: 8 }}>
+        <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, letterSpacing: 1 }}>{isBig ? "MARKET CAP" : "LIVE PRICE"} · tap to swap ⇄</div>
+        <div style={{ fontFamily: T.mono, fontSize: 15, fontWeight: 900, color: T.text }}>
+          {isBig ? fmt$(t.mc) : `$${fmtP(t.price)}`}
+        </div>
+        <div style={{ fontFamily: T.mono, fontSize: 8.5, color: d >= 0 ? T.green : T.red }}>
+          Δ {t.statWin || "24h"} {d >= 0 ? "+" : ""}{d.toFixed(2)}%
+        </div>
+        <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 2 }}>
+          {isBig ? `price $${fmtP(t.price)}` : `MC ${fmt$(t.mc)}`}
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, fontFamily: T.mono, fontSize: 8, color: T.dim }}>
+        <span>LP <b style={{ color: T.text }}>{fmt$(t.tvl)}</b></span>
+        <span>vol/min <b style={{ color: T.text }}>{fmt$(m.rateNow || 0)}</b></span>
+        <span>traders <b style={{ color: T.text }}>{t.traders || 0}</b></span>
+        <span>age <b style={{ color: T.text }}>{fmtAge(t.createdAt) || "—"}</b></span>
+      </div>
+    </div>
+  );
+}
 function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf = 15, isMobile = false, onHover, onLeave }) {
+  const [vitalsOpen, setVitalsOpen] = React.useState(null);
   // ⏱ live age — re-renders each minute so the clock actually moves on screen
   const [, setAgeTick] = useState(0);
   useEffect(() => {
@@ -7470,8 +7529,9 @@ function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line",
             )}
           </div>
         </div>
-        <div title={rug.rugged ? `Rugged — down ${(rug.drawdown * 100).toFixed(0)}% from peak with no recovery` : `Score ${score} · ${rating(score)}`}
-          style={{ position: "absolute", top: 7, right: 0, zIndex: 3, display: "flex", alignItems: "baseline", gap: 4,
+        <div title={rug.rugged ? `Rugged — down ${(rug.drawdown * 100).toFixed(0)}% from peak with no recovery` : `Score ${score} — tap for live vitals`}
+          onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setVitalsOpen((v) => (v ? null : { top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) })); }} role="button"
+          style={{ position: "absolute", top: 7, right: 0, zIndex: 3, display: "flex", alignItems: "baseline", gap: 4, cursor: "pointer",
             border: `1px solid ${rc}77`, borderRight: "none", background: `${rc}14`,
             borderRadius: "8px 0 0 8px", padding: "3px 8px 3px 7px", lineHeight: 1,
             boxShadow: `inset 0 0 10px ${rc}18` }}>
@@ -7479,6 +7539,14 @@ function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line",
             textShadow: `0 0 9px ${rc}55` }}>{score}</span>
           {(rug.rugged || rug.dying) && <span style={{ fontSize: isMobile ? 6.5 : 6, letterSpacing: 1.1, color: rc, fontWeight: 800, opacity: 0.85 }}>{rug.rugged ? "RUGGED" : "DYING"}</span>}
         </div>
+        {vitalsOpen && createPortal(
+          <>
+            <div onClick={(e) => { e.stopPropagation(); setVitalsOpen(null); }} style={{ position: "fixed", inset: 0, zIndex: 118 }} />
+            <TokenVitalsPop t={t} isMobile={isMobile} onClose={() => setVitalsOpen(null)}
+              style={isMobile
+                ? { position: "fixed", zIndex: 119, top: Math.min(vitalsOpen.top, window.innerHeight - 300), left: 8, right: 8, width: "auto" }
+                : { position: "fixed", zIndex: 119, top: Math.min(vitalsOpen.top, window.innerHeight - 320), right: vitalsOpen.right }} />
+          </>, document.body)}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
         <Meter label="MOMENTUM" value={Math.round(t.momentum)} color={accent(t.hue)} />
@@ -8510,6 +8578,8 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
   let list = cand.filter((t) => !ql || t.sym.toLowerCase().includes(ql) || (t.name || "").toLowerCase().includes(ql) || (t.ca || "").toLowerCase().includes(ql));
   // 🍼 brand-new launches live under the NEW filter (or an explicit search), not the default view
   if (!flags.fresh && !ql) list = list.filter((t) => !(t.createdAt && Date.now() - t.createdAt < 12 * 60e3));
+  // 🚫 below-launch pump tokens: excluded unless explicitly searched for
+  if (!ql) list = list.filter((t) => !belowLaunch(t));
   if (plat !== "all") list = list.filter((t) => platOf(t) === plat);
   if (flags.trend) list = list.filter(isHotTok);
   const heatOf = (t) => {
@@ -11905,7 +11975,7 @@ export default function App() {
       const st = scanPullRef.current; if (!st.on) return;
       const t0 = e.touches && e.touches[0]; if (!t0) return;
       const dy = t0.clientY - st.y0;
-      if (dy > 0) setScanPull(Math.min(110, dy * 0.6));
+      if (dy > 14) setScanPull(Math.min(110, (dy - 14) * 0.6));
     },
     onTouchEnd: () => {
       const fire = scanPull >= 64;
@@ -11920,11 +11990,17 @@ export default function App() {
     const now = Date.now();
     if (now - st.accAt > 700) st.acc = 0;
     st.accAt = now; st.acc += -e.deltaY;
-    setScanPull(Math.min(110, st.acc * 0.35));
-    if (st.acc >= 240) { st.acc = 0; setScanPull(0); refreshScanNow(); }
+    // dead zone: casual scroll-to-top never opens the strip — only a
+    // deliberate continued pull does
+    setScanPull(st.acc > 90 ? Math.min(110, (st.acc - 90) * 0.4) : 0);
+    if (st.acc >= 330) { st.acc = 0; setScanPull(0); refreshScanNow(); }
+    // auto-reset: the instant wheeling stops, the strip lets go — no stuck
+    // half-open state squeezing the column
+    clearTimeout(st.resetT);
+    st.resetT = setTimeout(() => { st.acc = 0; setScanPull(0); }, 450);
   };
   const scanPullStrip = (
-    <div style={{ height: scanRefreshing ? 30 : scanPull, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center",
+    <div style={{ height: scanRefreshing ? 30 : scanPull > 8 ? scanPull : 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center",
       transition: scanPull ? "none" : "height .22s ease", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.2,
       color: scanRefreshing || scanPull >= 64 ? T.green : T.faint }}>
       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -13581,10 +13657,14 @@ export default function App() {
     const heat2 = (t) => { const w = t.statWin === "5m" ? 5 : t.statWin === "1h" ? 60 : 1440; return ((t.buys || 0) + (t.sells || 0)) / w; };
     // 🍼 just-launched tokens only show under the NEW lens — everywhere else
     // they'd crowd out charts that are actually moving
-    if (scanMode !== "new") {
+    {
       const keepIds = new Set([sel, ...Object.keys(positions || {}).map(Number)]);
-      out = out.filter((t) => !(t.createdAt && Date.now() - t.createdAt < 12 * 60e3)
-        || keepIds.has(t.id) || (t.liveMint && chainLedger.byMint[t.liveMint] && chainLedger.byMint[t.liveMint].qty > 0));
+      const keep = (t) => keepIds.has(t.id) || (t.liveMint && chainLedger.byMint[t.liveMint] && chainLedger.byMint[t.liveMint].qty > 0);
+      // 🚫 below-launch pump tokens never ride any lens (held/selected excepted)
+      out = out.filter((t) => !belowLaunch(t) || keep(t));
+      if (scanMode !== "new") {
+        out = out.filter((t) => !(t.createdAt && Date.now() - t.createdAt < 12 * 60e3) || keep(t));
+      }
     }
     // ⛑ backfill: whatever the lens, an empty scanner helps no one — thin
     // matches get topped up with tokens that are actually MOVING right now
