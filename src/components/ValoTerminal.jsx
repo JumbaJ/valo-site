@@ -1130,6 +1130,16 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
               ctx.fillText(list.length > 1 ? `${isBuy ? "▲" : "▼"}${list.length}` : (list[0].dev ? "D" : isBuy ? "▲" : "▼"), px, by + h / 2 + 0.5);
             }
             ctx.textAlign = "left"; ctx.textBaseline = "middle";
+            // 🏷 the amount of THIS token they bought/sold, right on the marker
+            if (list.length === 1 && typeof list[0].amt === "number" && list[0].amt > 0 && (((geom.current || {}).step || 8) > 5)) {
+              ctx.font = `bold 8px ${T.mono}`;
+              ctx.fillStyle = isBuy ? "rgba(22,199,132,0.95)" : "rgba(234,57,67,0.95)";
+              const amtLbl = `${fmtQty(list[0].amt)}${list[0].unit && list[0].unit !== "SOL" ? "" : " SOL"}`;
+              ctx.strokeStyle = "rgba(5,7,11,0.85)"; ctx.lineWidth = 2.5;
+              ctx.strokeText(amtLbl, px + w / 2 + 4, by + h / 2 + 0.5);
+              ctx.fillText(amtLbl, px + w / 2 + 4, by + h / 2 + 0.5);
+              ctx.lineWidth = 1;
+            }
             markerHitsRef.current.push({ x: px, y: by + h / 2, r: 12, group: { side: isBuy ? "buy" : "sell", list, sym: list[0] && list[0].sym, trader: traderKey } });
             rank++;
           });
@@ -8946,7 +8956,7 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
               animation: flip.n ? `${flip.dir > 0 ? "pageFlipNext" : "pageFlipPrev"} .38s cubic-bezier(.4,.05,.25,1)` : "none" }}>
             {[
               ["TIME", new Date(tr.t).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })],
-              ["AMOUNT", `${tr.amt} ${tr.unit}`],
+              ["AMOUNT", `${typeof tr.amt === "number" && tr.amt >= 1000 ? fmtQty(tr.amt) : tr.amt} ${tr.unit}${tr.sol > 0 && tr.unit !== "SOL" ? ` · ${(+tr.sol).toFixed(3)} SOL` : ""}`],
               ["FILL PRICE", `$${fmtP(isBuy ? tr.price : (tr.entry || tr.price))}`],
               ...(isBuy ? [] : [["EXIT PRICE", `$${fmtP(tr.price)}`]]),
               ...(!isBuy && tr.mcEntry > 0 ? [["MC AT ENTRY", `${tr.mcEstimated ? "~" : ""}${fmt$(tr.mcEntry)}`]] : []),
@@ -9695,7 +9705,7 @@ export default function App() {
         const markers = j.trades.map((t) => {
           const pxUsd = t.priceSol * SOL_USD;
           return { t: t.t, side: t.side, price: pxUsd, p: pxUsd,
-            amt: t.side === "buy" ? t.solAmt : t.tokenAmt, unit: t.side === "buy" ? "SOL" : (tok && tok.sym) || "",
+            amt: t.tokenAmt, unit: (tok && tok.sym) || "", sol: t.solAmt, qty: t.tokenAmt,
             sym: (tok && tok.sym) || "", tx: t.sig, trader, wallet, real: true,
             mc: (tok && tok.mc && tok.price) ? pxUsd * (tok.mc / tok.price) : null };
         });
@@ -12958,8 +12968,7 @@ export default function App() {
       }
       return {
         t: f.at, side: f.side, price: px, p: px,
-        amt: f.side === "buy" ? f.sol : f.qty,
-        unit: f.side === "buy" ? "SOL" : f.sym,
+        amt: f.qty, unit: f.sym, sol: f.sol, qty: f.qty,
         sym: f.sym, tx: f.sig, real: true, mine: true,
         trader: "__me__",
         fillPrice: px, entry: entryAvg,
