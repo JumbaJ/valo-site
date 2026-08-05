@@ -13550,7 +13550,11 @@ export default function App() {
     const withBackfill = (matches) => {
       if (matches.length >= 6) return matches;
       const restMv = movingRank(out.filter((t) => !matches.includes(t) && ((Math.abs(t.ch || 0) > 0.3) || tokMetrics(t).tx > 0)));
-      return [...matches, ...restMv];
+      const res = [...matches, ...restMv];
+      // absolute floor: at the boot instant every ch/tx is 0, so nothing
+      // qualifies as moving either - show the board rather than a void;
+      // the lens re-ranks the moment live stats land
+      return res.length ? res : out;
     };
     if (scanMode === "lucky") {
       const picked = luckyOrder(out, "lucky" + scanShuffleRef.current, true);
