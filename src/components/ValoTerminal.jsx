@@ -12088,9 +12088,10 @@ export default function App() {
         if (stop || !rows.length) return;
         const fresh = rows.filter((x) => (+x.mc || 0) < 1e11).map(adoptMarketToken);
         setMoreToks((M) => {
-          const seen = new Set([...(tokensRef.current || []), ...M].map((t) => t.liveMint || t.pool));
+          const idk = (t) => String(t.liveMint || t.ca || t.pool || "").toLowerCase();
+          const seen = new Set([...(tokensRef.current || []), ...M].map(idk));
           const add = []; const sN = new Set();
-          for (const t of fresh) { const k = t.liveMint || t.pool; if (seen.has(k) || sN.has(k)) continue; sN.add(k); add.push(t); }
+          for (const t of fresh) { const k = idk(t); if (!k || seen.has(k) || sN.has(k)) continue; sN.add(k); add.push(t); }
           return add.length ? [...add, ...M].slice(0, 260) : M;
         });
       } catch (e) {}
@@ -12116,9 +12117,10 @@ export default function App() {
       }
       const fresh = rows.filter((x) => (+x.mc || 0) < 1e11).map(adoptMarketToken);
       setMoreToks((M) => {
-        const seen = new Set([...(tokensRef.current || []), ...M].map((t) => t.liveMint || t.pool));
+        const idk = (t) => String(t.liveMint || t.ca || t.pool || "").toLowerCase();
+        const seen = new Set([...(tokensRef.current || []), ...M].map(idk));
         const add = []; const seenNew = new Set();
-        for (const t of fresh) { const k = t.liveMint || t.pool; if (seen.has(k) || seenNew.has(k)) continue; seenNew.add(k); add.push(t); }
+        for (const t of fresh) { const k = idk(t); if (!k || seen.has(k) || seenNew.has(k)) continue; seenNew.add(k); add.push(t); }
         return add.length ? [...add, ...M].slice(0, 220) : M;
       });
     } catch (e) {}
@@ -13815,13 +13817,28 @@ export default function App() {
     : shownRaw;
   // one card per pool / mint / symbol — duplicates from different feeds collapse
   const shown = useMemo(() => {
-    const seen = new Set(); let out = [];
+    const byKey = new Map(); let out = [];
+    // richness score: when two records are the same token, the fuller one wins
+    // and donates its missing fields to the survivor
+    const rich = (t) => (t.img ? 4 : 0) + (t.pool ? 3 : 0) + (t.createdAt ? 2 : 0)
+      + (Number.isFinite(t.traders) ? 1 : 0) + ((t.vol24 || 0) > 0 ? 1 : 0) + ((t.tvl || 0) > 0 ? 1 : 0);
+    const mergeTok = (a, b) => {
+      const keep = rich(b) > rich(a) ? b : a, other = keep === a ? b : a;
+      const merged = { ...keep };
+      // fill only what the winner is missing — never overwrite live values
+      for (const f of ["img", "pool", "liveMint", "ca", "createdAt", "traders", "vol24", "tvl", "mc", "price", "name", "socials", "dev"]) {
+        if ((merged[f] == null || merged[f] === "" || merged[f] === 0) && other[f] != null && other[f] !== "") merged[f] = other[f];
+      }
+      return merged;
+    };
     for (const t of shownLive) {
       if (!t) continue;
-      const k = String(t.pool || t.liveMint || t.ca || ("id" + t.id)).toLowerCase();
-      if (seen.has(k)) continue;
-      seen.add(k); out.push(t);
+      // MINT is the identity; pool/ca/id only when there is no mint
+      const k = String(t.liveMint || t.ca || t.pool || ("id" + t.id)).toLowerCase();
+      if (byKey.has(k)) { byKey.set(k, mergeTok(byKey.get(k), t)); continue; }
+      byKey.set(k, t);
     }
+    out = [...byKey.values()];
     // 📡 the scan-mode lens: order (and lightly filter) the board
     const seedSort = (arr) => {
       const sd = scanShuffleRef.current;
