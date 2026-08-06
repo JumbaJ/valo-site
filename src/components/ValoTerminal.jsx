@@ -12449,9 +12449,21 @@ export default function App() {
     // newest candle live, so polling harder would only burn compute units
     const every = tf <= 1 ? 60000 : tf <= 15 ? 120000 : 300000;
     const iv = setInterval(pull, every);
-    const onVis = () => { if (!document.hidden) pull(); }; // returning to the tab = instant catch-up
-    document.addEventListener("visibilitychange", onVis);
-    return () => { stale = true; clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+    // 📱 every wake path resyncs instantly — mobile suspends timers, so
+    // returning from background/app-switch/radio-blip must never show a
+    // frozen chart while it waits for the next slow poll
+    let lastPull = Date.now();
+    const wPull = () => { lastPull = Date.now(); pull(); };
+    const onWake = () => { if (!document.hidden && Date.now() - lastPull > 4000) wPull(); };
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("focus", onWake);
+    window.addEventListener("pageshow", onWake);
+    window.addEventListener("online", onWake);
+    return () => { stale = true; clearInterval(iv);
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("focus", onWake);
+      window.removeEventListener("pageshow", onWake);
+      window.removeEventListener("online", onWake); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveData, sel, tf, (tokens.find((x) => x.id === sel) || {}).pool]);
   const [fsHint, setFsHint] = useState("");
@@ -14091,10 +14103,11 @@ export default function App() {
     const url = typeof window !== "undefined" ? window.__VALO_STREAM__ : null;
     if (!url || !liveData) { setStreamOn(false); return; }
     let ws = null, closed = false, retry = 0, timer = null;
+    let lastMsgAt = Date.now();
     const connect = () => {
       try { ws = new WebSocket(url); } catch (e) { return; }
       streamRef.current = ws;
-      ws.onopen = () => { retry = 0; setStreamOn(true); wantMint(); };
+      ws.onopen = () => { retry = 0; lastMsgAt = Date.now(); setStreamOn(true); wantMint(); };
       ws.onclose = () => {
         setStreamOn(false);
         if (closed) return;
@@ -14103,6 +14116,7 @@ export default function App() {
       };
       ws.onerror = () => { try { ws.close(); } catch (e) {} };
       ws.onmessage = (ev) => {
+        lastMsgAt = Date.now();
         let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
         if (m.type === "viewers" && m.mint) {
           setLiveViewers((V) => {
@@ -14163,7 +14177,24 @@ export default function App() {
       };
     };
     connect();
-    return () => { closed = true; clearTimeout(timer); try { ws && ws.close(); } catch (e) {} };
+    // 📱 zombie watchdog: on any wake, a socket that isn't OPEN — or has been
+    // silent >20s — gets torn down and rebuilt on the spot (iOS kills sockets
+    // without ever firing close; readyState lies)
+    const onWsWake = () => {
+      if (document.hidden || closed) return;
+      const dead = !ws || ws.readyState !== 1 || Date.now() - lastMsgAt > 20000;
+      if (dead) { try { ws && ws.close(); } catch (e) {} clearTimeout(timer); retry = 0; connect(); }
+      else { try { wantMint(); } catch (e) {} }        // alive → refresh the subscription
+    };
+    document.addEventListener("visibilitychange", onWsWake);
+    window.addEventListener("focus", onWsWake);
+    window.addEventListener("pageshow", onWsWake);
+    window.addEventListener("online", onWsWake);
+    return () => { closed = true; clearTimeout(timer); try { ws && ws.close(); } catch (e) {}
+      document.removeEventListener("visibilitychange", onWsWake);
+      window.removeEventListener("focus", onWsWake);
+      window.removeEventListener("pageshow", onWsWake);
+      window.removeEventListener("online", onWsWake); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveData, tf]);
   // tell the worker which token we're watching
