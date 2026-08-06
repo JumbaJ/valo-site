@@ -16585,7 +16585,12 @@ export default function App() {
                         statement: "Sign in to VALO. This signature only proves wallet ownership. No transaction, no fees.",
                       });
                       if (error) setCloudMsg(String(error.message || error).slice(0, 90));
-                      else setCloudOpen(false);
+                      else {
+                        setCloudOpen(false);
+                        // 🔗 same wallet, both doors: the trading-side Phantom
+                        // connects off the session you just approved
+                        try { connectPhantom(); } catch (e) {}
+                      }
                     } catch (e) { setCloudMsg(String(e && e.message || e).slice(0, 90)); }
                   }}
                   style={{ width: "100%", border: `1px solid ${VALO_PURPLE}88`, background: "rgba(125,92,240,0.16)", color: VALO_PURPLE,
