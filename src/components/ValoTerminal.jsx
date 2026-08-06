@@ -16565,7 +16565,13 @@ export default function App() {
                       : "wallet account")}</b></div>
                 <div style={{ fontFamily: T.mono, fontSize: 8.5, color: cloudSynced ? T.green : T.amber, marginBottom: 12 }}>{cloudSynced ? "● portfolio synced to the cloud" : "● syncing…"}</div>
                 <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, lineHeight: 1.6, marginBottom: 12 }}>Wallet, positions, activity, watchlist and live bots follow this account on any device.</div>
-                <button onClick={async () => { try { await sb.auth.signOut(); } catch (e) {} setCloudOpen(false); }}
+                <button onClick={async () => {
+                    try { await sb.auth.signOut(); } catch (e) {}
+                    // 🔗 one identity, one exit: the Phantom trading link
+                    // disconnects with the account
+                    try { await disconnectWallet(); } catch (e) {}
+                    setCloudOpen(false);
+                  }}
                   style={{ width: "100%", border: `1px solid ${T.red}66`, background: "rgba(234,57,67,0.1)", color: T.red, borderRadius: 9, padding: "9px", fontFamily: T.mono, fontSize: 10, fontWeight: 900, cursor: "pointer" }}>⎋ SIGN OUT</button>
               </>
             ) : (
