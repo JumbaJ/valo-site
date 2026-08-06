@@ -864,7 +864,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     // pad by a share of the visible RANGE (not the price value) → the top and
     // bottom candles always keep clear air, even fully zoomed out on a big move
     const range = Math.max(trueHi - trueLo, trueHi * 0.02);   // never a zero range
-    const willLog = trueLo > 0 && trueHi / trueLo > 12;   // the log axis will engage
+    const willLog = trueLo > 0 && trueHi / trueLo > 150;  // matches the auto-log trigger
     if (willLog) {
       // pad by a share of the LOG-SPAN → constant on-screen air (10% above,
       // 5% below) whether the chart spans one decade or four
@@ -885,7 +885,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     // chart is fully on-screen wherever you pan left/right (DexScreener-style).
     // switch to log automatically once the range is too wide to read linearly
     const logOn = logMode === "log"
-      || (logMode === "auto" && trueLo > 0 && trueHi / trueLo > 12);
+      || (logMode === "auto" && trueLo > 0 && trueHi / trueLo > 150);
     const lgLo = logOn ? Math.log(Math.max(lo, 1e-15)) : 0;
     const lgHi = logOn ? Math.log(Math.max(hi, 1e-14)) : 0;
     const lgSpan = logOn ? Math.max(1e-9, lgHi - lgLo) : 1;
@@ -2126,6 +2126,7 @@ function Meter({ label, value, color }) {
 
 // ---------------- order ticket (right side) ----------------
 function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editBot, onRelaunch, setAmount, botLock, dragSetOn, onToggleDragSet, compactArm = false, wide = false, onReadyArm, solBalance = 0, valoWallet = 0, onOpenSearch = null }) {
+  const prevHolders = useRef({});     // mint → last holder count, for ▲/▼ deltas
   const [stopLoss, setStopLoss] = useState(25);
   const [armFlash, setArmFlash] = useState(0); // lights the arm button when a bot goes live
   const [armEdit, setArmEdit] = useState(false);   // right-click ARM → retype the amount in place
@@ -2214,11 +2215,15 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
           </button>
           {tpStatsOpen && (() => {
             const durs = ["1H", "4H", "24H", "7D"];
-            const k = { "1H": 0.09, "4H": 0.3, "24H": 1, "7D": 5.6 }[tpStatDur];
+            const k = { "1H": 0.09, "4H": 0.3, "24H": 1, "7D": 5.6 }[tpStatDur] || 1;
+            // Δ over the chosen window, straight from the candle history
+            const barsFor = { "1H": 60, "4H": 240, "24H": 1440, "7D": 10080 }[tpStatDur] || 1440;
             const cs2 = token.candles || [];
-            const bi = cs2.length ? Math.max(0, cs2.length - Math.min(cs2.length - 1, Math.round(96 * k))) : -1;
-            const base = bi >= 0 && cs2[bi] ? cs2[bi].c : (token.price || 0);
-            const ch = base > 0 ? ((token.price - base) / base) * 100 : 0;
+            const bi = cs2.length ? Math.max(0, cs2.length - 1 - barsFor) : -1;
+            const base = bi >= 0 && cs2[bi] && cs2[bi].c > 0 ? cs2[bi].c : (token.price || 0);
+            const ch = base > 0 && token.price > 0 ? ((token.price - base) / base) * 100 : 0;
+            const mLive = tokMetrics(token);           // real window metrics
+            const isLive = !!token.pool;
             const st = (l2, v2, c2) => (
               <span style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <span style={{ color: T.faint }}>{l2}</span><b style={{ color: c2 || T.text }}>{v2}</b>
@@ -2234,25 +2239,37 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
                 <div style={{ display: "grid", gap: 4, fontFamily: T.mono, fontSize: 8.5 }}>
                   {st(`Δ PRICE · ${tpStatDur}`, `${ch >= 0 ? "+" : ""}${ch.toFixed(2)}%`, ch >= 0 ? T.green : T.red)}
                   {st("PRICE", `$${fmtP(token.price)}`)}
-                  {st(`VOL · ${tpStatDur}`, fmt$((token.greenUsd + token.redUsd) * k))}
-                  {st("BUYS", fmt$(token.greenUsd * k), T.green)}
-                  {st("SELLS", fmt$(token.redUsd * k), T.red)}
+                  {isLive ? (<>
+                    {st(`VOL · ${token.statWin || "24h"}`, fmt$(mLive.flow))}
+                    {st("BUYS", `${token.buys || 0} · ${fmt$(token.greenUsd || 0)}`, T.green)}
+                    {st("SELLS", `${token.sells || 0} · ${fmt$(token.redUsd || 0)}`, T.red)}
+                    {st("VOL · 24H", fmt$(token.vol24 || 0))}
+                  </>) : (<>
+                    {st(`VOL · ${tpStatDur}`, fmt$(((token.greenUsd || 0) + (token.redUsd || 0)) * k))}
+                    {st("BUYS", fmt$((token.greenUsd || 0) * k), T.green)}
+                    {st("SELLS", fmt$((token.redUsd || 0) * k), T.red)}
+                  </>)}
                   {st("MC", fmt$(mcOf(token)))}
                   {st("TVL", fmt$(token.tvl))}
-                  {st("MOMENTUM", Math.round(token.momentum), token.momentum > 60 ? T.green : T.dim)}
+                  {isLive
+                    ? st("TRADE RATE", `${mLive.txRate.toFixed(1)}/min`, mLive.txRate > 5 ? T.green : T.dim)
+                    : st("MOMENTUM", Math.round(token.momentum || 0), (token.momentum || 0) > 60 ? T.green : T.dim)}
                   {(() => {
                     const real = liveData && token.liveMint && window.__VALO_HOLDERS__ ? window.__VALO_HOLDERS__[token.liveMint] : null;
                     if (Number.isFinite(real) && real > 0) {
                       const prev = prevHolders.current[token.liveMint];
                       const delta = Number.isFinite(prev) ? real - prev : 0;
+                      if (prev !== real) setTimeout(() => { prevHolders.current[token.liveMint] = real; }, 30000);
                       return st("HOLDERS", <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                         {real.toLocaleString()}
                         {delta !== 0 && <span style={{ fontSize: 8, fontWeight: 900, color: delta > 0 ? T.green : T.red }}>{delta > 0 ? `▲${delta}` : `▼${Math.abs(delta)}`}</span>}
                       </span>);
                     }
-                    return st("HOLDERS", token.traders.toLocaleString());
+                    return st("HOLDERS", Number.isFinite(token.traders) ? token.traders.toLocaleString() : "—");
                   })()}
-                  {st("TOP 10 HOLD", `${(16 + ((token.id * 7) % 26)).toFixed(1)}%`, T.amber)}
+                  {!isLive && st("TOP 10 HOLD", `${(16 + (((token.id || 1) * 7) % 26)).toFixed(1)}%`, T.amber)}
+                  {isLive && st("AGE", fmtAge(token.createdAt) || "—")}
+                  {isLive && st("LP", fmt$(token.tvl || 0))}
                   {st("SAFETY", scoreToken(token), ratingColor(scoreToken(token)))}
                 </div>
               </div>
@@ -7459,8 +7476,11 @@ const luckyOrder = (list, seed, onlyElig = false) => {
   const elig = list.filter((t) => {
     const m = tokMetrics(t);
     if (!t.img) return false;                        // zero-metadata tokens are out
-    if (m.winMin > 60 || m.tx < 3) return false;     // anti-dead: real recent trades
-    return true;
+    // anti-dead, honestly measured: SOME real trading in the window we have,
+    // or a live price move. (The old rule demanded a ≤1h window, which most
+    // tokens don't report — it starved the draw down to one or two names.)
+    const alive = m.tx >= 3 || (t.vol24 || 0) > 500 || Math.abs(t.ch || 0) > 0.5;
+    return alive;
   });
   const weightOf = (t) => {
     const m = tokMetrics(t);
@@ -7473,7 +7493,7 @@ const luckyOrder = (list, seed, onlyElig = false) => {
     return w;
   };
   // sample without replacement by weight, deterministic per seed
-  const pool = elig.map((t) => ({ t, w: weightOf(t), r: (hashStr(seed + (t.liveMint || t.id)) % 1000) / 1000 }));
+  const pool = elig.map((t) => ({ t, w: weightOf(t), r: ((hashStr(String(seed) + (t.liveMint || t.id)) % 10000) + 1) / 10001 }));
   pool.forEach((x) => { x.key = Math.pow(x.r || 0.0001, 1 / x.w); });     // weighted-lottery key
   pool.sort((a, b) => b.key - a.key);
   const picked = pool.map((x) => x.t);
@@ -11997,6 +12017,7 @@ export default function App() {
   const [scanModeOpen, setScanModeOpen] = useState(false);
   const [moversSide, setMoversSide] = useState("gain");   // 📈 gainers ⇄ 📉 losers
   const scanShuffleRef = useRef(Math.random());
+  const [luckyDraw, setLuckyDraw] = useState(0);        // 🍀 bumps only on a real re-roll
   useEffect(() => { try { localStorage.setItem("valo-scan-mode", scanMode); } catch (e) {} if (scanMode === "random") scanShuffleRef.current = Math.random(); }, [scanMode]);
   const SCAN_MODES = [
     ["trending", "🔥 TRENDING", "volume accelerating ≥3× · buy pressure >70% · fresh <1h"],
@@ -12026,7 +12047,7 @@ export default function App() {
             background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 10, overflow: "hidden",
             boxShadow: "0 14px 40px rgba(0,0,0,0.6)" }}>
             {SCAN_MODES.map(([k, l, d]) => (
-              <button key={k} onClick={() => { setScanMode(k); if (k === "lucky") scanShuffleRef.current = Math.random(); setScanModeOpen(false); }}
+              <button key={k} onClick={() => { setScanMode(k); if (k === "lucky") { scanShuffleRef.current = Math.random(); setLuckyDraw((n) => n + 1); } setScanModeOpen(false); }}
                 style={{ display: "block", width: "100%", textAlign: "left", border: "none", cursor: "pointer",
                   background: scanMode === k ? "rgba(125,92,240,0.16)" : "transparent",
                   padding: "8px 11px", borderBottom: `1px solid ${T.border}` }}>
@@ -12085,7 +12106,7 @@ export default function App() {
     if (scanRefreshing) return;
     setScanRefreshing(true);
     try {
-      if (scanMode === "lucky") scanShuffleRef.current = Math.random();   // 🍀 fresh draw
+      if (scanMode === "lucky") { scanShuffleRef.current = Math.random(); setLuckyDraw((n) => n + 1); }   // 🍀 fresh draw
       const feeds = scanMode === "new" ? ["new"] : ["trending", "new", "top"];
       const bust = `&t=${Date.now()}`;
       const rs = await Promise.allSettled(feeds.map((f) => fetch(`/api/tokens?feed=${f}${bust}`)));
@@ -13833,7 +13854,12 @@ export default function App() {
     };
     if (scanMode === "lucky") {
       const picked = luckyOrder(out, "lucky" + scanShuffleRef.current, true);
-      return withBackfill(picked);
+      // the token you're viewing always stays on the board (opening a chart
+      // must never make the list shrink underneath you)
+      const withSel = picked.some((t) => t.id === sel)
+        ? picked
+        : [...picked, ...out.filter((t) => t.id === sel)];
+      return withBackfill(withSel);
     }
     if (scanMode === "new") {
       // 🍼 1–15min old · ≥5 baseline tx (deployed AND trading) · curve <15% =
@@ -13873,7 +13899,7 @@ export default function App() {
       return s2;
     };
     return [...out].sort((a, b) => scoreOf(b) - scoreOf(a));
-  }, [shownLive, scanMode, moversSide]);
+  }, [shownLive, scanMode, moversSide, luckyDraw, sel]);
   shownRef.current = shown;
 
   const gTvl = tokens.reduce((a, t) => a + t.tvl, 0);
