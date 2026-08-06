@@ -16582,7 +16582,7 @@ export default function App() {
                       if (!ph) { setCloudMsg("Phantom not detected — install it or use email below"); return; }
                       const { error } = await sb.auth.signInWithWeb3({
                         chain: "solana", wallet: ph,
-                        statement: "Sign in to VALO — this signature only proves wallet ownership. No transaction, no fees.",
+                        statement: "Sign in to VALO. This signature only proves wallet ownership. No transaction, no fees.",
                       });
                       if (error) setCloudMsg(String(error.message || error).slice(0, 90));
                       else setCloudOpen(false);
