@@ -854,11 +854,20 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     // pad by a share of the visible RANGE (not the price value) → the top and
     // bottom candles always keep clear air, even fully zoomed out on a big move
     const range = Math.max(trueHi - trueLo, trueHi * 0.02);   // never a zero range
-    const padTop = range * 0.34;     // generous headroom over the tallest wick
-    const padBot = range * 0.16;     // a little under the lowest
-    lo = trueLo > 0 ? Math.max(trueLo * 0.55, trueLo - padBot) : Math.max(1e-15, trueHi * 1e-6);
-    if (!(lo > 0)) lo = Math.max(1e-15, trueHi * 1e-6);
-    hi = trueHi > 0 ? trueHi + padTop : hi + p8;
+    const willLog = trueLo > 0 && trueHi / trueLo > 12;   // the log axis will engage
+    if (willLog) {
+      // pad by a share of the LOG-SPAN → constant on-screen air (10% above,
+      // 5% below) whether the chart spans one decade or four
+      const span = Math.log(trueHi / trueLo);
+      hi = trueHi * Math.exp(span * 0.10);
+      lo = Math.max(1e-15, trueLo / Math.exp(span * 0.05));
+    } else {
+      const padTop = range * 0.34;   // generous headroom over the tallest wick
+      const padBot = range * 0.16;   // a little under the lowest
+      lo = trueLo > 0 ? Math.max(trueLo * 0.55, trueLo - padBot) : Math.max(1e-15, trueHi * 1e-6);
+      if (!(lo > 0)) lo = Math.max(1e-15, trueHi * 1e-6);
+      hi = trueHi > 0 ? trueHi + padTop : hi + p8;
+    }
     // vertical zoom: stretch the visible price range around its centre. This is
     // what gives headroom above the candles for placing bot and visual lines.
     // (vertical stretch removed — the axis is ALWAYS the visible candles' fit)
@@ -1333,6 +1342,9 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     return () => clearInterval(iv);
   }, [createdAt]);
   const holdRef = useRef(null);        // touch press-and-hold timer
+  const lastTouchAtRef = useRef(0);    // 👻 synthetic-mouse suppressor
+  const panRafRef = useRef(0);         // 📱 pan updates coalesce to one per frame
+  const panPendingRef = useRef(null);
   const lineDragRef = useRef(null);    // active line drag: {id}
   const touchIntentRef = useRef(null); // first-move decision: chart gesture vs page scroll
   const pendGrabRef = useRef(null);    // touch press-and-hold before a line grab engages
@@ -1623,7 +1635,10 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
         }, 550);
       }
     }
-    setCross({ cx, cy });
+    if (e.touches) lastTouchAtRef.current = Date.now();
+    // crosshair on contact is a MOUSE privilege — touch goes through the
+    // 2s-hold ritual, and ghost mouse events after a touch don't count
+    if (!e.touches && Date.now() - lastTouchAtRef.current > 900) setCross({ cx, cy });
   };
   const onMove = (e) => {
     // 🤏 pinch in progress → rescale the candle count around the anchor bar
@@ -1712,11 +1727,19 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
         anchorRef.current = (nextOff <= 0) ? null
           : (endIdx >= 0 && endIdx < total && agg[endIdx] && Number.isFinite(agg[endIdx].t))
             ? agg[endIdx].t : anchorRef.current;
-        setView((v) => ({ ...v, offset: nextOff, priceOff: 0 }));
+        // 📱 coalesce: touchmove can fire at 120Hz — one setView per frame
+        // keeps the drag glassy instead of render-thrashed
+        panPendingRef.current = nextOff;
+        if (!panRafRef.current) panRafRef.current = requestAnimationFrame(() => {
+          panRafRef.current = 0;
+          const off2 = panPendingRef.current;
+          if (off2 != null) setView((v) => ({ ...v, offset: off2, priceOff: 0 }));
+        });
         return;
       }
     }
-    setCross({ cx, cy });
+    if (e.touches) lastTouchAtRef.current = Date.now();
+    if (!e.touches && Date.now() - lastTouchAtRef.current > 900) setCross({ cx, cy });
     const g = geom.current;
     if (g.idxOf) {
       const s = Math.max(0, Math.round((cx - g.step / 2) / g.step));
