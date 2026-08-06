@@ -22,8 +22,14 @@ const solBalance = async (addr) => {
   } catch (e) { return null; }
 };
 
-const weightOf = (volSol, calloutMult) =>
-  (1 + Math.min(3, (volSol || 0) * 0.5)) * Math.max(1, Math.min(2, calloutMult || 1));
+// 📜 WHITEPAPER FORMULA — verbatim from the spec:
+//   "vault half is distributed by holder weight + trading volume"
+//   with leaderboard epoch bonuses stacking up to +4.0×.
+// weight = (holderWeight + volSol) × (1 + Σ leaderboard bonuses, capped 4.0)
+// holderWeight arms itself when VALO_MINT exists (real $VALO balances);
+// until launch it is honestly 0 and volume carries the epoch.
+const weightOf = (volSol, lbBonus, holderWeight = 0) =>
+  ((holderWeight || 0) + (volSol || 0)) * (1 + Math.max(0, Math.min(4, (lbBonus || 1) - 1)));
 
 export default async function handler(req, res) {
   const EPOCH_W = (process.env.VALO_EPOCH || "").trim();
@@ -41,7 +47,8 @@ export default async function handler(req, res) {
       if (r.ok) rows = await r.json();
     } catch (e) {}
   }
-  const weights = (rows || []).map((x) => ({ user: x.user_id, volSol: +x.vol_sol || 0, w: weightOf(+x.vol_sol, +x.callout_mult) }));
+  // callout_mult column carries (1 + Σ leaderboard bonuses) per the spec
+  const weights = (rows || []).map((x) => ({ user: x.user_id, volSol: +x.vol_sol || 0, w: weightOf(+x.vol_sol, +x.callout_mult) })).filter((x) => x.w > 0);
   const totalW = weights.reduce((a, x) => a + x.w, 0);
 
   const pool = EPOCH_W ? await solBalance(EPOCH_W) : null;

@@ -3238,7 +3238,7 @@ function TierListModal({ onClose, isMobile, myBest = 0, embed = false }) {
 // compact leaderboard — the tier-list's sibling: same frame, top-10 badges per
 // duration, your rank, and the epoch bonus each placement pays
 const LB_MS = { "1H": 3600e3, "12H": 12 * 3600e3, "1D": 86400e3, "7D": 7 * 86400e3, "30D": 30 * 86400e3, "180D": 180 * 86400e3, "365D": 365 * 86400e3 };
-function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser, embed = false, focusUser = null, username = "you" }) {
+function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser, embed = false, focusUser = null, username = "you", onMyRank = null }) {
   // ☁ REAL entries — actual callouts ranked by the peak the market gave them
   const [realBoard, setRealBoard] = useState([]);
   const [period, setPeriod] = useState("1D");
@@ -3303,6 +3303,9 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
     io.observe(el);
     return () => io.disconnect();
   }, [period, myRank, board.length]);
+  // 📜 whitepaper epoch bonus: report this board's rank upward so bonuses
+  // can stack across every duration board
+  useEffect(() => { if (typeof onMyRank === "function") onMyRank(period, myRank); }, [period, myRank]);
   useEffect(() => {
     if (focusRank > 0 && focusRef.current) focusRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [focusRank, period]);
@@ -3494,7 +3497,7 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0 }, valoUsd 
 }
 
 // badge page — tiers & leaderboards side by side; jumped-to names glow & fade
-function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 0, focusUser = null, onOpenUser, username = "you" }) {
+function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 0, focusUser = null, onOpenUser, username = "you", onMyRank = null }) {
   const inTop250 = useMemo(() => {
     if (!focusUser) return false;
     const rk = genLeaderboard("1D").sort((a, b) => b.mult - a.mult).findIndex((e) => e.user === focusUser) + 1;
@@ -3518,7 +3521,7 @@ function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 
         <div style={{ padding: "4px 11px 12px" }}>
           {tab === "tiers"
             ? <TierListModal embed isMobile={isMobile} myBest={myBest} />
-            : <LeaderboardModal embed isMobile={isMobile} myCallouts={myCallouts} tokens={tokens} onOpenUser={onOpenUser} username={username} focusUser={inTop250 ? focusUser : null} />}
+            : <LeaderboardModal embed isMobile={isMobile} myCallouts={myCallouts} tokens={tokens} onOpenUser={onOpenUser} username={username} focusUser={inTop250 ? focusUser : null} onMyRank={onMyRank} />}
         </div>
       </div>
     </div>
@@ -3702,7 +3705,7 @@ function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned =
   );
 }
 
-function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser, username = "you" }) {
+function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser, username = "you", onMyRank = null }) {
   const [tab, setTab] = useState("tiers");   // tiers | board
   const [period, setPeriod] = useState("1D");
   useEffect(() => {
@@ -3762,7 +3765,7 @@ function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOp
             </div>
           ) : (
             <>
-              <LeaderboardModal embed isMobile={isMobile} myCallouts={myCallouts} tokens={tokens} onOpenUser={onOpenUser} username={username} />
+              <LeaderboardModal embed isMobile={isMobile} myCallouts={myCallouts} tokens={tokens} onOpenUser={onOpenUser} username={username} onMyRank={onMyRank} />
             </>
           )}
         </div>
@@ -10044,13 +10047,17 @@ export default function App() {
   });
   const realFillsRef = useRef([]);
   useEffect(() => { realFillsRef.current = realFills; }, [realFills]);
-  // 📣 callout wins raise the epoch multiplier: best peak → 1 + peak/10 (≤2×)
-  const epochCalloutMultRef = useRef(1);
-  useEffect(() => {
-    const best = Object.values(myMcCallouts || {}).reduce((m, c) => Math.max(m, c.peak || 0), 0);
-    const mult = Math.max(1, Math.min(2, 1 + best / 10));
-    if (Math.abs(mult - epochCalloutMultRef.current) < 0.05) return;
-    epochCalloutMultRef.current = mult;
+  // 📜 WHITEPAPER epoch bonuses: rank per duration board → +0.50…+0.10 each,
+  // stacking across boards, capped +4.0. Stored as (1 + Σbonus) on the row.
+  const lbRanksRef = useRef({});             // { period: rank }
+  const lbBonusOf = (r) => r < 1 ? 0 : r === 1 ? 0.5 : r === 2 ? 0.42 : r === 3 ? 0.36 : r === 4 ? 0.32 : r === 5 ? 0.29 : r === 6 ? 0.26 : r === 7 ? 0.23 : r === 8 ? 0.20 : r === 9 ? 0.17 : r === 10 ? 0.14 : r <= 100 ? 0.10 : 0;
+  const lastLbMultRef = useRef(1);
+  const reportMyRank = (period, rank) => {
+    lbRanksRef.current[period] = rank;
+    const total = Object.values(lbRanksRef.current).reduce((a, r) => a + lbBonusOf(r), 0);
+    const mult = 1 + Math.min(4, total);
+    if (Math.abs(mult - lastLbMultRef.current) < 0.01) return;
+    lastLbMultRef.current = mult;
     (async () => {
       try {
         const sb2 = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
@@ -10059,8 +10066,7 @@ export default function App() {
         await sb2.from("epoch_activity").upsert({ user_id: cloudUser.id, epoch, callout_mult: mult, updated_at: new Date().toISOString() }, { onConflict: "user_id,epoch" });
       } catch (e) {}
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(Object.values(myMcCallouts || {}).map((c) => Math.round((c.peak || 0) * 10)))]);
+  };
   // 🏋 log real volume into the current epoch (hour) — powers reward weights
   const logEpochVolume = async (sol) => {
     try {
@@ -16416,7 +16422,7 @@ export default function App() {
           }} />
       )}
       {wpOpen && <WhitepaperModal onClose={() => setWpOpen(false)} isMobile={isMobile} />}
-      {calloutHubOpen && <CalloutHubModal onClose={closeAllPages} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
+      {calloutHubOpen && <CalloutHubModal onMyRank={reportMyRank} onClose={closeAllPages} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
         onOpenUser={(u) => { setCalloutHubOpen(false); setProfileUser(u); }} />}
       {isMobile && quickArmOn && armPop && (
         <button data-armpop="1" onClick={() => { const fn = quickArmRef.current; fn && fn(); setArmPop(null); }}
@@ -17006,10 +17012,10 @@ export default function App() {
       {valoStatsOpen && <ValoStatsModal onClose={() => setValoStatsOpen(false)} isMobile={isMobile}
         valoUsd={valoUsdPrice} tvl={gTvl} burned={burned} valoWallet={valoWallet} />}
       {burnOpen && <BurnModal valoUsd={valoUsdPrice} onClose={() => setBurnOpen(false)} isMobile={isMobile} myBurned={myBurned} siteBurned={burned} />}
-      {ranksOpen && <RanksModal onClose={closeAllPages} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
+      {ranksOpen && <RanksModal onMyRank={reportMyRank} onClose={closeAllPages} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
         myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)}
         focusUser={ranksOpen.focus || null} onOpenUser={(u) => { setRanksOpen(null); setProfileUser(u); }} />}
-      {lbOpen && <LeaderboardModal onClose={closeAllPages} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
+      {lbOpen && <LeaderboardModal onMyRank={reportMyRank} onClose={closeAllPages} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
         onOpenUser={(u) => setProfileUser(u)} />}
       {tierListOpen && <TierListModal onClose={() => setTierListOpen(false)} isMobile={isMobile}
         myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)} />}
