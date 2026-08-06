@@ -803,7 +803,14 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       const highs2 = scaleWin.map((c) => c.h).sort((a, b) => b - a);
       const lows2 = scaleWin.map((c) => c.l).filter((v) => v > 0).sort((a, b) => a - b);
       const base = Math.max(1e-15, (highs2[1] || hi) - (lows2[1] || lo));
-      if (highs2[1] && highs2[0] - highs2[1] > base * 0.9) hi = Math.min(hi, highs2[1] + base * 0.3);
+      if (highs2[1] && highs2[0] - highs2[1] > base * 0.9) {
+        // 🎯 is the runner-up ITSELF a spike above the chart's body? Then this
+        // is a multi-spike chart — BOTH jumps are real, the frame holds both.
+        const bodyTop = highs2[Math.min(4, highs2.length - 1)];
+        const spread = Math.max(1e-15, bodyTop - (lows2[1] || lo));
+        const secondIsSpike = highs2[1] - bodyTop > Math.max(spread * 0.9, (highs2[0] - bodyTop) * 0.25);
+        if (!secondIsSpike) hi = Math.min(hi, highs2[1] + base * 0.3);   // truly lone → clip
+      }
       // the LOW side stays honest: the launch bar's origin is always in frame
       // (a little air under it comes from padBot below)
     }
@@ -7433,6 +7440,44 @@ function fmtAge(createdAt) {
   const d = Math.floor(h / 24);
   return d < 30 ? `${d}d ${h % 24}h` : `${Math.floor(d / 30)}mo ${d % 30}d`;
 }
+function EpochWeightCard({ cloudUser, liveData }) {
+  const [d, setD] = React.useState(null);
+  React.useEffect(() => {
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch(`/api/epoch${cloudUser ? `?user=${cloudUser.id}` : ""}&t=${Math.floor(Date.now() / 20000)}`.replace("epoch&", "epoch?"));
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop) setD(j);
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 30000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [cloudUser && cloudUser.id]);
+  if (!liveData || !d || !d.configured) return null;
+  return (
+    <div style={{ background: "#0c0f16", border: `1px solid ${T.border2}`, borderRadius: 10, padding: "9px 11px", marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+        <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: T.amber }}>🏋 THIS EPOCH · {d.minsLeft}m left</span>
+        <span style={{ fontFamily: T.mono, fontSize: 8, color: T.dim }}>pool {d.pool != null ? `◎${d.pool.toFixed(3)}` : "—"} · {d.participants} in</span>
+      </div>
+      {d.you ? (
+        <div style={{ fontFamily: T.mono, fontSize: 10, color: T.text, lineHeight: 1.8 }}>
+          your weight <b style={{ color: VALO_PURPLE }}>×{d.you.weight}</b>
+          <span style={{ color: T.dim, fontSize: 8.5 }}> (◎{d.you.volSol} traded this hour)</span><br />
+          projected share <b style={{ color: T.green }}>{(d.you.share * 100).toFixed(1)}%</b>
+          {d.pool != null && d.you.share > 0 && <span style={{ color: T.dim, fontSize: 8.5 }}> ≈ ◎{(d.pool * d.you.share).toFixed(4)} equivalent in $VALO</span>}
+        </div>
+      ) : (
+        <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, lineHeight: 1.6 }}>
+          trade on turbo this hour to earn a slice — every real fill adds weight, callout wins multiply it
+        </div>
+      )}
+    </div>
+  );
+}
 function TokenVitalsPop({ t, isMobile = false, onClose, style = {} }) {
   const [big, setBig] = React.useState("price");
   const buys = t.buys || 0, sells = t.sells || 0;
@@ -9999,9 +10044,39 @@ export default function App() {
   });
   const realFillsRef = useRef([]);
   useEffect(() => { realFillsRef.current = realFills; }, [realFills]);
+  // 📣 callout wins raise the epoch multiplier: best peak → 1 + peak/10 (≤2×)
+  const epochCalloutMultRef = useRef(1);
+  useEffect(() => {
+    const best = Object.values(myMcCallouts || {}).reduce((m, c) => Math.max(m, c.peak || 0), 0);
+    const mult = Math.max(1, Math.min(2, 1 + best / 10));
+    if (Math.abs(mult - epochCalloutMultRef.current) < 0.05) return;
+    epochCalloutMultRef.current = mult;
+    (async () => {
+      try {
+        const sb2 = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
+        if (!sb2 || !cloudUser || !liveData) return;
+        const epoch = String(Math.floor(Date.now() / 3600e3));
+        await sb2.from("epoch_activity").upsert({ user_id: cloudUser.id, epoch, callout_mult: mult, updated_at: new Date().toISOString() }, { onConflict: "user_id,epoch" });
+      } catch (e) {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(Object.values(myMcCallouts || {}).map((c) => Math.round((c.peak || 0) * 10)))]);
+  // 🏋 log real volume into the current epoch (hour) — powers reward weights
+  const logEpochVolume = async (sol) => {
+    try {
+      if (!(sol > 0)) return;
+      const sb2 = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
+      if (!sb2 || !cloudUser) return;
+      const epoch = String(Math.floor(Date.now() / 3600e3));      // hour id
+      const { data } = await sb2.from("epoch_activity").select("vol_sol").eq("user_id", cloudUser.id).eq("epoch", epoch).maybeSingle();
+      const cur = (data && +data.vol_sol) || 0;
+      await sb2.from("epoch_activity").upsert({ user_id: cloudUser.id, epoch, vol_sol: cur + sol, updated_at: new Date().toISOString() }, { onConflict: "user_id,epoch" });
+    } catch (e) {}
+  };
   const recordRealFill = (f) => setRealFills((F) => {
     // stamp the token's live market cap at THIS instant, so the marker can show
     // the exact MC the trade happened at (not a later, recomputed value)
+    try { logEpochVolume(f.sol || 0); } catch (e) {}
     let mcAtFill = f.mcAtFill;
     if (!(mcAtFill > 0) && f.mint) {
       const tk = (tokensRef.current || []).find((t) => t.liveMint === f.mint);
@@ -17514,6 +17589,8 @@ export default function App() {
               <b style={{ color: T.text }}> you pay your own SOL gas</b>, tokens land directly in your wallet.
             </div>
 
+            {/* 🏋 your weight this epoch — live from real activity */}
+            <EpochWeightCard cloudUser={cloudUser} liveData={liveData} />
             {/* 🎯 payout wallet — rewards land wherever the user points them */}
             <div style={{ background: "#0c0f16", border: `1px solid ${VALO_PURPLE}44`, borderRadius: 10, padding: "9px 11px", marginBottom: 12 }}>
               <div style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: VALO_PURPLE, marginBottom: 5 }}>🎯 PAYOUT WALLET · where your $VALO lands</div>
