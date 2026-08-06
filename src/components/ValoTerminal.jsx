@@ -15418,14 +15418,16 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFire]);
 
-  // banner items — every callout renders; ≥2x calls get green MC trail
+  // 🏆 banner items — ONLY real winners ride the header: a callout must be
+  // holding ≥2x right now. The tier it reaches drives how hard it animates.
   const bannerItems = callouts.map((c) => {
     const t = tokens.find((x) => x.id === c.tokenId);
     if (!t) return null;
     const mcNow = mcOf(t);
-    const mult = mcNow / c.mcAt;
+    const mult = c.mcAt > 0 ? mcNow / c.mcAt : 0;
+    if (!(mult >= 2)) return null;                 // under 2x never shows
     return { ...c, t, mcNow, mult };
-  }).filter(Boolean);
+  }).filter(Boolean).sort((a, b) => b.mult - a.mult);
 
   return (
     <div style={{
@@ -15713,24 +15715,33 @@ export default function App() {
               <div key={dup} className="ticker-half" aria-hidden={dup === 1}>
                 {bannerItems.length === 0 && (
                   <span style={{ fontFamily: T.mono, fontSize: 11, color: T.faint, padding: "0 40px" }}>
-                    Waiting for community callouts…
+                    No 2x calls running right now — land one and it rides here
                   </span>
                 )}
-                {bannerItems.map((c) => (
-                  <button key={`${dup}-${c.id}`} onClick={() => { setSel(c.t.id); setClickMode(null); }}
-                    style={{ background: "transparent", border: "none", cursor: "pointer", padding: "8px 0", display: "inline-flex", alignItems: "center", gap: 6, fontFamily: T.mono, fontSize: 11, whiteSpace: "nowrap" }}>
-                    <span style={{ color: T.dim }}>@{c.user}</span>
-                    <span style={{ color: accent(c.t.hue), fontWeight: 800 }}>${c.t.sym}</span>
-                    {c.mult >= 2 ? (
-                      <span style={{ color: T.green, fontWeight: 800, textShadow: "0 0 8px rgba(22,199,132,0.5)" }}>
-                        ▲ {c.mult.toFixed(1)}x · in @ {fmt$(c.mcAt)} MC → now {fmt$(c.mcNow)} MC
+                {bannerItems.map((c) => {
+                  const { tier } = calloutTier(c.mult);
+                  // escalation ladder — the bigger the call, the louder it rides
+                  const lvl = c.mult >= 50 ? 5 : c.mult >= 20 ? 4 : c.mult >= 10 ? 3 : c.mult >= 5 ? 2 : 1;
+                  const col = tier.color;
+                  const cls = ["", "cb-glow", "cb-pulse", "cb-shimmer", "cb-flare", "cb-legend"][lvl];
+                  return (
+                    <button key={`${dup}-${c.id}`} onClick={() => { setSel(c.t.id); setClickMode(null); }}
+                      className={cls}
+                      style={{ background: lvl >= 3 ? `${col}12` : "transparent", border: lvl >= 4 ? `1px solid ${col}55` : "none",
+                        borderRadius: lvl >= 3 ? 8 : 0, cursor: "pointer", padding: lvl >= 3 ? "6px 10px" : "8px 0",
+                        display: "inline-flex", alignItems: "center", gap: 6, fontFamily: T.mono, fontSize: 11, whiteSpace: "nowrap",
+                        ["--cbCol"]: col }}>
+                      <span style={{ color: T.dim }}>@{c.user}</span>
+                      <span style={{ color: accent(c.t.hue), fontWeight: 800 }}>${c.t.sym}</span>
+                      <span style={{ color: col, fontWeight: 900, textShadow: `0 0 ${5 + lvl * 3}px ${col}${lvl >= 3 ? "cc" : "77"}` }}>
+                        {lvl >= 5 ? "👑 " : lvl >= 4 ? "🔥 " : lvl >= 3 ? "⚡ " : "▲ "}{c.mult.toFixed(1)}x
                       </span>
-                    ) : (
-                      <span style={{ color: T.faint }}>called @ {fmt$(c.mcAt)} MC</span>
-                    )}
-                    <span style={{ color: T.border2, padding: "0 14px" }}>◆</span>
-                  </button>
-                ))}
+                      {lvl >= 2 && <span style={{ color: col, fontSize: 8.5, fontWeight: 800, letterSpacing: 1, opacity: 0.9 }}>{tier.label}</span>}
+                      <span style={{ color: T.dim, fontSize: 10 }}>in @ {fmt$(c.mcAt)} → {fmt$(c.mcNow)}</span>
+                      <span style={{ color: T.border2, padding: "0 14px" }}>◆</span>
+                    </button>
+                  );
+                })}
               </div>
             ))}
           </div>
@@ -18076,6 +18087,25 @@ export default function App() {
         @keyframes tierPop4 { 0%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1); } 22%{ transform: scale(1.42) rotate(-9deg); filter: brightness(1.9) saturate(1.5); } 48%{ transform: scale(1.12) rotate(7deg); filter: brightness(1.3) saturate(1.2); } 74%{ transform: scale(1.22) rotate(-3deg); filter: brightness(1.5); } 100%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1); } }
         @keyframes tierPop5 { 0%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1) hue-rotate(0); } 18%{ transform: scale(1.55) rotate(-12deg); filter: brightness(2.2) saturate(1.8) hue-rotate(18deg); } 40%{ transform: scale(1.15) rotate(9deg); filter: brightness(1.4) saturate(1.4) hue-rotate(-12deg); } 62%{ transform: scale(1.35) rotate(-5deg); filter: brightness(1.9) saturate(1.6) hue-rotate(10deg); } 82%{ transform: scale(1.08) rotate(3deg); filter: brightness(1.2); } 100%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1) hue-rotate(0); } }
         @keyframes diamond3d { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
+        /* 🏆 callout banner escalation — louder the higher the multiple */
+        .cb-glow { animation: cbGlow 3.4s ease-in-out infinite; }
+        @keyframes cbGlow { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.28); } }
+        .cb-pulse { animation: cbPulse 2.2s ease-in-out infinite; }
+        @keyframes cbPulse { 0%,100% { transform: scale(1); filter: brightness(1); } 50% { transform: scale(1.045); filter: brightness(1.35); } }
+        .cb-shimmer { position: relative; overflow: hidden; animation: cbPulse 1.9s ease-in-out infinite; }
+        .cb-shimmer::after { content: ""; position: absolute; inset: 0; background: linear-gradient(115deg, transparent 35%, var(--cbCol) 50%, transparent 65%); opacity: 0.22; transform: translateX(-120%); animation: cbSweep 2.6s linear infinite; }
+        @keyframes cbSweep { to { transform: translateX(120%); } }
+        .cb-flare { position: relative; overflow: hidden; animation: cbFlare 1.5s ease-in-out infinite; }
+        @keyframes cbFlare { 0%,100% { transform: scale(1) rotate(0deg); box-shadow: 0 0 0 var(--cbCol); } 25% { transform: scale(1.06) rotate(-0.6deg); } 50% { transform: scale(1.05); box-shadow: 0 0 16px var(--cbCol); } 75% { transform: scale(1.06) rotate(0.6deg); } }
+        .cb-flare::after { content: ""; position: absolute; inset: 0; background: linear-gradient(115deg, transparent 30%, var(--cbCol) 50%, transparent 70%); opacity: 0.3; transform: translateX(-120%); animation: cbSweep 1.7s linear infinite; }
+        .cb-legend { position: relative; overflow: hidden; animation: cbLegend 1.1s ease-in-out infinite; }
+        @keyframes cbLegend {
+          0%,100% { transform: scale(1) rotate(0deg); box-shadow: 0 0 10px var(--cbCol); filter: brightness(1.1) saturate(1.2); }
+          20% { transform: scale(1.09) rotate(-1.2deg); box-shadow: 0 0 26px var(--cbCol); filter: brightness(1.55) saturate(1.5); }
+          45% { transform: scale(1.04) rotate(0.8deg); }
+          70% { transform: scale(1.1) rotate(-0.7deg); box-shadow: 0 0 30px var(--cbCol); filter: brightness(1.6) saturate(1.6); }
+        }
+        .cb-legend::after { content: ""; position: absolute; inset: 0; background: linear-gradient(115deg, transparent 25%, var(--cbCol) 50%, transparent 75%); opacity: 0.42; transform: translateX(-120%); animation: cbSweep 1.15s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .lucky-charm { display: inline-block; animation: luckyCharm 2.6s ease-in-out infinite; filter: drop-shadow(0 0 4px rgba(74,222,128,0.8)); }
         @keyframes luckyCharm {
