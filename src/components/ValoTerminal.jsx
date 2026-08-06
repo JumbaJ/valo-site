@@ -632,6 +632,9 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   const [axisMC, setAxisMC] = useState(false);   // right axis shows market cap instead of price
   const fmtAxis = (v) => (axisMC && mcRatio > 0 ? fmt$(v * mcRatio) : fmtP(v));
   const [pinCross, setPinCross] = useState(null); // mobile: held crosshair {cx, cy}
+  const pinCrossRef = useRef(null);               // 🔒 read by effects that must not move the chart
+  const frozenScaleRef = useRef(null);            // 🔒 the exact axis held while the line is up
+  useEffect(() => { pinCrossRef.current = pinCross; }, [pinCross]);
   const [pulseTick, setPulseTick] = useState(0);
   const requestRepaint = useCallback(() => setPulseTick((t) => t + 1), []);
   const markerHitsRef = useRef([]);
@@ -650,7 +653,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     setView({ count: n, offset: 0, priceOff: 0, priceZoom: 1, follow: true });   // live edge, right side
     scaleRef.current = { key: null, lo: NaN, hi: NaN };
     setAxisMC(false);                                   // price axis, fresh ratio
-    setPinCross(null);
+    setPinCross(null); frozenScaleRef.current = null;   // 🔓 token/tf change always thaws
     anchorRef.current = null;                           // a fresh chart follows live
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tfMin, sym]);
@@ -839,8 +842,15 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     const minRange = mid * 0.02;                     // never tighter than ±1%
     if (hi - lo < minRange) { hi = mid + minRange / 2; lo = mid - minRange / 2; }
     // remember the true range before padding — the log decision depends on it
+    // 🔒 crosshair locked (mobile): hold the exact frame the user is reading —
+    // arriving candles must not rescale the axis under their finger
+    if (pinCross && frozenScaleRef.current) {
+      const fz = frozenScaleRef.current;
+      lo = fz.lo; hi = fz.hi;
+    }
     // ⚓ the live close is always visible: whatever the clips decided, the
     // frame stretches to include where the price IS right now
+    if (!(pinCross && frozenScaleRef.current))
     {
       const lastC = agg[Math.min(total, scaleStart + count) - 1];
       const liveC = lastC && lastC.c > 0 ? lastC.c : 0;
@@ -1344,6 +1354,8 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   const holdRef = useRef(null);        // touch press-and-hold timer
   const lastTouchAtRef = useRef(0);    // 👻 synthetic-mouse suppressor
   const panRafRef = useRef(0);         // 📱 pan updates coalesce to one per frame
+  const crossRafRef = useRef(0);       // 🔒 crosshair drags coalesce too
+  const crossPendRef = useRef(null);
   const panPendingRef = useRef(null);
   const lineDragRef = useRef(null);    // active line drag: {id}
   const touchIntentRef = useRef(null); // first-move decision: chart gesture vs page scroll
@@ -1608,6 +1620,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
           holdRef.current = setTimeout(() => {   // hold again ~2s → crosshair goes away
             if (dragRef.current && dragRef.current.moved) return;
             if (navigator.vibrate) navigator.vibrate(12);
+            frozenScaleRef.current = null;      // 🔓 the chart breathes again
             setPinCross(null); setCross(null);
           }, 1900);
         }
@@ -1623,6 +1636,9 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
         holdRef.current = setTimeout(() => {
           if (dragRef.current && dragRef.current.moved) return;
           if (navigator.vibrate) navigator.vibrate(12);
+          // 🔒 snapshot the exact frame being read — it holds until release
+          const gN = geom.current || {};
+          if (gN.lo > 0 && gN.hi > gN.lo) frozenScaleRef.current = { lo: gN.lo, hi: gN.hi };
           setPinCross({ cx, cy }); setCross({ cx, cy });
         }, 1900);
       }
@@ -1704,10 +1720,18 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       return;
     }
     if (pinCross && e.touches) {
-      // dragging the crosshair is USE, not dismissal — real movement keeps it
+      // 🔒 locked: the chart holds perfectly still, the finger only moves the
+      // line. Dragging is USE, not dismissal — movement cancels the hold timer.
       const it3 = touchIntentRef.current;
       if (it3 && (Math.abs((e.touches[0] && e.touches[0].clientX) - it3.x) > 10 || Math.abs((e.touches[0] && e.touches[0].clientY) - it3.y) > 10)) clearTimeout(holdRef.current);
-      setPinCross({ cx, cy }); setCross({ cx, cy }); return;
+      if (dragRef.current) dragRef.current.moved = false;   // no pan can start under the line
+      crossPendRef.current = { cx, cy };
+      if (!crossRafRef.current) crossRafRef.current = requestAnimationFrame(() => {
+        crossRafRef.current = 0;
+        const c2 = crossPendRef.current;
+        if (c2) { setPinCross(c2); setCross(c2); }
+      });
+      return;
     }
     const d = dragRef.current;
     if (d) {
