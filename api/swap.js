@@ -66,7 +66,8 @@ const ENABLED = String(process.env.VALO_ONCHAIN || "").trim() === "1";
 const isMint = (m) => /^[A-Za-z0-9]{32,50}$/.test(String(m || ""));
 const FEE_BPS = Math.max(0, Math.min(500, parseInt(process.env.VALO_FEE_BPS || "60", 10) || 0));        // SOL routes: 0.6%
 const FEE_BPS_VALO = Math.max(0, Math.min(500, parseInt(process.env.VALO_FEE_BPS_VALO || "30", 10) || 0)); // $VALO routes: 0.3%
-const FEE_ACCT = (process.env.VALO_FEE_ACCOUNT || "").trim();
+// treasury is the default fee destination — VALO_FEE_ACCOUNT only overrides it
+const FEE_ACCT = (process.env.VALO_FEE_ACCOUNT || process.env.VALO_TREASURY || "").trim();
 const VALO_MINT_ADDR = (process.env.VALO_MINT || "").trim();
 const BURN_ADDR = (process.env.VALO_BURN || "1nc1nerator11111111111111111111111111111111").trim();
 const EPOCH_ADDR = (process.env.VALO_EPOCH || "").trim();
@@ -138,7 +139,8 @@ export default async function handler(req, res) {
         + "&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=100000&slippageBps=100");
       return res.status(200).json({ enabled: true, feeBps: FEE_BPS, feeBpsValo: FEE_BPS_VALO,
         feeVia: feeViaJup ? "jupiter" : (FEE_BPS > 0 ? "client" : "none"), jupiter: "reachable", via: host, maxSol: MAX_SOL,
-        feeSplit: { burn: BURN_ADDR, epoch: EPOCH_ADDR || null, creator: (process.env.VALO_CREATOR || "").trim() || null } });
+        feeSplit: { burn: BURN_ADDR, epoch: EPOCH_ADDR || null, creator: (process.env.VALO_CREATOR || "").trim() || null,
+          treasury: (process.env.VALO_TREASURY || "").trim() || null, deployer: (process.env.VALO_DEPLOYER || "").trim() || null } });
     } catch (e) {
       return res.status(200).json({ enabled: true, jupiter: "unreachable", error: String(e.message || e), maxSol: MAX_SOL });
     }

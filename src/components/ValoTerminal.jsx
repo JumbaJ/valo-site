@@ -8414,6 +8414,8 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
   }, [token.id, token.liveMint]);
   const topHolders = useMemo(() => {
     if (liveHolders) return liveHolders;
+    // ⛓ live with no holder data yet → show nothing rather than a simulated book
+    if (liveData && token.liveMint) return [];
     const supply = 1e9 * (0.35 + ((token.id * 13) % 50) / 100);
     let x = token.id * 77 + 13; const rnd2 = () => { x = (x * 9301 + 49297) % 233280; return x / 233280; };
     const N = 25;
@@ -8456,6 +8458,11 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "20px 1fr 82px 70px 48px" : "18px 1fr 74px 62px 44px", gap: 6, padding: "6px 12px", position: "sticky", top: 0, background: T.panel, borderBottom: `1px solid ${T.border}`, fontFamily: T.mono, fontSize: isMobile ? 9.5 : 8, color: T.faint, letterSpacing: 0.5, zIndex: 1 }}>
             <span>#</span><span>HOLDER · TOKENS</span><span style={{ textAlign: "right" }}>B / S</span><span style={{ textAlign: "right" }}>P/L</span><span style={{ textAlign: "right" }}>HELD</span>
           </div>
+          {!topHolders.length && (
+            <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, padding: "14px 12px", textAlign: "center" }}>
+              ⛓ reading the holder book from chain…
+            </div>
+          )}
           {topHolders.map((h) => (
             <div key={h.i}
               onClick={() => onPickTrader && onPickTrader({ trader: h.name || h.wal, isBuy: true, usd: h.usd, qty: h.qty, holder: true })}
