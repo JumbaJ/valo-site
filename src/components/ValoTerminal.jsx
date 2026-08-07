@@ -13920,9 +13920,11 @@ export default function App() {
         ? [...shownCore.filter((t) => !t.market), ...moreToks]
         : shownCore);
   // in live mode, once real pools are on the board the simulated cards retire
-  const realOnly = liveData && shownRaw.some((t) => t && t.pool);
-  const shownLive = realOnly
-    ? shownRaw.filter((t) => t && (t.pool || t.sym === "VALO"))   // $VALO is ours, it stays
+  // 🛰 LIVE MEANS LIVE: simulated tokens never appear on a live board — not even
+  // for the second before the first market fetch lands. (This used to wait for
+  // a real token to arrive, so slow connections briefly saw the sim cast.)
+  const shownLive = liveData
+    ? shownRaw.filter((t) => t && (t.pool || (t.sym === "VALO" && valoMint)))
     : shownRaw;
   // one card per pool / mint / symbol — duplicates from different feeds collapse
   const shown = useMemo(() => {
@@ -13973,6 +13975,9 @@ export default function App() {
       if (matches.length >= 6) return matches;
       const restMv = movingRank(out.filter((t) => !matches.includes(t) && ((Math.abs(t.ch || 0) > 0.3) || tokMetrics(t).tx > 0)));
       const res = [...matches, ...restMv];
+      // on live, "show the board rather than a void" must never mean sim tokens —
+      // `out` is already real-only there, so this stays honest
+
       // absolute floor: at the boot instant every ch/tx is 0, so nothing
       // qualifies as moving either - show the board rather than a void;
       // the lens re-ranks the moment live stats land
@@ -15973,6 +15978,14 @@ export default function App() {
               {scanPullStrip}
               <div>{scanModeDropdown}</div>
               {secBanner}
+              {liveData && !shown.length && (
+                <div style={{ border: `1px dashed ${T.border2}`, borderRadius: 12, padding: "26px 14px", textAlign: "center",
+                  fontFamily: T.mono, fontSize: 10, color: T.faint, lineHeight: 1.9 }}>
+                  <div style={{ fontSize: 16, marginBottom: 6 }}>🛰</div>
+                  loading live tokens from chain…
+                  <div style={{ fontSize: 8.5, opacity: 0.8 }}>real markets only · nothing simulated</div>
+                </div>
+              )}
               {shown.map((t) => (
                 compactList
                   ? <div key={t.id} data-mslot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 10, transition: "opacity .12s, transform .12s" }} {...tdProps(t)}><TokenRow t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} tf={tf}
@@ -16044,6 +16057,14 @@ export default function App() {
             {scanPullStrip}
             <div style={{ margin: "0 34px 8px 0" }}>{scanModeDropdown}</div>
             {secBanner}
+            {liveData && !shown.length && (
+              <div style={{ border: `1px dashed ${T.border2}`, borderRadius: 12, padding: "26px 14px", textAlign: "center",
+                fontFamily: T.mono, fontSize: 10, color: T.faint, lineHeight: 1.9 }}>
+                <div style={{ fontSize: 16, marginBottom: 6 }}>🛰</div>
+                loading live tokens from chain…
+                <div style={{ fontSize: 8.5, opacity: 0.8 }}>real markets only · nothing simulated</div>
+              </div>
+            )}
             {shown.map((t) => (
               <div key={t.id} data-slot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ position: "relative", opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s, transform .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => { e.preventDefault(); const id = dragIdOf(e); if (id == null || id === t.id) return;
