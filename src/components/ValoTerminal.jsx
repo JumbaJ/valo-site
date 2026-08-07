@@ -3595,18 +3595,61 @@ function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 
 // ◆ $VALO TOKEN STATS — pop-out page: live price/TVL/flow/PnL/supply with a
 // duration-aware chart; every stat re-times to the selected window. Pre-mainnet
 // this runs as a faithful demonstration feed.
-function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned = 0, valoWallet = 0 }) {
+function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned = 0, valoWallet = 0, valoMint = null, liveData = false }) {
   const DURS = ["1H", "4H", "1D", "7D", "30D", "ALL"];
   const VOL = { "1H": 0.004, "4H": 0.007, "1D": 0.012, "7D": 0.028, "30D": 0.055, "ALL": 0.10 };
   const [dur, setDur] = useState("1D");
   const [livePx, setLivePx] = useState(valoUsd);
+  // ⛓ REAL $VALO: the mint's own pool + candles, same sources as every chart
+  const [real, setReal] = useState(null);      // { price, mc, tvl, vol24, buys, sells, greenUsd, redUsd, pool, statWin, traders, supply }
+  const [realCandles, setRealCandles] = useState(null);
+  const isReal = !!(liveData && valoMint && real);
   useEffect(() => {
+    if (!liveData || !valoMint) return;
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch(`/api/tokens?search=${encodeURIComponent(valoMint)}&t=${Math.floor(Date.now() / 15000)}`);
+        if (!r.ok) return;
+        const rows = await r.json();
+        const hit = Array.isArray(rows) ? rows.find((x) => String(x.mint || "").toLowerCase() === String(valoMint).toLowerCase()) || rows[0] : null;
+        if (!stop && hit) setReal(hit);
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 15000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [liveData, valoMint]);
+  // real candle history for the selected window
+  useEffect(() => {
+    if (!real || !real.pool) return;
+    let stop = false;
+    const tf = { "1H": 1, "4H": 5, "1D": 15, "7D": 60, "30D": 240, "ALL": 240 }[dur] || 15;
+    (async () => {
+      try {
+        const r = await fetch(`/api/candles?pool=${encodeURIComponent(real.pool)}&tf=${tf}&mint=${encodeURIComponent(valoMint || "")}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        const arr = Array.isArray(j) ? j : (j && j.candles) || [];
+        if (!stop && arr.length) setRealCandles(arr);
+      } catch (e) {}
+    })();
+    return () => { stop = true; };
+  }, [real && real.pool, dur, valoMint]);
+  useEffect(() => {
+    if (isReal && real.price > 0) { setLivePx(real.price); return; }
+    if (liveData && valoMint) return;                 // real mode: never fake-tick
     const iv = setInterval(() => setLivePx((p) => Math.max(0.0001, p * (1 + (Math.random() - 0.48) * 0.006))), 2000);
     return () => clearInterval(iv);
-  }, []);
+  }, [isReal, real && real.price, liveData, valoMint]);
   // seeded walk backward from the live price — same seed per duration, so the
   // shape is stable while the tail ticks live
   const closes = useMemo(() => {
+    // ⛓ real closes win — the seeded walk is demo-only
+    if (realCandles && realCandles.length > 1) {
+      const cs = realCandles.map((c) => +c.c || 0).filter((v) => v > 0);
+      if (cs.length > 1) return cs.slice(-72);
+    }
     let s = 0; for (const c of dur) s += c.charCodeAt(0);
     let x = s * 9301 + 49297; const rnd = () => { x = (x * 9301 + 49297) % 233280; return x / 233280; };
     const N = 72; const arr = new Array(N); arr[N - 1] = livePx;
@@ -3618,12 +3661,15 @@ function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned =
   const up = chg >= 0;
   // duration-scaled activity (deterministic per window, feels alive via price)
   const durMult = { "1H": 1, "4H": 3.4, "1D": 11, "7D": 52, "30D": 170, "ALL": 660 }[dur];
-  const buys = Math.round(140 * durMult * (1 + chg / 200));
-  const sells = Math.round(120 * durMult * (1 - chg / 300));
-  const netFlow = (buys - sells) * 92 * (1 + Math.abs(chg) / 40);
-  const tvlNow = tvl * (1 + chg / 160);
+  // ⛓ real trade counts + real dollar flow when the token is live
+  const buys = isReal ? (real.buys || 0) : Math.round(140 * durMult * (1 + chg / 200));
+  const sells = isReal ? (real.sells || 0) : Math.round(120 * durMult * (1 - chg / 300));
+  const netFlow = isReal ? ((real.greenUsd || 0) - (real.redUsd || 0)) : (buys - sells) * 92 * (1 + Math.abs(chg) / 40);
+  const tvlNow = isReal ? (real.tvl || 0) : tvl * (1 + chg / 160);
   const myPnl = valoWallet * (last - first); // holding $VALO through this window
-  const circ = Math.max(0, 1e9 - burned);
+  // pump tokens are a fixed 1B supply; MC/price gives the true current supply
+  const realSupply = isReal && real.price > 0 && real.mc > 0 ? real.mc / real.price : 0;
+  const circ = isReal && realSupply > 0 ? realSupply : Math.max(0, 1e9 - burned);
   const cvsRef = useRef(null);
   const [cross, setCross] = useState(null); // {i} — traced slot (hover on PC, finger on mobile)
   const traceAt = (clientX) => {
@@ -3715,6 +3761,9 @@ function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned =
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
             <span style={{ fontFamily: T.mono, fontSize: isMobile ? 11 : 12.5, fontWeight: 900, letterSpacing: 1.5 }}>
               <span style={{ color: VALO_PURPLE }}>◆</span> $VALO · TOKEN STATS
+              {isReal && <span style={{ marginLeft: 8, fontSize: 8, fontWeight: 900, letterSpacing: 1,
+                color: T.green, border: `1px solid ${T.green}55`, background: "rgba(22,199,132,0.12)",
+                borderRadius: 999, padding: "2px 7px" }}>● LIVE ON CHAIN</span>}
             </span>
             <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <span style={{ fontFamily: T.mono, fontSize: 7, fontWeight: 900, letterSpacing: 1, color: T.amber, border: `1px solid ${T.amber}55`, background: "rgba(240,185,11,0.08)", borderRadius: 6, padding: "2px 6px" }}>DEMO · PRE-MAINNET</span>
@@ -17166,7 +17215,8 @@ export default function App() {
         </div>
       )}
       {valoStatsOpen && <ValoStatsModal onClose={() => setValoStatsOpen(false)} isMobile={isMobile}
-        valoUsd={valoUsdPrice} tvl={gTvl} burned={burned} valoWallet={valoWallet} />}
+        valoUsd={valoUsdPrice} tvl={gTvl} burned={burned} valoWallet={valoWallet}
+        valoMint={valoMint} liveData={liveData} />}
       {burnOpen && <BurnModal valoUsd={valoUsdPrice} onClose={() => setBurnOpen(false)} isMobile={isMobile} myBurned={myBurned} siteBurned={burned} />}
       {ranksOpen && <RanksModal onMyRank={reportMyRank} onClose={closeAllPages} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
         myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)}
