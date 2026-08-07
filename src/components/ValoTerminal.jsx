@@ -7482,6 +7482,23 @@ function CardMiniChart({ candles, hue, mode, tfMin = 15, count = 90, full = fals
 }
 
 const visHolds = (arr) => (arr || []).filter((h) => h && !h.spam && !h.dust);
+// 🧾 turn Solana program errors into something a trader can act on
+const humanSwapError = (raw) => {
+  const m = String(raw || "");
+  if (/0x1789|0x1771|slippage|SlippageToleranceExceeded/i.test(m))
+    return "Price moved faster than your slippage allowed. Raise slippage (fresh launches often need 5-15%) and try again.";
+  if (/0x1|insufficient (lamports|funds)|InsufficientFunds/i.test(m) && /lamports|funds/i.test(m))
+    return "Not enough SOL in your turbo wallet to cover the trade plus network fees.";
+  if (/blockhash|BlockhashNotFound|expired/i.test(m))
+    return "The quote expired before it landed. Try again — it should go straight through.";
+  if (/0x1786|TooLittleSolReceived|TooMuchSolRequired/i.test(m))
+    return "The pool price moved mid-trade. Raise slippage a little and retry.";
+  if (/AccountNotFound|could not find account/i.test(m))
+    return "Token account missing — the first buy of a token creates one. Retry once.";
+  if (/simulation failed/i.test(m) && !/0x/.test(m))
+    return "The network rejected the simulation. Try again in a moment.";
+  return m;
+};
 // 🚫 pump curve launches at ≈$4.2K MC — a pump token priced BELOW that floor
 // (mayhem-mode territory) is broken, drained, or abandoned. Not scanner material.
 const belowLaunch = (t) => {
@@ -10179,6 +10196,11 @@ export default function App() {
   useEffect(() => { if (claimOpen) setPayoutDraft(payoutWallet || ""); /* eslint-disable-next-line */ }, [claimOpen]);
   // ⛓ real trading (off unless the server enables it)
   const [onchain, setOnchain] = useState({ enabled: false, maxSol: 0 });
+  // 🎚 slippage: fresh launches move fast — 5% default, user adjustable
+  const [slipBps, setSlipBps] = useState(() => {
+    try { const v = parseInt(localStorage.getItem("valo-slip-bps") || "500", 10); return Number.isFinite(v) ? Math.min(3000, Math.max(50, v)) : 500; } catch (e) { return 500; }
+  });
+  useEffect(() => { try { localStorage.setItem("valo-slip-bps", String(slipBps)); } catch (e) {} }, [slipBps]);
   const [valoMint, setValoMint] = useState(null);   // real $VALO mint, once launched
   useEffect(() => { try { if (typeof window !== "undefined") window.__VALO_MINT__ = valoMint || null; } catch (e) {} }, [valoMint]);
   const [valoTreasury, setValoTreasury] = useState(null);   // fee destination
@@ -10349,7 +10371,7 @@ export default function App() {
 
     setRealOrder({ stage: "quoting", token, side, size, label, owner, fullExit });
     try {
-      const r = await fetch(`/api/swap?mode=quote&inputMint=${inputMint}&outputMint=${outputMint}${q}&slippageBps=100`);
+      const r = await fetch(`/api/swap?mode=quote&inputMint=${inputMint}&outputMint=${outputMint}${q}&slippageBps=${slipBps}`);
       const j = await r.json();
       if (!r.ok || j.error) { setRealOrder({ stage: "error", token, side, size, label, msg: j.error || "no route" }); return; }
       setRealOrder({ stage: "review", token, side, size, label, quote: j.quote, inputMint, outputMint, q, owner, fullExit });
@@ -10616,7 +10638,7 @@ export default function App() {
       try {
         const ph = getProvider();
         if (!ph && !turboActive) return { ok: false, err: "Phantom not found" };
-        const r = await fetch(`/api/swap?mode=build&inputMint=${inputMint}&outputMint=${outputMint}${q}&slippageBps=150&user=${tradeAddr}`);
+        const r = await fetch(`/api/swap?mode=build&inputMint=${inputMint}&outputMint=${outputMint}${q}&slippageBps=${slipBps}&user=${tradeAddr}`);
         const j = await r.json();
         if (!r.ok || j.error || !j.swapTransaction) return { ok: false, err: j.error || "no route" };
         const web3 = await loadWeb3();
@@ -10834,7 +10856,7 @@ export default function App() {
     for (const h of list) {
       try {
         const fullExit = h.raw ? `&amountRaw=${h.raw}` : `&amountUi=${h.qty}`;
-        const r = await fetch(`/api/swap?mode=build&inputMint=${h.mint}&outputMint=So11111111111111111111111111111111111111112${fullExit}&slippageBps=200&user=${h.owner}`);
+        const r = await fetch(`/api/swap?mode=build&inputMint=${h.mint}&outputMint=So11111111111111111111111111111111111111112${fullExit}&slippageBps=${Math.min(3000, slipBps + 100)}&user=${h.owner}`);
         const j = await r.json();
         if (!r.ok || j.error || !j.swapTransaction) throw new Error(j.error || "no route");
         const raw = Uint8Array.from(atob(j.swapTransaction), (ch) => ch.charCodeAt(0));
@@ -10937,7 +10959,7 @@ export default function App() {
     try {
       const ordOwner = o.owner || tradeAddr;
       const ownerIsTurbo = !!(turbo && ordOwner === turbo.pubkey);
-      const r = await fetch(`/api/swap?mode=build&inputMint=${o.inputMint}&outputMint=${o.outputMint}${o.q}&slippageBps=100&user=${ordOwner}`);
+      const r = await fetch(`/api/swap?mode=build&inputMint=${o.inputMint}&outputMint=${o.outputMint}${o.q}&slippageBps=${slipBps}&user=${ordOwner}`);
       const j = await r.json();
       if (!r.ok || j.error || !j.swapTransaction) throw new Error(j.error || "could not build the transaction");
 
@@ -13449,7 +13471,7 @@ export default function App() {
           const dec = 6;   // pump tokens are 6-dec; quote amount is approximate anyway
           const amt = Math.floor(h.qty * Math.pow(10, dec));
           if (!(amt > 0)) continue;
-          const r = await fetch(`/api/swap?mode=quote&inputMint=${h.mint}&outputMint=${SOLM}&amount=${amt}&slippageBps=100`);
+          const r = await fetch(`/api/swap?mode=quote&inputMint=${h.mint}&outputMint=${SOLM}&amount=${amt}&slippageBps=${slipBps}`);
           if (!r.ok) continue;
           const j = await r.json();
           const outSol = j && j.quote && (+j.quote.outAmount || 0) / 1e9;
@@ -16702,7 +16724,33 @@ export default function App() {
               {realOrder.stage === "error" && (
                 <div style={{ padding: "6px 0" }}>
                   <div style={{ fontFamily: T.mono, fontSize: 10, color: T.red, lineHeight: 1.6 }}>
-                    Nothing was sent.<br /><span style={{ color: T.faint, fontSize: 9 }}>{realOrder.msg}</span>
+                    Nothing was sent.<br />
+                    <span style={{ color: T.text, fontSize: 10.5 }}>{humanSwapError(realOrder.msg)}</span>
+                    {humanSwapError(realOrder.msg) !== realOrder.msg && (
+                      <><br /><span style={{ color: T.faint, fontSize: 8 }}>{realOrder.msg}</span></>
+                    )}
+                    {/* 🎚 fix it right here — raise slippage without hunting for a setting */}
+                    {/slippage|0x1789|0x1771|moved/i.test(String(realOrder.msg || "")) && (
+                      <div style={{ marginTop: 10, borderTop: `1px solid ${T.border}`, paddingTop: 9 }}>
+                        <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 5 }}>
+                          SLIPPAGE · now {(slipBps / 100).toFixed(1)}%
+                        </div>
+                        <div style={{ display: "flex", gap: 5 }}>
+                          {[500, 1000, 1500, 2000].map((b) => (
+                            <button key={b} onClick={() => setSlipBps(b)}
+                              style={{ flex: 1, padding: "6px 0", borderRadius: 7, cursor: "pointer",
+                                border: `1px solid ${slipBps === b ? T.amber : T.border2}`,
+                                background: slipBps === b ? "rgba(240,185,11,0.14)" : "transparent",
+                                color: slipBps === b ? T.amber : T.dim, fontFamily: T.mono, fontSize: 10, fontWeight: 900 }}>
+                              {b / 100}%
+                            </button>
+                          ))}
+                        </div>
+                        <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, marginTop: 5, lineHeight: 1.5 }}>
+                          Higher slippage lands the trade but accepts a worse price. Fresh launches often need 10-15%.
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <button onClick={() => setRealOrder(null)}
                     style={{ width: "100%", marginTop: 10, border: `1px solid ${T.border2}`, borderRadius: 10,

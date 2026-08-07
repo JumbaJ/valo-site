@@ -147,7 +147,8 @@ export default async function handler(req, res) {
   }
   const inputMint = String(req.query.inputMint || SOL_MINT);
   const outputMint = String(req.query.outputMint || "");
-  const slippageBps = Math.min(1000, Math.max(10, parseInt(req.query.slippageBps || "100", 10)));
+  const DEFAULT_SLIP = Math.max(50, parseInt(process.env.VALO_SLIPPAGE_BPS || "300", 10));
+  const slippageBps = Math.min(3000, Math.max(10, parseInt(req.query.slippageBps || String(DEFAULT_SLIP), 10)));
   const userPublicKey = String(req.query.user || "");
 
   if (!isMint(inputMint) || !isMint(outputMint)) return res.status(400).json({ error: "bad mint" });
