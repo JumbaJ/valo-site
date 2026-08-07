@@ -59,7 +59,22 @@ export default async function handler(req, res) {
       }),
     });
     const j = await r.json();
-    if (j.error) return res.status(200).json({ ok: false, error: j.error.message || "rejected by the network" });
+    if (j.error) {
+      // 🔬 keep the simulation logs — they name the exact program and error,
+      // which a bare "custom program error: 0x…" never tells you
+      const data = j.error.data || {};
+      const logs = Array.isArray(data.logs) ? data.logs : [];
+      // the last program to log before the failure is the one that threw
+      const failing = [...logs].reverse().find((l) => /Program \w+ failed|Error Code|Error Number|AnchorError/i.test(l)) || null;
+      const named = logs.find((l) => /Error Code: (\w+)/i.exec(l)) || null;
+      return res.status(200).json({
+        ok: false,
+        error: j.error.message || "rejected by the network",
+        program: failing,
+        errorName: named ? (/Error Code: (\w+)/i.exec(named) || [])[1] : null,
+        logs: logs.slice(-14),
+      });
+    }
     res.status(200).json({ ok: true, signature: j.result, solscan: `https://solscan.io/tx/${j.result}` });
   } catch (e) {
     res.status(502).json({ error: String(e.message || e) });
