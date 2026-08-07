@@ -4866,6 +4866,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   );
 }
 function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], onOpenToken, onOpenUser, onAccept, onDecline, onCloudReq, notifSetting, setNotifSetting }) {
+  const [whyOpen, setWhyOpen] = useState(null);   // 🤖 which bot-skip explanation is expanded
   const [tab, setTab] = useState("all"); // all | callout | follower | friend
   const shown = notifs.filter((n) => tab === "all" || n.type === tab || (tab === "friend" && n.type === "friendreq"));
   const icon = (t) => (t === "callout" ? "📣" : t === "follower" ? "👥" : t === "tier" ? "🏆"
@@ -4905,8 +4906,14 @@ function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], o
           {shown.map((n) => {
             const body = n.user && n.text && n.text.startsWith("@" + n.user) ? n.text.slice(("@" + n.user).length).replace(/^\s*/, " ") : n.text;
             return (
-            <div key={n.id} onClick={() => { if (n.tokenId) onOpenToken(n.tokenId); else if (n.user) onOpenUser(n.user); }}
-              title={n.tokenId ? "Open the chart" : "Open profile"}
+            <React.Fragment key={n.id}>
+            <div
+              onClick={() => {
+                // 🤖 a skipped bot explains itself in place; everything else navigates
+                if (n.botSkip) { setWhyOpen((w) => (w === n.id ? null : n.id)); return; }
+                if (n.tokenId) onOpenToken(n.tokenId); else if (n.user) onOpenUser(n.user);
+              }}
+              title={n.botSkip ? "Why it didn't fire" : n.tokenId ? "Open the chart" : "Open profile"}
               style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 9, marginBottom: 3, cursor: "pointer", border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.015)" }}>
               <span style={{ fontSize: 13 }}>{icon(n.type)}</span>
               <span style={{ flex: 1, fontFamily: T.mono, fontSize: 10.5, color: T.text, lineHeight: 1.35 }}>
@@ -4916,6 +4923,12 @@ function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], o
                 )}
                 {body}
               </span>
+              {n.botSkip && (
+                <span style={{ flex: "0 0 auto", fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, letterSpacing: 0.6,
+                  color: T.amber, border: `1px solid ${T.amber}55`, borderRadius: 999, padding: "2px 7px" }}>
+                  {whyOpen === n.id ? "▴" : "WHY?"}
+                </span>
+              )}
               {n.type === "friendreq" && n.reqId && !n.reqDone && (
                 <span style={{ display: "flex", gap: 4, flex: "0 0 auto" }}>
                   <button onClick={(e) => { e.stopPropagation(); onCloudReq && onCloudReq(n, true); }}
@@ -4931,6 +4944,38 @@ function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], o
               )}
               <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, flex: "0 0 auto" }}>{timeAgo(n.ts)}</span>
             </div>
+            {/* 🤖 the full explanation — what stopped it, and how to fix it */}
+            {n.botSkip && whyOpen === n.id && (
+              <div onClick={(e) => e.stopPropagation()}
+                style={{ margin: "0 0 8px", border: `1px solid ${T.amber}44`, borderRadius: 10,
+                  background: "rgba(240,185,11,0.06)", padding: "10px 12px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
+                  <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1,
+                    color: T.amber, border: `1px solid ${T.amber}66`, borderRadius: 999, padding: "2px 7px" }}>{n.botSkip.tag}</span>
+                  <span style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>
+                    {n.botSkip.size > 0 ? `${n.botSkip.size} ${n.botSkip.unit} order · ` : ""}nothing was spent
+                  </span>
+                </div>
+                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.text, lineHeight: 1.7, marginBottom: 7 }}>
+                  <b style={{ color: T.amber }}>Why it didn't fire:</b> {n.botSkip.why}
+                </div>
+                <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.dim, lineHeight: 1.7 }}>
+                  <b style={{ color: T.text }}>How to fix it:</b> {n.botSkip.fix}
+                </div>
+                {n.botSkip.raw && (
+                  <div style={{ marginTop: 7, fontFamily: T.mono, fontSize: 7.5, color: T.faint,
+                    borderTop: `1px solid ${T.border}`, paddingTop: 6, wordBreak: "break-word" }}>{n.botSkip.raw}</div>
+                )}
+                {n.tokenId && (
+                  <button onClick={(e) => { e.stopPropagation(); onOpenToken(n.tokenId); }}
+                    style={{ marginTop: 9, border: `1px solid ${T.border2}`, background: "transparent", color: VALO_PURPLE,
+                      borderRadius: 8, padding: "6px 12px", fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, cursor: "pointer" }}>
+                    open {n.botSkip.sym} chart →
+                  </button>
+                )}
+              </div>
+            )}
+            </React.Fragment>
           ); })}
         </div>
       </div>
@@ -12399,10 +12444,24 @@ export default function App() {
     let stop = false;
     const pull = async () => {
       try {
-        const r = await fetch(`/api/valo?mint=${encodeURIComponent(valoMint)}&t=${Math.floor(Date.now() / 10000)}`);
-        if (!r.ok) return;
-        const hit = await r.json();
-        if (!stop && hit && hit.indexed && (+hit.price > 0)) {
+        let hit = null;
+        try {
+          const r = await fetch(`/api/valo?mint=${encodeURIComponent(valoMint)}&t=${Math.floor(Date.now() / 10000)}`);
+          if (r.ok) { const j = await r.json(); if (j && j.indexed && +j.price > 0) hit = j; }
+        } catch (e) {}
+        if (!hit) {
+          // ⛓ fallback: /api/valo may not be deployed yet — read the pool the
+          // same way every other token does so $VALO is never missing
+          try {
+            const r2 = await fetch(`/api/tokens?search=${encodeURIComponent(valoMint)}&t=${Math.floor(Date.now() / 10000)}`);
+            if (r2.ok) {
+              const rows = await r2.json();
+              const m = Array.isArray(rows) ? rows.find((x) => String(x.mint || "").toLowerCase() === String(valoMint).toLowerCase()) : null;
+              if (m && +m.price > 0) hit = { ...m, indexed: true, mint: valoMint };
+            }
+          } catch (e) {}
+        }
+        if (!stop && hit) {
           setValoLive(hit);
           // (the canonical $VALO card lives in `tokens` at id 424242 — see the
           // pin effect below. No second copy here, or the board would show two.)
@@ -13171,7 +13230,24 @@ export default function App() {
   // ◆ tapping any $VALO stat opens the REAL token chart (by CA) once launched
   // ◆ keep THE $VALO card (id 424242) synced to our CA + live market data
   useEffect(() => {
-    if (!valoMint || !valoLive || !valoLive.indexed || !(valoLive.price > 0)) return;
+    if (!valoMint) return;
+    // create a placeholder immediately so the chart can always be opened;
+    // the market row fills it in as soon as it lands
+    if (!valoLive || !valoLive.indexed || !(valoLive.price > 0)) {
+      setTokens((Ts) => {
+        if (Ts.some((t) => t && t.id === 424242)) return Ts;
+        return [...Ts, {
+          id: 424242, sym: "VALO", name: "VALO Terminal", liveMint: valoMint, ca: valoMint,
+          pool: null, hue: 262, isValo: true, price: 0, mc: 0, tvl: 0, vol24: 0,
+          buys: 0, sells: 0, greenUsd: 0, redUsd: 0, ch: 0, ch24: 0, statWin: "24h",
+          traders: 0, momentum: 50, buyPressure: 50, ageMin: 1, candles: [],
+          socials: {}, dev: { wallet: "", trades: [], launches: [], withdrawals: [], feeHistory: [],
+            tokensLaunched: 0, rugged: 0, creatorRewardsSol: 0, feesDay: 0, feesMonth: 0, feesYear: 0 },
+          trending: { reason: "$VALO — the terminal's own token, live on pump.fun.", tweet: null, desc: "" },
+        }];
+      });
+      return;
+    }
     setTokens((Ts) => {
       const base = (() => { try { return adoptMarketToken(valoLive); } catch (e) { return null; } })();
       if (!base) return Ts;
@@ -14099,15 +14175,29 @@ export default function App() {
           // wallet, or no route). It does NOT fall back to paper — the live
           // site never writes a paper fill. Refund the arm escrow and say why.
           refundEscrow(o.amt, o.pay);
-          const why = !liveAuto ? "live automation is disarmed (arm 🤖 in portfolio → ⚡ TURBO)"
-            : turboLockedButPresent ? "⚡ turbo wallet is locked — unlock it with your PIN so bots can sign"
-            : !walletReady ? "no wallet — set up ⚡ turbo or connect Phantom"
-            : !onchain.enabled ? "live routing is reconnecting — retrying automatically, next trigger will fire"
-            : o.pay !== "SOL" ? "live orders are SOL-only"
-            : !t.liveMint ? "this token has no live route"
-            : "route check failed — retrying";
+          // 🔎 exact cause + how to fix it, carried on the notification so
+          // tapping it opens a full explanation instead of a vague line
+          const solNow = (walletChain && (walletChain.solTrading != null ? walletChain.solTrading : walletChain.sol)) || 0;
+          const needSol = (+o.amt || 0) * (1 + ((onchain && onchain.feeBps) || 60) / 10000) + 0.004;
+          const diag = !liveAuto
+            ? { why: "live automation is disarmed", fix: "Open portfolio → ⚡ TURBO and arm 🤖 LIVE AUTOMATION. Bots can only sign for you while that's on — the wallet tab shows a spinning diamond when it is.", tag: "AUTOMATION OFF" }
+            : turboLockedButPresent
+            ? { why: "your ⚡ turbo wallet is locked", fix: "Unlock turbo with your PIN (portfolio → ⚡ TURBO). Bots sign with that key, so a locked wallet can't fill. It stays unlocked for the session.", tag: "TURBO LOCKED" }
+            : !walletReady
+            ? { why: "no wallet is connected", fix: "Set up the ⚡ turbo wallet or connect Phantom, then re-arm. Nothing was spent.", tag: "NO WALLET" }
+            : (o.pay === "SOL" && solNow < needSol)
+            ? { why: `not enough SOL — needed ◎${needSol.toFixed(4)}, turbo had ◎${solNow.toFixed(4)}`, fix: `The trigger fired but the wallet couldn't cover ◎${(+o.amt || 0).toFixed(4)} plus the site fee and network fees. Top up turbo and re-arm.`, tag: "SHORT FUNDS" }
+            : !onchain.enabled
+            ? { why: "live routing was reconnecting", fix: "The router briefly dropped. Nothing was spent and the next trigger will fire normally — re-arm if the level has already passed.", tag: "ROUTER BLIP" }
+            : o.pay !== "SOL"
+            ? { why: "live orders are SOL-only", fix: "Set the buy-in to SOL on the ticket and re-arm. $VALO-denominated orders don't route on chain yet.", tag: "WRONG UNIT" }
+            : !t.liveMint
+            ? { why: "this token has no live route", fix: "The pool isn't routable through Jupiter yet — common for a token minutes old. Try again once it has liquidity.", tag: "NO ROUTE" }
+            : { why: "the route check failed", fix: "The quote didn't come back in time. Nothing was spent — re-arm to try again, and raise slippage if it keeps happening.", tag: "QUOTE FAILED" };
+          const why = diag.why;
           pushNotif({ type: "system", user: null, tokenId: t.id,
-            text: `🤖 bot trigger hit on ${t.sym} but was SKIPPED — ${why}. Nothing was bought.` });
+            botSkip: { ...diag, sym: t.sym, at: Date.now(), size: +o.amt || 0, unit: o.pay || "SOL" },
+            text: `🤖 bot trigger hit on ${t.sym} but was SKIPPED — ${why}. Nothing was bought. Tap for details.` });
           sayPrivate({ type: "note", text: `⚠ bot skipped on ${t.sym}: ${why}` });
           return;
         }
@@ -14119,7 +14209,11 @@ export default function App() {
           sayPrivate({ type: "note", text: `⛓🤖 bot triggered — placing REAL buy of ${size} SOL into ${t.sym}…` });
           fireRealOrderDirect(t, "buy", size).then((res) => {
             if (!res.ok) {
-              pushNotif({ type: "system", user: null, tokenId: t.id, text: `⛓🤖 bot buy MISSED on ${t.sym} — ${res.err}. No funds moved; re-arm if you still want in.` });
+              pushNotif({ type: "system", user: null, tokenId: t.id,
+                botSkip: { tag: "FILL FAILED", why: humanSwapError(res.err), sym: t.sym, at: Date.now(), size, unit: "SOL",
+                  fix: "The trigger fired and the swap was attempted, but the network rejected it. No funds moved. Raising slippage fixes most of these — re-arm to try again.",
+                  raw: res.err || null },
+                text: `⛓🤖 bot buy MISSED on ${t.sym} — ${humanSwapError(res.err)} Tap for details.` });
               sayPrivate({ type: "note", text: `⚠ bot buy missed on ${t.sym}: ${res.err}` });
               return;
             }
@@ -14275,7 +14369,7 @@ export default function App() {
   // a real token to arrive, so slow connections briefly saw the sim cast.)
   // 🛰 LIVE MEANS LIVE: only tokens backed by a real pool. The old rule let the
   // seeded demo $VALO through — the REAL $VALO arrives from its own mint.
-  const shownLive = liveData ? shownRaw.filter((t) => t && t.pool) : shownRaw;
+  const shownLive = liveData ? shownRaw.filter((t) => t && (t.pool || (t.isValo && valoMint))) : shownRaw;
   // one card per pool / mint / symbol — duplicates from different feeds collapse
   const shown = useMemo(() => {
     const byKey = new Map(); let out = [];
