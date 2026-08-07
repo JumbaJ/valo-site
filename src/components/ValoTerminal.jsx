@@ -12404,16 +12404,8 @@ export default function App() {
         const hit = await r.json();
         if (!stop && hit && hit.indexed && (+hit.price > 0)) {
           setValoLive(hit);
-          // 🪙 put the REAL $VALO on the board (replacing the demo copy) so it
-          // appears in the scanner and search like every other live token
-          try {
-            const tok = adoptMarketToken(hit);
-            setMoreToks((M) => {
-              const k = String(tok.liveMint || tok.pool || "").toLowerCase();
-              const rest = M.filter((t) => String(t.liveMint || t.pool || "").toLowerCase() !== k);
-              return [tok, ...rest].slice(0, 260);
-            });
-          } catch (e) {}
+          // (the canonical $VALO card lives in `tokens` at id 424242 — see the
+          // pin effect below. No second copy here, or the board would show two.)
         }
       } catch (e) {}
     };
@@ -12494,7 +12486,10 @@ export default function App() {
           try { const a = await rr.value.json(); if (Array.isArray(a)) rows.push(...a); } catch (e) {}
         }
         if (stop || !rows.length) return;
-        const fresh = rows.filter((x) => (+x.mc || 0) < 1e11).map(adoptMarketToken);
+        const vm = String(valoMint || "").toLowerCase();
+      const fresh = rows.filter((x) => (+x.mc || 0) < 1e11
+        && (!vm || String(x.mint || "").toLowerCase() !== vm))   // ◆ $VALO is pinned, never duplicated
+        .map(adoptMarketToken);
         setMoreToks((M) => {
           const idk = (t) => String(t.liveMint || t.ca || t.pool || "").toLowerCase();
           const seen = new Set([...(tokensRef.current || []), ...M].map(idk));
@@ -12523,7 +12518,10 @@ export default function App() {
       for (const rr of rs) if (rr.status === "fulfilled" && rr.value.ok) {
         try { const a = await rr.value.json(); if (Array.isArray(a)) rows.push(...a); } catch (e) {}
       }
-      const fresh = rows.filter((x) => (+x.mc || 0) < 1e11).map(adoptMarketToken);
+      const vm = String(valoMint || "").toLowerCase();
+      const fresh = rows.filter((x) => (+x.mc || 0) < 1e11
+        && (!vm || String(x.mint || "").toLowerCase() !== vm))   // ◆ $VALO is pinned, never duplicated
+        .map(adoptMarketToken);
       setMoreToks((M) => {
         const idk = (t) => String(t.liveMint || t.ca || t.pool || "").toLowerCase();
         const seen = new Set([...(tokensRef.current || []), ...M].map(idk));
@@ -13171,25 +13169,27 @@ export default function App() {
     try { localStorage.setItem("valo-tour-v1", "done"); } catch (e) {}
   }, []);
   // ◆ tapping any $VALO stat opens the REAL token chart (by CA) once launched
+  // ◆ keep THE $VALO card (id 424242) synced to our CA + live market data
+  useEffect(() => {
+    if (!valoMint || !valoLive || !valoLive.indexed || !(valoLive.price > 0)) return;
+    setTokens((Ts) => {
+      const base = (() => { try { return adoptMarketToken(valoLive); } catch (e) { return null; } })();
+      if (!base) return Ts;
+      const card = { ...base, id: 424242, sym: "VALO", name: "VALO Terminal",
+        liveMint: valoMint, ca: valoMint, hue: 262, isValo: true };
+      const i = Ts.findIndex((t) => t && t.id === 424242);
+      if (i < 0) return [...Ts, card];
+      // preserve candles the chart already streamed for it
+      const prev = Ts[i];
+      const next = [...Ts];
+      next[i] = { ...card, candles: (prev.candles && prev.candles.length) ? prev.candles : card.candles };
+      return next;
+    });
+  }, [valoMint, valoLive]);
   const openValoChart = useCallback(() => {
     setClickMode(null);
-    if (!valoMint) { setSel(424242); return; }
-    // ◆ we already poll $VALO — adopt that row straight onto the board so the
-    // first tap opens OUR token, no search round-trip, no wrong card
-    const lc = String(valoMint).toLowerCase();
-    const onBoard = [...(tokensRef.current || []), ...(moreToksRef.current || [])]
-      .find((t) => t && String(t.liveMint || "").toLowerCase() === lc);
-    if (onBoard) { setSel(onBoard.id); return; }
-    if (valoLive && valoLive.indexed) {
-      try {
-        const card = adoptMarketToken(valoLive);
-        setMoreToks((M) => (M.some((t) => String(t.liveMint || "").toLowerCase() === lc) ? M : [card, ...M]));
-        setSel(card.id);
-        return;
-      } catch (e) {}
-    }
-    try { openTokenByMint(valoMint); } catch (e) { setSel(424242); }
-  }, [valoMint, valoLive, openTokenByMint]);
+    setSel(424242);            // ◆ always OUR token — the card is pinned to the CA
+  }, []);
   // 🔥 SITE BURN — real. $VALO launches with a fixed 1B supply, and SPL burns
   // reduce total supply directly, so burned = 1B − current supply. Measured
   // from the pool's own MC ÷ price. Demo keeps the simulated ticker.
