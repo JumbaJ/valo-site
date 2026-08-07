@@ -72,15 +72,7 @@ const VALO_PURPLE = "hsl(258 75% 68%)"; // brand purple used for $VALO
 // 🛰 resolved once, at module load — every simulation gate reads this so the
 // demo cast is never even CREATED on a live site (not created, not ticked,
 // not callout-generated). Mirrors the liveData initializer exactly.
-const BOOT_LIVE = (() => {
-  try {
-    if (typeof window === "undefined") return false;
-    const q = window.location.search;
-    if (/[?&](live|test)=0/.test(q) || /[?&]demo=1/.test(q)) return false;
-    if (/[?&](live|test)=1/.test(q)) return true;
-    return window.__VALO_LIVE__ !== false;
-  } catch (e) { return true; }
-})();
+const BOOT_LIVE = true;   // 🛰 VALO is live-only. There is no demo build.
 const cardGrad = (h) =>
   `linear-gradient(160deg, hsla(${h},60%,50%,0.10) 0%, hsla(${h},60%,40%,0.035) 40%, transparent 75%), ${T.panel}`;
 
@@ -476,13 +468,14 @@ function saneMc(x) {
 }
 function adoptMarketToken(x) {
   const sym = String(x.sym || "???").toUpperCase().slice(0, 12);
-  const buys = +x.buys24 || 0, sells = +x.sells24 || 0;
+  const buys = +x.buys24 || +x.buys || 0, sells = +x.sells24 || +x.sells || 0;
   const flow = Math.max(1, buys + sells);
   const green = +x.greenUsd || 0, red = +x.redUsd || 0;
   const tvl = +x.tvl || 0, mc = +x.mc || 0, price = +x.price || 0;
   const buyPressure = Math.round((buys / flow) * 100);
   const ch = +x.ch24 || 0;
-  const momentum = Math.max(1, Math.min(99, Math.round(50 + ch / 2 + (buyPressure - 50) * 0.4)));
+  const mRaw = 50 + (Number.isFinite(ch) ? ch : 0) / 2 + ((Number.isFinite(buyPressure) ? buyPressure : 50) - 50) * 0.4;
+  const momentum = Math.max(1, Math.min(99, Math.round(Number.isFinite(mRaw) ? mRaw : 50)));
   const ageMin = x.createdAt ? Math.max(1, Math.round((Date.now() - x.createdAt) / 60000)) : 600;
   x = { ...x, mc: saneMc(x) };
   return {
@@ -7759,8 +7752,8 @@ function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line",
           </>, document.body)}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
-        <Meter label="MOMENTUM" value={Math.round(t.momentum)} color={accent(t.hue)} />
-        <Meter label="B/S PRESSURE" value={Math.round(t.buyPressure)} color={t.buyPressure >= 50 ? T.green : T.red} />
+        <Meter label="MOMENTUM" value={Number.isFinite(t.momentum) ? Math.round(t.momentum) : 50} color={accent(t.hue)} />
+        <Meter label="B/S PRESSURE" value={Number.isFinite(t.buyPressure) ? Math.round(t.buyPressure) : 50} color={(t.buyPressure || 50) >= 50 ? T.green : T.red} />
         {fmtAge(t.createdAt) && (
           <span title={`Launched ${new Date(t.createdAt).toLocaleString()}`}
             style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 800, color: (t.ageMin || 0) < 60 ? T.green : T.faint, whiteSpace: "nowrap" }}>
@@ -11976,23 +11969,9 @@ export default function App() {
   const [ecoFull, setEcoFull] = useState(false);  // 📱 fullscreen token ecosystem
   const [ecoQ, setEcoQ] = useState("");
 
-  const [liveData, setLiveData] = useState(() => {
-    if (typeof window === "undefined") return false;
-    const q = window.location.search;
-    if (/[?&](live|test)=0/.test(q) || /[?&]demo=1/.test(q)) {
-      // strip the flag so a bookmarked/home-screen URL can't pin demo forever —
-      // this session honours it, the next visit starts live again
-      try {
-        const clean = window.location.pathname + q.replace(/[?&](live|test)=0|[?&]demo=1/g, "").replace(/^&/, "?");
-        window.history.replaceState({}, "", clean || window.location.pathname);
-      } catch (e) {}
-      return false;
-    }
-    if (/[?&](live|test)=1/.test(q)) return true;                            // live, explicitly
-    // 🛰 LIVE IS THE DEFAULT: everyone opens the app on real chain data.
-    // A deployment can still force demo with VITE_LIVE_DATA="0" (→ __VALO_LIVE__ === false).
-    return window.__VALO_LIVE__ !== false;
-  }); // 🛰 real charts from the first paint — ?demo=1 or ?live=0 opts out
+  // 🛰 LIVE ONLY. Every chart, price, token, callout and balance on this site
+  // is real chain data — there is no simulated mode to fall back into.
+  const [liveData, setLiveData] = useState(true);
   useEffect(() => {
     if (!liveData) return;
     let stop = false;
@@ -17048,14 +17027,13 @@ export default function App() {
         </>
       )}
       {!isMobile && (
-        <button onClick={() => setLiveData((v) => !v)}
-          title={liveData ? "LIVE DATA ON — real pump.fun pairs via DexScreener; wallet & fills stay simulated. Click to return to the demo feed." : "Pull REAL Solana pump tokens (DexScreener) into the terminal — paper trading on live prices"}
-          style={{ display: "flex", alignItems: "center", gap: 6, width: 152, height: 26, boxSizing: "border-box", justifyContent: "center",  flex: "0 0 auto",
-            background: liveData ? "rgba(22,199,132,0.14)" : "rgba(15,19,28,0.72)", border: `1px solid ${liveData ? T.green : T.border}`, borderTop: "none", borderRadius: "0 0 9px 9px", padding: "0 8px", cursor: "pointer",
-            boxShadow: liveData ? "0 0 10px rgba(22,199,132,0.35)" : "none" }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: liveData ? T.green : "#39414f", boxShadow: liveData ? `0 0 6px ${T.green}` : "none" }} />
-          <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: liveData ? T.green : "rgba(138,148,168,0.7)", fontWeight: 800 }}>{liveData ? "LIVE DATA · PAPER" : "LIVE DATA"}</span>
-        </button>
+        <div title="Every price, chart and balance here is real chain data"
+          style={{ display: "flex", alignItems: "center", gap: 6, width: 152, height: 26, boxSizing: "border-box", justifyContent: "center", flex: "0 0 auto",
+            background: "rgba(22,199,132,0.14)", border: `1px solid ${T.green}`, borderTop: "none", borderRadius: "0 0 9px 9px", padding: "0 8px",
+            boxShadow: "0 0 10px rgba(22,199,132,0.35)" }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.green, boxShadow: `0 0 6px ${T.green}` }} />
+          <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: T.green, fontWeight: 800 }}>⛓ LIVE CHAIN DATA</span>
+        </div>
       )}
         </div>
       )}
