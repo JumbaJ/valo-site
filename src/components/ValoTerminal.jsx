@@ -8895,7 +8895,20 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
   );
 }
 
-function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, eco = false, isMobile = false, onFullEco, mktExtra = [], onQuery}) {
+function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, eco = false, isMobile = false, onFullEco, mktExtra = [], onQuery, liveData = false, valoMint = null }) {
+  // 🛰 live: simulated tokens never appear. + one entry per mint (feeds overlap)
+  const srcTokens = React.useMemo(() => {
+    const all = [...(tokens || []), ...(mktExtra || [])];
+    const real = liveData ? all.filter((t) => t && (t.pool || (t.sym === "VALO" && valoMint))) : all;
+    const seen = new Set(); const out = [];
+    for (const t of real) {
+      if (!t) continue;
+      const k = String(t.liveMint || t.ca || t.pool || ("id" + t.id)).toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k); out.push(t);
+    }
+    return out;
+  }, [tokens, mktExtra, liveData, valoMint]);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   useEffect(() => { onQuery && onQuery(q); }, [q]);
@@ -8908,7 +8921,7 @@ function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, ec
   // fake "other users" pool + the current user — API: user directory search
   const users = ["solwhale", "moonboy", "degenlord", "pumpking", "based", "cryptogod", "apehunter", "frostbyte", username].filter(Boolean);
   const ql = q.trim().toLowerCase();
-  const tokMatches = ql ? tokens.filter((t) => t.sym.toLowerCase().includes(ql) || (t.name || "").toLowerCase().includes(ql) || (t.ca || "").toLowerCase().includes(ql)).slice(0, 6) : [];
+  const tokMatches = ql ? srcTokens.filter((t) => t.sym.toLowerCase().includes(ql) || (t.name || "").toLowerCase().includes(ql) || (t.ca || "").toLowerCase().includes(ql) || (t.liveMint || "").toLowerCase().includes(ql)).slice(0, 6) : [];
   const userMatches = ql ? users.filter((u) => u.toLowerCase().includes(ql)).slice(0, 4) : [];
   const hasResults = tokMatches.length + userMatches.length > 0;
 
@@ -8926,7 +8939,7 @@ function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, ec
       {eco && open && !isMobile && (
         <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 40, background: T.panel, border: `1px solid ${VALO_PURPLE}55`, borderRadius: 12, boxShadow: "0 26px 70px rgba(0,0,0,0.7)", overflow: "hidden",
           opacity: (typeof window !== "undefined" && window.__valoEcoDim) ? 0.07 : 1, pointerEvents: (typeof window !== "undefined" && window.__valoEcoDim) ? "none" : "auto", transition: "opacity .22s ease" }}>
-          <TokenEcosystem tokens={mktExtra && mktExtra.length ? [...tokens, ...mktExtra] : tokens}
+          <TokenEcosystem tokens={srcTokens}
             q={q} isMobile={false} maxH="min(72vh, 760px)" tdProps={(typeof window !== "undefined" && window.__valoTdProps) || null}
             onPick={(id, tokObj) => { onPickToken && onPickToken(id, tokObj); setOpen(false); setQ(""); }}
             onWatchAdd={typeof window !== "undefined" && window.__valoWatchAdd ? window.__valoWatchAdd : undefined}
@@ -15955,7 +15968,7 @@ export default function App() {
             <StickySearch top={headerH}>
               <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <SearchBar tokens={tokens} username={username} full eco isMobile onFullEco={() => setEcoFull(true)} mktExtra={[...mktHits, ...moreToks]} onQuery={setEcoQ} onPickToken={openAnyToken} onPickUser={(u) => setProfileUser(u)} />
+                  <SearchBar tokens={tokens} username={username} full eco isMobile liveData={liveData} valoMint={valoMint} onFullEco={() => setEcoFull(true)} mktExtra={[...mktHits, ...moreToks]} onQuery={setEcoQ} onPickToken={openAnyToken} onPickUser={(u) => setProfileUser(u)} />
                 </div>
                 <button onClick={() => setCompactList((v) => !v)} title={compactList ? "Expand cards" : "Compact list"}
                   style={{ flex: "0 0 auto", border: `1px solid ${compactList ? VALO_PURPLE : T.border2}`, background: T.panel, color: compactList ? VALO_PURPLE : T.dim,
@@ -16086,7 +16099,7 @@ export default function App() {
               {/* search — the chart's exact width, glued under the callout
                   banner, riding along as you scroll */}
               <div style={{ position: "sticky", top: "calc(var(--stkTop, 8px) - 8px)", zIndex: 34, margin: "0 0 8px" }}>
-                <SearchBar tokens={tokens} username={username} full eco mktExtra={[...mktHits, ...moreToks]} onQuery={setEcoQ} onPickToken={openAnyToken} onPickUser={(u) => setProfileUser(u)} />
+                <SearchBar tokens={tokens} username={username} full eco liveData={liveData} valoMint={valoMint} mktExtra={[...mktHits, ...moreToks]} onQuery={setEcoQ} onPickToken={openAnyToken} onPickUser={(u) => setProfileUser(u)} />
               </div>
 
               {chartBlock}
@@ -18192,7 +18205,14 @@ export default function App() {
                 </div>
               ) : null}
               heldSlot={
-                <HeldPositions positions={positions} tokens={tokens} pay={pay} onTrade={onPosTrade} solBalance={dispSol} valoWallet={dispValo}
+                <HeldPositions liveMode={liveData} chainHoldings={chainHoldingsLive}
+                  onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings}
+                  onOpenMint={(m) => { openTokenByMint(m); setPortfolioDrawer(false); }}
+                  positions={positions} tokens={tokens} pay={pay} onTrade={onPosTrade}
+                  solBalance={liveData && combinedChain ? (combinedChain.solTrading != null ? combinedChain.solTrading : combinedChain.sol) : dispSol}
+                  valoWallet={liveData && valoMint && combinedChain
+                    ? ((visHolds(combinedChain.holdings).find((h) => h.mint === valoMint && h.src !== "phantom") || {}).qty || 0)
+                    : dispValo}
                   onOpenToken={(id) => { setSel(id); setClickMode(null); setPortfolioDrawer(false); }}
                   onSellAll={(t) => { const p = positions[t.id]; if (p && p.amt > 0) execute(t, { side: "sell", pay: p.pay, amt: p.amt, mode: "instant", tax: taxFor(p.pay), burn: splitFee(p.amt, p.pay).total, legs: [] }); }}
                   onCloseAll={() => { Object.entries(positions).forEach(([id, p]) => { const tok = tokens.find((x) => x.id === +id); if (tok && p && p.amt > 0) execute(tok, { side: "sell", pay: p.pay, amt: p.amt, mode: "instant", tax: taxFor(p.pay), burn: splitFee(p.amt, p.pay).total, legs: [] }); }); }} />
