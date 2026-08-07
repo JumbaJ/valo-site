@@ -1,5 +1,5 @@
 {
   "crons": [
-    { "path": "/api/callout-tick", "schedule": "0 * * * *" }
+    { "path": "/api/epoch-payout", "schedule": "0 * * * *" }
   ]
 }

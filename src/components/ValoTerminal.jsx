@@ -2255,7 +2255,7 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
                     ? st("TRADE RATE", `${mLive.txRate.toFixed(1)}/min`, mLive.txRate > 5 ? T.green : T.dim)
                     : st("MOMENTUM", Math.round(token.momentum || 0), (token.momentum || 0) > 60 ? T.green : T.dim)}
                   {(() => {
-                    const real = liveData && token.liveMint && window.__VALO_HOLDERS__ ? window.__VALO_HOLDERS__[token.liveMint] : null;
+                    const real = token.liveMint && typeof window !== "undefined" && window.__VALO_HOLDERS__ ? window.__VALO_HOLDERS__[token.liveMint] : null;
                     if (Number.isFinite(real) && real > 0) {
                       const prev = prevHolders.current[token.liveMint];
                       const delta = Number.isFinite(prev) ? real - prev : 0;
@@ -8414,8 +8414,8 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
   }, [token.id, token.liveMint]);
   const topHolders = useMemo(() => {
     if (liveHolders) return liveHolders;
-    // ⛓ live with no holder data yet → show nothing rather than a simulated book
-    if (liveData && token.liveMint) return [];
+    // ⛓ a real token with no holder data yet → show nothing, never a sim book
+    if (token && token.liveMint && token.pool) return [];
     const supply = 1e9 * (0.35 + ((token.id * 13) % 50) / 100);
     let x = token.id * 77 + 13; const rnd2 = () => { x = (x * 9301 + 49297) % 233280; return x / 233280; };
     const N = 25;
