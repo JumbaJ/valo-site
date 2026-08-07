@@ -3518,10 +3518,14 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
 }
 
 // 🔥 burn stats — everything the burn buttons track, moving live with trades
-function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0 }, valoUsd = 0.0125) {
+function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0, valoUsd = 0.0125, valoLive = null, valoMint = null }) {
   const TOTAL = 1e9; // genesis supply
-  const circ = Math.max(0, TOTAL - siteBurned);
-  const pct = (siteBurned / TOTAL) * 100;
+  // ⛓ real price + real circulating supply from the token's own pool
+  const px = valoLive && valoLive.price > 0 ? valoLive.price : valoUsd;
+  const realCirc = valoLive && valoLive.price > 0 && valoLive.mc > 0 ? valoLive.mc / valoLive.price : 0;
+  const circ = realCirc > 0 ? realCirc : Math.max(0, TOTAL - siteBurned);
+  const burnedReal = realCirc > 0 ? Math.max(0, TOTAL - realCirc) : siteBurned;
+  const pct = (burnedReal / TOTAL) * 100;
   const row = (label, val, sub, col) => (
     <div style={{ border: `1px solid ${col}44`, background: `${col}0d`, borderRadius: 11, padding: "11px 13px", marginBottom: 8 }}>
       <div style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.5, color: T.faint, marginBottom: 4 }}>{label}</div>
@@ -3539,11 +3543,12 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0 }, valoUsd 
         </div>
         <div style={{ padding: "11px 12px 13px" }}>
           {row("YOUR TOTAL BURNED", `${myBurned.toFixed(4)} $VALO`, "the burn slice of every fee you've ever paid", "#f97316")}
-          {row("SITE TOTAL BURN", `${fmtQty(siteBurned)} $VALO`, "every trader's burn pool + hourly buyback burns, on-chain forever", T.red)}
+          {row("SITE TOTAL BURN", `${fmtQty(burnedReal)} $VALO`,
+            realCirc > 0 ? "genesis supply minus what's left on chain — permanent" : "every trader's burn pool + hourly buyback burns, on-chain forever", T.red)}
           {row("CIRCULATING SUPPLY", `${fmtQty(circ)} $VALO`, `of ${fmtQty(TOTAL)} genesis — shrinking with every trade`, T.green)}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, border: `1.5px solid ${VALO_PURPLE}66`, background: "rgba(125,92,240,0.10)", borderRadius: 10, padding: "8px 11px", marginTop: 7, boxShadow: `0 0 12px ${VALO_PURPLE}33` }}>
-            <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: VALO_PURPLE, fontWeight: 900 }}>◆ $VALO PRICE · LIVE</span>
-            <span style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 900, color: VALO_PURPLE }}>${(valoUsd * (1 + Math.sin(Date.now() / 4000) * 0.003)).toFixed(4)}</span>
+            <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: VALO_PURPLE, fontWeight: 900 }}>◆ $VALO PRICE {valoLive && valoLive.price > 0 ? "· ⛓ ON CHAIN" : ""}</span>
+            <span style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 900, color: VALO_PURPLE }}>${fmtP(px)}</span>
           </div>
           <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, margin: "4px 0 5px", display: "flex", justifyContent: "space-between" }}>
             <span>SUPPLY BURNED</span><span style={{ color: "#f97316", fontWeight: 800 }}>{pct.toFixed(5)}%</span>
@@ -3609,11 +3614,10 @@ function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned =
     let stop = false;
     const pull = async () => {
       try {
-        const r = await fetch(`/api/tokens?search=${encodeURIComponent(valoMint)}&t=${Math.floor(Date.now() / 15000)}`);
+        const r = await fetch(`/api/valo?mint=${encodeURIComponent(valoMint)}&t=${Math.floor(Date.now() / 10000)}`);
         if (!r.ok) return;
-        const rows = await r.json();
-        const hit = Array.isArray(rows) ? rows.find((x) => String(x.mint || "").toLowerCase() === String(valoMint).toLowerCase()) || rows[0] : null;
-        if (!stop && hit) setReal(hit);
+        const hit = await r.json();
+        if (!stop && hit && hit.indexed) setReal(hit);
       } catch (e) {}
     };
     pull();
@@ -12102,13 +12106,10 @@ export default function App() {
     let stop = false;
     const pull = async () => {
       try {
-        const r = await fetch(`/api/tokens?search=${encodeURIComponent(valoMint)}&t=${Math.floor(Date.now() / 15000)}`);
+        const r = await fetch(`/api/valo?mint=${encodeURIComponent(valoMint)}&t=${Math.floor(Date.now() / 10000)}`);
         if (!r.ok) return;
-        const rows = await r.json();
-        const hit = Array.isArray(rows)
-          ? rows.find((x) => String(x.mint || "").toLowerCase() === String(valoMint).toLowerCase()) || rows[0]
-          : null;
-        if (!stop && hit && (+hit.price > 0)) {
+        const hit = await r.json();
+        if (!stop && hit && hit.indexed && (+hit.price > 0)) {
           setValoLive(hit);
           // 🪙 put the REAL $VALO on the board (replacing the demo copy) so it
           // appears in the scanner and search like every other live token
@@ -12124,7 +12125,7 @@ export default function App() {
       } catch (e) {}
     };
     pull();
-    const iv = setInterval(pull, 15000);
+    const iv = setInterval(pull, 10000);
     return () => { stop = true; clearInterval(iv); };
   }, [liveData, valoMint]);
   const [scanMode, setScanMode] = useState(() => { try { const v0 = localStorage.getItem("valo-scan-mode") || "trending"; return v0 === "random" ? "lucky" : v0; } catch (e) { return "trending"; } });
@@ -12873,11 +12874,8 @@ export default function App() {
   // from the pool's own MC ÷ price. Demo keeps the simulated ticker.
   useEffect(() => {
     if (liveData && valoMint) {
-      if (valoLive && valoLive.price > 0 && valoLive.mc > 0) {
-        const supplyNow = valoLive.mc / valoLive.price;
-        const gone = Math.max(0, 1e9 - supplyNow);
-        setBurned(gone);
-      }
+      if (valoLive && Number.isFinite(valoLive.burned)) setBurned(Math.max(0, valoLive.burned));
+      else if (valoLive && valoLive.price > 0 && valoLive.mc > 0) setBurned(Math.max(0, 1e9 - valoLive.mc / valoLive.price));
       return;                                  // never fake-tick a live token
     }
     const iv = setInterval(() => setBurned((b) => b + 40 + Math.random() * 140), 2600);
@@ -15852,7 +15850,7 @@ export default function App() {
                 valoLive ? "Live $VALO price from the pool" : "Current $VALO price"],
               [valoLive ? "MARKET CAP" : "TVL", valoLive ? fmt$(valoLive.mc || 0) : fmt$(gTvl), T.text,
                 valoLive ? "Real $VALO market cap" : null],
-              ["LP", valoLive ? fmt$(valoLive.tvl || 0) : fmt$(gTvl), T.text, valoLive ? "Real pool liquidity" : null],
+              ...(valoLive ? [["LP", fmt$(valoLive.tvl || 0), T.text, "Real pool liquidity"]] : []),
               ["NET FLOW", (() => {
                 const n = valoLive ? ((valoLive.greenUsd || 0) - (valoLive.redUsd || 0)) : gNet;
                 return `${n >= 0 ? "+" : "−"}${fmt$(Math.abs(n))}`;
@@ -17329,7 +17327,9 @@ export default function App() {
       {valoStatsOpen && <ValoStatsModal onClose={() => setValoStatsOpen(false)} isMobile={isMobile}
         valoUsd={valoUsdPrice} tvl={gTvl} burned={burned} valoWallet={valoWallet}
         valoMint={valoMint} liveData={liveData} />}
-      {burnOpen && <BurnModal valoUsd={valoUsdPrice} onClose={() => setBurnOpen(false)} isMobile={isMobile} myBurned={myBurned} siteBurned={burned} />}
+      {burnOpen && <BurnModal valoUsd={valoLive && valoLive.price > 0 ? valoLive.price : valoUsdPrice}
+        valoLive={valoLive} valoMint={valoMint}
+        onClose={() => setBurnOpen(false)} isMobile={isMobile} myBurned={myBurned} siteBurned={burned} />}
       {ranksOpen && <RanksModal onMyRank={reportMyRank} onClose={closeAllPages} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
         myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)}
         focusUser={ranksOpen.focus || null} onOpenUser={(u) => { setRanksOpen(null); setProfileUser(u); }} />}
