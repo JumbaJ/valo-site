@@ -68,6 +68,19 @@ function symbolHue(sym) {
 }
 const accent = (h, l = 60) => `hsl(${h} 75% ${l}%)`;
 const VALO_PURPLE = "hsl(258 75% 68%)"; // brand purple used for $VALO
+
+// 🛰 resolved once, at module load — every simulation gate reads this so the
+// demo cast is never even CREATED on a live site (not created, not ticked,
+// not callout-generated). Mirrors the liveData initializer exactly.
+const BOOT_LIVE = (() => {
+  try {
+    if (typeof window === "undefined") return false;
+    const q = window.location.search;
+    if (/[?&](live|test)=0/.test(q) || /[?&]demo=1/.test(q)) return false;
+    if (/[?&](live|test)=1/.test(q)) return true;
+    return window.__VALO_LIVE__ !== false;
+  } catch (e) { return true; }
+})();
 const cardGrad = (h) =>
   `linear-gradient(160deg, hsla(${h},60%,50%,0.10) 0%, hsla(${h},60%,40%,0.035) 40%, transparent 75%), ${T.panel}`;
 
@@ -3333,7 +3346,7 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
       const tk = tokens.find((t) => String(t.id) === String(id));
       return tk ? { user: "you", you: true, sym: tk.sym, hue: tk.hue, mcAt: c.mcAt, mult: c.peak } : null;
     }).filter(Boolean);
-    const liveOn = typeof window !== "undefined" && window.__VALO_LIVE_ON__;
+    const liveOn = BOOT_LIVE || (typeof window !== "undefined" && window.__VALO_LIVE_ON__);
     // live mode → only real callouts rank; demo mode keeps the simulated field
     const all = liveOn ? [...realBoard] : [...genLeaderboard(period), ...realBoard, ...mine];
     // collapse to each trader's best call in this window, and remember how many
@@ -8127,6 +8140,27 @@ function WpFeeTable() {
 }
 
 const PATCH_NOTES = [
+  { v: "3.0.2", name: "PATCH V 3.0.2 — $VALO IS LIVE", date: "August 2026", accent: "#7D5CF0", items: [
+    "◆ $VALO LAUNCHED ON PUMP.FUN — the token is live and the whole terminal is wired to it. Header price, market cap, LP, net flow, 24h volume and the burn tracker all read the real pool every 10 seconds through a dedicated market endpoint. Tap any stat to open the real $VALO chart by CA",
+    "🔥 BURN TRACKER IS CHAIN-TRUTH — burns are measured as genesis supply minus real current supply (SPL burns shrink supply directly), so the number matches what anyone can verify on Solscan. The old simulated counter — and a sine wave that faked price movement — are gone",
+    "🛰 LIVE BY DEFAULT — everyone now opens the app on real chain data from the first paint. No simulated token, price, callout or leaderboard entry is ever created on a live site: the demo cast isn't hidden, it's never built. The installed mobile app launches straight into live too",
+    "📣 CALLOUT BANNER = WALL OF FAME — only calls actually holding 2x+ ride the header, sorted biggest first, and each one animates harder the higher it climbs: glow at 2x, pulse + tier name at 5x, ⚡ shimmer at 10x, 🔥 flare at 20x, and full 👑 legend spectacle at 50x. Only real traders rank",
+    "🏋 HOURLY EPOCH ENGINE — every real fill now logs trading weight, leaderboard placements stack their bonuses (#1 +0.50× … #11–100 +0.10×, capped +4.0×), and the claim modal shows your live weight, the vault pool and your projected share. Payout wallet is yours to set",
+    "👻 SIGN IN WITH YOUR WALLET — one Phantom signature, no email, no transaction. It links your trading side in the same tap, and signing out closes both doors. Email magic-link kept as a fallback",
+    "📊 CHARTS REBUILT TO DEXSCREENER PARITY — candles now open where the previous one closed (the staircase reads properly instead of stacking bricks), bodies sit at 82% of the slot with real seams, wicks are 1px, and the axis stays LINEAR unless a chart truly spans decades — so a bar's height is true to the move",
+    "📐 AXIS THAT NEVER LIES — the live price is always in frame, launch bars keep their origin, two real jumps both fit (the second one used to get beheaded), and a lone monster wick still gets clipped so it can't crush everything else",
+    "📱 MOBILE CHART OVERHAUL — the gray crosshair only appears on a 2-second hold, locks on screen, and freezes the chart completely while you drag it (no pan, no rescaling under your finger); hold again to dismiss. Pans and crosshair drags render at native frame rate, and every wake path — app switch, back-swipe, network blip — resyncs candles and rebuilds a dead socket instantly",
+    "📡 FIVE REAL SCANNER LENSES — 🔥 TRENDING (volume accelerating 3×+, buy pressure, freshness), 💪 HOT (60–95% curve, 50+ tx pace, 80+ traders), 🍼 NEW (1–15min, trading confirmed, ground floor), 📈 MOVERS (velocity with a $2K LP floor so dust can't fake spikes), 🍀 LUCKY PICK (weighted lottery for undervalued gems, animated clover). Each lens streams its own candidates — no more five costumes on one cast",
+    "🚫 SCANNER HYGIENE — nothing below its pump launch price, no sub-12-minute launches outside NEW, no duplicate cards (identity is the mint now, and duplicates merge keeping the richer record), and thin lenses top up with tokens that are actually moving instead of going blank",
+    "🔢 SCORES ARE REAL, AND THEY EXPLAIN THEMSELVES — the number is built from LP depth, real traders, flow balance, survival age, turnover sanity, metadata and graduation distance. SAFE/CAUTION/RISKY text is gone; tap any score for live B/S pressure, price ⇄ market cap, and vitals — right beside the card, without opening the chart",
+    "⛓ DEV WALLET TAB AUDITED LINE BY LINE — real creator balance, their true launch count, DEAD/FADED tallied from chain, every launch tappable, and real wallet movements with working Solscan links. The fees chart was removed on live rather than faked, and creator money now shows what actually arrived",
+    "✅ ONLY OFFICIAL SOCIALS — every link is verified against the platform's real domain over https before it renders. Lookalikes, typosquats and subdomain tricks are blocked, and a token with no socials honestly shows none",
+    "🎚 SLIPPAGE CONTROL — 5% default (1% was killing fills on fresh launches), adjustable to 30%, and swap failures now explain themselves in plain English with 5/10/15/20% buttons right on the dialog plus the chain's own logs for anything unusual",
+    "⛔ ARM-TIME FUNDS GATE — a trigger that can't afford its own fill is refused when you tap it, with the exact math (buy-in + site fee + tx fees vs your turbo balance), instead of arming a line that dies later at the worst moment",
+    "◆ THE DIAMOND MEANS ARMED — the wallet tab's lightning becomes the spinning brand diamond only when single-tap trading is genuinely live. Green ⚡ = unlocked, red ⚡ = locked",
+    "🏷 MARKERS SHOW SIZE — every buy/sell marker now carries the token amount traded, and receipts read '142.3K PINO · 0.497 SOL' for both sides",
+    "⤓ PULL TO REFRESH — yank the top of the scanner on mobile or overscroll on PC to deal a fresh hand for whatever lens you're on. 🍀 LUCKY re-rolls the whole lottery",
+  ]},
   { v: "2.0.2", name: "PATCH V 2.0.2", date: "July 2026", accent: "#16C784", items: [
     "🖐 FILE-STYLE SCANNER DRAG (PC + mobile) — hold a token and it SHRINKS in your grip, a ⠿ $TICKER ghost pill rides your cursor/finger, the tile under you scales up with a dashed glow, and slots flip the moment you clip ~15% into the neighbor. 320ms pickup, half-way jitter killed, and the PC down-drag dead-zone bug is gone — one-slot drags land instantly in both directions",
     "📑 SUBSECTIONS GO LIVE — single-click (tap on mobile) any watchlist subsection header and its tokens BECOME the scanner: everything else clears, the header lights up ● IN SCANNER, click again to restore. Removing a token while its subsection is loaded clears it from the watchlist too — the two stay in sync",
@@ -9363,8 +9397,12 @@ function StickySearch({ top, children }) {
   );
 }
 
+
 export default function App() {
   const [tokens, setTokens] = useState(() => {
+    // ⛓ LIVE: the board starts EMPTY and fills from chain. No demo cast ever
+    // exists, so nothing simulated can leak into any panel.
+    if (BOOT_LIVE) return [];
     const base = NAMES.slice(0, 8).map((n) => makeToken(n));
     // ◆ the flagship — $VALO itself trades as a first-class chart token
     const v = makeToken(["VALO", "VALO Terminal", "sol"]);
@@ -10376,7 +10414,8 @@ export default function App() {
       if (!r.ok || j.error) { setRealOrder({ stage: "error", token, side, size, label, msg: j.error || "no route" }); return; }
       setRealOrder({ stage: "review", token, side, size, label, quote: j.quote, inputMint, outputMint, q, owner, fullExit });
     } catch (e) {
-      setRealOrder({ stage: "error", token, side, size, label, msg: String(e.message || e) });
+      setRealOrder({ stage: "error", token, side, size, label, msg: String(e.message || e),
+        errorName: (e && e.errorName) || null, logs: (e && e.logs) || null, program: (e && e.program) || null });
     }
   };
 
@@ -10656,7 +10695,7 @@ export default function App() {
           const send = await fetch("/api/sendtx", { method: "POST", headers: { "content-type": "application/json" },
             body: JSON.stringify({ signed: b64 }) });
           const sj = await send.json();
-          if (!sj.ok) return { ok: false, err: sj.error || "network rejected it" };
+          if (!sj.ok) return { ok: false, err: sj.error || "network rejected it", errorName: sj.errorName || null, logs: sj.logs || null, program: sj.program || null };
           sig = sj.signature;
         } else return { ok: false, err: "wallet can't sign here" };
         if (!sig) return { ok: false, err: "not signed" };
@@ -10986,7 +11025,12 @@ export default function App() {
         const send = await fetch("/api/sendtx", { method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify({ signed: b64 }) });
         const sj = await send.json();
-        if (!sj.ok) throw new Error(sj.error || "the network rejected it");
+        if (!sj.ok) {
+          // carry the chain's own diagnosis to the dialog
+          const err = new Error(sj.error || "the network rejected it");
+          err.errorName = sj.errorName || null; err.logs = sj.logs || null; err.program = sj.program || null;
+          throw err;
+        }
         sig = sj.signature;
       } else throw new Error("this wallet can't sign transactions here");
       if (!sig) throw new Error("no signature returned — nothing was sent");
@@ -13187,6 +13231,7 @@ export default function App() {
 
   // surge + hard-drop detector → BIG announcements in public feed
   useEffect(() => {
+    if (liveData) return;            // ⛓ live: only real market moves speak
     const iv = setInterval(() => {
       setTokens((Ts) => {
         const now = Date.now();
@@ -13212,10 +13257,11 @@ export default function App() {
       });
     }, 9000);
     return () => clearInterval(iv);
-  }, [sayAlert]);
+  }, [sayAlert, liveData]);
 
   // new launches — API: pump.fun mint stream
   useEffect(() => {
+    if (liveData) return;            // ⛓ live: real launches arrive from the NEW feed
     const iv = setInterval(() => {
       if (poolRef.current.length) {
         const t = makeToken(poolRef.current.shift(), true);
@@ -13229,7 +13275,7 @@ export default function App() {
       }
     }, 16000);
     return () => clearInterval(iv);
-  }, [sayAlert]);
+  }, [sayAlert, liveData]);
 
   // metadata image resolver — attaches a real picture once it "loads"
   const resolveImage = useCallback((t) => {
@@ -13273,6 +13319,7 @@ export default function App() {
 
   // community callouts — API: social/telegram callout feed
   useEffect(() => {
+    if (liveData) return;            // ⛓ live: ONLY real traders' callouts ride the banner
     const iv = setInterval(() => {
       setTokens((Ts) => {
         if (!Ts.length) return Ts;
@@ -13296,7 +13343,7 @@ export default function App() {
       });
     }, 4200);
     return () => clearInterval(iv);
-  }, []);
+  }, [liveData]);
 
   const calloutCountFor = useCallback((id) => callouts.filter((c) => c.tokenId === id).length, [callouts]);
 
@@ -13346,13 +13393,14 @@ export default function App() {
 
   // background: other users trading into the vault — API: on-chain fee events
   useEffect(() => {
+    if (liveData) return;            // ⛓ live: the vault fills from real fees only
     const iv = setInterval(() => {
       const otherVol = rnd(200, 9000);
       setPoolVol((v) => v + otherVol);
       setVaultTotal((v) => v + otherVol * (TAX.VALO / 100) / 2);
     }, 3000);
     return () => clearInterval(iv);
-  }, []);
+  }, [liveData]);
 
   // per-coin room chatter — API: coin room websocket
   useEffect(() => {
@@ -16728,6 +16776,18 @@ export default function App() {
                     <span style={{ color: T.text, fontSize: 10.5 }}>{humanSwapError(realOrder.msg)}</span>
                     {humanSwapError(realOrder.msg) !== realOrder.msg && (
                       <><br /><span style={{ color: T.faint, fontSize: 8 }}>{realOrder.msg}</span></>
+                    )}
+                    {realOrder.errorName && <><br /><span style={{ color: T.amber, fontSize: 9 }}>program says: {realOrder.errorName}</span></>}
+                    {Array.isArray(realOrder.logs) && realOrder.logs.length > 0 && (
+                      <details style={{ marginTop: 8 }}>
+                        <summary style={{ cursor: "pointer", fontFamily: T.mono, fontSize: 8.5, color: T.dim }}>chain logs (tap to copy for support)</summary>
+                        <div onClick={() => { try { navigator.clipboard.writeText(realOrder.logs.join("\n")); } catch (e) {} }}
+                          style={{ marginTop: 5, maxHeight: 160, overflowY: "auto", background: "#0a0d14",
+                            border: `1px solid ${T.border}`, borderRadius: 7, padding: 8, cursor: "copy",
+                            fontFamily: T.mono, fontSize: 7.5, color: T.faint, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                          {realOrder.logs.join("\n")}
+                        </div>
+                      </details>
                     )}
                     {/* 🎚 fix it right here — raise slippage without hunting for a setting */}
                     {/slippage|0x1789|0x1771|moved/i.test(String(realOrder.msg || "")) && (
