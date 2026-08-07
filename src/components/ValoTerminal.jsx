@@ -2483,14 +2483,35 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
 // full desktop ticket — settlement, instant buy/sell, click-to-trade arming,
 // plus the auto strategy. Desktop keeps the complete toolset.
 // held positions dropdown — every open position with per-token PnL, click-to-open, per-token & bulk close
-function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onCloseAll, onTrade, solBalance = 0, valoWallet = 0 }) {
+function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onCloseAll, onTrade, solBalance = 0, valoWallet = 0,
+  liveMode = false, chainHoldings = null, onRealSellOne = null, onRealSellAll = null, onOpenMint = null }) {
   const [rowMode, setRowMode] = useState({}); // { [tokenId]: "buy" } — toggle flips the bar
   const [confirmSel, setConfirmSel] = useState(null); // { tid, side, pct } — two-tap safety
   const confTO = useRef(null);
   const [open, setOpen] = useState(false);
-  const held = Object.entries(positions)
+  // ⛓ LIVE: your real open positions — turbo wallet AND anything already sitting
+  // in Phantom. Not paper. Sorted biggest first.
+  const chainRows = (liveMode && Array.isArray(chainHoldings))
+    ? chainHoldings
+        .filter((h) => h && h.mint && (h.qty || 0) > 0 && !h.spam && !h.dust)
+        .map((h) => {
+          const tk = tokens.find((x) => x.liveMint === h.mint) || null;
+          const px = (tk && tk.price > 0) ? tk.price : (h.price || 0);
+          const usd = (h.usd > 0) ? h.usd : (h.qty || 0) * px;
+          // cost basis only exists for fills WE recorded — otherwise PnL is unknown
+          const entry = h.entry > 0 ? h.entry : 0;
+          const pnlUsd = entry > 0 && px > 0 ? (px - entry) * (h.qty || 0) : null;
+          const pnlPct = entry > 0 && px > 0 ? ((px - entry) / entry) * 100 : null;
+          return { chain: true, h, tk, px, usd, pnlUsd, pnlPct,
+            sym: h.sym || (tk && tk.sym) || (h.mint || "").slice(0, 4).toUpperCase(),
+            src: h.src === "phantom" ? "phantom" : "turbo" };
+        })
+        .sort((a, b) => (b.usd || 0) - (a.usd || 0))
+    : [];
+  const paperRows = liveMode ? [] : Object.entries(positions)
     .map(([id, p]) => { const t = tokens.find((x) => x.id === +id); return t && p && p.amt > 0 ? { t, p } : null; })
     .filter(Boolean);
+  const held = liveMode ? chainRows : paperRows;
 
   // per-token PnL in USD
   const pnlUsdOf = ({ t, p }) => {
@@ -2500,35 +2521,103 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
   };
   const valueSolOf = ({ t, p }) => (p.pay === "SOL" ? p.amt : (p.amt * t.price) / SOL_USD);
   const costSolOf = ({ t, p }) => (p.pay === "SOL" ? p.amt : (p.amt * p.entry) / SOL_USD);
-  const totalPnlUsd = held.reduce((a, h) => a + pnlUsdOf(h), 0);
-  const totalSol = held.reduce((a, h) => a + valueSolOf(h), 0);
-  const investedUsd = held.reduce((a, h) => a + costSolOf(h) * SOL_USD, 0);
-  const currentUsd = investedUsd + totalPnlUsd;
+  const totalPnlUsd = liveMode
+    ? chainRows.reduce((a, r) => a + (r.pnlUsd || 0), 0)
+    : held.reduce((a, h) => a + pnlUsdOf(h), 0);
+  const totalUsdLive = chainRows.reduce((a, r) => a + (r.usd || 0), 0);
+  const totalSol = liveMode ? totalUsdLive / (SOL_USD || 1) : held.reduce((a, h) => a + valueSolOf(h), 0);
+  const knownCost = chainRows.filter((r) => r.pnlUsd != null).length;
+  const investedUsd = liveMode
+    ? Math.max(0, totalUsdLive - totalPnlUsd)
+    : held.reduce((a, h) => a + costSolOf(h) * SOL_USD, 0);
+  const currentUsd = liveMode ? totalUsdLive : investedUsd + totalPnlUsd;
   const bulkGain = totalPnlUsd >= 0;
 
   return (
     <div style={{ marginTop: 10 }}>
       <button onClick={() => setOpen((v) => !v)}
         style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", border: `1px solid ${T.border2}`, borderRadius: 9, padding: "9px 12px", background: "rgba(255,255,255,0.02)", cursor: "pointer", fontFamily: T.mono, fontSize: 11, fontWeight: 700, color: T.text }}>
-        <span>▾ MY POSITIONS · {held.length}</span>
-        <span style={{ color: totalPnlUsd >= 0 ? T.green : T.red }}>{totalPnlUsd >= 0 ? "+" : "−"}${Math.abs(totalPnlUsd).toFixed(2)}</span>
+        <span>{open ? "▾" : "▸"} MY OPEN POSITIONS · {held.length}</span>
+        {liveMode ? (
+          <span style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+            <span style={{ color: T.text }}>{fmt$(totalUsdLive)}</span>
+            {knownCost > 0 && (
+              <span style={{ color: totalPnlUsd >= 0 ? T.green : T.red, fontSize: 10 }}>
+                {totalPnlUsd >= 0 ? "+" : "−"}${Math.abs(totalPnlUsd).toFixed(2)}
+              </span>
+            )}
+          </span>
+        ) : (
+          <span style={{ color: totalPnlUsd >= 0 ? T.green : T.red }}>{totalPnlUsd >= 0 ? "+" : "−"}${Math.abs(totalPnlUsd).toFixed(2)}</span>
+        )}
       </button>
 
       {open && (
         <div style={{ marginTop: 8, display: "grid", gap: 7 }}>
           {held.length === 0 && (
-            <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center", padding: "10px 0" }}>No open positions.</div>
+            <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center", padding: "12px 0", lineHeight: 1.7 }}>
+              No open positions yet.<br />
+              <span style={{ fontSize: 8.5 }}>tokens you buy here — and anything already in Phantom — show up automatically</span>
+            </div>
           )}
           {held.length > 0 && (
-            <button onClick={onCloseAll}
+            <button onClick={() => (liveMode ? (onRealSellAll && onRealSellAll()) : onCloseAll && onCloseAll())}
               style={{ width: "100%", boxSizing: "border-box", border: "none", borderRadius: 10, padding: "10px", fontFamily: T.mono, fontWeight: 800,
                 background: bulkGain ? T.green : T.red, color: bulkGain ? "#07130d" : "#170808", cursor: "pointer", lineHeight: 1.35,
                 boxShadow: `0 0 14px ${bulkGain ? "rgba(22,199,132,0.35)" : "rgba(234,57,67,0.35)"}` }}>
               <div style={{ fontSize: 12.5 }}>✕ CLOSE ALL · {bulkGain ? "+" : "−"}${Math.abs(totalPnlUsd).toFixed(2)}</div>
-              <div style={{ fontSize: 8.5, opacity: 0.9 }}>put in ${investedUsd.toFixed(0)} → now ${currentUsd.toFixed(0)} · {totalSol.toFixed(2)} SOL</div>
+              <div style={{ fontSize: 8.5, opacity: 0.9 }}>
+                {liveMode
+                  ? `${chainRows.length} token${chainRows.length === 1 ? "" : "s"} → ${fmt$(totalUsdLive)} · sells settle on chain`
+                  : `put in $${investedUsd.toFixed(0)} → now $${currentUsd.toFixed(0)} · ${totalSol.toFixed(2)} SOL`}
+              </div>
             </button>
           )}
-          {held.map((h) => {
+          {/* ⛓ real holdings — turbo wallet + anything already in Phantom */}
+          {liveMode && chainRows.map((r) => (
+            <div key={r.h.mint + r.src}
+              style={{ border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", background: "rgba(255,255,255,0.02)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span onClick={() => onOpenMint && onOpenMint(r.h.mint)} role="button"
+                  style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", flex: 1, minWidth: 0 }}>
+                  <TokenAvatar sym={r.sym} hue={symbolHue(r.sym)} img={(r.tk && r.tk.img) || r.h.img} size={22} />
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ display: "block", fontFamily: T.mono, fontSize: 11.5, fontWeight: 800, color: T.text,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {r.sym}
+                      <span style={{ marginLeft: 6, fontSize: 7.5, fontWeight: 900, letterSpacing: 0.6,
+                        color: r.src === "turbo" ? T.amber : "#a98fff",
+                        border: `1px solid ${r.src === "turbo" ? T.amber : "#a98fff"}55`, borderRadius: 999, padding: "1px 5px" }}>
+                        {r.src === "turbo" ? "⚡ TURBO" : "👻 PHANTOM"}
+                      </span>
+                    </span>
+                    <span style={{ display: "block", fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>
+                      {fmtQty(r.h.qty || 0)} · ${fmtP(r.px)}
+                    </span>
+                  </span>
+                </span>
+                <span style={{ textAlign: "right", flexShrink: 0 }}>
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 11.5, fontWeight: 800, color: T.text }}>{fmt$(r.usd)}</span>
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 8.5,
+                    color: r.pnlPct == null ? T.faint : r.pnlPct >= 0 ? T.green : T.red }}>
+                    {r.pnlPct == null ? "held before VALO" : `${r.pnlPct >= 0 ? "+" : ""}${r.pnlPct.toFixed(1)}% · ${r.pnlUsd >= 0 ? "+" : "−"}$${Math.abs(r.pnlUsd).toFixed(2)}`}
+                  </span>
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 5, marginTop: 8 }}>
+                {[25, 50, 100].map((pct) => (
+                  <button key={pct} onClick={() => onRealSellOne && onRealSellOne(r.h, pct)}
+                    style={{ flex: 1, padding: "6px 0", borderRadius: 7, cursor: "pointer",
+                      border: `1px solid ${pct === 100 ? T.red : T.border2}`,
+                      background: pct === 100 ? "rgba(234,57,67,0.14)" : "transparent",
+                      color: pct === 100 ? T.red : T.dim, fontFamily: T.mono, fontSize: 9.5, fontWeight: 900 }}>
+                    {pct === 100 ? "SELL ALL" : `SELL ${pct}%`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          {!liveMode && held.map((h) => {
             const pnl = pnlUsdOf(h); const gain = pnl >= 0;
             return (
               <div key={h.t.id}
@@ -2774,7 +2863,7 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
               const shortSol = chainSol > 0 && size > chainSol;
               const ok = size > 0 && !wrongUnit && !shortSol;
               return (
-                <button disabled={!ok} onClick={() => ok && onRealOrder && onRealOrder(token, "buy", size)}
+                <button data-tour="buy" disabled={!ok} onClick={() => ok && onRealOrder && onRealOrder(token, "buy", size)}
                   style={{ width: "100%", border: "none", borderRadius: 9, padding: "10px 6px", fontFamily: T.mono, fontWeight: 900,
                     cursor: ok ? "pointer" : "not-allowed", background: ok ? T.green : "#1a2030", color: ok ? "#07130d" : T.faint,
                     boxShadow: ok ? "0 0 16px rgba(22,199,132,0.25)" : "none", lineHeight: 1.25 }}>
@@ -6684,7 +6773,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
             style={{ ...chip(tab === "wallet"), flex: 1, textAlign: "center", padding: "7px", fontSize: 11,
               borderTopRightRadius: liveMode && turboState ? 0 : undefined, borderBottomRightRadius: liveMode && turboState ? 0 : undefined }}>💼 Wallet</button>
           {liveMode && (
-            <button onClick={() => setTurboPop((v) => !v)}
+            <button data-tour="turbo" onClick={() => setTurboPop((v) => !v)}
               title={!turboState ? "Set up your ⚡ TURBO wallet"
                 : turboState.unlocked && turboAutoOn ? "◆ single-tap trading ARMED — bots + one-tap buys/sells fire instantly"
                 : turboState.unlocked ? "⚡ TURBO unlocked — arm automation for single-tap trading"
@@ -7630,27 +7719,38 @@ function EpochWeightCard({ cloudUser, liveData }) {
 // it, and says what it does. Copy adapts to mouse vs touch. Any step whose
 // target isn't on screen is skipped, so it never points at nothing.
 // ───────────────────────────────────────────────────────────────────
-function ValoTour({ isMobile, onDone }) {
+function ValoTour({ isMobile, onDone, walletReady = false, turboReady = false }) {
   const STEPS = React.useMemo(() => ([
     { sel: '[data-tour="lenses"]', title: "FIVE SCANNER LENSES",
-      pc: "Click here to switch how the board is picked: TRENDING, HOT, NEW, MOVERS, or the LUCKY PICK lottery. Each lens streams its own tokens — nothing below its launch price, nothing dead.",
-      mob: "Tap here to switch lenses: TRENDING, HOT, NEW, MOVERS, or LUCKY PICK. Pull the scanner down to deal a fresh hand." },
-    { sel: '[data-tour="search"]', title: "SEARCH ANYTHING",
-      pc: "Paste a contract address, type a ticker, or look up a trader. Every Solana pair is searchable — hit enter and the chart opens.",
-      mob: "Paste a CA, type a ticker, or find a trader. Tap a result and its chart opens full screen." },
+      pc: "Click here to switch how the board is picked: 🔥 TRENDING, 💪 HOT, 🍼 NEW, 📈 MOVERS, or the 🍀 LUCKY PICK lottery. Each lens streams its own tokens — nothing below its launch price, nothing dead.",
+      mob: "Tap to switch lenses: TRENDING, HOT, NEW, MOVERS, or LUCKY PICK. Pull the scanner down from the top to deal a fresh hand." },
     { sel: '[data-tour="score"]', title: "THE SCORE EXPLAINS ITSELF",
-      pc: "That number is built from real LP depth, traders, flow balance, age and curve progress. Click it for live buy/sell pressure and vitals — the chart stays where it is.",
-      mob: "That number comes from real LP, traders, flow and age. Tap it for live pressure and vitals without leaving the scanner." },
+      pc: "That number is built from real LP depth, traders, flow balance, age and curve progress — nothing invented. Click it for live buy/sell pressure and vitals; the chart stays exactly where it is.",
+      mob: "Built from real LP, traders, flow and age. Tap it for live pressure and vitals without leaving the scanner." },
+    { sel: '[data-tour="search"]', title: "SEARCH ANYTHING",
+      pc: "Paste a contract address, type a ticker, or look up a trader. Every Solana pair is searchable — the chart opens on the real pool.",
+      mob: "Paste a CA, type a ticker, or find a trader. Tap a result and its chart opens." },
     { sel: '[data-tour="chart"]', title: "THE CHART",
-      pc: "Drag to pan, scroll to zoom, run the price axis to stretch it. ⛰ ALL frames the token's whole history; ◉ LIVE snaps back to the edge.",
-      mob: "Drag to pan, pinch to zoom. Hold for 2 seconds to lock the crosshair on screen — the chart freezes so you can read exact values, hold again to release." },
-    { sel: '[data-tour="wallet"]', title: "YOUR WALLET",
-      pc: "Connect Phantom, then fund the ⚡ TURBO wallet — that's the one-tap trigger. The lightning turns into a spinning diamond when single-tap trading is armed.",
-      mob: "Connect Phantom and fund ⚡ TURBO — your one-tap trigger. Hold this tab to peek your Phantom balance." },
+      pc: "Drag to pan, scroll to zoom on your cursor, run the price axis to stretch it. ⛰ ALL frames the token's whole history, ◉ LIVE snaps back to the edge, and double-click resets.",
+      mob: "Drag to pan, pinch to zoom. Hold 2 seconds to lock the gray crosshair on screen — the chart freezes completely so you can read exact values. Hold again to release." },
     { sel: '[data-tour="callout"]', title: "CALL IT",
-      pc: "Stamp your entry market cap on any token. Land 2x and it rides the site-wide banner — bigger multiples animate harder, and rank earns epoch bonuses.",
+      pc: "Stamp your entry market cap on any token. Land 2x and your call rides the site-wide banner — bigger multiples animate harder, and ranking earns epoch bonuses up to +4×.",
       mob: "Stamp your entry MC on any token. Hit 2x and it rides the banner site-wide, with epoch bonuses for ranking." },
-  ]), []);
+    { sel: '[data-tour="wallet"]', title: "YOUR WALLET",
+      pc: "Connect Phantom here. Nothing is custodial — VALO never holds your keys, and every fill settles from your own wallet on chain.",
+      mob: "Connect Phantom from this tab. Nothing custodial — every fill settles from your own wallet. Hold the tab to peek your Phantom balance.",
+      skipIf: () => walletReady },
+    { sel: '[data-tour="turbo"]', title: "⚡ TURBO — YOUR TRIGGER",
+      pc: "Fund the turbo wallet and trading becomes one tap: no popup, no signature per trade. The lightning turns into a spinning diamond the moment single-tap trading is armed.",
+      mob: "Fund turbo and trading becomes one tap — no popup per trade. The lightning becomes a spinning diamond when it's armed.",
+      skipIf: () => turboReady },
+    { sel: '[data-tour="buy"]', title: "BUYING FOR REAL",
+      pc: "Buys route through Jupiter straight from your wallet. The 0.6% fee splits on-chain in the same transaction — 40% burned, 40% to the hourly reward vault, 20% treasury. Check any of it on Solscan.",
+      mob: "Buys route through Jupiter from your own wallet. The 0.6% fee splits on-chain in the same transaction: 40% burned, 40% to the reward vault, 20% treasury." },
+    { sel: '[data-tour="claim"]', title: "🎁 HOURLY EPOCHS",
+      pc: "Every real fill earns you weight for the current hour, and leaderboard placements stack bonuses on top. Open this to see your live weight, the vault pool, and where your rewards should land.",
+      mob: "Every real fill earns weight this hour, and ranking stacks bonuses. Open this for your live weight, the vault pool, and your payout wallet." },
+  ]), [walletReady, turboReady]);
 
   const [i, setI] = React.useState(0);
   const [rect, setRect] = React.useState(null);
@@ -7660,6 +7760,7 @@ function ValoTour({ isMobile, onDone }) {
   // find the first step from `start` that actually exists on screen
   const resolve = React.useCallback((start) => {
     for (let k = start; k < STEPS.length; k++) {
+      if (STEPS[k].skipIf && STEPS[k].skipIf()) continue;   // already done it — don't teach it
       const el = document.querySelector(STEPS[k].sel);
       if (el) {
         const r = el.getBoundingClientRect();
@@ -7737,7 +7838,12 @@ function ValoTour({ isMobile, onDone }) {
         boxShadow: "0 24px 60px rgba(0,0,0,0.75)", transition: "all .5s cubic-bezier(.4,0,.2,1)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
           <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: VALO_PURPLE, letterSpacing: 1.2 }}>{st.title}</span>
-          <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>{i + 1} / {STEPS.length}</span>
+          <span style={{ marginLeft: "auto", display: "flex", gap: 3.5, alignItems: "center" }}>
+            {STEPS.map((_, k) => (
+              <span key={k} style={{ width: k === i ? 14 : 5, height: 5, borderRadius: 3,
+                background: k === i ? VALO_PURPLE : k < i ? `${VALO_PURPLE}66` : T.border2, transition: "all .3s" }} />
+            ))}
+          </span>
         </div>
         <div style={{ fontFamily: T.mono, fontSize: 10.5, color: T.text, lineHeight: 1.75 }}>
           {isMobile ? st.mob : st.pc}
@@ -9923,8 +10029,9 @@ export default function App() {
   const [ranksOpen, setRanksOpen] = useState(null);            // badge page: {focus} — tiers + leaderboard tabs
   const [nameChangedAt, setNameChangedAt] = useState(0);      // weekly username-change lock
   // ---- social graph + notifications (API: wire real social service) ----
-  const [followersList, setFollowersList] = useState(() => { const r = seededRand(4242); return Array.from({ length: 7 }, () => randomHandle(r)); });
-  const [followingList, setFollowingList] = useState(() => { const r = seededRand(7777); return Array.from({ length: 5 }, () => randomHandle(r)); });
+  // ⛓ real social graph only — a new account starts at zero, as it should
+  const [followersList, setFollowersList] = useState([]);
+  const [followingList, setFollowingList] = useState([]);
   const [friendsList, setFriendsList] = useState(() => ["degenmike"]);
   const [sentFriendReqs, setSentFriendReqs] = useState([]);
   const [friendReqs, setFriendReqs] = useState([]);          // incoming
@@ -9965,24 +10072,9 @@ export default function App() {
   };
   // simulated inbound social events — followed callers call out, new followers, friend requests
   useEffect(() => {
-    const iv = setInterval(() => {
-      const roll = Math.random();
-      if (roll < 0.45) {
-        if (!notifSetting) return;                            // gated by the website setting
-        const t = tokens[Math.floor(Math.random() * tokens.length)]; if (!t) return;
-        const from = followingList[Math.floor(Math.random() * followingList.length)] || CALLERS[0];
-        pushNotif({ type: "callout", user: from, tokenId: t.id, sym: t.sym, text: `@${from} called out $${t.sym} @ ${fmt$(mcOf(t))} MC` });
-      } else if (roll < 0.75) {
-        const who = randomHandle(seededRand(Math.floor(Math.random() * 1e9)));
-        setFollowersList((L) => (L.includes(who) ? L : [...L, who]));
-        pushNotif({ type: "follower", user: who, text: `@${who} started following you — they now get your callouts` });
-      } else {
-        const who = randomHandle(seededRand(Math.floor(Math.random() * 1e9)));
-        setFriendReqs((L) => (L.includes(who) ? L : [...L, who]));
-        pushNotif({ type: "friend", user: who, text: `@${who} sent you a friend request` });
-      }
-    }, 26000);
-    return () => clearInterval(iv);
+    // ⛓ LIVE ONLY: followers, friend requests and callout pings come from real
+    // people using the site (Supabase realtime), never from a generator.
+    return () => {};
   }, [tokens, followingList, notifSetting]);
   useEffect(() => {
     setMyMcCallouts((M) => {
@@ -10036,7 +10128,22 @@ export default function App() {
   const tabTouchStart = (which, cur) => (e) => { tabDrag.current = { which, y0: e.touches[0].clientY, top0: cur, moved: false }; };
   // MOBILE chart gestures — top handle crunches the metrics above the chart,
   // bottom handle resizes chart height (content below follows in flow)
-  const [mobChartH, setMobChartH] = useState(348);
+  // 📱 a mobile chart fills the screen by default — the old fixed 348px window
+  // wasted most of the display. Height = viewport minus the header and the
+  // trade bar; the drag handle still lets you shrink it for the panels below.
+  const mobFullH = () => {
+    if (typeof window === "undefined") return 348;
+    return Math.max(300, Math.round(window.innerHeight - 236));
+  };
+  const [mobChartH, setMobChartH] = useState(mobFullH);
+  const [mobUserSized, setMobUserSized] = useState(false);   // did they drag it themselves?
+  useEffect(() => {
+    if (mobUserSized) return;                                 // respect a manual size
+    const onR = () => setMobChartH(mobFullH());
+    window.addEventListener("resize", onR);
+    window.addEventListener("orientationchange", onR);
+    return () => { window.removeEventListener("resize", onR); window.removeEventListener("orientationchange", onR); };
+  }, [mobUserSized]);
 
   const [metricsCrunch, setMetricsCrunch] = useState(0); // 0 = full metrics, 1 = hidden
   // a freshly opened token starts pulled up: the chart meets the pull bar
@@ -10049,15 +10156,17 @@ export default function App() {
     mobOpenedRef.current = sel;
     setMetricsCrunch(1);
     // conservative first paint — no overshoot, no scrunch under the header
-    setMobChartH(Math.max(360, Math.round(vpH() * 0.55)));
+    setMobChartH(Math.max(360, Math.round(vpH() * 0.78)));
     // measure the REAL available space once layout settles, then expand to it
     let tries = 0;
     const fit = () => {
       const mc = document.querySelector("[data-mchart]");
       if (!mc) { if (++tries < 6) setTimeout(fit, 120); return; }
       const top = mc.getBoundingClientRect().top;
-      const avail = Math.round(vpH() - top - 96);   // pull-bar + hotbar clearance
-      if (avail > 360) setMobChartH(Math.min(Math.max(400, avail), vpH() - 80));
+      // 📱 full-bleed: everything from the chart's top edge down to the trade
+      // hotbar belongs to the chart. (Was reserving 96px of dead space.)
+      const avail = Math.round(vpH() - top - 58);
+      if (avail > 300) setMobChartH(Math.min(Math.max(360, avail), vpH() - 52));
     };
     setTimeout(fit, 160);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -10070,7 +10179,7 @@ export default function App() {
       setMobChartH((h) => {
         const mc = document.querySelector("[data-mchart]");
         const top = mc ? mc.getBoundingClientRect().top : 104;
-        const max = Math.round(vpH() - Math.max(0, top) - 80);
+        const max = Math.round(vpH() - Math.max(0, top) - 52);
         return h > max && max > 300 ? max : h;
       });
     };
@@ -10083,6 +10192,7 @@ export default function App() {
   const chartRaf = useRef(0);
   const chartDragStart = (which) => (e) => {
     e.stopPropagation(); // never arm the sheet's swipe-to-close from a resize handle
+    setMobUserSized(true);          // they chose a size — stop auto-fitting to full screen
     const d = { which, y0: e.touches[0].clientY, h0: mobChartH, c0: metricsCrunch };
     if (which === "bottom") {
       // cap the pull right above the LIVE TRADES / HOLDERS tab — never cover it
@@ -12280,6 +12390,7 @@ export default function App() {
 
   // ♾ ENDLESS SCANNER — more real tokens append as you reach the bottom
   const [moreToks, setMoreToks] = useState([]);
+  const moreToksRef = useRef([]); moreToksRef.current = moreToks;
   // ⛓ the REAL $VALO market row — price, LP, flow, MC, supply. Polled from the
   // token's own pool so every header stat is chain truth, not a sim tick.
   const [valoLive, setValoLive] = useState(null);
@@ -12566,13 +12677,16 @@ export default function App() {
   // open a token we only know by mint (a dev's launch history, for example)
   const openTokenByMint = useCallback(async (mint) => {
     if (!mint) return;
-    const have = (tokensRef.current || []).find((t) => t.liveMint === mint);
+    const lc = String(mint).toLowerCase();
+    const have = [...(tokensRef.current || []), ...(moreToksRef.current || [])]
+      .find((t) => t && String(t.liveMint || "").toLowerCase() === lc);
     if (have) { setSel(have.id); setClickMode(null); return; }
     try {
       const r = await fetch(`/api/search?q=${encodeURIComponent(mint)}`);
       if (!r.ok) return;
       const j = await r.json();
-      const hit = Array.isArray(j) ? j.find((x) => x.mint === mint) || j[0] : null;
+      // never substitute: we asked for ONE mint, so only an exact match counts
+      const hit = Array.isArray(j) ? j.find((x) => String(x.mint || "").toLowerCase() === String(mint).toLowerCase()) : null;
       if (hit) {
         const card = adoptMarketToken(hit);
         setTokens((Ts) => (Ts.some((t) => String(t.pool || "") === String(card.pool)) ? Ts : [...Ts, card]));
@@ -13059,9 +13173,23 @@ export default function App() {
   // ◆ tapping any $VALO stat opens the REAL token chart (by CA) once launched
   const openValoChart = useCallback(() => {
     setClickMode(null);
-    if (liveData && valoMint) { try { openTokenByMint(valoMint); return; } catch (e) {} }
-    setSel(424242);
-  }, [liveData, valoMint]);
+    if (!valoMint) { setSel(424242); return; }
+    // ◆ we already poll $VALO — adopt that row straight onto the board so the
+    // first tap opens OUR token, no search round-trip, no wrong card
+    const lc = String(valoMint).toLowerCase();
+    const onBoard = [...(tokensRef.current || []), ...(moreToksRef.current || [])]
+      .find((t) => t && String(t.liveMint || "").toLowerCase() === lc);
+    if (onBoard) { setSel(onBoard.id); return; }
+    if (valoLive && valoLive.indexed) {
+      try {
+        const card = adoptMarketToken(valoLive);
+        setMoreToks((M) => (M.some((t) => String(t.liveMint || "").toLowerCase() === lc) ? M : [card, ...M]));
+        setSel(card.id);
+        return;
+      } catch (e) {}
+    }
+    try { openTokenByMint(valoMint); } catch (e) { setSel(424242); }
+  }, [valoMint, valoLive, openTokenByMint]);
   // 🔥 SITE BURN — real. $VALO launches with a fixed 1B supply, and SPL burns
   // reduce total supply directly, so burned = 1B − current supply. Measured
   // from the pool's own MC ÷ price. Demo keeps the simulated ticker.
@@ -16104,7 +16232,7 @@ export default function App() {
 
 
             {/* CLAIM REWARDS */}
-            <button onClick={() => setClaimOpen(true)} title="Claim your rolling hourly airdrop"
+            <button data-tour="claim" onClick={() => setClaimOpen(true)} title="Claim your rolling hourly airdrop"
               style={{
                 display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
                 border: `1px solid ${claimable > 0 ? "rgba(22,199,132,0.5)" : T.border}`,
@@ -17571,7 +17699,8 @@ export default function App() {
       {valoStatsOpen && <ValoStatsModal onClose={() => setValoStatsOpen(false)} isMobile={isMobile}
         valoUsd={valoUsdPrice} tvl={gTvl} burned={burned} valoWallet={valoWallet}
         valoMint={valoMint} liveData={liveData} />}
-      {tourOn && <ValoTour isMobile={isMobile} onDone={endTour} />}
+      {tourOn && <ValoTour isMobile={isMobile} onDone={endTour}
+        walletReady={!!(wallet && wallet.address)} turboReady={!!turboActive} />}
       {burnOpen && <BurnModal valoUsd={valoLive && valoLive.price > 0 ? valoLive.price : valoUsdPrice}
         valoLive={valoLive} valoMint={valoMint}
         onClose={() => setBurnOpen(false)} isMobile={isMobile} myBurned={myBurned} siteBurned={burned} />}
