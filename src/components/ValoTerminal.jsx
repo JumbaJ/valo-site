@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
 
 /* ================================================================
    VALO TERMINAL — $VALO
@@ -67,6 +68,11 @@ function symbolHue(sym) {
 }
 const accent = (h, l = 60) => `hsl(${h} 75% ${l}%)`;
 const VALO_PURPLE = "hsl(258 75% 68%)"; // brand purple used for $VALO
+
+// 🛰 resolved once, at module load — every simulation gate reads this so the
+// demo cast is never even CREATED on a live site (not created, not ticked,
+// not callout-generated). Mirrors the liveData initializer exactly.
+const BOOT_LIVE = true;   // 🛰 VALO is live-only. There is no demo build.
 const cardGrad = (h) =>
   `linear-gradient(160deg, hsla(${h},60%,50%,0.10) 0%, hsla(${h},60%,40%,0.035) 40%, transparent 75%), ${T.panel}`;
 
@@ -99,11 +105,23 @@ if (typeof window !== "undefined") window.__valoTest = TestLog;
 // 👁 viewer engine — deterministic, so every mount agrees, yet it breathes:
 // smooth sin-wobble makes people "join and leave" live; totals only ever climb
 const VIEW_EPOCH = 1700000000000;
+// real holder count when we've looked it up, else the estimate
+const holdersOf = (t, fallback) => {
+  const real = typeof window !== "undefined" && window.__VALO_HOLDERS__ && t && t.liveMint
+    ? window.__VALO_HOLDERS__[t.liveMint] : null;
+  return Number.isFinite(real) && real > 0 ? real : fallback;
+};
 const liveViewersOf = (t, mode) => {
-  const seed = ((t && t.id) * 9301 + 11) % 233;
-  const base = mode === "valo" ? 7 + (seed % 21) : 24 + (seed % 150);
-  const w = Math.sin(Date.now() / 9000 + seed) * base * 0.22 + Math.sin(Date.now() / 2400 + seed * 3) * 2.6;
-  return Math.max(1, Math.round(base + w));
+  if (mode === "valo") {
+    // TRUE count of VALO users on this token now — 1 when it's only you
+    const real = typeof window !== "undefined" && window.__VALO_VIEWERS__
+      && t && t.liveMint ? window.__VALO_VIEWERS__[t.liveMint] : null;
+    return Number.isFinite(real) && real > 0 ? real : 1;
+  }
+  // pump.fun side → REAL engagement (reply count) when we have it; null hides it
+  const rep = typeof window !== "undefined" && window.__VALO_PUMP_REPLIES__
+    && t && t.liveMint ? window.__VALO_PUMP_REPLIES__[t.liveMint] : null;
+  return Number.isFinite(rep) && rep >= 0 ? rep : null;
 };
 const totalViewsOf = (t, mode) => {
   const seed = ((t && t.id) * 7919 + 5) % 997;
@@ -133,20 +151,30 @@ function ViewerPills({ token, small = false }) {
   useEffect(() => { const iv = setInterval(() => setTick((x) => x + 1), 1400); return () => clearInterval(iv); }, []);
   if (!token) return null;
   const live = liveViewersOf(token, mode);
-  const total = totalViewsOf(token, mode);
   const col = mode === "valo" ? VALO_PURPLE : T.green;
   const fs = small ? 8.5 : 9.5;
+  // pump.fun engagement unknown for this token → show only the VALO presence,
+  // never a made-up number
+  if (mode === "pump" && live == null) {
+    const vp = typeof window !== "undefined" && window.__VALO_VIEWERS__ && token.liveMint ? window.__VALO_VIEWERS__[token.liveMint] : null;
+    const here = Number.isFinite(vp) && vp > 0 ? vp : 1;
+    return (
+      <span onClick={() => setMode("valo")} title="VALO viewers here now — tap for more"
+        style={{ display: "inline-flex", gap: 4, alignItems: "center", cursor: "pointer", fontFamily: T.mono, userSelect: "none" }}>
+        <EyeOpenIcon c={VALO_PURPLE} s={small ? 12 : 14} />
+        <b style={{ color: VALO_PURPLE, fontSize: fs }}>{here}</b>
+        <span style={{ color: T.faint, fontSize: fs - 1.5 }}>here</span>
+      </span>
+    );
+  }
   return (
     <span onClick={() => setMode((m) => (m === "pump" ? "valo" : "pump"))}
-      title={`${mode === "pump" ? "pump.fun" : "VALO terminal"} viewers — tap to flip to ${mode === "pump" ? "VALO" : "pump.fun"}`}
+      title={mode === "pump" ? "pump.fun replies (live engagement) — tap for VALO viewers" : "VALO users viewing this now — tap for pump.fun activity"}
       style={{ display: "inline-flex", gap: small ? 8 : 11, alignItems: "center", cursor: "pointer", fontFamily: T.mono, userSelect: "none" }}>
       <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-        <EyeOpenIcon c={col} s={small ? 12 : 14} />
-        <b style={{ color: col, fontSize: fs, minWidth: small ? 26 : 32, textAlign: "left" }}>{live.toLocaleString()}</b>
-      </span>
-      <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-        <EyeClosedIcon c={mode === "valo" ? "#9d8df0" : T.dim} s={small ? 12 : 14} />
-        <b style={{ color: mode === "valo" ? "#9d8df0" : T.dim, fontSize: fs, minWidth: small ? 34 : 40, textAlign: "left" }}>{fmtQty(total)}</b>
+        {mode === "valo" ? <EyeOpenIcon c={col} s={small ? 12 : 14} /> : <span style={{ fontSize: small ? 11 : 13 }}>💬</span>}
+        <b style={{ color: col, fontSize: fs, textAlign: "left" }}>{(live || 0).toLocaleString()}</b>
+        <span style={{ color: T.faint, fontSize: fs - 1.5 }}>{mode === "valo" ? "here" : "replies"}</span>
       </span>
     </span>
   );
@@ -163,7 +191,11 @@ const splitFee = (amt, pay) => {
   return { total, burn: total / 2, vault: total / 2 };
 };
 const EPOCH_MS = 60 * 60 * 1000;                 // rolling hourly distribution
-const SOL_USD = 165; // API: live SOL/USD price for $ conversions
+// live SOL/USD — refreshed from /api/solprice, so every $ figure is honest.
+// `let` on purpose: read at call time by ~90 conversions across the terminal.
+let SOL_USD = 165;                       // seed only; replaced within a second of load
+let SOL_USD_AT = 0;                      // when we last confirmed it
+const setSolUsd = (p) => { if (p > 0) { SOL_USD = p; SOL_USD_AT = Date.now(); } };
 const epochOf = (t) => Math.floor(t / EPOCH_MS);
 const fmtDur = (ms) => {
   const s2 = Math.max(0, Math.floor(ms / 1000));
@@ -179,7 +211,7 @@ const fakeRoot = (seed) => {
 const fmt$ = (raw) => {
   const n = Number(raw);
   if (!isFinite(n)) return "$0.00";
-  return n >= 1e6 ? `$${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n / 1e3).toFixed(1)}K` : `$${n.toFixed(2)}`;
+  return n >= 1e9 ? `$${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `$${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n / 1e3).toFixed(1)}K` : `$${n.toFixed(2)}`;
 };
 function subZeros(p) {
   const s = p.toFixed(12).replace("0.", "");
@@ -210,8 +242,10 @@ function seedCandles(startPrice, momentum) {
   return out;
 }
 function tickCandles(candles, momentum, buyP) {
+  if (!Array.isArray(candles) || !candles.length) return candles || [];  // nothing to tick yet
   const now = Date.now();
   const last = candles[candles.length - 1];
+  if (!last || !(last.c > 0)) return candles;
   const drift = (momentum - 50) / 30000 + (buyP - 50) / 40000;
   const vol = rnd(0.002, 0.018);
   const nc = Math.max(1e-12, last.c * (1 + drift + rnd(-vol, vol)));
@@ -222,7 +256,19 @@ function tickCandles(candles, momentum, buyP) {
   return [...candles.slice(-HISTORY_MIN), { t: bucket, o: last.c, h: Math.max(last.c, nc), l: Math.min(last.c, nc), c: nc, v: rnd(50, 800) }];
 }
 function aggregate(candles, tfMin) {
-  if (tfMin <= 1) return candles;
+  const stitch = (arr) => {
+    // 🧵 DexScreener-style continuity: each candle opens where the last one
+    // closed. Bucket gaps stop drawing as tall detached bricks.
+    if (arr.length < 2) return arr;
+    const out2 = [arr[0]];
+    for (let i = 1; i < arr.length; i++) {
+      const prev = out2[i - 1], c = arr[i];
+      const o2 = prev.c > 0 ? prev.c : c.o;
+      out2.push(o2 === c.o ? c : { ...c, o: o2, h: Math.max(c.h, o2), l: Math.min(c.l, o2) });
+    }
+    return out2;
+  };
+  if (tfMin <= 1) return stitch(candles);
   const out = []; const ms = tfMin * 60000; let cur = null;
   for (const c of candles) {
     const b = Math.floor(c.t / ms) * ms;
@@ -230,7 +276,7 @@ function aggregate(candles, tfMin) {
     else { cur.h = Math.max(cur.h, c.h); cur.l = Math.min(cur.l, c.l); cur.c = c.c; cur.v += c.v; }
   }
   if (cur) out.push(cur);
-  return out;
+  return stitch(out);
 }
 const TIMEFRAMES = [
   { k: "1m", m: 1 }, { k: "5m", m: 5 }, { k: "15m", m: 15 }, { k: "30m", m: 30 },
@@ -240,10 +286,10 @@ const TIMEFRAMES = [
 // ---------------- tokens ----------------
 const NAMES = [
   ["PEPEGOLD", "Pepe Gold", "pump"], ["MOONCAT", "Moon Cat", "pump"],
-  ["BLOODWOLF", "Blood Wolf", "pump"], ["ICEDOGE", "Ice Doge", "robinhood"],
+  ["BLOODWOLF", "Blood Wolf", "pump"], ["ICEDOGE", "Ice Doge", "pump"],
   ["NEONRAT", "Neon Rat", "pump"], ["LIMEFROG", "Lime Frog", "pump"],
-  ["SKYWHALE", "Sky Whale", "robinhood"], ["LAVASHIB", "Lava Shib", "pump"],
-  ["GRAPEAPE", "Grape Ape", "pump"], ["GHOSTFISH", "Ghost Fish", "robinhood"],
+  ["SKYWHALE", "Sky Whale", "pump"], ["LAVASHIB", "Lava Shib", "pump"],
+  ["GRAPEAPE", "Grape Ape", "pump"], ["GHOSTFISH", "Ghost Fish", "pump"],
   ["SUNBIRD", "Sun Bird", "pump"], ["TOXICPUP", "Toxic Pup", "pump"],
 ];
 let nid = 0;
@@ -260,7 +306,8 @@ function makeToken([sym, name, chain], isNew = false) {
     traders, tvl, greenUsd: tvl * greenPct, redUsd: tvl * (1 - greenPct),
     momentum, buyPressure: Math.round(rnd(15, 92)),
     liq: tvl * rnd(0.15, 0.6), vol24: tvl * rnd(0.4, 3),
-    ageMin: isNew ? Math.floor(rnd(1, 30)) : Math.floor(rnd(60, 20000)),
+    ageMin: (() => { const a = isNew ? Math.floor(rnd(1, 30)) : Math.floor(rnd(60, 20000)); return a; })(),
+    createdAt: Date.now() - (isNew ? Math.floor(rnd(1, 30)) : Math.floor(rnd(60, 20000))) * 60000,
     hue: symbolHue(sym), candles, price: candles[candles.length - 1].c,
     supply: rnd(2e8, 1e9),
     // contract address (mint) — API: real pump.fun mint address
@@ -281,7 +328,7 @@ function makeToken([sym, name, chain], isNew = false) {
     trending: {
       reason: `$${sym} is trending: a wave of new holders piled in over the last hour as volume spiked and the chart broke out. Callouts across Solana meme channels pushed fresh eyes to the pair.`,
       tweet: { user: `@${sym.toLowerCase()}whale`, text: `$${sym} looking absolutely dialed 🚀 volume ripping, holders up only. this is the one anon 👀`, likes: Math.floor(rnd(120, 4200)), rts: Math.floor(rnd(30, 900)) },
-      desc: `${name} (${sym}) is a community meme token on ${chain === "pump" ? "pump.fun" : "the Robinhood chain"} / Solana. Fair launch, no presale.`,
+      desc: `${name} (${sym}) is a community meme token on pump.fun / Solana. Fair launch, no presale.`,
     },
     dev: (() => {
       const now = Date.now();
@@ -326,6 +373,8 @@ function makeToken([sym, name, chain], isNew = false) {
   };
 }
 const mcOf = (t) => t.price * t.supply;
+// pay units → dollars. Every P/L figure must pass through this.
+const payUsd = (amt, pay) => (+amt || 0) * (pay === "SOL" ? SOL_USD : 0.0125);
 const posTokenQty = (t, p) => ((p.pay === "SOL" ? p.amt * SOL_USD : p.amt * 0.0125) / (p.entry || t.price)); // token units held
 const fmtQty = (n) => (n >= 1e9 ? (n / 1e9).toFixed(2) + "B" : n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : n.toFixed(0));
 
@@ -408,23 +457,190 @@ function buysSellsFor(t, tfMin, count = 90) {
   return { buys, sells: Math.max(0, total - buys) };
 }
 
+// real market pool → a complete VALO token card
+let mktNid = 900000;
+function saneMc(x) {
+  const mc = +x.mc || 0, price = +x.price || 0;
+  const isPump = !!(x.mint && /pump$/i.test(x.mint));
+  // pump tokens: 1B fixed supply → any FDV wildly above price×1B is feed junk
+  if (isPump && price > 0 && (mc <= 0 || mc > price * 1e9 * 3)) return price * 1e9;
+  return mc;
+}
+function adoptMarketToken(x) {
+  const sym = String(x.sym || "???").toUpperCase().slice(0, 12);
+  const buys = +x.buys24 || +x.buys || 0, sells = +x.sells24 || +x.sells || 0;
+  const flow = Math.max(1, buys + sells);
+  const green = +x.greenUsd || 0, red = +x.redUsd || 0;
+  const tvl = +x.tvl || 0, mc = +x.mc || 0, price = +x.price || 0;
+  const buyPressure = Math.round((buys / flow) * 100);
+  const ch = +x.ch24 || 0;
+  const mRaw = 50 + (Number.isFinite(ch) ? ch : 0) / 2 + ((Number.isFinite(buyPressure) ? buyPressure : 50) - 50) * 0.4;
+  const momentum = Math.max(1, Math.min(99, Math.round(Number.isFinite(mRaw) ? mRaw : 50)));
+  const ageMin = x.createdAt ? Math.max(1, Math.round((Date.now() - x.createdAt) / 60000)) : 600;
+  x = { ...x, mc: saneMc(x) };
+  return {
+    id: ++mktNid,                       // numeric id — every helper expects one
+    pool: x.id, liveMint: x.mint || null, market: true,
+    sym, name: x.name || sym, chain: "pump",
+    isNew: ageMin < 60, hasDex: true, createdAt: x.createdAt || null,
+    traders: +x.traders || flow, tvl, greenUsd: green, redUsd: red,
+    momentum, buyPressure,
+    liq: tvl, vol24: (+x.vol24 || green + red),   // real reserve + real 24h volume
+    ageMin, hue: symbolHue(sym), img: x.img || null, ch24: ch,
+    candles: [], price, supply: price > 0 && mc > 0 ? mc / price : 1e9,
+    ca: x.mint || x.id,
+    socials: (x.mint && /pump$/i.test(x.mint)) ? { pump: `https://pump.fun/coin/${x.mint}` } : {},
+    trending: { reason: `$${sym} is live on Solana — real market data streaming from the pool.`,
+      tweet: null, desc: `${x.name || sym} (${sym}) — live pool tracked by VALO.` },
+    dev: { wallet: "", trades: [], launches: [], withdrawals: [], feeHistory: [],
+      tokensLaunched: 0, rugged: 0, creatorRewardsSol: 0, feesDay: 0, feesMonth: 0, feesYear: 0 },
+  };
+}
+// build candles straight from the trade tape: [{at, price, usd, isBuy}] → OHLCV
+function candlesFromTrades(trades, tfMin) {
+  if (!Array.isArray(trades) || !trades.length) return [];
+  const ms = Math.max(1, tfMin) * 60000;
+  const byBucket = new Map();
+  // ignore prints wildly off the median — one bad price used to own the axis
+  const px0 = trades.map((x) => +x.price || 0).filter((v) => v > 0).sort((a, b) => a - b);
+  const med = px0.length ? px0[Math.floor(px0.length / 2)] : 0;
+  for (const tr of trades) {
+    const at = +tr.at || +tr.t || 0;
+    const px = +tr.price || 0;
+    if (!(at > 0) || !(px > 0)) continue;
+    if (med > 0 && (px > med * 20 || px < med / 20)) continue;
+    const b = Math.floor(at / ms) * ms;
+    const cur = byBucket.get(b);
+    if (!cur) byBucket.set(b, { t: b, o: px, h: px, l: px, c: px, v: +tr.usd || 0, first: at, last: at });
+    else {
+      cur.h = Math.max(cur.h, px); cur.l = Math.min(cur.l, px); cur.v += +tr.usd || 0;
+      if (at < cur.first) { cur.first = at; cur.o = px; }     // earliest print opens
+      if (at >= cur.last) { cur.last = at; cur.c = px; }      // latest print closes
+    }
+  }
+  return [...byBucket.values()].sort((a, b) => a.t - b.t)
+    .map(({ t, o, h, l, c, v }) => ({ t, o, h, l, c, v }));
+}
+// splice the tape-built tail onto whatever history we have, so the newest
+// candles move with real trades instead of an interpolated price
+// one gatekeeper for every candle series: no broken rows, no duplicate buckets,
+// always in order. A series that reaches the chart is always dense.
+function sanitizeCandles(arr) {
+  if (!Array.isArray(arr) || !arr.length) return [];
+  const byT = new Map();
+  for (const c of arr) {
+    if (!c) continue;
+    const o = +c.o, h = +c.h, l = +c.l, cl = +c.c;
+    if (![o, h, l, cl].every((v) => Number.isFinite(v) && v > 0)) continue;
+    if (h < l) continue;
+    const t = Number.isFinite(c.t) ? c.t : null;
+    const key = t == null ? `x${byT.size}` : t;
+    const prev = byT.get(key);
+    // later data for the same bucket wins, but keep the wider wick
+    byT.set(key, prev
+      ? { t, o: prev.o, h: Math.max(prev.h, h), l: Math.min(prev.l, l), c: cl, v: Math.max(prev.v || 0, +c.v || 0) }
+      : { t, o, h, l, c: cl, v: +c.v || 0 });
+  }
+  const out = [...byT.values()];
+  out.sort((a, b) => (a.t || 0) - (b.t || 0));
+  return out;
+}
+function mergeTapeCandles(history, tape) {
+  if (!tape || !tape.length) return history;
+  if (!history || !history.length) return tape;
+  const last = history[history.length - 1];
+  if (!last || !Number.isFinite(last.t)) return history;
+  // SCALE CHECK: history and tape must be quoting the same unit. If the newest
+  // tape close is wildly off the newest history close, they aren't — and
+  // merging them is what produced the giant final candle.
+  const tapeLast = tape[tape.length - 1];
+  if (!tapeLast || !(tapeLast.c > 0) || !(last.c > 0)) return history;
+  const ratio = tapeLast.c / last.c;
+  if (ratio > 3 || ratio < 1 / 3) return history;        // different basis → don't mix
+  // the newest bucket the feed knows about — everything before it is untouched
+  const edge = last.t;
+  const out = history.slice();
+  for (const c of tape) {
+    if (!Number.isFinite(c.t) || c.t < edge) continue;      // never rewrite history
+    if (c.t === edge) {
+      // same bucket: the tape refines the forming candle rather than replacing it
+      const h = out[out.length - 1];
+      out[out.length - 1] = {
+        t: h.t, o: h.o,
+        h: Math.max(h.h, c.h), l: Math.min(h.l, c.l),
+        c: c.c, v: Math.max(h.v || 0, c.v || 0),
+      };
+    } else {
+      out.push(c);                                          // a genuinely new bucket
+    }
+  }
+  return sanitizeCandles(out);
+}
 function scoreToken(t) {
+  // ⛓ live tokens: the number is built from REAL metrics only
+  if (t && t.pool) {
+    const m = tokMetrics(t);
+    const tvl = t.tvl || 0, mc = t.mc || 0;
+    let sc = 0;
+    sc += Math.min(25, (tvl / 20000) * 25);                       // LP depth (full at $20K)
+    sc += Math.min(15, ((t.traders || 0) / 150) * 15);            // real participants
+    const g = ((t.greenUsd || 0) + (t.redUsd || 0)) > 0 ? (t.greenUsd || 0) / ((t.greenUsd || 0) + (t.redUsd || 0)) : 0.5;
+    sc += Math.max(0, 20 - Math.abs(g - 0.62) * 60);              // healthy buy-lean, not wash-pure
+    sc += Math.min(15, (m.ageMs / 86400e3) * 15);                 // survived time (full at 24h)
+    const to = m.turnover;                                        // vol/mc sanity band
+    sc += to >= 0.05 && to <= 3 ? 10 : to > 20 ? 0 : 5;
+    sc += t.img ? 5 : 0;                                          // published metadata
+    sc += (!m.isPump || m.curvePct >= 100) ? 10 : m.curvePct >= 60 ? 6 : 2;  // graduation distance
+    return Math.max(1, Math.min(99, Math.round(sc)));
+  }
   const g = t.greenUsd / (t.greenUsd + t.redUsd);
   const liq = Math.min(100, (t.liq / t.tvl) * 180);
   const age = Math.min(100, t.ageMin / 14);
   return Math.round(t.momentum * 0.25 + t.buyPressure * 0.25 + g * 100 * 0.25 + liq * 0.15 + age * 0.1);
 }
 const rating = (s) => (s >= 66 ? "SAFE" : s >= 40 ? "CAUTION" : "RISKY");
+// rugState(t) → { rugged, dying, drawdown, recovery }
+//   drawdown : how far below its peak the price sits now (0–1)
+//   recovery : how much of the crash it has bounced back (0–1)
+// RUGGED  = down ≥78% from peak, bounced back <20%, and liquidity gone thin
+// DYING   = the same crash but showing some life — a warning, not a verdict
+const rugState = (t) => {
+  const cs = t && t.candles;
+  if (!cs || cs.length < 12) return { rugged: false, dying: false, drawdown: 0, recovery: 1 };
+  let peak = 0, peakIdx = 0;
+  for (let i = 0; i < cs.length; i++) { const h = cs[i].h; if (Number.isFinite(h) && h > peak) { peak = h; peakIdx = i; } }
+  if (!(peak > 0) || peakIdx > cs.length - 4) return { rugged: false, dying: false, drawdown: 0, recovery: 1 };
+  let low = Infinity;
+  for (let i = peakIdx; i < cs.length; i++) { const l = cs[i].l; if (Number.isFinite(l) && l < low) low = l; }
+  const now = t.price || cs[cs.length - 1].c;
+  const drawdown = Math.max(0, Math.min(1, (peak - now) / peak));
+  const span = Math.max(peak - low, peak * 1e-9);
+  const recovery = Math.max(0, Math.min(1, (now - low) / span));   // 0 = still on the floor
+  // liquidity check: a real rug drains the pool, not just the price
+  const liveMc = t.price > 0 && t.supply > 0 ? t.price * t.supply : (t.mc || 0);
+  const liqThin = t.tvl > 0 && liveMc > 0 ? (t.tvl / liveMc) < 0.02 : false;
+  const rugged = drawdown >= 0.78 && recovery < 0.20 && (liqThin || drawdown >= 0.9);
+  const dying = !rugged && drawdown >= 0.6 && recovery < 0.35;
+  return { rugged, dying, drawdown, recovery };
+};
 const ratingColor = (s) => (s >= 66 ? T.green : s >= 40 ? T.amber : T.red);
 
 // ================================================================
 // CHART
 // ================================================================
-function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null }) {
+function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onChartTrade, onSelToken, onMarkerClick, position, price, sym, height = 380, isMobile = false, highlightTx = null, traderPrefs = {}, theme = 0, pendingLevels = [], botRuns = [], botSetMode = false, onBotDraft, onBotSet, onBotArm, onBotLineDrag, selectedLineId = null, editLineReq = null, onLineSelect, eyesToken = null, shiftArm = false, onCancelLine = null, onNeedHistory = null, historyShift = null, mcRatio = 0, createdAt = null }) {
   const wrapRef = useRef(null);
   const cvsRef = useRef(null);
   const [cross, setCross] = useState(null);
   const [hover, setHover] = useState(null);
+  const scaleRef = useRef({ key: null, lo: NaN, hi: NaN }); // locked price axis
+  const [logMode, setLogMode] = useState("auto");  // auto | log | linear
+  const [axisMC, setAxisMC] = useState(false);   // right axis shows market cap instead of price
+  const fmtAxis = (v) => (axisMC && mcRatio > 0 ? fmt$(v * mcRatio) : fmtP(v));
+  const [pinCross, setPinCross] = useState(null); // mobile: held crosshair {cx, cy}
+  const pinCrossRef = useRef(null);               // 🔒 read by effects that must not move the chart
+  const frozenScaleRef = useRef(null);            // 🔒 the exact axis held while the line is up
+  useEffect(() => { pinCrossRef.current = pinCross; }, [pinCross]);
   const [pulseTick, setPulseTick] = useState(0);
   const requestRepaint = useCallback(() => setPulseTick((t) => t + 1), []);
   const markerHitsRef = useRef([]);
@@ -436,29 +652,124 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   const [view, setView] = useState({ count: 90, offset: 0, priceOff: 0 });
   const dragRef = useRef(null);
 
-  useEffect(() => { setView({ count: 90, offset: 0, priceOff: 0 }); }, [tfMin]);
+  useEffect(() => {
+    // open fitted to what this timeframe actually holds — never zoomed out
+    // into empty space, never inheriting the last token's window
+    const n = Math.max(12, Math.min(120, aggLenRef.current || 90));
+    setView({ count: n, offset: 0, priceOff: 0, priceZoom: 1, follow: true });   // live edge, right side
+    scaleRef.current = { key: null, lo: NaN, hi: NaN };
+    setAxisMC(false);                                   // price axis, fresh ratio
+    setPinCross(null); frozenScaleRef.current = null;   // 🔓 token/tf change always thaws
+    anchorRef.current = null;                           // a fresh chart follows live
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tfMin, sym]);
+
 
   const agg = useMemo(() => aggregate(candles, tfMin), [candles, tfMin]);
+  const aggLenRef = useRef(0);
+  const emptySinceRef = useRef(0);
+  useEffect(() => { emptySinceRef.current = agg.length ? 0 : Date.now(); }, [agg.length, sym]);
+  useEffect(() => {
+    const was = aggLenRef.current; aggLenRef.current = agg.length;
+    // first data for this series → fit to it
+    // only the FIRST data sets the frame; after that the camera stays put
+    if (agg.length && !was) {
+      setView((v) => ({ ...v, count: Math.max(12, Math.min(120, agg.length)), offset: 0 }));
+    }
+  }, [agg.length]);
   const total = agg.length;
-  const count = Math.max(12, Math.min(view.count, 60000));
-  const offset = Math.max(-(count + 20), Math.min(view.offset, total + 20));
+  // room to zoom past what's loaded — the gap is what pulls older candles in
+  // frame everything we hold plus a small margin — never more
+  // heal any pre-clamp runaway stretch left in view state (the PC "scrunch")
+  useEffect(() => {
+    setView((v) => (v.priceZoom > 6 || v.priceZoom < 0.5)
+      ? { ...v, priceZoom: Math.max(0.5, Math.min(6, v.priceZoom || 1)) } : v);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const zoomCap = Math.max(60, Math.min(4000, Math.round(agg.length * 1.28) + 18));
+  const count = Math.max(12, Math.min(view.count, zoomCap));
+  // a small, fixed margin rather than most of a screen: enough to feel free,
+  // not enough to strand the candles in a corner
+  // where the camera is pointed. null = follow the live edge.
+  const anchorRef = useRef(null);                       // timestamp at the right edge
+  const PAD_BARS = Math.max(4, Math.min(20, Math.round(count * 0.12)));
+  const maxOff = Math.max(0, total - count);           // oldest candle at the left edge
+  // resolve the anchor to an index every render: candles may have been added on
+  // either side since last time, and the camera must not care
+  const anchoredOffset = (() => {
+    const a = anchorRef.current;
+    if (a == null || !total) return view.offset;
+    let lo2 = 0, hi2 = total - 1, idx = total - 1;
+    while (lo2 <= hi2) {                                 // newest candle at or before the anchor
+      const mid = (lo2 + hi2) >> 1;
+      const t = agg[mid] && agg[mid].t;
+      if (!Number.isFinite(t)) break;
+      if (t <= a) { idx = mid; lo2 = mid + 1; } else hi2 = mid - 1;
+    }
+    return total - 1 - idx;                              // same moment, whatever the length
+  })();
+  const offset = Math.max(-PAD_BARS, Math.min(anchoredOffset, maxOff + PAD_BARS));
   // window of slots: slot s ↔ agg index (total - count - offset + s)
+  // older candles just arrived → slide the offset by the same amount so the
+  // candles under your cursor stay exactly where they were
+  // (history arriving no longer nudges the offset — the time anchor handles it)
+  // safety net: if the view ever ends up past the data (a shorter history, a
+  // trimmed series), snap back to live instead of showing an empty plot
+  useEffect(() => {
+    if (!agg.length) return;
+    // rescue only a view that has ended up completely off the data
+    const startNow = agg.length - count - (view.offset || 0);
+    if (startNow > agg.length + count || startNow < -(count * 3)) {
+      anchorRef.current = null;
+      setView((v) => ({ ...v, offset: 0 }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agg.length, count]);
   const winStart = total - count - offset;
+  // approaching the left edge of what we have → ask for the previous page
+  const histAskRef = useRef(0);
+  useEffect(() => {
+    if (!onNeedHistory) return;
+    // only when genuinely near the oldest candle, and at most once every 4s —
+    // firing on every render is what made the chart creep to the left
+    const reaching = winStart <= Math.max(8, Math.round(count * 0.25));
+    if (!reaching) return;
+    const now = Date.now();
+    if (now - histAskRef.current < 4000) return;
+    histAskRef.current = now;
+    onNeedHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [winStart, count, onNeedHistory]);
 
   const geom = useRef({});
+  const pressureRef = useRef({ dir: 0, at: 0, prevC: null });   // live tick pressure
+  const pressureRafRef = useRef(0);
 
   const draw = useCallback(() => {
     const cvs = cvsRef.current, wrap = wrapRef.current;
-    if (!cvs || !wrap || !total) return;
+    if (!cvs || !wrap) return;
     const dpr = window.devicePixelRatio || 1;
     const W = wrap.clientWidth, H = height;
     cvs.width = W * dpr; cvs.height = H * dpr;
     const ctx = cvs.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
+    if (!total) {
+      // no series yet — never leave the last token's drawing on screen
+      const waited = Date.now() - (emptySinceRef.current || Date.now());
+      ctx.fillStyle = T.faint; ctx.font = `11px ${T.mono}`; ctx.textAlign = "center";
+      ctx.fillText(waited > 12000 ? "no chart data for this pool yet" : "loading chart…", W / 2, H / 2 - 6);
+      if (waited > 12000) {
+        ctx.font = `9px ${T.mono}`;
+        ctx.fillText("tap to retry · or switch timeframe", W / 2, H / 2 + 12);
+      }
+      ctx.textAlign = "left";
+      return;
+    }
 
     const padR = 74, padB = 26, padT = 12, volH = 42;
     const chartH = H - padB - padT - volH;
+    if (chartH < 50) return;   // mid-transition sliver — skip this frame, RO redraws
     const plotW = W - padR;
     const step = plotW / count;
     const x = (s) => s * step + step / 2;
@@ -468,25 +779,179 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
 
     // visible candles
     let lo = Infinity, hi = -Infinity, vMax = 0, anyVisible = false;
-    for (let s = 0; s < count; s++) {
-      const i = idxOf(s);
-      if (!inData(i)) continue;
-      anyVisible = true;
+    // scale off a full-width window pinned inside the data — overscrolling then
+    // moves the candles WITHOUT changing the price range underneath them
+    const scaleStart = Math.max(0, Math.min(winStart, Math.max(0, total - count)));
+    // the same sanity rules the draw loop uses — otherwise the axis stretches to
+    // cover candles that are never rendered
+    const scaleWin = [];
+    for (let i = scaleStart; i < Math.min(total, scaleStart + count); i++) {
       const c = agg[i];
-      lo = Math.min(lo, c.l); hi = Math.max(hi, c.h); vMax = Math.max(vMax, c.v);
+      if (!c || !Number.isFinite(c.h) || !Number.isFinite(c.l) || c.h <= 0 || c.l <= 0) continue;
+      if (c.h / c.l > 5000) continue;                     // only genuinely broken data
+      scaleWin.push(c);
     }
-    if (!anyVisible) { // fully panned off — keep a sane price scale
+    for (const c of scaleWin) {
+      anyVisible = true;
+      lo = Math.min(lo, c.l); hi = Math.max(hi, c.h); vMax = Math.max(vMax, c.v || 0);
+    }
+    // a single freak candle shouldn't flatten everything else: if the range is
+    // extreme, scale to the 2nd–98th percentile instead of the absolute extremes.
+    // Nothing is hidden — outliers simply run past the edge.
+    if (scaleWin.length > 12 && lo > 0 && hi / lo > 400) {
+      const lows = scaleWin.map((c) => c.l).sort((a, b) => a - b);
+      const highs = scaleWin.map((c) => c.h).sort((a, b) => a - b);
+      const pLo = lows[Math.floor(lows.length * 0.02)];
+      const pHi = highs[Math.floor(highs.length * 0.98)];
+      if (pLo > 0 && pHi > pLo) { lo = pLo; hi = pHi; }
+    }
+    // 🗜 a single monster buy/sell bar can't own the fit: when ONE candle's
+    // extreme dwarfs everything else, clip toward the runner-up so the rest
+    // of the chart keeps its space (the spike still shows, just runs the edge)
+    if (scaleWin.length > 8) {
+      const highs2 = scaleWin.map((c) => c.h).sort((a, b) => b - a);
+      const lows2 = scaleWin.map((c) => c.l).filter((v) => v > 0).sort((a, b) => a - b);
+      const base = Math.max(1e-15, (highs2[1] || hi) - (lows2[1] || lo));
+      if (highs2[1] && highs2[0] - highs2[1] > base * 0.9) {
+        // 🎯 is the runner-up ITSELF a spike above the chart's body? Then this
+        // is a multi-spike chart — BOTH jumps are real, the frame holds both.
+        const bodyTop = highs2[Math.min(4, highs2.length - 1)];
+        const spread = Math.max(1e-15, bodyTop - (lows2[1] || lo));
+        const secondIsSpike = highs2[1] - bodyTop > Math.max(spread * 0.9, (highs2[0] - bodyTop) * 0.25);
+        if (!secondIsSpike) hi = Math.min(hi, highs2[1] + base * 0.3);   // truly lone → clip
+      }
+      // the LOW side stays honest: the launch bar's origin is always in frame
+      // (a little air under it comes from padBot below)
+    }
+    // one absurd print can't own the axis: cap the range around the median close
+    if (anyVisible && hi / Math.max(lo, 1e-12) > 1e4) {
+      const win = [];
+      for (let i = scaleStart; i < Math.min(total, scaleStart + count); i++) if (agg[i] && agg[i].c > 0) win.push(agg[i].c);
+      if (win.length) {
+        win.sort((a, b) => a - b);
+        const med = win[Math.floor(win.length / 2)];
+        // corrupt prints die; real launches AND real repricings (within 1000×
+        // of the median) stay in frame — the log axis handles the depth
+        lo = Math.max(lo, med / 1000); hi = Math.min(hi, med * 1000);
+      }
+    }
+    if (!anyVisible) {
       const last = agg[total - 1];
-      lo = last.l * 0.9; hi = last.h * 1.1; vMax = 1;
+      if (last) { lo = last.l * 0.9; hi = last.h * 1.1; vMax = 1; } else { lo = 0; hi = 1; vMax = 1; }
     }
-    const p8 = (hi - lo) * 0.1 || hi * 0.01; lo -= p8; hi += p8;
-    // vertical free-drag: shift the visible price window up/down without clamping
-    const vShift = (view.priceOff || 0) * (hi - lo);
-    lo -= vShift; hi -= vShift;
-    const y = (p) => padT + (1 - (p - lo) / (hi - lo)) * chartH;
+    // ⚓ hold the axis still while panning: the range is locked per
+    // token · timeframe · zoom level, and only grows if price runs past it
+    // pure fit — no locks, no memory: the axis is exactly the visible window
+    // floor the range: a series that barely moves stays a flat line instead of
+    // stretching every candle across the whole plot
+    const mid = (hi + lo) / 2 || hi || 1;
+    const minRange = mid * 0.02;                     // never tighter than ±1%
+    if (hi - lo < minRange) { hi = mid + minRange / 2; lo = mid - minRange / 2; }
+    // remember the true range before padding — the log decision depends on it
+    // 🔒 crosshair locked (mobile): hold the exact frame the user is reading —
+    // arriving candles must not rescale the axis under their finger
+    if (pinCross && frozenScaleRef.current) {
+      const fz = frozenScaleRef.current;
+      lo = fz.lo; hi = fz.hi;
+    }
+    // ⚓ the live close is always visible: whatever the clips decided, the
+    // frame stretches to include where the price IS right now
+    if (!(pinCross && frozenScaleRef.current))
+    {
+      const lastC = agg[Math.min(total, scaleStart + count) - 1];
+      const liveC = lastC && lastC.c > 0 ? lastC.c : 0;
+      if (liveC > 0) { hi = Math.max(hi, liveC * 1.04); lo = Math.min(lo, liveC * 0.96); }
+    }
+    const trueLo = lo, trueHi = hi;
+    const p8 = (hi - lo) * 0.12 || hi * 0.01;
+    // never let padding drive the floor to (or below) zero: on a wide range that
+    // both breaks log scaling and squashes everything into a hairline
+    // a log axis wants proportional headroom, not a flat subtraction
+    // pad by a share of the visible RANGE (not the price value) → the top and
+    // bottom candles always keep clear air, even fully zoomed out on a big move
+    const range = Math.max(trueHi - trueLo, trueHi * 0.02);   // never a zero range
+    const willLog = trueLo > 0 && trueHi / trueLo > 150;  // matches the auto-log trigger
+    if (willLog) {
+      // pad by a share of the LOG-SPAN → constant on-screen air (10% above,
+      // 5% below) whether the chart spans one decade or four
+      const span = Math.log(trueHi / trueLo);
+      hi = trueHi * Math.exp(span * 0.10);
+      lo = Math.max(1e-15, trueLo / Math.exp(span * 0.05));
+    } else {
+      const padTop = range * 0.34;   // generous headroom over the tallest wick
+      const padBot = range * 0.16;   // a little under the lowest
+      lo = trueLo > 0 ? Math.max(trueLo * 0.55, trueLo - padBot) : Math.max(1e-15, trueHi * 1e-6);
+      if (!(lo > 0)) lo = Math.max(1e-15, trueHi * 1e-6);
+      hi = trueHi > 0 ? trueHi + padTop : hi + p8;
+    }
+    // vertical zoom: stretch the visible price range around its centre. This is
+    // what gives headroom above the candles for placing bot and visual lines.
+    // (vertical stretch removed — the axis is ALWAYS the visible candles' fit)
+    // NO vertical drag — the axis always auto-fits the visible candles so the
+    // chart is fully on-screen wherever you pan left/right (DexScreener-style).
+    // switch to log automatically once the range is too wide to read linearly
+    const logOn = logMode === "log"
+      || (logMode === "auto" && trueLo > 0 && trueHi / trueLo > 150);
+    const lgLo = logOn ? Math.log(Math.max(lo, 1e-15)) : 0;
+    const lgHi = logOn ? Math.log(Math.max(hi, 1e-14)) : 0;
+    const lgSpan = logOn ? Math.max(1e-9, lgHi - lgLo) : 1;
+    const y = logOn
+      ? (p) => padT + (1 - (Math.log(Math.max(p, 1e-15)) - lgLo) / lgSpan) * chartH
+      : (p) => padT + (1 - (p - lo) / (hi - lo)) * chartH;
     const tfMs = tfMin * 60000;
-    const timeAtSlot = (s) => agg[0].t + idxOf(s) * tfMs; // extrapolates into empty space
-    geom.current = { y, x, step, lo, hi, padT, chartH, plotW, slotOf, idxOf, inData, timeAtSlot, hiLoRange: hi - lo };
+    // candles may arrive without timestamps (simulated series) — anchor the
+    // axis so the newest candle is "now" and step backwards by the timeframe
+    const baseT = agg.length && Number.isFinite(agg[0].t)
+      ? agg[0].t
+      : Date.now() - Math.max(0, agg.length - 1) * tfMs;
+    const timeAtSlot = (s) => {
+      const i = idxOf(s);
+      const c = i >= 0 && i < total ? agg[i] : null;
+      if (c && Number.isFinite(c.t)) return c.t;                  // the candle's own time
+      if (i < 0) {                                                // before the first candle
+        const f = agg[0] && Number.isFinite(agg[0].t) ? agg[0].t : baseT;
+        return f + i * tfMs;
+      }
+      const lastC = agg[total - 1];                               // past the newest
+      const lt = lastC && Number.isFinite(lastC.t) ? lastC.t : baseT + Math.max(0, total - 1) * tfMs;
+      return lt + (i - (total - 1)) * tfMs;
+    };
+    // 🫁 tick-pressure pulse on the live bar: green at the top on an up-tick,
+    // red at the bottom on a down-tick, breathing out over ~1.2s
+    try {
+      const lastC = agg[total - 1];
+      const lastSlot = (total - 1) - winStart;
+      if (lastC && lastSlot >= 0 && lastSlot < count) {
+        const pr = pressureRef.current;
+        if (pr.prevC != null && lastC.c !== pr.prevC) {
+          pr.dir = lastC.c > pr.prevC ? 1 : -1; pr.at = Date.now();
+          if (!pressureRafRef.current) {
+            const loop = () => {
+              pressureRafRef.current = 0;
+              if (Date.now() - pressureRef.current.at < 1250) {
+                safeDrawRef.current && safeDrawRef.current();
+                pressureRafRef.current = requestAnimationFrame(loop);
+              }
+            };
+            pressureRafRef.current = requestAnimationFrame(loop);
+          }
+        }
+        pr.prevC = lastC.c;
+        const age = Date.now() - pr.at;
+        if (pr.dir !== 0 && age < 1250) {
+          const p2 = age / 1250;                       // 0 → 1 breath
+          const cxp = x(lastSlot);
+          const cyp = pr.dir > 0 ? y(lastC.h) : y(lastC.l);
+          const col = pr.dir > 0 ? "22,199,132" : "234,57,67";
+          ctx.beginPath(); ctx.arc(cxp, cyp, 2.5 + 9 * p2, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(${col},${(0.55 * (1 - p2)).toFixed(3)})`; ctx.lineWidth = 1.6; ctx.stroke();
+          ctx.beginPath(); ctx.arc(cxp, cyp, 2.2, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(${col},${(0.9 * (1 - p2 * 0.6)).toFixed(3)})`; ctx.fill();
+        }
+      }
+    } catch (e) {}
+    geom.current = { y, x, step, lo, hi, padT, chartH, plotW, slotOf, idxOf, inData, timeAtSlot, aggLen: agg.length,
+      hiLoRange: hi - lo, logOn, lgLo, lgSpan };
 
     ctx.font = `10px ${T.mono}`; ctx.textBaseline = "middle";
     // zoom strip: tint the price-axis gutter so it reads as a draggable control
@@ -499,10 +964,15 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     ctx.fillText("↕", plotW + padR / 2, padT + 8);
     ctx.font = `10px ${T.mono}`; ctx.textAlign = "left";
     for (let i = 0; i <= 5; i++) {
-      const p = lo + ((hi - lo) * i) / 5, yy = y(p);
+      // even steps in LOG space when the axis is logarithmic, so every decade
+      // gets a line and the lower range stays readable
+      const p = logOn
+        ? Math.exp(lgLo + ((lgHi - lgLo) * i) / 5)
+        : lo + ((hi - lo) * i) / 5;
+      const yy = y(p);
       ctx.strokeStyle = "rgba(255,255,255,0.045)";
       ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(plotW, yy); ctx.stroke();
-      ctx.fillStyle = T.faint; ctx.fillText(fmtP(p), plotW + 8, yy);
+      ctx.fillStyle = T.faint; ctx.fillText(fmtAxis(p), plotW + 8, yy);
     }
     ctx.textAlign = "center";
     const nLab = 6;
@@ -521,7 +991,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
 
     if (!anyVisible) {
       ctx.fillStyle = T.faint; ctx.font = `11px ${T.mono}`; ctx.textAlign = "center";
-      ctx.fillText("— chart panned off screen · hit LIVE ⟶ to return —", plotW / 2, padT + chartH / 2);
+      ctx.fillText(total === 0 ? "loading chart…" : "— chart panned off screen · hit LIVE ⟶ to return —",
+        plotW / 2, padT + chartH / 2);
       ctx.textAlign = "left"; ctx.font = `10px ${T.mono}`;
     }
 
@@ -602,18 +1073,29 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const c = agg[i], up = c.c >= c.o;
       ctx.fillStyle = up ? "rgba(22,199,132,0.28)" : "rgba(234,57,67,0.28)";
       const vh = (c.v / vMax) * volH;
-      ctx.fillRect(x(s) - Math.max(0.6, step * 0.32), volTop + volH - vh, Math.max(1.2, step * 0.64), vh);
+      ctx.fillRect(x(s) - Math.max(0.5, Math.min(step - 1.2, step * 0.82) / 2), volTop + volH - vh, Math.max(1, Math.min(step - 1.2, step * 0.82)), vh);
     }
 
     if (mode === "candles") {
-      const bw = Math.max(1, Math.min(12, step * 0.62));
+      const bw = Math.max(1, Math.min(24, Math.min(step - 1.2, step * 0.82)));   // DexScreener spacing: near, never touching
       for (let s = 0; s < count; s++) {
         const i = idxOf(s); if (!inData(i)) continue;
-        const c = agg[i], up = c.c >= c.o, col = up ? T.green : T.red;
+        const c = agg[i];
+        if (!c || ![c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v))) continue;  // never draw a broken candle
+        // NOTE: no range filter here — a 50× candle on a launch is real, and
+        // hiding it left gaps in the series. The axis handles outliers instead.
+        const up = c.c >= c.o, col = up ? T.green : T.red;
         ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(x(s), y(c.h)); ctx.lineTo(x(s), y(c.l)); ctx.stroke();
+        const px2 = Math.round(x(s)) + 0.5;                       // crisp 1px wick
+        const yh = y(c.h), yl = y(c.l);
+        if (Number.isFinite(yh) && Number.isFinite(yl)) {
+          ctx.beginPath(); ctx.moveTo(px2, yh); ctx.lineTo(px2, yl); ctx.stroke();
+        }
         const yo = y(c.o), yc = y(c.c);
-        ctx.fillRect(x(s) - bw / 2, Math.min(yo, yc), bw, Math.max(1, Math.abs(yc - yo)));
+        if (!Number.isFinite(yo) || !Number.isFinite(yc)) continue;
+        const top = Math.min(yo, yc);
+        const bodyH = Math.max(1, Math.abs(yc - yo));             // a doji is a hairline, not a stub
+        ctx.fillRect(Math.round(x(s) - bw / 2), Math.round(top), Math.max(1, Math.round(bw)), bodyH);
       }
     } else if (anyVisible) {
       const g = ctx.createLinearGradient(0, padT, 0, padT + chartH);
@@ -641,7 +1123,17 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const byIdx = new Map();
       for (const tr of trades) {
         const bucket = Math.floor(tr.t / tfMs) * tfMs;
-        const i = Math.round((bucket - agg[0].t) / tfMs);
+        // find the candle that actually owns this bucket (binary search — the
+        // series is sorted, and may have gaps where nothing traded)
+        let lo2 = 0, hi2 = agg.length - 1, i = -1;
+        while (lo2 <= hi2) {
+          const mid = (lo2 + hi2) >> 1;
+          const mt = agg[mid] && Number.isFinite(agg[mid].t) ? agg[mid].t : null;
+          if (mt == null) break;
+          if (mt === bucket) { i = mid; break; }
+          if (mt < bucket) { i = mid; lo2 = mid + 1; } else hi2 = mid - 1;  // nearest candle at or before
+        }
+        if (i < 0) continue;
         if (!inData(i)) continue;
         const s = slotOf(i);
         if (s < 0 || s >= count) continue;
@@ -656,7 +1148,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
           if (!all.length) return;
           const byTrader = new Map();
           for (const tr of all) {
-            const key = tr.trader || (tr.dev ? "__dev__" : "__me__");
+            const key = tr.market ? "__mkt__" : (tr.trader || (tr.dev ? "__dev__" : "__me__"));
             if (!byTrader.has(key)) byTrader.set(key, []);
             byTrader.get(key).push(tr);
           }
@@ -665,7 +1157,12 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
             const pref = traderPrefs[traderKey];
             const mine = traderKey === "__me__";
             const hiIn = highlightTx && list.some((t) => t.tx === highlightTx);
-            const baseY = (isBuy ? y(c.h) - 16 : y(c.l) + 16) + (isBuy ? -rank * 19 : rank * 19);
+            const rankC = Math.min(rank, 2);   // three tiers max — never a tower
+            // 🟢 buys hang UNDER the bar's LOW, 🔴 sells sit ABOVE its HIGH —
+            // always at the bar's own extreme, so the live candle carries its
+            // badge with it as it bounces, and history reads clean.
+            const anchorP = isBuy ? c.l : c.h;
+            const baseY = (isBuy ? y(anchorP) + 16 : y(anchorP) - 16) + (isBuy ? rankC * 19 : -rankC * 19);
             // badge body is always the gain/loss colour (green buy / red sell) so
             // direction reads instantly; the trader's own colour becomes the ring.
             const own = isBuy ? T.green : T.red;
@@ -675,12 +1172,12 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
             const ringCol = trackedCol ? "rgba(255,255,255,0.85)" : null;
             const icon = !mine && pref && pref.icon ? getIcon(pref.icon, requestRepaint) : null;
             const w = icon ? 22 : list.length > 1 ? 26 : 18, h = 15;
-            // triangle pointer toward the bar
+            // triangle pointer toward the bar (buys point UP at it, sells DOWN)
             ctx.beginPath();
-            if (isBuy) { ctx.moveTo(px, baseY + 9); ctx.lineTo(px - 5, baseY + 3); ctx.lineTo(px + 5, baseY + 3); }
-            else { ctx.moveTo(px, baseY - 9); ctx.lineTo(px - 5, baseY - 3); ctx.lineTo(px + 5, baseY - 3); }
+            if (isBuy) { ctx.moveTo(px, baseY - 9); ctx.lineTo(px - 5, baseY - 3); ctx.lineTo(px + 5, baseY - 3); }
+            else { ctx.moveTo(px, baseY + 9); ctx.lineTo(px - 5, baseY + 3); ctx.lineTo(px + 5, baseY + 3); }
             ctx.closePath(); ctx.fillStyle = badgeCol; ctx.fill();
-            const bx = px - w / 2, by = isBuy ? baseY - h + 3 : baseY - 3;
+            const bx = px - w / 2, by = isBuy ? baseY - 3 : baseY - h + 3;
             ctx.beginPath();
             if (ctx.roundRect) ctx.roundRect(bx, by, w, h, 5); else ctx.rect(bx, by, w, h);
             ctx.fillStyle = badgeCol; ctx.fill();
@@ -704,6 +1201,16 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
               ctx.fillText(list.length > 1 ? `${isBuy ? "▲" : "▼"}${list.length}` : (list[0].dev ? "D" : isBuy ? "▲" : "▼"), px, by + h / 2 + 0.5);
             }
             ctx.textAlign = "left"; ctx.textBaseline = "middle";
+            // 🏷 the amount of THIS token they bought/sold, right on the marker
+            if (list.length === 1 && typeof list[0].amt === "number" && list[0].amt > 0 && (((geom.current || {}).step || 8) > 5)) {
+              ctx.font = `bold 8px ${T.mono}`;
+              ctx.fillStyle = isBuy ? "rgba(22,199,132,0.95)" : "rgba(234,57,67,0.95)";
+              const amtLbl = `${fmtQty(list[0].amt)}${list[0].unit && list[0].unit !== "SOL" ? "" : " SOL"}`;
+              ctx.strokeStyle = "rgba(5,7,11,0.85)"; ctx.lineWidth = 2.5;
+              ctx.strokeText(amtLbl, px + w / 2 + 4, by + h / 2 + 0.5);
+              ctx.fillText(amtLbl, px + w / 2 + 4, by + h / 2 + 0.5);
+              ctx.lineWidth = 1;
+            }
             markerHitsRef.current.push({ x: px, y: by + h / 2, r: 12, group: { side: isBuy ? "buy" : "sell", list, sym: list[0] && list[0].sym, trader: traderKey } });
             rank++;
           });
@@ -716,14 +1223,14 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     // last price line
     const lastSlot = slotOf(total - 1);
     const last = agg[total - 1];
-    if (lastSlot >= 0 && lastSlot < count && last.c >= lo && last.c <= hi) {
+    if (last && lastSlot >= 0 && lastSlot < count && last.c >= lo && last.c <= hi) {
       const ly = y(last.c), up = last.c >= last.o;
       ctx.setLineDash([4, 4]); ctx.strokeStyle = up ? T.green : T.red;
       ctx.beginPath(); ctx.moveTo(0, ly); ctx.lineTo(plotW, ly); ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = up ? T.green : T.red;
       ctx.fillRect(plotW + 2, ly - 9, padR - 4, 18);
-      ctx.fillStyle = "#0a0d13"; ctx.fillText(fmtP(last.c), plotW + 8, ly);
+      ctx.fillStyle = "#0a0d13"; ctx.fillText(fmtAxis(last.c), plotW + 8, ly);
       lastPxRef.current = { y: ly, x: x(lastSlot), plotW, visible: true };
     } else {
       lastPxRef.current = { visible: false };
@@ -746,7 +1253,7 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
         const price = lo + (1 - (cy - padT) / chartH) * (hi - lo);
         ctx.setLineDash([]);
         ctx.fillStyle = "#2e3648"; ctx.fillRect(plotW + 2, cy - 9, padR - 4, 18);
-        ctx.fillStyle = T.text; ctx.fillText(fmtP(price), plotW + 8, cy);
+        ctx.fillStyle = T.text; ctx.fillText(fmtAxis(price), plotW + 8, cy);
         if (clickMode) {
           ctx.fillStyle = armCol; ctx.font = `bold 10px ${T.mono}`;
           ctx.fillText(clickMode === "buy" ? "CLICK = ARM BUY BOT HERE 🤖" : "CLICK = ARM SELL BOT HERE 🤖", Math.min(sx + 12, plotW - 170), Math.max(cy - 14, padT + 10));
@@ -765,8 +1272,27 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       ctx.fillText(tl, Math.min(Math.max(tw / 2, sx), plotW - tw / 2), H - 12);
       ctx.textAlign = "left";
     }
-  }, [agg, total, count, offset, winStart, hue, mode, cross, height, tfMin, trades, clickMode, view.priceOff, highlightTx, pulseTick, traderPrefs, theme, pendingLevels, botRuns, price]);
+  }, [agg, total, count, offset, winStart, hue, mode, cross, height, tfMin, trades, clickMode, view.priceOff, view.priceZoom, logMode, highlightTx, pulseTick, traderPrefs, theme, pendingLevels, botRuns, price, axisMC, mcRatio, pinCross]);
+  // a paint error must never leave stale pixels pretending to be a live chart
+  const safeDraw = useCallback(() => {
+    try { draw(); } catch (e) {
+      console.error("[VALO chart]", e);
+      const cvs = cvsRef.current, wrap = wrapRef.current;
+      if (!cvs || !wrap) return;
+      const dpr = window.devicePixelRatio || 1;
+      const W = wrap.clientWidth, H = height;
+      const ctx = cvs.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = T.faint; ctx.font = `11px ${T.mono}`; ctx.textAlign = "center";
+      ctx.fillText("chart reloading…", W / 2, H / 2);
+      ctx.textAlign = "left";
+    }
+  }, [draw, height]);
 
+  const safeDrawRef = useRef(null);
+  useEffect(() => { safeDrawRef.current = safeDraw; });
+  useEffect(() => () => { if (pressureRafRef.current) cancelAnimationFrame(pressureRafRef.current); }, []);
   // keep repainting while a marker is highlighted so its ring pulses
   useEffect(() => {
     if (!highlightTx) return;
@@ -776,22 +1302,41 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     return () => cancelAnimationFrame(raf);
   }, [highlightTx]);
 
-  useEffect(() => { draw(); }, [draw]);
+  useEffect(() => { safeDraw(); }, [safeDraw]);
   useEffect(() => {
     const ro = new ResizeObserver(() => draw());
     if (wrapRef.current) ro.observe(wrapRef.current);
     return () => ro.disconnect();
-  }, [draw]);
+  }, [safeDraw]);
 
   // free wheel-zoom — no upper clamp against data size
   useEffect(() => {
     const cvs = cvsRef.current; if (!cvs) return;
     const onWheel = (e) => {
       e.preventDefault();
-      setView((v) => ({ ...v, count: Math.max(12, Math.min(60000, Math.round(v.count * (e.deltaY > 0 ? 1.18 : 1 / 1.18)))) }));
+      // where under the plot is the cursor? that bar must not move (DexScreener feel)
+      const r = cvs.getBoundingClientRect();
+      const g = geom.current || {};
+      const frac = g.chartW > 0 ? Math.max(0, Math.min(1, (e.clientX - r.left - (g.padL || 0)) / g.chartW)) : 1;
+      setView((v) => {
+        const f = e.deltaY > 0 ? 1.07 : 1 / 1.07;               // fine notches, not jumps
+        const next = v.count * f;
+        // always move at least one bar so small counts still respond
+        const stepped = Math.abs(next - v.count) < 1 ? v.count + (e.deltaY > 0 ? 1 : -1) : next;
+        const count2 = Math.max(12, Math.min(60000, Math.round(stepped)));
+        // shift the window so the bar under the cursor keeps its screen x
+        const off2 = Math.max(0, Math.round(v.offset + (1 - frac) * (v.count - count2)));
+        return { ...v, count: count2, offset: off2, follow: off2 === 0 ? v.follow : false };
+      });
     };
+    const onDbl = (e) => {
+      // double-click the plot → reset to the fitted view
+      e.preventDefault();
+      setView({ count: 90, offset: 0, priceOff: 0, priceZoom: 1, follow: true });
+    };
+    cvs.addEventListener("dblclick", onDbl);
     cvs.addEventListener("wheel", onWheel, { passive: false });
-    return () => cvs.removeEventListener("wheel", onWheel);
+    return () => { cvs.removeEventListener("wheel", onWheel); cvs.removeEventListener("dblclick", onDbl); };
   }, []);
 
   // Lock the page while a finger is on the chart. React binds touch events as
@@ -803,14 +1348,38 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
   const clickModeRef = useRef(clickMode); clickModeRef.current = clickMode;
   const onChartTradeRef = useRef(onChartTrade); onChartTradeRef.current = onChartTrade;
   // bot-set mode: dragging the chart paints the buy-in line instead of panning
-  const botSetRef = useRef({}); botSetRef.current = { on: botSetMode, draft: onBotDraft, set: onBotSet, arm: onBotArm, lineDrag: onBotLineDrag };
+  const botSetRef = useRef({}); botSetRef.current = { on: botSetMode, draft: onBotDraft, set: onBotSet, arm: onBotArm, lineDrag: onBotLineDrag, shiftArm };
   const lineHitsRef = useRef([]);      // grabbable bot lines: {id, y}
+  const [lineMenu, setLineMenu] = useState(null); // { id, x, y } — cancel bubble
+  const [, setAgeTick2] = useState(0);   // ⏱ minute tick so the pill age moves
+  useEffect(() => {
+    if (!(createdAt > 0)) return;
+    const iv = setInterval(() => setAgeTick2((x) => x + 1), 30000);
+    return () => clearInterval(iv);
+  }, [createdAt]);
+  const holdRef = useRef(null);        // touch press-and-hold timer
+  const lastTouchAtRef = useRef(0);    // 👻 synthetic-mouse suppressor
+  const panRafRef = useRef(0);         // 📱 pan updates coalesce to one per frame
+  const crossRafRef = useRef(0);       // 🔒 crosshair drags coalesce too
+  const crossPendRef = useRef(null);
+  const panPendingRef = useRef(null);
   const lineDragRef = useRef(null);    // active line drag: {id}
   const touchIntentRef = useRef(null); // first-move decision: chart gesture vs page scroll
   const pendGrabRef = useRef(null);    // touch press-and-hold before a line grab engages
   const traceRef = useRef(false);      // touch hold-to-trace: crosshair rides the finger, no panning
   const pendTraceRef = useRef(null);
-  const stickyRef = useRef(null);      // instant-edit: the line rides the cursor until you click/release
+  const stickyRef = useRef(null);
+  const shiftTraceRef = useRef(false); // SHIFT-held preview line is showing
+  useEffect(() => {
+    const clear = (e) => {
+      if (e.key !== "Shift" || !shiftTraceRef.current) return;
+      shiftTraceRef.current = false;
+      const bs0 = botSetRef.current;
+      if (bs0 && bs0.draft) bs0.draft(null);   // preview disappears on release
+    };
+    window.addEventListener("keyup", clear);
+    return () => window.removeEventListener("keyup", clear);
+  }, []);      // instant-edit: the line rides the cursor until you click/release
   useEffect(() => {
     if (!editLineReq || editLineReq.id == null) return;
     // remember where the line IS — it stays put and moves relative to your hand,
@@ -831,7 +1400,12 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     }
     return priceAtY(clampY(yy + ((st && st.off) || 0)));
   };
-  const priceAtY = (cy) => { const g = geom.current; return g.hi - ((cy - g.padT) / g.chartH) * (g.hi - g.lo); };
+  const priceAtY = (cy) => {
+    const g = geom.current;
+    const f = 1 - (cy - g.padT) / g.chartH;              // 0 at the bottom, 1 at the top
+    if (g.logOn) return Math.exp(g.lgLo + f * g.lgSpan); // inverse of the log mapping
+    return g.lo + f * (g.hi - g.lo);
+  };
   useEffect(() => {
     const cvs = cvsRef.current; if (!cvs) return;
     // SCROLL-FRIENDLY TOUCH: the first ~7px of movement decides the gesture.
@@ -846,22 +1420,8 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const p0 = e.touches && e.touches[0]; if (!p0) return;
       touchIntentRef.current = { x: p0.clientX, y: p0.clientY, decided: false, scroll: false };
       if (chartForced()) { touchIntentRef.current.decided = true; e.preventDefault(); }
-      else if (!pendGrabRef.current) {
-        // hold still ~350ms → TRACER: crosshair follows the finger, chart holds still
-        if (pendTraceRef.current) clearTimeout(pendTraceRef.current.timer);
-        const sx = p0.clientX, sy = p0.clientY;
-        pendTraceRef.current = { x: sx, y: sy, timer: setTimeout(() => {
-          pendTraceRef.current = null;
-          const it2 = touchIntentRef.current;
-          if (it2 && !it2.decided) {
-            traceRef.current = true; it2.decided = true; it2.scroll = false;
-            if (navigator.vibrate) navigator.vibrate(8);
-            const r2 = cvs.getBoundingClientRect();
-            const sc2 = r2.width / (cvs.clientWidth || r2.width) || 1;
-            setCross({ cx: (sx - r2.left) / sc2, cy: (sy - r2.top) / sc2 });
-          }
-        }, 350) };
-      }
+      // (the quick 350ms tracer is retired — the held crosshair below is the
+      // one and only crosshair on mobile, so ordinary taps stay clean)
     };
     const onTM = (e) => {
       const it = touchIntentRef.current; const p0 = e.touches && e.touches[0];
@@ -986,19 +1546,33 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     return { cx: (p.clientX - r.left) / sc, cy: (p.clientY - r.top) / sc };
   };
   const axisRef = useRef(null); // dragging the price-axis strip = zoom
+  const pinchRef = useRef(null); // two-finger time zoom
   const onDown = (e) => {
+    // 🤏 two fingers = pinch-zoom the TIME axis (zoom into the bars)
+    if (e.touches && e.touches.length === 2) {
+      e.preventDefault && e.preventDefault();
+      const [a, b] = [e.touches[0], e.touches[1]];
+      const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      const g0 = geom.current;
+      const cvs0 = cvsRef.current; const r0 = cvs0 ? cvs0.getBoundingClientRect() : { left: 0, width: 1 };
+      const midX = ((a.clientX + b.clientX) / 2 - r0.left);
+      const midSlot = g0.step ? midX / g0.step : 0;   // the anchor bar
+      pinchRef.current = { d0: Math.max(20, dist), c0: count, off0: offset, midSlot };
+      dragRef.current = null; axisRef.current = null; setCross(null);
+      return;
+    }
     const { cx, cy } = ptOf(e);
     const g = geom.current;
     // touch/press starting in the right-hand price-number strip = zoom mode:
     // run finger UP to zoom in, DOWN to zoom out. No pinch, no browser fight.
-    if (g.plotW != null && cx >= g.plotW - 4) {
-      axisRef.current = { sy: cy, c0: count };
+    if (g.plotW != null && cx >= g.plotW - (isMobile ? 16 : 4)) {
+      axisRef.current = { sy: cy, c0: count, z0: view.priceZoom || 1, t0: Date.now(), moved: false };
       dragRef.current = null;
       setCross(null);
       return;
     }
     const bs = botSetRef.current;
-    if (bs.on && g.idxOf && cy >= g.padT && cy <= g.padT + g.chartH && cx <= g.plotW) {
+    if ((bs.on || (e.shiftKey && bs.shiftArm)) && g.idxOf && cy >= g.padT && cy <= g.padT + g.chartH && cx <= g.plotW) {
       // drag anywhere on the plot → the yellow buy-in line follows the finger
       dragRef.current = { botset: true, moved: false, t0: Date.now(), touch: !!e.touches };
       bs.draft && bs.draft(priceAtY(cy));
@@ -1044,11 +1618,80 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     }
     onLineSelect && onLineSelect(null); // tapped open chart — drop the highlight
     dragRef.current = { sx: cx, sy: cy, startOffset: offset, startPriceOff: view.priceOff || 0, moved: false, t0: Date.now(), touch: !!e.touches };
-    setCross({ cx, cy });
+    if (e.touches) {
+      // already reading the chart → keep the crosshair under the finger
+      if (pinCross) {
+        if (e.touches) {
+          clearTimeout(holdRef.current);
+          holdRef.current = setTimeout(() => {   // hold again ~2s → crosshair goes away
+            if (dragRef.current && dragRef.current.moved) return;
+            if (navigator.vibrate) navigator.vibrate(12);
+            frozenScaleRef.current = null;      // 🔓 the chart breathes again
+            setPinCross(null); setCross(null);
+          }, 1900);
+        }
+        setPinCross({ cx, cy }); setCross({ cx, cy }); return;
+      }
+    }
+    if (e.touches) {                       // press-and-hold a line → cancel bubble
+      const hit = lineAt(cy);
+      clearTimeout(holdRef.current);
+      const g2 = geom.current || {};
+      const inPlot2 = g2.chartW > 0 ? (cx > (g2.padL || 0) && cx < (g2.padL || 0) + g2.chartW) : true;
+      if (!hit && inPlot2) {               // hold the chart ~2s → crosshair mode
+        holdRef.current = setTimeout(() => {
+          if (dragRef.current && dragRef.current.moved) return;
+          if (navigator.vibrate) navigator.vibrate(12);
+          // 🔒 snapshot the exact frame being read — it holds until release
+          const gN = geom.current || {};
+          if (gN.lo > 0 && gN.hi > gN.lo) frozenScaleRef.current = { lo: gN.lo, hi: gN.hi };
+          setPinCross({ cx, cy }); setCross({ cx, cy });
+        }, 1900);
+      }
+      if (hit) {
+        const p0 = e.touches[0];
+        holdRef.current = setTimeout(() => {
+          if (dragRef.current && dragRef.current.moved) return;
+          if (navigator.vibrate) navigator.vibrate(14);
+          setLineMenu({ id: hit.id, x: p0.clientX, y: p0.clientY });
+        }, 550);
+      }
+    }
+    if (e.touches) lastTouchAtRef.current = Date.now();
+    // crosshair on contact is a MOUSE privilege — touch goes through the
+    // 2s-hold ritual, and ghost mouse events after a touch don't count
+    if (!e.touches && Date.now() - lastTouchAtRef.current > 900) setCross({ cx, cy });
   };
   const onMove = (e) => {
+    // 🤏 pinch in progress → rescale the candle count around the anchor bar
+    if (pinchRef.current && e.touches && e.touches.length === 2) {
+      e.preventDefault && e.preventDefault();
+      const pz = pinchRef.current;
+      const [a, b] = [e.touches[0], e.touches[1]];
+      const dist = Math.max(20, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY));
+      const capNow = Math.max(60, Math.min(4000, Math.round((geom.current.aggLen || 600) * 1.28) + 18));
+      const nextCount = Math.max(12, Math.min(capNow, Math.round(pz.c0 * (pz.d0 / dist))));
+      const ratio = nextCount / pz.c0;
+      const slotsRight0 = pz.c0 - pz.midSlot;
+      const dOff = Math.round(slotsRight0 * ratio - slotsRight0);
+      setView((v) => ({ ...v, count: nextCount, offset: Math.max(0, pz.off0 + dOff) }));
+      return;
+    }
     const { cx, cy } = ptOf(e);
     const st = stickyRef.current;
+    // ✋ hover-trace: with drag-set armed (or SHIFT held) the yellow buy-in bar
+    // simply follows the cursor — no button held down
+    if (!e.touches && !dragRef.current && !lineDragRef.current && !st) {
+      const bs0 = botSetRef.current; const g0 = geom.current;
+      const inPlot = g0 && cy >= g0.padT && cy <= g0.padT + g0.chartH && cx <= g0.plotW;
+      if (bs0 && bs0.draft && inPlot && (bs0.on || (e.shiftKey && bs0.shiftArm))) {
+        if (e.shiftKey && !shiftTraceRef.current) shiftTraceRef.current = true;
+        bs0.draft(priceAtY(cy));
+        setCross({ cx, cy });
+        return;
+      }
+      if (shiftTraceRef.current && !e.shiftKey) { shiftTraceRef.current = false; if (bs0 && bs0.draft) bs0.draft(null); }
+    }
     if (st && !e.touches) {
       botSetRef.current.lineDrag && botSetRef.current.lineDrag(st.id, stickyPriceAt(cy), false);
       return;
@@ -1073,10 +1716,27 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     }
     const ax = axisRef.current;
     if (ax) {
-      // up (negative dy) → fewer candles (zoom in); down → more (zoom out)
+      // the strip now zooms TIME: run up = zoom into the bars, down = out.
+      // (vertical is pure auto-fit and cannot be touched)
       const dy = cy - ax.sy;
-      const factor = Math.pow(1.9, dy / 120); // smooth, ~1.9× per 120px
-      setView((v) => ({ ...v, count: Math.max(12, Math.min(60000, Math.round(ax.c0 * factor))) }));
+      if (Math.abs(dy) > 4) ax.moved = true;
+      const factor = Math.pow(1.9, dy / 160);
+      const capNow = Math.max(60, Math.min(4000, Math.round((geom.current.aggLen || 600) * 1.28) + 18));
+      setView((v) => ({ ...v, count: Math.max(12, Math.min(capNow, Math.round((ax.c0 || 60) * factor))) }));
+      return;
+    }
+    if (pinCross && e.touches) {
+      // 🔒 locked: the chart holds perfectly still, the finger only moves the
+      // line. Dragging is USE, not dismissal — movement cancels the hold timer.
+      const it3 = touchIntentRef.current;
+      if (it3 && (Math.abs((e.touches[0] && e.touches[0].clientX) - it3.x) > 10 || Math.abs((e.touches[0] && e.touches[0].clientY) - it3.y) > 10)) clearTimeout(holdRef.current);
+      if (dragRef.current) dragRef.current.moved = false;   // no pan can start under the line
+      crossPendRef.current = { cx, cy };
+      if (!crossRafRef.current) crossRafRef.current = requestAnimationFrame(() => {
+        crossRafRef.current = 0;
+        const c2 = crossPendRef.current;
+        if (c2) { setPinCross(c2); setCross(c2); }
+      });
       return;
     }
     const d = dragRef.current;
@@ -1084,20 +1744,32 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       const dx = cx - d.sx;
       const dyTot = cy - d.sy;
       const thr = d.touch ? 12 : 5;
-      if (Math.abs(dx) > thr || Math.abs(dyTot) > thr) d.moved = true;
+      if (Math.abs(dx) > thr || (d.touch && Math.abs(dyTot) > thr)) { d.moved = true; clearTimeout(holdRef.current); }
+      else if (Math.abs(dyTot) > thr) clearTimeout(holdRef.current);
       if (d.moved) {
         const g = geom.current;
-        // horizontal → time offset; vertical → free price shift (no bar limit)
-        const priceShift = (dyTot / (g.chartH || 300)); // fraction of visible range
-        setView((v) => ({
-          ...v,
-          offset: d.startOffset + Math.round(dx / (g.step || 6)),
-          priceOff: (d.startPriceOff || 0) - priceShift,
-        }));
+        // horizontal pan ONLY — up/down does nothing; the axis auto-fits so
+        // the visible candles are always fully framed no matter where you are.
+        const vGive = 0;
+        const nextOff = d.startOffset + Math.round(dx / (g.step || 6));
+        // remember WHEN the right edge points at — later candles can't move it
+        const endIdx = total - 1 - nextOff;
+        anchorRef.current = (nextOff <= 0) ? null
+          : (endIdx >= 0 && endIdx < total && agg[endIdx] && Number.isFinite(agg[endIdx].t))
+            ? agg[endIdx].t : anchorRef.current;
+        // 📱 coalesce: touchmove can fire at 120Hz — one setView per frame
+        // keeps the drag glassy instead of render-thrashed
+        panPendingRef.current = nextOff;
+        if (!panRafRef.current) panRafRef.current = requestAnimationFrame(() => {
+          panRafRef.current = 0;
+          const off2 = panPendingRef.current;
+          if (off2 != null) setView((v) => ({ ...v, offset: off2, priceOff: 0 }));
+        });
         return;
       }
     }
-    setCross({ cx, cy });
+    if (e.touches) lastTouchAtRef.current = Date.now();
+    if (!e.touches && Date.now() - lastTouchAtRef.current > 900) setCross({ cx, cy });
     const g = geom.current;
     if (g.idxOf) {
       const s = Math.max(0, Math.round((cx - g.step / 2) / g.step));
@@ -1105,7 +1777,21 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       setHover(g.inData(i) ? agg[i] : null);
     }
   };
+  const lineAt = (cy) => {
+    const slop = isMobile ? 16 : 10;
+    return lineHitsRef.current.find((l) => Math.abs(l.y - cy) <= slop) || null;
+  };
+  // an empty chart is a retry button
+  const onEmptyTap = () => { if (!total && onNeedHistory) onNeedHistory(); };
+  const onCtx = (e) => {
+    const { cy } = ptOf(e);
+    const hit = lineAt(cy);
+    if (!hit) return;
+    e.preventDefault();
+    setLineMenu({ id: hit.id, x: e.clientX, y: e.clientY });
+  };
   const onUp = (e) => {
+    if (pinchRef.current && (!e.touches || e.touches.length < 2)) { pinchRef.current = null; return; }
     if (e.touches) {
       const it = touchIntentRef.current;
       if (it && (it.scroll || !it.decided) && !chartForced()) return; // page owns it — chart holds still
@@ -1128,9 +1814,15 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
       dragRef.current = null;
       return;
     }
-    if (axisRef.current) { axisRef.current = null; return; }
+    if (axisRef.current) {
+      const ax0 = axisRef.current; axisRef.current = null;
+      if (ax0 && !ax0.moved && Date.now() - (ax0.t0 || 0) < 600 && mcRatio > 0) setAxisMC((v) => !v);
+      return;
+    }
     const d = dragRef.current;
     dragRef.current = null;
+    clearTimeout(holdRef.current);
+    // (tap no longer dismisses the crosshair — hold ~2s again to put it away)
     // a clean tap on a $ marker opens its receipt — takes priority over trading
     if (d && !d.moved) {
       const { cx, cy } = ptOf(e);
@@ -1150,14 +1842,16 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
     }
   };
 
-  const ohlc = hover || agg[total - 1];
-  const chg = ohlc ? ((ohlc.c - ohlc.o) / ohlc.o) * 100 : 0;
+  const ohlc = hover || agg[total - 1] || null;
+  const chg = ohlc && ohlc.o > 0 ? ((ohlc.c - ohlc.o) / ohlc.o) * 100 : 0;
 
   return (
     <div ref={wrapRef}
       onTouchStart={(e) => e.stopPropagation()} onTouchMove={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()}
-      data-chart="1"
-      style={{ position: "relative", background: "#0c0f16", border: `1px solid ${clickMode ? (clickMode === "buy" ? T.green : T.red) : T.border}`, borderRadius: 10, overflow: "hidden", transition: "border-color .2s", touchAction: "pan-y", overscrollBehavior: "contain" }}>
+      data-chart="1" data-tour="chart"
+      style={{ position: "relative", background: "#0c0f16", border: `1px solid ${clickMode ? (clickMode === "buy" ? T.green : T.red) : T.border}`, borderRadius: 10,
+        overflow: isMobile ? "visible" : "hidden", marginTop: isMobile ? 15 : 0,
+        transition: "border-color .2s", touchAction: "pan-y", overscrollBehavior: "contain" }}>
       {/* mobile: stacked in-chart overlays — OHLC pill on top, eyes under it,
           LIVE/fit under that. The canvas runs full height beneath them. */}
       {isMobile ? (
@@ -1168,9 +1862,11 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
               fontFamily: T.mono, fontSize: 8.5, color: T.dim,
               background: "rgba(12,15,22,0.88)", border: `1px solid ${T.border}`, borderRadius: 20, padding: "4px 11px" }}>
               <span>O <b style={{ color: T.text }}>{fmtP(ohlc.o)}</b></span>
+              {fmtAge(createdAt) && <span title="Token age — live">⏱ <b style={{ color: T.text }}>{fmtAge(createdAt)}</b></span>}
               <span>H <b style={{ color: T.green }}>{fmtP(ohlc.h)}</b></span>
               <span>L <b style={{ color: T.red }}>{fmtP(ohlc.l)}</b></span>
               <span>C <b style={{ color: chg >= 0 ? T.green : T.red }}>{fmtP(ohlc.c)}</b></span>
+              {ohlc.v > 0 && <span>V <b style={{ color: T.blue }}>{fmt$(ohlc.v)}</b></span>}
               <span style={{ color: chg >= 0 ? T.green : T.red }}>{pct(chg)}</span>
             </div>
           )}
@@ -1179,12 +1875,16 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
               <ViewerPills token={eyesToken} small />
             </div>
           )}
-          <div style={{ position: "absolute", top: 52, left: 10, zIndex: 3, display: "flex", gap: 6, alignItems: "center" }}>
-            <button onClick={() => setView({ count: 18, offset: 0, priceOff: 0, follow: true })}
-              style={{ height: 21, padding: "0 9px", borderRadius: 6, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 9, fontWeight: 700, fontFamily: T.mono }}>◉ LIVE</button>
+          <div style={{ position: "absolute", top: -15, right: 4, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 14, lineHeight: 1 }}>
+            <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: 18, offset: 0, priceOff: 0, priceZoom: 1, follow: true }); }}
+              style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 7.5, fontWeight: 800, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>◉ LIVE</button>
+            <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: Math.max(15, Math.round(total * 1.12) + 8), offset: 0, priceOff: 0, priceZoom: 1, follow: true }); }}
+              title="Zoom out to the whole chart — every candle this token has"
+              style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.9)", color: T.dim, cursor: "pointer", fontSize: 7.5, fontWeight: 800, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>⛰ ALL</button>
+
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
-              <button onClick={() => setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, follow: false })}
-                style={{ height: 21, padding: "0 8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.9)", color: T.dim, cursor: "pointer", fontSize: 9, fontFamily: T.mono }}>⤢ fit</button>
+              <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, priceZoom: 1, follow: false }); }}
+                style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.9)", color: T.dim, cursor: "pointer", fontSize: 7.5, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>⤢ fit</button>
             )}
           </div>
         </>
@@ -1193,31 +1893,54 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
           <div style={{ position: "absolute", top: 8, left: 10, zIndex: 3, fontFamily: T.mono, fontSize: 10.5, color: T.dim, display: "flex", gap: 10, flexWrap: "wrap", pointerEvents: "none" }}>
             {ohlc && (<>
               <span>O <b style={{ color: T.text }}>{fmtP(ohlc.o)}</b></span>
+              {fmtAge(createdAt) && <span title="Token age — live">⏱ <b style={{ color: T.text }}>{fmtAge(createdAt)}</b></span>}
               <span>H <b style={{ color: T.green }}>{fmtP(ohlc.h)}</b></span>
               <span>L <b style={{ color: T.red }}>{fmtP(ohlc.l)}</b></span>
               <span>C <b style={{ color: chg >= 0 ? T.green : T.red }}>{fmtP(ohlc.c)}</b></span>
+              {ohlc.v > 0 && <span>V <b style={{ color: T.blue }}>{fmt$(ohlc.v)}</b></span>}
               <span style={{ color: chg >= 0 ? T.green : T.red }}>{pct(chg)}</span>
             </>)}
           </div>
           <div style={{ position: "absolute", top: 8, right: 82, zIndex: 3, display: "flex", gap: 8, alignItems: "center" }}>
             {eyesToken && <ViewerPills token={eyesToken} small />}
-            <button onClick={() => setView({ count: 18, offset: 0, priceOff: 0, follow: true })}
+            <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: 18, offset: 0, priceOff: 0, priceZoom: 1, follow: true }); }}
               title="Zoom to the live edge and follow the price"
               style={{ height: 24, padding: "0 10px", borderRadius: 6, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.15)", color: T.blue, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: T.mono }}>◉ LIVE</button>
+            <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: Math.max(15, Math.round(total * 1.12) + 8), offset: 0, priceOff: 0, priceZoom: 1, follow: true }); }}
+              title="Zoom out to the whole chart — every candle this token has"
+              style={{ height: 24, padding: "0 8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.85)", color: T.dim, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: T.mono }}>⛰ ALL</button>
+
             {(offset !== 0 || count > total + 10 || Math.abs(view.priceOff || 0) > 0.01) && (
-              <button onClick={() => setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, follow: false })}
+              <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: Math.min(90, Math.max(15, total)), offset: 0, priceOff: 0, priceZoom: 1, follow: false }); }}
                 style={{ height: 24, padding: "0 8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.85)", color: T.dim, cursor: "pointer", fontSize: 10, fontFamily: T.mono }}>⤢ fit</button>
             )}
           </div>
         </>
       )}
       <div style={{ position: "absolute", bottom: 30, right: 84, zIndex: 3, fontFamily: T.mono, fontSize: 9, letterSpacing: 1, color: synthetic ? T.amber : T.faint, pointerEvents: "none" }}>
-        {synthetic ? "⟲ SYNTH" : "DEXSCREENER"} · drag ⇄ pan · drag price axis ↕ zoom
+        {synthetic ? "⟲ SYNTH" : (candles && candles.length < 6 ? "🕯 FRESH LAUNCH — chart builds live from real trades" : "DEXSCREENER")} · drag ⇄ pan · run the axis ⤢ time zoom · scroll ⇱ zoom
       </div>
+      {lineMenu && (
+        <>
+          <div onClick={() => setLineMenu(null)} onTouchStart={() => setLineMenu(null)}
+            style={{ position: "fixed", inset: 0, zIndex: 149 }} />
+          <div style={{ position: "fixed", left: Math.max(8, lineMenu.x - 52), top: Math.max(8, lineMenu.y - 46), zIndex: 150 }}>
+            <button onClick={() => { onCancelLine && onCancelLine(lineMenu.id); setLineMenu(null); }}
+              style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                border: `1px solid ${T.red}`, background: "rgba(234,57,67,0.16)", color: T.red,
+                borderRadius: 9, padding: "7px 12px", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900,
+                boxShadow: `0 8px 24px rgba(0,0,0,0.6), 0 0 12px ${T.red}55`, backdropFilter: "blur(4px)" }}>
+              ✕ CANCEL
+            </button>
+          </div>
+        </>
+      )}
       <canvas
         ref={cvsRef}
-        style={{ width: "100%", height, display: "block", cursor: clickMode ? "pointer" : "crosshair", touchAction: "pan-y", overscrollBehavior: "contain", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
+        style={{ width: "100%", height, display: "block", cursor: clickMode ? "pointer" : "crosshair", touchAction: isMobile ? "none" : "pan-y", overscrollBehavior: "contain", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
         onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
+        onClick={onEmptyTap}
+        onContextMenu={onCtx}
         onDoubleClick={(e) => {
           const bs = botSetRef.current; if (!bs.on || !bs.arm) return;
           const { cx, cy } = ptOf(e); const g = geom.current;
@@ -1259,6 +1982,34 @@ function ProChart({ candles, hue, synthetic, mode, tfMin, trades, clickMode, onC
 
 // ---------------- UI atoms ----------------
 // double-tap (mobile), hold ~500ms, double-click or right-click (PC) → edit the chip
+// repaint only when something the chart actually draws has changed.
+// price-line arrays are rebuilt inline by the parent, so they're compared by
+// value rather than identity — cheap, since they hold a handful of entries.
+const sameLevels = (a, b) => {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i], y = b[i];
+    if (!x || !y) return false;
+    if (x.id !== y.id || x.level !== y.level || x.side !== y.side
+      || x.draft !== y.draft || x.vt !== y.vt || x.amt !== y.amt) return false;
+  }
+  return true;
+};
+const ProChart = React.memo(ProChartBase, (a, b) => (
+  a.candles === b.candles && a.trades === b.trades && a.hue === b.hue
+  && a.mode === b.mode && a.tfMin === b.tfMin && a.height === b.height
+  && a.clickMode === b.clickMode && a.price === b.price && a.sym === b.sym
+  && a.position === b.position && a.highlightTx === b.highlightTx
+  && a.theme === b.theme && a.traderPrefs === b.traderPrefs
+  && a.botSetMode === b.botSetMode && a.selectedLineId === b.selectedLineId
+  && a.editLineReq === b.editLineReq && a.eyesToken === b.eyesToken
+  && a.shiftArm === b.shiftArm && a.historyShift === b.historyShift
+  && a.mcRatio === b.mcRatio && a.synthetic === b.synthetic && a.isMobile === b.isMobile
+  && a.createdAt === b.createdAt
+  && sameLevels(a.pendingLevels, b.pendingLevels) && sameLevels(a.botRuns, b.botRuns)
+));
+
 function UserSearchFly({ onOpenUser }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -1381,6 +2132,7 @@ function Meter({ label, value, color }) {
 
 // ---------------- order ticket (right side) ----------------
 function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editBot, onRelaunch, setAmount, botLock, dragSetOn, onToggleDragSet, compactArm = false, wide = false, onReadyArm, solBalance = 0, valoWallet = 0, onOpenSearch = null }) {
+  const prevHolders = useRef({});     // mint → last holder count, for ▲/▼ deltas
   const [stopLoss, setStopLoss] = useState(25);
   const [armFlash, setArmFlash] = useState(0); // lights the arm button when a bot goes live
   const [armEdit, setArmEdit] = useState(false);   // right-click ARM → retype the amount in place
@@ -1454,7 +2206,7 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
 
   return (
     <div data-botui="1" style={{ background: wide ? "transparent" : T.panel, border: wide ? "none" : `1px solid ${T.border2}`, borderRadius: 12, padding: wide ? 0 : 14,
-      ...(wide ? { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" } : {}) }}>
+      ...(wide ? { display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1.15fr)", gap: 10, alignItems: "start" } : {}) }}>
       {!wide && (
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <div style={{ fontFamily: T.mono, fontSize: 11, letterSpacing: 2, color: T.dim, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1469,9 +2221,15 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
           </button>
           {tpStatsOpen && (() => {
             const durs = ["1H", "4H", "24H", "7D"];
-            const k = { "1H": 0.09, "4H": 0.3, "24H": 1, "7D": 5.6 }[tpStatDur];
-            const base = token.candles[Math.max(0, token.candles.length - Math.min(token.candles.length - 1, Math.round(96 * k)))].c;
-            const ch = ((token.price - base) / base) * 100;
+            const k = { "1H": 0.09, "4H": 0.3, "24H": 1, "7D": 5.6 }[tpStatDur] || 1;
+            // Δ over the chosen window, straight from the candle history
+            const barsFor = { "1H": 60, "4H": 240, "24H": 1440, "7D": 10080 }[tpStatDur] || 1440;
+            const cs2 = token.candles || [];
+            const bi = cs2.length ? Math.max(0, cs2.length - 1 - barsFor) : -1;
+            const base = bi >= 0 && cs2[bi] && cs2[bi].c > 0 ? cs2[bi].c : (token.price || 0);
+            const ch = base > 0 && token.price > 0 ? ((token.price - base) / base) * 100 : 0;
+            const mLive = tokMetrics(token);           // real window metrics
+            const isLive = !!token.pool;
             const st = (l2, v2, c2) => (
               <span style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <span style={{ color: T.faint }}>{l2}</span><b style={{ color: c2 || T.text }}>{v2}</b>
@@ -1487,14 +2245,37 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
                 <div style={{ display: "grid", gap: 4, fontFamily: T.mono, fontSize: 8.5 }}>
                   {st(`Δ PRICE · ${tpStatDur}`, `${ch >= 0 ? "+" : ""}${ch.toFixed(2)}%`, ch >= 0 ? T.green : T.red)}
                   {st("PRICE", `$${fmtP(token.price)}`)}
-                  {st(`VOL · ${tpStatDur}`, fmt$((token.greenUsd + token.redUsd) * k))}
-                  {st("BUYS", fmt$(token.greenUsd * k), T.green)}
-                  {st("SELLS", fmt$(token.redUsd * k), T.red)}
+                  {isLive ? (<>
+                    {st(`VOL · ${token.statWin || "24h"}`, fmt$(mLive.flow))}
+                    {st("BUYS", `${token.buys || 0} · ${fmt$(token.greenUsd || 0)}`, T.green)}
+                    {st("SELLS", `${token.sells || 0} · ${fmt$(token.redUsd || 0)}`, T.red)}
+                    {st("VOL · 24H", fmt$(token.vol24 || 0))}
+                  </>) : (<>
+                    {st(`VOL · ${tpStatDur}`, fmt$(((token.greenUsd || 0) + (token.redUsd || 0)) * k))}
+                    {st("BUYS", fmt$((token.greenUsd || 0) * k), T.green)}
+                    {st("SELLS", fmt$((token.redUsd || 0) * k), T.red)}
+                  </>)}
                   {st("MC", fmt$(mcOf(token)))}
                   {st("TVL", fmt$(token.tvl))}
-                  {st("MOMENTUM", Math.round(token.momentum), token.momentum > 60 ? T.green : T.dim)}
-                  {st("HOLDERS", token.traders.toLocaleString())}
-                  {st("TOP 10 HOLD", `${(16 + ((token.id * 7) % 26)).toFixed(1)}%`, T.amber)}
+                  {isLive
+                    ? st("TRADE RATE", `${mLive.txRate.toFixed(1)}/min`, mLive.txRate > 5 ? T.green : T.dim)
+                    : st("MOMENTUM", Math.round(token.momentum || 0), (token.momentum || 0) > 60 ? T.green : T.dim)}
+                  {(() => {
+                    const real = token.liveMint && typeof window !== "undefined" && window.__VALO_HOLDERS__ ? window.__VALO_HOLDERS__[token.liveMint] : null;
+                    if (Number.isFinite(real) && real > 0) {
+                      const prev = prevHolders.current[token.liveMint];
+                      const delta = Number.isFinite(prev) ? real - prev : 0;
+                      if (prev !== real) setTimeout(() => { prevHolders.current[token.liveMint] = real; }, 30000);
+                      return st("HOLDERS", <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        {real.toLocaleString()}
+                        {delta !== 0 && <span style={{ fontSize: 8, fontWeight: 900, color: delta > 0 ? T.green : T.red }}>{delta > 0 ? `▲${delta}` : `▼${Math.abs(delta)}`}</span>}
+                      </span>);
+                    }
+                    return st("HOLDERS", Number.isFinite(token.traders) ? token.traders.toLocaleString() : "—");
+                  })()}
+                  {!isLive && st("TOP 10 HOLD", `${(16 + (((token.id || 1) * 7) % 26)).toFixed(1)}%`, T.amber)}
+                  {isLive && st("AGE", fmtAge(token.createdAt) || "—")}
+                  {isLive && st("LP", fmt$(token.tvl || 0))}
                   {st("SAFETY", scoreToken(token), ratingColor(scoreToken(token)))}
                 </div>
               </div>
@@ -1513,7 +2294,8 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       </div>
       )}
 
-      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1 1 210px", minWidth: 200 } : undefined}>
+      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 9, padding: "7px 9px", background: "rgba(255,255,255,0.015)",
+          minWidth: 0 } : undefined}>
       {/* BUY-IN AMOUNT — swap SOL / $VALO freely */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <label style={{ ...lbl, marginBottom: 0 }}>Buy-in amount</label>
@@ -1586,11 +2368,16 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       })()}
 
       </div>
-      <div style={sideM ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 12, alignItems: "start", marginTop: 8 } : { display: "contents" }}>
-      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1.1 1 230px", minWidth: 220 }
+      <div style={sideM ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 12, alignItems: "start", marginTop: 8 }
+        : wide ? { display: "block" }
+        : { border: `1px solid ${T.border}`, borderRadius: 10, background: "rgba(255,255,255,0.015)",
+            padding: "9px 11px", marginTop: 8 }}>
+      <div style={wide ? { minWidth: 0,
+          border: `1px solid ${T.border}`, borderRadius: 9,
+          padding: "7px 9px", background: "rgba(255,255,255,0.015)" }
         : sideM ? { gridColumn: 1, gridRow: "1 / span 2", minWidth: 0 }
-        : { border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", background: "rgba(255,255,255,0.015)", marginTop: 9 }}>
-      {!wide && !sideM && <div style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 1.5, color: T.faint, marginBottom: 7 }}>① ENTRY</div>}
+        : { minWidth: 0 }}>
+      {!sideM && <div style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 2, color: T.faint, marginBottom: 5 }}>ENTRY</div>}
       {/* buy-in price slider — tracks live price, drag to set a higher/lower entry */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 7 }}>
         {onDraftLevel && (
@@ -1621,38 +2408,44 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       </div>
 
       </div>
-      <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1.3 1 260px", minWidth: 250 }
+      <div style={wide ? { marginTop: 8, paddingTop: 7, borderTop: `1px solid ${T.border}` }
         : sideM ? { display: "contents" }
-        : { border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", background: "rgba(255,255,255,0.015)", marginTop: 8 }}>
-      {!wide && !sideM && <div style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 1.5, color: T.faint, marginBottom: 7 }}>② RISK</div>}
+        : { minWidth: 0, marginTop: 9, paddingTop: 8, borderTop: `1px solid ${T.border}` }}>
+      {!sideM && <div style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 2, color: T.faint, marginBottom: 5 }}>RISK</div>}
       <label style={{ ...lbl, marginTop: wide || sideM ? 0 : 0, ...(sideM ? { gridColumn: 2, gridRow: 1 } : {}) }}>Stop loss — {stopLoss}% below entry</label>
       <input type="range" min={1} max={100} value={stopLoss} onChange={(e) => setStopLoss(+e.target.value)} style={{ width: "100%", accentColor: T.red, ...(sideM ? { gridColumn: 2, gridRow: 2, alignSelf: "start" } : {}) }} />
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: sideM ? 6 : 12, marginBottom: 7,
-        borderTop: `1px solid ${T.border}`, paddingTop: 9, ...(sideM ? { gridColumn: "1 / -1" } : {}) }}>
-        <span style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 1.5, color: T.faint }}>③ TAKE-PROFIT LEGS</span>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: sideM ? 6 : 9, marginBottom: 5,
+        borderTop: `1px solid ${T.border}`, paddingTop: 7, ...(sideM ? { gridColumn: "1 / -1" } : {}) }}>
+        <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 2, color: T.faint }}>TAKE PROFIT</span>
         <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: allocTotal === 100 ? T.green : T.red,
           border: `1px solid ${allocTotal === 100 ? T.green : T.red}55`, background: allocTotal === 100 ? "rgba(22,199,132,0.1)" : "rgba(234,57,67,0.1)",
           borderRadius: 6, padding: "2px 7px" }}>Σ {allocTotal}% {allocTotal === 100 ? "✓" : "≠100"}</span>
       </div>
+      {!sideM && legs.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "18px 1fr 1fr 1fr 18px", gap: 5, alignItems: "center",
+          fontFamily: T.mono, fontSize: 7, letterSpacing: 1, color: T.faint, padding: "0 1px 3px" }}>
+          <span /><span>AT ×</span><span>TRAIL %</span><span>SELL %</span><span />
+        </div>
+      )}
       {legs.map((l, i) => (
-        <div key={i} style={{ border: `1px solid ${T.border}`, borderRadius: 9, padding: "7px 8px", marginBottom: 6,
-          background: "rgba(255,255,255,0.02)", ...(sideM ? { gridColumn: "1 / -1" } : {}) }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
-            <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1, color: T.dim }}>LEG {i + 1}</span>
+        <div key={i} style={{ marginBottom: 2, ...(sideM ? { gridColumn: "1 / -1" } : {}) }}>
+          <div style={{ display: "grid", gridTemplateColumns: "18px 1fr 1fr 1fr 18px", gap: 5, alignItems: "center" }}>
+            <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, color: T.dim }}>{i + 1}</span>
+            <input value={l.mult} onChange={(e) => setLeg(i, "mult", e.target.value)}
+              style={{ ...inpS, padding: "4px 5px", fontSize: 10.5, minWidth: 0, width: "100%", textAlign: "center" }} />
+            <input value={l.trail} onChange={(e) => setLeg(i, "trail", e.target.value)}
+              style={{ ...inpS, padding: "4px 5px", fontSize: 10.5, minWidth: 0, width: "100%", textAlign: "center" }} />
+            <input value={l.alloc} onChange={(e) => setLeg(i, "alloc", +e.target.value)}
+              style={{ ...inpS, padding: "4px 5px", fontSize: 10.5, minWidth: 0, width: "100%", textAlign: "center" }} />
             <button onClick={() => setLegs((L) => L.filter((_, j) => j !== i))} title="Remove this leg"
-              style={{ border: `1px solid ${T.border2}`, background: "transparent", color: T.faint, borderRadius: 6, width: 22, height: 20, cursor: "pointer", fontSize: 12, lineHeight: 1 }}>−</button>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-            <div><span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>AT ×</span><input value={l.mult} onChange={(e) => setLeg(i, "mult", e.target.value)} style={inpS} /></div>
-            <div><span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>TRAIL %</span><input value={l.trail} onChange={(e) => setLeg(i, "trail", e.target.value)} style={inpS} /></div>
-            <div><span style={{ ...lbl, fontSize: 9, marginBottom: 2 }}>SELL %</span><input value={l.alloc} onChange={(e) => setLeg(i, "alloc", +e.target.value)} style={inpS} /></div>
+              style={{ border: "none", background: "transparent", color: T.faint, cursor: "pointer",
+                fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
           </div>
           {(() => { const m = parseFloat(l.mult) || 0, al = Number(l.alloc || 0); const est = amt * (al / 100) * (m - 1) * (pay === "SOL" ? SOL_USD : 0.0125);
             return m > 1 && al > 0 ? (
-              <div style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 800, color: T.green, marginTop: 6, textAlign: "right" }}>
-                sells {al}% at ×{m} · ≈ +${est.toFixed(0)}
-              </div>
+              <div style={{ fontFamily: T.mono, fontSize: 7, color: T.green, opacity: 0.85, marginTop: 1,
+                textAlign: "right", paddingRight: 23 }}>≈ +${est.toFixed(0)}</div>
             ) : null; })()}
         </div>
       ))}
@@ -1690,14 +2483,35 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
 // full desktop ticket — settlement, instant buy/sell, click-to-trade arming,
 // plus the auto strategy. Desktop keeps the complete toolset.
 // held positions dropdown — every open position with per-token PnL, click-to-open, per-token & bulk close
-function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onCloseAll, onTrade, solBalance = 0, valoWallet = 0 }) {
+function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onCloseAll, onTrade, solBalance = 0, valoWallet = 0,
+  liveMode = false, chainHoldings = null, onRealSellOne = null, onRealSellAll = null, onOpenMint = null }) {
   const [rowMode, setRowMode] = useState({}); // { [tokenId]: "buy" } — toggle flips the bar
   const [confirmSel, setConfirmSel] = useState(null); // { tid, side, pct } — two-tap safety
   const confTO = useRef(null);
   const [open, setOpen] = useState(false);
-  const held = Object.entries(positions)
+  // ⛓ LIVE: your real open positions — turbo wallet AND anything already sitting
+  // in Phantom. Not paper. Sorted biggest first.
+  const chainRows = (liveMode && Array.isArray(chainHoldings))
+    ? chainHoldings
+        .filter((h) => h && h.mint && (h.qty || 0) > 0 && !h.spam && !h.dust)
+        .map((h) => {
+          const tk = tokens.find((x) => x.liveMint === h.mint) || null;
+          const px = (tk && tk.price > 0) ? tk.price : (h.price || 0);
+          const usd = (h.usd > 0) ? h.usd : (h.qty || 0) * px;
+          // cost basis only exists for fills WE recorded — otherwise PnL is unknown
+          const entry = h.entry > 0 ? h.entry : 0;
+          const pnlUsd = entry > 0 && px > 0 ? (px - entry) * (h.qty || 0) : null;
+          const pnlPct = entry > 0 && px > 0 ? ((px - entry) / entry) * 100 : null;
+          return { chain: true, h, tk, px, usd, pnlUsd, pnlPct,
+            sym: h.sym || (tk && tk.sym) || (h.mint || "").slice(0, 4).toUpperCase(),
+            src: h.src === "phantom" ? "phantom" : "turbo" };
+        })
+        .sort((a, b) => (b.usd || 0) - (a.usd || 0))
+    : [];
+  const paperRows = liveMode ? [] : Object.entries(positions)
     .map(([id, p]) => { const t = tokens.find((x) => x.id === +id); return t && p && p.amt > 0 ? { t, p } : null; })
     .filter(Boolean);
+  const held = liveMode ? chainRows : paperRows;
 
   // per-token PnL in USD
   const pnlUsdOf = ({ t, p }) => {
@@ -1707,35 +2521,103 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
   };
   const valueSolOf = ({ t, p }) => (p.pay === "SOL" ? p.amt : (p.amt * t.price) / SOL_USD);
   const costSolOf = ({ t, p }) => (p.pay === "SOL" ? p.amt : (p.amt * p.entry) / SOL_USD);
-  const totalPnlUsd = held.reduce((a, h) => a + pnlUsdOf(h), 0);
-  const totalSol = held.reduce((a, h) => a + valueSolOf(h), 0);
-  const investedUsd = held.reduce((a, h) => a + costSolOf(h) * SOL_USD, 0);
-  const currentUsd = investedUsd + totalPnlUsd;
+  const totalPnlUsd = liveMode
+    ? chainRows.reduce((a, r) => a + (r.pnlUsd || 0), 0)
+    : held.reduce((a, h) => a + pnlUsdOf(h), 0);
+  const totalUsdLive = chainRows.reduce((a, r) => a + (r.usd || 0), 0);
+  const totalSol = liveMode ? totalUsdLive / (SOL_USD || 1) : held.reduce((a, h) => a + valueSolOf(h), 0);
+  const knownCost = chainRows.filter((r) => r.pnlUsd != null).length;
+  const investedUsd = liveMode
+    ? Math.max(0, totalUsdLive - totalPnlUsd)
+    : held.reduce((a, h) => a + costSolOf(h) * SOL_USD, 0);
+  const currentUsd = liveMode ? totalUsdLive : investedUsd + totalPnlUsd;
   const bulkGain = totalPnlUsd >= 0;
 
   return (
     <div style={{ marginTop: 10 }}>
       <button onClick={() => setOpen((v) => !v)}
         style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", border: `1px solid ${T.border2}`, borderRadius: 9, padding: "9px 12px", background: "rgba(255,255,255,0.02)", cursor: "pointer", fontFamily: T.mono, fontSize: 11, fontWeight: 700, color: T.text }}>
-        <span>▾ MY POSITIONS · {held.length}</span>
-        <span style={{ color: totalPnlUsd >= 0 ? T.green : T.red }}>{totalPnlUsd >= 0 ? "+" : "−"}${Math.abs(totalPnlUsd).toFixed(2)}</span>
+        <span>{open ? "▾" : "▸"} MY OPEN POSITIONS · {held.length}</span>
+        {liveMode ? (
+          <span style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+            <span style={{ color: T.text }}>{fmt$(totalUsdLive)}</span>
+            {knownCost > 0 && (
+              <span style={{ color: totalPnlUsd >= 0 ? T.green : T.red, fontSize: 10 }}>
+                {totalPnlUsd >= 0 ? "+" : "−"}${Math.abs(totalPnlUsd).toFixed(2)}
+              </span>
+            )}
+          </span>
+        ) : (
+          <span style={{ color: totalPnlUsd >= 0 ? T.green : T.red }}>{totalPnlUsd >= 0 ? "+" : "−"}${Math.abs(totalPnlUsd).toFixed(2)}</span>
+        )}
       </button>
 
       {open && (
         <div style={{ marginTop: 8, display: "grid", gap: 7 }}>
           {held.length === 0 && (
-            <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center", padding: "10px 0" }}>No open positions.</div>
+            <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center", padding: "12px 0", lineHeight: 1.7 }}>
+              No open positions yet.<br />
+              <span style={{ fontSize: 8.5 }}>tokens you buy here — and anything already in Phantom — show up automatically</span>
+            </div>
           )}
           {held.length > 0 && (
-            <button onClick={onCloseAll}
+            <button onClick={() => (liveMode ? (onRealSellAll && onRealSellAll()) : onCloseAll && onCloseAll())}
               style={{ width: "100%", boxSizing: "border-box", border: "none", borderRadius: 10, padding: "10px", fontFamily: T.mono, fontWeight: 800,
                 background: bulkGain ? T.green : T.red, color: bulkGain ? "#07130d" : "#170808", cursor: "pointer", lineHeight: 1.35,
                 boxShadow: `0 0 14px ${bulkGain ? "rgba(22,199,132,0.35)" : "rgba(234,57,67,0.35)"}` }}>
               <div style={{ fontSize: 12.5 }}>✕ CLOSE ALL · {bulkGain ? "+" : "−"}${Math.abs(totalPnlUsd).toFixed(2)}</div>
-              <div style={{ fontSize: 8.5, opacity: 0.9 }}>put in ${investedUsd.toFixed(0)} → now ${currentUsd.toFixed(0)} · {totalSol.toFixed(2)} SOL</div>
+              <div style={{ fontSize: 8.5, opacity: 0.9 }}>
+                {liveMode
+                  ? `${chainRows.length} token${chainRows.length === 1 ? "" : "s"} → ${fmt$(totalUsdLive)} · sells settle on chain`
+                  : `put in $${investedUsd.toFixed(0)} → now $${currentUsd.toFixed(0)} · ${totalSol.toFixed(2)} SOL`}
+              </div>
             </button>
           )}
-          {held.map((h) => {
+          {/* ⛓ real holdings — turbo wallet + anything already in Phantom */}
+          {liveMode && chainRows.map((r) => (
+            <div key={r.h.mint + r.src}
+              style={{ border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", background: "rgba(255,255,255,0.02)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span onClick={() => onOpenMint && onOpenMint(r.h.mint)} role="button"
+                  style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", flex: 1, minWidth: 0 }}>
+                  <TokenAvatar sym={r.sym} hue={symbolHue(r.sym)} img={(r.tk && r.tk.img) || r.h.img} size={22} />
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ display: "block", fontFamily: T.mono, fontSize: 11.5, fontWeight: 800, color: T.text,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {r.sym}
+                      <span style={{ marginLeft: 6, fontSize: 7.5, fontWeight: 900, letterSpacing: 0.6,
+                        color: r.src === "turbo" ? T.amber : "#a98fff",
+                        border: `1px solid ${r.src === "turbo" ? T.amber : "#a98fff"}55`, borderRadius: 999, padding: "1px 5px" }}>
+                        {r.src === "turbo" ? "⚡ TURBO" : "👻 PHANTOM"}
+                      </span>
+                    </span>
+                    <span style={{ display: "block", fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>
+                      {fmtQty(r.h.qty || 0)} · ${fmtP(r.px)}
+                    </span>
+                  </span>
+                </span>
+                <span style={{ textAlign: "right", flexShrink: 0 }}>
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 11.5, fontWeight: 800, color: T.text }}>{fmt$(r.usd)}</span>
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 8.5,
+                    color: r.pnlPct == null ? T.faint : r.pnlPct >= 0 ? T.green : T.red }}>
+                    {r.pnlPct == null ? "held before VALO" : `${r.pnlPct >= 0 ? "+" : ""}${r.pnlPct.toFixed(1)}% · ${r.pnlUsd >= 0 ? "+" : "−"}$${Math.abs(r.pnlUsd).toFixed(2)}`}
+                  </span>
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 5, marginTop: 8 }}>
+                {[25, 50, 100].map((pct) => (
+                  <button key={pct} onClick={() => onRealSellOne && onRealSellOne(r.h, pct)}
+                    style={{ flex: 1, padding: "6px 0", borderRadius: 7, cursor: "pointer",
+                      border: `1px solid ${pct === 100 ? T.red : T.border2}`,
+                      background: pct === 100 ? "rgba(234,57,67,0.14)" : "transparent",
+                      color: pct === 100 ? T.red : T.dim, fontFamily: T.mono, fontSize: 9.5, fontWeight: 900 }}>
+                    {pct === 100 ? "SELL ALL" : `SELL ${pct}%`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          {!liveMode && held.map((h) => {
             const pnl = pnlUsdOf(h); const gain = pnl >= 0;
             return (
               <div key={h.t.id}
@@ -1836,7 +2718,7 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
   );
 }
 
-function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, setAmount, pay, setPay, position, solBalance, valoBalance, positions, tokens, onOpenToken, onCloseAll, bestMult, pctSel, setPctSel, pendingOrders = [], onOpenBot, onCancelBot, onPosTrade, onDraftLevel, realized24 = 0 }) {
+function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, setAmount, pay, setPay, position, solBalance, valoBalance, positions, tokens, onOpenToken, onCloseAll, bestMult, pctSel, setPctSel, pendingOrders = [], onOpenBot, onCancelBot, onPosTrade, onDraftLevel, realized24 = 0, botRuns = [], onRealOrder, onChainReady = false, onChainMax = 0, chainHeld = 0, chainSol = 0, autoOn = false, onToggleAuto = null, turboOn = false, liveMode = false, chainHoldings = [], onRealSellOne = null, onRealSellAll = null, onOpenMint = null}) {
   const [dtBuyPcts, setDtBuyPcts] = useState([10, 25, 50, 75, 100]);  // dbl-click / right-click a chip to retype it
   const [dtSellPcts, setDtSellPcts] = useState([10, 25, 50, 75, 100]);
   const [dtFixed, setDtFixed] = useState([0.5, 1, 2, 5]);
@@ -1848,7 +2730,8 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
     if (editBot && onRelaunch) onRelaunch(editBot.id, payload);
     else onExecute(payload);
   };
-  const held = position?.amt || 0;
+  const chainHold = (liveMode && token) ? (chainHoldings || []).find((h) => h.mint === token.liveMint && !h.spam && !h.dust) : null;
+  const held = chainHold ? chainHold.qty : (position?.amt || 0);
   const pnlPct = position ? ((token.price - position.entry) / position.entry) * 100 : 0;
   const heldSol = pay === "SOL" ? held : (held * token.price) / SOL_USD;
   const livePnlUsd = position ? (heldSol * pnlPct / 100) * SOL_USD : 0;
@@ -1860,8 +2743,9 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
   };
   return (
     <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 16 }}>
-      {/* LIVE PnL + multiplier header — fluctuates while you hold */}
-      {position ? (
+      {/* LIVE PnL + multiplier header — paper only; on live the skinny
+          MY POSITIONS bar below carries the live P/L */}
+      {position && !liveMode ? (
         <div style={{ borderRadius: 10, padding: "10px 12px", marginBottom: 12, background: gain ? "rgba(22,199,132,0.1)" : "rgba(234,57,67,0.1)", border: `1px solid ${gain ? "rgba(22,199,132,0.4)" : "rgba(234,57,67,0.4)"}`, transition: "background .3s" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
@@ -1873,8 +2757,31 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
               <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 3, lineHeight: 1.5 }}>
                 BUY-IN ${((position.amt || 0) * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 <span style={{ color: (realized24 || 0) >= 0 ? T.green : T.red }}> · REALIZED 24H {(realized24 || 0) >= 0 ? "+" : "−"}${Math.abs(realized24 || 0).toFixed(2)}</span>
-                <span style={{ color: gain ? T.green : T.red }}> · UNREALIZED {gain ? "+" : "−"}${Math.abs(livePnlUsd).toFixed(2)}</span>
               </div>
+              {/* your whole book on this token: ticket money vs bot money */}
+              {(() => {
+                const bots = (botRuns || []).filter((r) => r.status === "live" && String(r.tokenId) === String(token.id));
+                const botPnl = bots.reduce((s, r) => {
+                  const q = (r.amt || 0) * (r.pay === "SOL" ? SOL_USD : 0.0125) / (r.entry || token.price || 1);
+                  return s + q * (token.price - (r.entry || token.price));
+                }, 0);
+                const total = livePnlUsd + botPnl;
+                const cell = (label, v, always) => (always || Math.abs(v) > 0.004) ? (
+                  <span style={{ color: v >= 0 ? T.green : T.red, fontWeight: 800 }}>
+                    {label} {v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}
+                  </span>
+                ) : null;
+                return (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontFamily: T.mono, fontSize: 8,
+                    marginTop: 4, paddingTop: 4, borderTop: `1px solid ${T.border}` }}>
+                    {cell("🧾 TICKET", livePnlUsd, true)}
+                    {cell(`🤖 BOTS${bots.length ? " ×" + bots.length : ""}`, botPnl, bots.length > 0)}
+                    <span style={{ marginLeft: "auto", color: total >= 0 ? T.green : T.red, fontWeight: 900 }}>
+                      Σ TOTAL {total >= 0 ? "+" : "−"}${Math.abs(total).toFixed(2)}
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
             <MultBadge mult={liveMult} live />
           </div>
@@ -1917,6 +2824,9 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
         const bidSol = pay === "SOL" ? amt : (amt * token.price) / SOL_USD;
         const sellCol = !position ? T.red : pnlPct > 0.05 ? T.green : pnlPct < -0.05 ? T.red : "#4a5266";
         const sellAllSol = pay === "SOL" ? held : (held * token.price) / SOL_USD;
+        // live sells follow the same % chips as paper ones
+        const dtSellPct = pctSel && pctSel.side === "sell" ? pctSel.p : 100;
+        const dtSellQty = chainHeld > 0 ? chainHeld * (dtSellPct / 100) : 0;
         return (<>
           {/* BUY block — % of your wallet balance */}
           <div style={{ background: "rgba(22,199,132,0.05)", border: "1px solid rgba(22,199,132,0.25)", borderRadius: 10, padding: 10, marginBottom: 8 }}>
@@ -1947,11 +2857,31 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
                   style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "4px 0", fontSize: 9, fontWeight: 800, color: T.green }}>{v}</button>
               ))}
             </div>
-            <button onClick={() => onExecute({ side: "buy", pay, amt, mode: "instant", tax: taxFor(pay), burn: fee.total, legs: [] })}
-              style={{ width: "100%", border: "none", borderRadius: 9, padding: "10px 6px", fontFamily: T.mono, fontWeight: 900, cursor: "pointer", background: T.green, color: "#07130d", boxShadow: "0 0 16px rgba(22,199,132,0.25)", lineHeight: 1.25 }}>
-              <div style={{ fontSize: 12.5 }}>⚡ BUY</div>
-              <div style={{ fontSize: 8.5, opacity: 0.85 }}>{bidSol.toFixed(2)} SOL · ${(bidSol * SOL_USD).toFixed(0)}</div>
-            </button>
+            {onChainReady ? (() => {
+              const size = Math.min(amt, onChainMax);
+              const wrongUnit = pay !== "SOL";
+              const shortSol = chainSol > 0 && size > chainSol;
+              const ok = size > 0 && !wrongUnit && !shortSol;
+              return (
+                <button data-tour="buy" disabled={!ok} onClick={() => ok && onRealOrder && onRealOrder(token, "buy", size)}
+                  style={{ width: "100%", border: "none", borderRadius: 9, padding: "10px 6px", fontFamily: T.mono, fontWeight: 900,
+                    cursor: ok ? "pointer" : "not-allowed", background: ok ? T.green : "#1a2030", color: ok ? "#07130d" : T.faint,
+                    boxShadow: ok ? "0 0 16px rgba(22,199,132,0.25)" : "none", lineHeight: 1.25 }}>
+                  <div style={{ fontSize: 12.5 }}>⚡ BUY</div>
+                  <div style={{ fontSize: 8.5, opacity: 0.85 }}>
+                    {wrongUnit ? "switch unit to SOL"
+                      : shortSol ? `wallet holds ${chainSol.toFixed(3)} SOL`
+                      : `${size} SOL · $${(size * SOL_USD).toFixed(0)}${amt > onChainMax ? ` · capped at ${onChainMax}` : ""}`}
+                  </div>
+                </button>
+              );
+            })() : (
+              <button onClick={() => onExecute({ side: "buy", pay, amt, mode: "instant", tax: taxFor(pay), burn: fee.total, legs: [] })}
+                style={{ width: "100%", border: "none", borderRadius: 9, padding: "10px 6px", fontFamily: T.mono, fontWeight: 900, cursor: "pointer", background: T.green, color: "#07130d", boxShadow: "0 0 16px rgba(22,199,132,0.25)", lineHeight: 1.25 }}>
+                <div style={{ fontSize: 12.5 }}>⚡ BUY</div>
+                <div style={{ fontSize: 8.5, opacity: 0.85 }}>{bidSol.toFixed(2)} SOL · ${(bidSol * SOL_USD).toFixed(0)}</div>
+              </button>
+            )}
           </div>
 
           {/* SELL block — % of your current holdings */}
@@ -1976,24 +2906,45 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
               })}
             </div>
             <div style={{ display: "flex", gap: 6 }}>
-              <button onClick={() => onExecute({ side: "sell", pay, amt, mode: "instant", tax: taxFor(pay), burn: fee.total, legs: [] })}
-                style={{ flex: 1.4, border: "none", borderRadius: 9, padding: "10px 6px", fontFamily: T.mono, fontWeight: 900, cursor: "pointer", background: sellCol, color: "#170808", lineHeight: 1.25, transition: "background .3s" }}>
-                <div style={{ fontSize: 12.5 }}>⚡ SELL {position ? (pnlPct >= 0 ? "▲" : "▼") : ""}</div>
-                <div style={{ fontSize: 8.5, opacity: 0.85 }}>{bidSol.toFixed(2)} SOL · ${(bidSol * SOL_USD).toFixed(0)}</div>
-              </button>
-              <button onClick={() => { if (held > 0) onExecute({ side: "sell", pay, amt: held, mode: "instant", tax: taxFor(pay), burn: splitFee(held, pay).total, legs: [] }); }}
-                disabled={held <= 0}
-                style={{ flex: 1, border: `1px solid ${sellCol}`, borderRadius: 9, padding: "10px 4px", fontFamily: T.mono, fontSize: 10, fontWeight: 800, background: `${sellCol}22`, color: sellCol, cursor: held > 0 ? "pointer" : "not-allowed", opacity: held > 0 ? 1 : 0.5, lineHeight: 1.2 }}>
-                <div>SELL ALL</div>
-                <div style={{ fontSize: 8, opacity: 0.9 }}>{held > 0 ? `${sellAllSol.toFixed(2)} SOL` : "—"}</div>
-              </button>
+              {onChainReady ? (
+                <button disabled={!(dtSellQty > 0)} onClick={() => dtSellQty > 0 && onRealOrder && onRealOrder(token, "sell", dtSellQty)}
+                  style={{ flex: 1.4, border: "none", borderRadius: 9, padding: "10px 6px", fontFamily: T.mono, fontWeight: 900,
+                    cursor: dtSellQty > 0 ? "pointer" : "not-allowed", background: dtSellQty > 0 ? sellCol : "#1a2030",
+                    color: dtSellQty > 0 ? "#170808" : T.faint, lineHeight: 1.25, transition: "background .3s" }}>
+                  <div style={{ fontSize: 12.5 }}>⚡ SELL</div>
+                  <div style={{ fontSize: 8.5, opacity: 0.85 }}>
+                    {dtSellQty > 0 ? `${dtSellPct}% ≈ ${((dtSellQty * token.price) / SOL_USD).toFixed(4)} SOL · $${((dtSellQty * token.price)).toFixed(2)}` : "no position"}
+                  </div>
+                </button>
+              ) : (
+                <button onClick={() => onExecute({ side: "sell", pay, amt, mode: "instant", tax: taxFor(pay), burn: fee.total, legs: [] })}
+                  style={{ flex: 1.4, border: "none", borderRadius: 9, padding: "10px 6px", fontFamily: T.mono, fontWeight: 900, cursor: "pointer", background: sellCol, color: "#170808", lineHeight: 1.25, transition: "background .3s" }}>
+                  <div style={{ fontSize: 12.5 }}>⚡ SELL {position ? (pnlPct >= 0 ? "▲" : "▼") : ""}</div>
+                  <div style={{ fontSize: 8.5, opacity: 0.85 }}>{bidSol.toFixed(2)} SOL · ${(bidSol * SOL_USD).toFixed(0)}</div>
+                </button>
+              )}
+              {onChainReady ? (
+                <button onClick={() => chainHeld > 0 && onRealOrder && onRealOrder(token, "sell", chainHeld)}
+                  disabled={!(chainHeld > 0)}
+                  style={{ flex: 1, border: `1px solid ${sellCol}`, borderRadius: 9, padding: "10px 4px", fontFamily: T.mono, fontSize: 10, fontWeight: 800, background: `${sellCol}22`, color: sellCol, cursor: chainHeld > 0 ? "pointer" : "not-allowed", opacity: chainHeld > 0 ? 1 : 0.5, lineHeight: 1.2 }}>
+                  <div>SELL ALL</div>
+                  <div style={{ fontSize: 8, opacity: 0.9 }}>{chainHeld > 0 ? `≈ ${((chainHeld * token.price) / SOL_USD).toFixed(4)} SOL` : "—"}</div>
+                </button>
+              ) : (
+                <button onClick={() => { if (held > 0) onExecute({ side: "sell", pay, amt: held, mode: "instant", tax: taxFor(pay), burn: splitFee(held, pay).total, legs: [] }); }}
+                  disabled={held <= 0}
+                  style={{ flex: 1, border: `1px solid ${sellCol}`, borderRadius: 9, padding: "10px 4px", fontFamily: T.mono, fontSize: 10, fontWeight: 800, background: `${sellCol}22`, color: sellCol, cursor: held > 0 ? "pointer" : "not-allowed", opacity: held > 0 ? 1 : 0.5, lineHeight: 1.2 }}>
+                  <div>SELL ALL</div>
+                  <div style={{ fontSize: 8, opacity: 0.9 }}>{held > 0 ? `${sellAllSol.toFixed(2)} SOL` : "—"}</div>
+                </button>
+              )}
             </div>
           </div>
         </>);
       })()}
 
       {/* held positions dropdown */}
-      <HeldPositions positions={positions} tokens={tokens} pay={pay} onTrade={onPosTrade} solBalance={solBalance} valoWallet={valoBalance}
+      <HeldPositions liveMode={liveMode} chainHoldings={chainHoldings} onRealSellOne={onRealSellOne} onRealSellAll={onRealSellAll} onOpenMint={onOpenMint} positions={positions} tokens={tokens} pay={pay} onTrade={onPosTrade} solBalance={solBalance} valoWallet={valoBalance}
         onOpenToken={onOpenToken}
         onSellAll={(t) => { const p = positions[t.id]; if (p && p.amt > 0) onExecute({ side: "sell", pay: p.pay, amt: p.amt, mode: "instant", tax: taxFor(p.pay), burn: splitFee(p.amt, p.pay).total, legs: [] }, t); }}
         onCloseAll={onCloseAll} />
@@ -2005,6 +2956,7 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
         <button onClick={() => setClickMode(clickMode === "sell" ? null : "sell")}
           style={{ ...chip(clickMode === "sell"), flex: 1, textAlign: "center", color: clickMode === "sell" ? T.red : T.dim, borderColor: clickMode === "sell" ? T.red : T.border }}>▼ ARM SELL</button>
       </div>
+      {onChainReady && <div style={{ marginBottom: 12 }}><LiveFundsNotice sol={chainSol} compact autoOn={autoOn} onToggleAuto={onToggleAuto} turboOn={turboOn} /></div>}
       {clickMode && <div style={{ fontFamily: T.mono, fontSize: 9.5, color: clickMode === "buy" ? T.green : T.red, marginBottom: 12 }}>
         Armed — click the chart to fill instantly & stamp the spot.
       </div>}
@@ -2410,7 +3362,7 @@ function TierListModal({ onClose, isMobile, myBest = 0, embed = false }) {
     </div>
   );
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 540, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "80vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 13px", borderBottom: `1px solid ${T.border}` }}>
@@ -2445,7 +3397,7 @@ function TierListModal({ onClose, isMobile, myBest = 0, embed = false }) {
 // compact leaderboard — the tier-list's sibling: same frame, top-10 badges per
 // duration, your rank, and the epoch bonus each placement pays
 const LB_MS = { "1H": 3600e3, "12H": 12 * 3600e3, "1D": 86400e3, "7D": 7 * 86400e3, "30D": 30 * 86400e3, "180D": 180 * 86400e3, "365D": 365 * 86400e3 };
-function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser, embed = false, focusUser = null, username = "you" }) {
+function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser, embed = false, focusUser = null, username = "you", onMyRank = null }) {
   // ☁ REAL entries — actual callouts ranked by the peak the market gave them
   const [realBoard, setRealBoard] = useState([]);
   const [period, setPeriod] = useState("1D");
@@ -2476,7 +3428,23 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
       const tk = tokens.find((t) => String(t.id) === String(id));
       return tk ? { user: "you", you: true, sym: tk.sym, hue: tk.hue, mcAt: c.mcAt, mult: c.peak } : null;
     }).filter(Boolean);
-    return [...genLeaderboard(period), ...realBoard, ...mine].sort((a, b) => b.mult - a.mult);
+    const liveOn = BOOT_LIVE || (typeof window !== "undefined" && window.__VALO_LIVE_ON__);
+    // live mode → only real callouts rank; demo mode keeps the simulated field
+    const all = liveOn ? [...realBoard] : [...genLeaderboard(period), ...realBoard, ...mine];
+    // collapse to each trader's best call in this window, and remember how many
+    // calls they landed so the row can show it
+    const best = new Map();
+    for (const e of all) {
+      if (!e) continue;
+      const key = e.you ? "__you__" : String(e.user || "").toLowerCase();
+      const prev = best.get(key);
+      if (!prev) { best.set(key, { ...e, calls: 1 }); continue; }
+      prev.calls += 1;
+      if ((e.mult || 0) > (prev.mult || 0)) {
+        best.set(key, { ...e, calls: prev.calls });   // better call takes the slot
+      }
+    }
+    return [...best.values()].sort((a, b) => b.mult - a.mult);
   }, [period, myCallouts, tokens, realBoard]);
   const myRank = board.findIndex((e) => e.you) + 1;
   const focusRank = focusUser ? board.findIndex((e) => !e.you && e.user === focusUser) + 1 : 0;
@@ -2494,6 +3462,9 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
     io.observe(el);
     return () => io.disconnect();
   }, [period, myRank, board.length]);
+  // 📜 whitepaper epoch bonus: report this board's rank upward so bonuses
+  // can stack across every duration board
+  useEffect(() => { if (typeof onMyRank === "function") onMyRank(period, myRank); }, [period, myRank]);
   useEffect(() => {
     if (focusRank > 0 && focusRef.current) focusRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [focusRank, period]);
@@ -2565,6 +3536,13 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
               })}
             </div>
           )}
+          {board.length === 0 && (
+            <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center",
+              padding: "26px 12px", lineHeight: 1.8 }}>
+              No callouts in this window yet.<br />
+              <span style={{ fontSize: 9 }}>Arm a callout on any token and you'll be the first name here.</span>
+            </div>
+          )}
           {board.slice(3, listEnd).map((r, i) => {
             const rk = i + 4;
             const tr = calloutTier(r.mult);
@@ -2581,7 +3559,9 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
                 {rk <= 100 && <CalloutRing mult={r.mult} size={19} />}
                 <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, color: r.you ? T.green : isFocus && hl ? VALO_PURPLE : T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {r.real && <span title="Real VALO account" style={{ color: T.blue, marginRight: 3 }}>☁</span>}@{r.user}</span>
-                <span style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>${r.sym}</span>
+                <span style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>${r.sym}
+                  {r.calls > 1 && <span title={`${r.calls} callouts in this window — best one ranks`} style={{ color: VALO_PURPLE, fontWeight: 800 }}> ·{r.calls}</span>}
+                </span>
                 <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: tr.color }}>×{r.mult.toFixed(1)}</span>
                 {lbBonus(rk) > 0 && <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, color: "#ffd54a",
                   background: "rgba(255,213,74,0.1)", border: "1px solid rgba(255,213,74,0.35)", borderRadius: 5, padding: "1px 5px",
@@ -2623,7 +3603,7 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
   );
   if (embed) return body;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div data-lbscroll="1" onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 620, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "82vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         {body}
@@ -2633,10 +3613,14 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
 }
 
 // 🔥 burn stats — everything the burn buttons track, moving live with trades
-function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0 }, valoUsd = 0.0125) {
+function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0, valoUsd = 0.0125, valoLive = null, valoMint = null }) {
   const TOTAL = 1e9; // genesis supply
-  const circ = Math.max(0, TOTAL - siteBurned);
-  const pct = (siteBurned / TOTAL) * 100;
+  // ⛓ real price + real circulating supply from the token's own pool
+  const px = valoLive && valoLive.price > 0 ? valoLive.price : valoUsd;
+  const realCirc = valoLive && valoLive.price > 0 && valoLive.mc > 0 ? valoLive.mc / valoLive.price : 0;
+  const circ = realCirc > 0 ? realCirc : Math.max(0, TOTAL - siteBurned);
+  const burnedReal = realCirc > 0 ? Math.max(0, TOTAL - realCirc) : siteBurned;
+  const pct = (burnedReal / TOTAL) * 100;
   const row = (label, val, sub, col) => (
     <div style={{ border: `1px solid ${col}44`, background: `${col}0d`, borderRadius: 11, padding: "11px 13px", marginBottom: 8 }}>
       <div style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.5, color: T.faint, marginBottom: 4 }}>{label}</div>
@@ -2645,7 +3629,7 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0 }, valoUsd 
     </div>
   );
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 390, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "80vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 13px", borderBottom: `1px solid ${T.border}` }}>
@@ -2654,11 +3638,12 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0 }, valoUsd 
         </div>
         <div style={{ padding: "11px 12px 13px" }}>
           {row("YOUR TOTAL BURNED", `${myBurned.toFixed(4)} $VALO`, "the burn slice of every fee you've ever paid", "#f97316")}
-          {row("SITE TOTAL BURN", `${fmtQty(siteBurned)} $VALO`, "every trader's burn pool + hourly buyback burns, on-chain forever", T.red)}
+          {row("SITE TOTAL BURN", `${fmtQty(burnedReal)} $VALO`,
+            realCirc > 0 ? "genesis supply minus what's left on chain — permanent" : "every trader's burn pool + hourly buyback burns, on-chain forever", T.red)}
           {row("CIRCULATING SUPPLY", `${fmtQty(circ)} $VALO`, `of ${fmtQty(TOTAL)} genesis — shrinking with every trade`, T.green)}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, border: `1.5px solid ${VALO_PURPLE}66`, background: "rgba(125,92,240,0.10)", borderRadius: 10, padding: "8px 11px", marginTop: 7, boxShadow: `0 0 12px ${VALO_PURPLE}33` }}>
-            <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: VALO_PURPLE, fontWeight: 900 }}>◆ $VALO PRICE · LIVE</span>
-            <span style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 900, color: VALO_PURPLE }}>${(valoUsd * (1 + Math.sin(Date.now() / 4000) * 0.003)).toFixed(4)}</span>
+            <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: VALO_PURPLE, fontWeight: 900 }}>◆ $VALO PRICE {valoLive && valoLive.price > 0 ? "· ⛓ ON CHAIN" : ""}</span>
+            <span style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 900, color: VALO_PURPLE }}>${fmtP(px)}</span>
           </div>
           <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, margin: "4px 0 5px", display: "flex", justifyContent: "space-between" }}>
             <span>SUPPLY BURNED</span><span style={{ color: "#f97316", fontWeight: 800 }}>{pct.toFixed(5)}%</span>
@@ -2676,7 +3661,7 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0 }, valoUsd 
 }
 
 // badge page — tiers & leaderboards side by side; jumped-to names glow & fade
-function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 0, focusUser = null, onOpenUser, username = "you" }) {
+function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 0, focusUser = null, onOpenUser, username = "you", onMyRank = null }) {
   const inTop250 = useMemo(() => {
     if (!focusUser) return false;
     const rk = genLeaderboard("1D").sort((a, b) => b.mult - a.mult).findIndex((e) => e.user === focusUser) + 1;
@@ -2684,7 +3669,7 @@ function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 
   }, [focusUser]);
   const [tab, setTab] = useState(inTop250 ? "board" : "tiers");
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 139, background: "rgba(4,6,10,0.82)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 375 : 560, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "82vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 3, padding: "11px 13px 0", borderBottom: `1px solid ${T.border}` }}>
@@ -2700,7 +3685,7 @@ function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 
         <div style={{ padding: "4px 11px 12px" }}>
           {tab === "tiers"
             ? <TierListModal embed isMobile={isMobile} myBest={myBest} />
-            : <LeaderboardModal embed isMobile={isMobile} myCallouts={myCallouts} tokens={tokens} onOpenUser={onOpenUser} username={username} focusUser={inTop250 ? focusUser : null} />}
+            : <LeaderboardModal embed isMobile={isMobile} myCallouts={myCallouts} tokens={tokens} onOpenUser={onOpenUser} username={username} focusUser={inTop250 ? focusUser : null} onMyRank={onMyRank} />}
         </div>
       </div>
     </div>
@@ -2710,18 +3695,60 @@ function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 
 // ◆ $VALO TOKEN STATS — pop-out page: live price/TVL/flow/PnL/supply with a
 // duration-aware chart; every stat re-times to the selected window. Pre-mainnet
 // this runs as a faithful demonstration feed.
-function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned = 0, valoWallet = 0 }) {
+function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned = 0, valoWallet = 0, valoMint = null, liveData = false }) {
   const DURS = ["1H", "4H", "1D", "7D", "30D", "ALL"];
   const VOL = { "1H": 0.004, "4H": 0.007, "1D": 0.012, "7D": 0.028, "30D": 0.055, "ALL": 0.10 };
   const [dur, setDur] = useState("1D");
   const [livePx, setLivePx] = useState(valoUsd);
+  // ⛓ REAL $VALO: the mint's own pool + candles, same sources as every chart
+  const [real, setReal] = useState(null);      // { price, mc, tvl, vol24, buys, sells, greenUsd, redUsd, pool, statWin, traders, supply }
+  const [realCandles, setRealCandles] = useState(null);
+  const isReal = !!(liveData && valoMint && real);
   useEffect(() => {
+    if (!liveData || !valoMint) return;
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch(`/api/valo?mint=${encodeURIComponent(valoMint)}&t=${Math.floor(Date.now() / 10000)}`);
+        if (!r.ok) return;
+        const hit = await r.json();
+        if (!stop && hit && hit.indexed) setReal(hit);
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 15000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [liveData, valoMint]);
+  // real candle history for the selected window
+  useEffect(() => {
+    if (!real || !real.pool) return;
+    let stop = false;
+    const tf = { "1H": 1, "4H": 5, "1D": 15, "7D": 60, "30D": 240, "ALL": 240 }[dur] || 15;
+    (async () => {
+      try {
+        const r = await fetch(`/api/candles?pool=${encodeURIComponent(real.pool)}&tf=${tf}&mint=${encodeURIComponent(valoMint || "")}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        const arr = Array.isArray(j) ? j : (j && j.candles) || [];
+        if (!stop && arr.length) setRealCandles(arr);
+      } catch (e) {}
+    })();
+    return () => { stop = true; };
+  }, [real && real.pool, dur, valoMint]);
+  useEffect(() => {
+    if (isReal && real.price > 0) { setLivePx(real.price); return; }
+    if (liveData && valoMint) return;                 // real mode: never fake-tick
     const iv = setInterval(() => setLivePx((p) => Math.max(0.0001, p * (1 + (Math.random() - 0.48) * 0.006))), 2000);
     return () => clearInterval(iv);
-  }, []);
+  }, [isReal, real && real.price, liveData, valoMint]);
   // seeded walk backward from the live price — same seed per duration, so the
   // shape is stable while the tail ticks live
   const closes = useMemo(() => {
+    // ⛓ real closes win — the seeded walk is demo-only
+    if (realCandles && realCandles.length > 1) {
+      const cs = realCandles.map((c) => +c.c || 0).filter((v) => v > 0);
+      if (cs.length > 1) return cs.slice(-72);
+    }
     let s = 0; for (const c of dur) s += c.charCodeAt(0);
     let x = s * 9301 + 49297; const rnd = () => { x = (x * 9301 + 49297) % 233280; return x / 233280; };
     const N = 72; const arr = new Array(N); arr[N - 1] = livePx;
@@ -2733,12 +3760,15 @@ function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned =
   const up = chg >= 0;
   // duration-scaled activity (deterministic per window, feels alive via price)
   const durMult = { "1H": 1, "4H": 3.4, "1D": 11, "7D": 52, "30D": 170, "ALL": 660 }[dur];
-  const buys = Math.round(140 * durMult * (1 + chg / 200));
-  const sells = Math.round(120 * durMult * (1 - chg / 300));
-  const netFlow = (buys - sells) * 92 * (1 + Math.abs(chg) / 40);
-  const tvlNow = tvl * (1 + chg / 160);
+  // ⛓ real trade counts + real dollar flow when the token is live
+  const buys = isReal ? (real.buys || 0) : Math.round(140 * durMult * (1 + chg / 200));
+  const sells = isReal ? (real.sells || 0) : Math.round(120 * durMult * (1 - chg / 300));
+  const netFlow = isReal ? ((real.greenUsd || 0) - (real.redUsd || 0)) : (buys - sells) * 92 * (1 + Math.abs(chg) / 40);
+  const tvlNow = isReal ? (real.tvl || 0) : tvl * (1 + chg / 160);
   const myPnl = valoWallet * (last - first); // holding $VALO through this window
-  const circ = Math.max(0, 1e9 - burned);
+  // pump tokens are a fixed 1B supply; MC/price gives the true current supply
+  const realSupply = isReal && real.price > 0 && real.mc > 0 ? real.mc / real.price : 0;
+  const circ = isReal && realSupply > 0 ? realSupply : Math.max(0, 1e9 - burned);
   const cvsRef = useRef(null);
   const [cross, setCross] = useState(null); // {i} — traced slot (hover on PC, finger on mobile)
   const traceAt = (clientX) => {
@@ -2823,13 +3853,16 @@ function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned =
   );
   const tot = buys + sells || 1;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 116, background: "rgba(4,6,10,0.84)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 116, background: "rgba(4,6,10,0.84)", backdropFilter: "blur(5px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: isMobile ? 380 : 660, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "88vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,0.65)" }}>
         <div style={{ position: "sticky", top: 0, background: T.panel, zIndex: 2, padding: "11px 13px 9px", borderBottom: `1px solid ${T.border}` }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
             <span style={{ fontFamily: T.mono, fontSize: isMobile ? 11 : 12.5, fontWeight: 900, letterSpacing: 1.5 }}>
               <span style={{ color: VALO_PURPLE }}>◆</span> $VALO · TOKEN STATS
+              {isReal && <span style={{ marginLeft: 8, fontSize: 8, fontWeight: 900, letterSpacing: 1,
+                color: T.green, border: `1px solid ${T.green}55`, background: "rgba(22,199,132,0.12)",
+                borderRadius: 999, padding: "2px 7px" }}>● LIVE ON CHAIN</span>}
             </span>
             <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <span style={{ fontFamily: T.mono, fontSize: 7, fontWeight: 900, letterSpacing: 1, color: T.amber, border: `1px solid ${T.amber}55`, background: "rgba(240,185,11,0.08)", borderRadius: 6, padding: "2px 6px" }}>DEMO · PRE-MAINNET</span>
@@ -2884,7 +3917,7 @@ function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned =
   );
 }
 
-function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser, username = "you" }) {
+function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser, username = "you", onMyRank = null }) {
   const [tab, setTab] = useState("tiers");   // tiers | board
   const [period, setPeriod] = useState("1D");
   useEffect(() => {
@@ -2904,7 +3937,7 @@ function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOp
     <button onClick={() => setTab(k)} style={{ ...chip(tab === k), flex: 1, textAlign: "center", padding: "9px", fontSize: 11, fontWeight: 800 }}>{l}</button>
   );
   return (
-    <div onClick={onClose}
+    <div className="valo-fixed-safe" onClick={onClose}
       style={{ position: "fixed", inset: 0, zIndex: 106, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()}
         style={{ width: "100%", maxWidth: 780, maxHeight: "88vh", display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, overflow: "hidden" }}>
@@ -2944,7 +3977,7 @@ function CalloutHubModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOp
             </div>
           ) : (
             <>
-              <LeaderboardModal embed isMobile={isMobile} myCallouts={myCallouts} tokens={tokens} onOpenUser={onOpenUser} username={username} />
+              <LeaderboardModal embed isMobile={isMobile} myCallouts={myCallouts} tokens={tokens} onOpenUser={onOpenUser} username={username} onMyRank={onMyRank} />
             </>
           )}
         </div>
@@ -2975,7 +4008,7 @@ function MyCalloutsModal({ onClose, isMobile, myCallouts = {}, tokens = [], user
   }).filter(Boolean).sort((a, b) => (a.ts || 0) - (b.ts || 0)); // very first → latest
   const bestPeak = rows.reduce((m, r) => Math.max(m, r.peak), 0);
   return (
-    <div onClick={onClose}
+    <div className="valo-fixed-safe" onClick={onClose}
       style={{ position: "fixed", inset: 0, zIndex: 106, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()}
         style={{ width: "100%", maxWidth: 620, maxHeight: "86vh", display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, overflow: "hidden" }}>
@@ -3031,7 +4064,7 @@ function randomHandle(rand) {
 }
 function FollowListModal({ kind, list, onClose, isMobile, onOpenUser, ownerHandle = null, loading = false }) {
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 145, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 145, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 400, maxHeight: "80vh", display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
           <div style={{ fontWeight: 800, fontSize: 14, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -3059,7 +4092,7 @@ function FollowListModal({ kind, list, onClose, isMobile, onOpenUser, ownerHandl
     </div>
   );
 }
-function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, onToggleFollow, friendStatus, onFriendAction, onOpenToken, onSendFunds, dmLog = [], onSendDm, solBalance = 0, valoWallet = 0 , incomingReq = false, onAcceptReq, onDeclineReq, onOpenTierList, onOpenLeaderboard, cloudProfile = null, onOpenTrade = null, onOpenFollowList = null }) {
+function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, onToggleFollow, friendStatus, onFriendAction, onOpenToken, onSendFunds, dmLog = [], onSendDm, solBalance = 0, valoWallet = 0 , incomingReq = false, onAcceptReq, onDeclineReq, onOpenTierList, onOpenLeaderboard, cloudProfile = null, onOpenTrade = null, onOpenFollowList = null, onOpenByMint = null }) {
   const [badgeTab, setBadgeTab] = useState(false); // insignia tapped → tier/leaderboard tab
   const [dmOpen, setDmOpen] = useState(false);     // ✉️ private thread with this person
   const dmEndRef = useRef(null);
@@ -3070,7 +4103,53 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   const simFols = Math.floor(20 + rand() * 900), simFolg = Math.floor(5 + rand() * 300);
   const fols = cloudProfile ? (cloudProfile.followers || 0) : simFols;
   const folg = cloudProfile ? (cloudProfile.following || 0) : simFolg;
-  const calls = cloudProfile
+  // does this profile correspond to a real on-chain wallet?
+  const devWallet = useMemo(() => {
+    for (const t of tokens || []) {
+      try {
+        const d = devOf(t);
+        if (d && d.real && (d.name === name || d.short === name)) return d.wallet;
+      } catch (e) {}
+    }
+    // a 4…4 shortened address IS the handle for on-chain profiles
+    if (/^[A-Za-z0-9]{4}…[A-Za-z0-9]{4}$/.test(name || "")) {
+      const w = (typeof window !== "undefined" && window.__VALO_CREATORS__) || {};
+      for (const k of Object.keys(w)) if (w[k] && w[k].short === name) return w[k].creator;
+      // …or a trader we've seen on the tape
+      const tw = (typeof window !== "undefined" && window.__VALO_WALLETS__) || {};
+      if (tw[name]) return tw[name];
+    }
+    // a full address used as the handle resolves to itself
+    if (/^[A-Za-z0-9]{32,50}$/.test(name || "")) return name;
+    // a VALO account that published its trading wallet
+    if (cloudProfile && cloudProfile.wallet && /^[A-Za-z0-9]{32,50}$/.test(cloudProfile.wallet)) return cloudProfile.wallet;
+    return null;
+  }, [tokens, name, cloudProfile]);
+  const [chainWallet, setChainWallet] = useState(null);   // real balance + holdings + trades
+  const [realTx, setRealTx] = useState(null);             // real swap activity, live-polled
+  useEffect(() => {
+    setChainWallet(null); setRealTx(null);
+    if (!devWallet) return;
+    let stop = false;
+    // register for pinned-trader markers everywhere
+    try { if (typeof window !== "undefined") window.__VALO_WALLETS__ = { ...(window.__VALO_WALLETS__ || {}), [name]: devWallet }; } catch (e) {}
+    const pull = async () => {
+      try {
+        const r = await fetch(`/api/wallet?address=${encodeURIComponent(devWallet)}&t=${Date.now()}`);
+        if (r.ok) { const j = await r.json(); if (!stop && j && !j.error) setChainWallet(j); }
+      } catch (e) {}
+      try {
+        const r2 = await fetch(`/api/trader?wallet=${encodeURIComponent(devWallet)}`);
+        if (r2.ok) { const j2 = await r2.json(); if (!stop && j2 && Array.isArray(j2.trades)) setRealTx(j2.trades.slice().reverse()); }
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 25000);   // the profile TRACES live while open
+    return () => { stop = true; clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devWallet]);
+  const calls = (!cloudProfile && chainWallet) ? []       // no VALO account → no callouts
+    : cloudProfile
     ? (cloudProfile.callouts || []).slice(0, 8).map((c) => {
         const t = tokens.find((x) => x.sym === c.sym) || { sym: c.sym || "?", hue: symbolHue(c.sym || "?"), img: null, id: null };
         const mins = Math.max(1, Math.floor((Date.now() - c.ts) / 60000));
@@ -3084,15 +4163,58 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     const live = +(pk * (0.3 + rand() * 0.9)).toFixed(2);
     return { t, mcAt, pk, live, ago: `${Math.floor(1 + rand() * 72)}h ago` };
   }).filter((c) => c.t);
+  // a tier is earned through VALO callouts — an on-chain wallet with no VALO
+  // account has none, and we say zero rather than inventing a rank
   const realPeak = cloudProfile
     ? (cloudProfile.callouts || []).reduce((m, c) => Math.max(m, c.peak || 1), 0) || 0
-    : null;
+    : (chainWallet ? 0 : null);
   const shownPeak = cloudProfile ? realPeak : peak;
   const { tier } = calloutTier(shownPeak || 1);
   const [dmDraft, setDmDraft] = useState("");
   const [fundAmt, setFundAmt] = useState("");
   const [holdsOpen, setHoldsOpen] = useState(false); // 💼 all-holdings dropdown
   const [holdsTab, setHoldsTab] = useState("open");  // open ⇄ closed positions
+  const [holdsView, setHoldsView] = useState("trades"); // trades ⇄ dev (launched/rugged)
+  // every token this person launched, and which of them died
+  // real launches when this profile is a creator wallet, otherwise the sim set
+
+
+  const [realLaunches, setRealLaunches] = useState(null);
+  useEffect(() => {
+    setRealLaunches(null);
+    const addr = devWallet;
+    if (!addr) return;
+    let stop = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/creator?wallet=${encodeURIComponent(addr)}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop && j && Array.isArray(j.launches)) setRealLaunches(j.launches);
+      } catch (e) {}
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name, devWallet]);
+  const devTokens = useMemo(() => {
+    if (realLaunches) {
+      // pair each real launch with a live card when we have one
+      return realLaunches.map((L) => {
+        const live = (tokens || []).find((t) => t.liveMint === L.mint);
+        return live || {
+          id: "L:" + L.mint, liveMint: L.mint, pool: null, sym: L.sym, name: L.name,
+          hue: symbolHue(L.sym || "?"), img: L.img || null,
+          price: 0, mc: +L.mc || 0, tvl: 0, offMarket: true,
+          candles: [], ageMin: L.createdAt ? Math.max(1, Math.round((Date.now() - L.createdAt) / 60000)) : 0,
+          greenUsd: 0, redUsd: 0, traders: 0, offMarket: true,
+        };
+      });
+    }
+    return (tokens || []).filter((t) => {
+      try { return devOf(t).name === name; } catch (e) { return false; }
+    });
+  }, [tokens, name, realLaunches]);
+  const devRugs = useMemo(() => devTokens.filter((t) => rugState(t).rugged), [devTokens]);
   const [cpFilter, setCpFilter] = useState(null);    // closed tab: view one token only
   const [txFilter, setTxFilter] = useState(null);    // activity: view one token's txs only
   // held-for durations: 15-minute steps → hours → days → months → lifetime
@@ -3113,6 +4235,25 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   const [txShowAll, setTxShowAll] = useState(true);
   const { holds, txAll } = useMemo(() => {
     const r2 = seededRand(hashStr("acts-" + name));
+    // ⛓ on-chain wallet (no VALO account behind it): real holdings, real trades
+    if (chainWallet && Array.isArray(chainWallet.holdings) && !cloudProfile) {
+      const hs = chainWallet.holdings.map((h) => ({
+        t: {
+          id: "W:" + h.mint, liveMint: h.mint, pool: h.pool || null, offMarket: !h.pool,
+          sym: h.sym || h.mint.slice(0, 4), name: h.name || h.sym || h.mint.slice(0, 6),
+          hue: symbolHue(h.sym || h.mint), img: h.img || null, price: h.price || 0,
+          candles: [], supply: 0, tvl: 0, greenUsd: 0, redUsd: 0, traders: 0, ageMin: 0,
+        },
+        qty: h.qty, entry: h.price || 0, since: Date.now(), onChain: true,
+      }));
+      const tx = (chainWallet.trades || []).map((t3) => ({
+        t: { id: "W:" + (t3.mint || t3.sym), liveMint: t3.mint || null, offMarket: !t3.mint,
+          sym: t3.sym || "?", hue: symbolHue(t3.sym || "?"), img: null, price: t3.price || 0 },
+        isBuy: true, sol: (t3.usd || 0) / SOL_USD, valUsd: t3.usd || 0, pnlUsd: null,
+        key: t3.mint || t3.sym, ts: t3.at || Date.now(), tokQty: null, priceAt: t3.price || 0,
+      }));
+      return { holds: hs, txAll: tx };
+    }
     if (cloudProfile && cloudProfile.holds) {
       // ☁ REAL ACCOUNT — real positions AND their real trade log; zero fakes
       return { holds: cloudProfile.holds, txAll: cloudProfile.activity || [] };
@@ -3131,9 +4272,28 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
       return t && { t, isBuy: r2() < 0.55, sol: +(0.1 + r2() * 14).toFixed(2), ts: now - Math.floor(r2() * 30 * 86400e3) };
     }).filter(Boolean).sort((a, b) => b.ts - a.ts);
     return { holds, txAll };
-  }, [name, tokens, cloudProfile]); // cloudProfile lands async — without it here, real holdings load and get ignored
+  }, [name, tokens, cloudProfile, chainWallet]); // async sources — all must retrigger the memo
   // 🔒 closed positions: every sell, paired with its buy-in date and PnL
   const closedRows = useMemo(() => {
+    // ⛓ chain truth first: walk their real swaps, avg-cost per mint
+    if (realTx && realTx.length) {
+      const book = {};
+      const out = [];
+      for (const tr of realTx) {
+        const b = book[tr.mint] || (book[tr.mint] = { qty: 0, costSol: 0, since: tr.t });
+        if (tr.side === "buy") { b.qty += tr.tokenAmt; b.costSol += tr.solAmt; if (!b.since) b.since = tr.t; }
+        else if (b.qty > 0) {
+          const p2 = Math.min(1, tr.tokenAmt / b.qty);
+          const basisSol = b.costSol * p2;
+          const pnlUsd = (tr.solAmt - basisSol) * SOL_USD;
+          const tk = (tokens || []).find((t2) => t2.liveMint === tr.mint) || null;
+          out.push({ t: tk || { id: null, sym: (tr.mint || "").slice(0, 5), hue: symbolHue(tr.mint || "?"), liveMint: tr.mint },
+            soldTs: tr.t, boughtTs: b.since, inUsd: basisSol * SOL_USD, outUsd: tr.solAmt * SOL_USD, pnlUsd, chain: true, mint: tr.mint });
+          b.costSol -= basisSol; b.qty = Math.max(0, b.qty - tr.tokenAmt);
+        }
+      }
+      return out.reverse();
+    }
     const src2 = cloudProfile ? (cloudProfile.activity || []) : txAll;
     const sells = src2.filter((x) => !x.isBuy);
     return sells.map((s, i) => {
@@ -3145,9 +4305,21 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
       return { t: s.t, soldTs: s.ts, boughtTs: priorBuy ? priorBuy.ts : s.ts,
         inUsd: Math.max(0, outUsd - pnlUsd), outUsd, pnlUsd };
     });
-  }, [cloudProfile, txAll, name]);
+  }, [cloudProfile, txAll, name, realTx, tokens]);
   const closedTotal = closedRows.reduce((s2, r) => s2 + r.pnlUsd, 0);
-  const txShown = txShowAll ? txAll : txAll.filter((x) => {
+  // ⛓ real swaps win over the simulated set the moment they arrive
+  const txReal = useMemo(() => {
+    if (!realTx || !realTx.length) return null;
+    return realTx.map((tr) => {
+      const tk = (tokens || []).find((t2) => t2.liveMint === tr.mint) || null;
+      const move = tr.side === "in" || tr.side === "out" || tr.side === "tin" || tr.side === "tout";
+      return { t: tk, sym: tk ? tk.sym : tr.mint ? (tr.mint || "").slice(0, 5) : "SOL", isBuy: tr.side === "buy" || tr.side === "in" || tr.side === "tin",
+        move, moveLbl: tr.side === "in" ? "↓ IN" : tr.side === "out" ? "↑ OUT" : tr.side === "tin" ? "↓ RECV" : tr.side === "tout" ? "↑ SENT" : null,
+        sol: +(+tr.solAmt || 0).toFixed(4), qty: tr.tokenAmt, ts: tr.t, sig: tr.sig, real: true, mint: tr.mint };
+    });
+  }, [realTx, tokens]);
+  const txBase = txReal || txAll;
+  const txShown = txShowAll ? txBase : txBase.filter((x) => {
     const a = txFrom ? new Date(txFrom + "T00:00:00").getTime() : -Infinity;
     const b = txTo ? new Date(txTo + "T23:59:59").getTime() : Infinity;
     return x.ts >= a && x.ts <= b;                            // inclusive range, e.g. 7/3–7/9
@@ -3165,7 +4337,12 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
           boxShadow: "0 24px 70px rgba(0,0,0,0.7)", overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 13px", borderBottom: `1px solid ${T.border}` }}>
           <span style={{ fontSize: 13 }}>✉️</span>
-          <span style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{name}</span>
+          {devWallet ? (
+            <a href={`https://solscan.io/account/${devWallet}`} target="_blank" rel="noopener noreferrer"
+              style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>@{name} ↗</a>
+          ) : (
+            <span style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{name}</span>
+          )}
           <button onClick={() => setDmOpen(false)} style={{ ...chip(false), padding: "3px 9px", fontSize: 10 }}>✕</button>
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: "10px 12px", minHeight: 120 }}>
@@ -3198,7 +4375,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   return (
     <>
     {dmBoard}
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 137, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 137, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
       padding: isMobile ? "max(14px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, maxHeight: isMobile ? "calc(100dvh - max(14px, env(safe-area-inset-top)) - 22px)" : "88vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14 }}>
         {/* profile head */}
@@ -3207,10 +4384,26 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
             <span style={{ width: 40, height: 40, borderRadius: "50%", background: `linear-gradient(135deg, ${accent(symbolHue(name))}, ${T.blue})`, display: "grid", placeItems: "center", fontFamily: T.mono, fontWeight: 900, fontSize: 17, color: "#0a0713" }}>{name[0].toUpperCase()}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
-                <span style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{name}</span>
+                {devWallet ? (
+                  <a href={`https://solscan.io/account/${devWallet}`} target="_blank" rel="noopener noreferrer"
+                    title="Open this account on Solscan"
+                    style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.text, textDecoration: "underline dotted", textUnderlineOffset: 3 }}>@{name} ↗</a>
+                ) : (
+                  <span style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>@{name}</span>
+                )}
                 {cloudProfile && <span title="Verified VALO account — real holdings shown"
                   style={{ fontFamily: T.mono, fontSize: 7, fontWeight: 900, letterSpacing: 1, color: T.blue, flexShrink: 0,
                     border: `1px solid ${T.blue}66`, background: "rgba(59,130,246,0.12)", borderRadius: 6, padding: "2px 6px" }}>☁ REAL</span>}
+                {devWallet && (
+                  <a href={`https://solscan.io/account/${devWallet}`} target="_blank" rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    title={`Open ${devWallet} on Solscan — every trade and transfer on-chain`}
+                    style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 3, textDecoration: "none",
+                      border: `1px solid ${T.amber}77`, background: "rgba(240,185,11,0.12)", color: T.amber,
+                      borderRadius: 7, padding: "2px 7px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, lineHeight: 1.5 }}>
+                    🔎 SOLSCAN
+                  </a>
+                )}
                 <button onClick={(e) => { e.stopPropagation(); if (friends) setDmOpen(true); }}
                   title={friends ? `Message @${name}` : `Friends only — send @${name} a friend request to message them`}
                   style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 3, cursor: friends ? "pointer" : "default",
@@ -3260,21 +4453,106 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
             </button>
             )}
           </div>
-          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 6 }}>
-            Followers get this user's callouts as alerts · friends can also DM & send SOL/$VALO
-          </div>
+          {devWallet ? (
+            <a href={`https://solscan.io/account/${devWallet}`} target="_blank" rel="noopener noreferrer"
+              title="Open this wallet on Solscan — every trade and transfer on-chain"
+              style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 7, textDecoration: "none",
+                border: `1px solid ${T.amber}55`, background: "rgba(240,185,11,0.08)", borderRadius: 9,
+                padding: "7px 9px", overflow: "hidden" }}>
+              <span style={{ fontSize: 11, flex: "0 0 auto" }}>🔎</span>
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", maskImage: "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)", WebkitMaskImage: "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)" }}>
+                <span style={{ display: "inline-block", whiteSpace: "nowrap", fontFamily: T.mono, fontSize: 9.5,
+                  color: T.amber, animation: "addrScroll 14s linear infinite", paddingLeft: "1%" }}>
+                  {devWallet}&nbsp;&nbsp;·&nbsp;&nbsp;{devWallet}
+                </span>
+              </span>
+              <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, color: T.amber, flex: "0 0 auto", letterSpacing: 1 }}>SOLSCAN ↗</span>
+            </a>
+          ) : null}
+          {devWallet && chainWallet && (
+            <div style={{ border: `1px solid ${T.border}`, borderRadius: 9, marginTop: 6, overflow: "hidden" }}>
+              {/* what this wallet actually holds, on-chain */}
+              <div style={{ display: "flex", gap: 1, background: T.border }}>
+                {[["SOL", chainWallet.sol != null ? chainWallet.sol.toFixed(2) : "—", T.text],
+                  ["TOKENS", chainWallet.tokensUsd ? fmt$(chainWallet.tokensUsd) : "$0", T.green],
+                  ["POSITIONS", String(visHolds(chainWallet.holdings).length || chainWallet.holdingsCount || 0), VALO_PURPLE]].map(([k, v, c]) => (
+                  <div key={k} style={{ flex: 1, background: "#0c0f16", padding: "6px 8px" }}>
+                    <div style={{ fontFamily: T.mono, fontSize: 7, letterSpacing: 1, color: T.faint }}>{k}</div>
+                    <div style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, color: c }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              {chainWallet.holdings && chainWallet.holdings.length > 0 && (
+                <div style={{ maxHeight: 150, overflowY: "auto", background: "#0a0d13" }}>
+                  {chainWallet.holdings.slice(0, 12).map((h) => (
+                    <div key={h.mint} onClick={() => { if (onOpenByMint) { onOpenByMint(h.mint); onClose && onClose(); } }}
+                      title={h.sym ? `Open the $${h.sym} chart` : h.mint}
+                      style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 8px",
+                        borderTop: `1px solid ${T.border}`, cursor: onOpenByMint ? "pointer" : "default" }}>
+                      <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: accent(symbolHue(h.sym || "?")), flex: "0 0 auto" }}>
+                        ${h.sym || h.mint.slice(0, 4)}
+                      </span>
+                      <span style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {fmtQty(h.qty)} tok
+                      </span>
+                      <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: T.text }}>{fmt$(h.usd)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {chainWallet.trades && chainWallet.trades.length > 0 && (
+                <div style={{ borderTop: `1px solid ${T.border}`, background: "#0c0f16", padding: "5px 8px" }}>
+                  <div style={{ fontFamily: T.mono, fontSize: 7, letterSpacing: 1, color: T.faint, marginBottom: 3 }}>
+                    ⛓ TRADES · {chainWallet.trades.length}
+                  </div>
+                  {(realTx && realTx.length ? realTx.slice(-6).reverse().map((tr) => ({
+                      at: tr.t, sig: tr.sig,
+                      lbl: tr.side === "buy" ? "BUY" : tr.side === "sell" ? "SELL" : tr.side === "in" ? "↓ IN" : tr.side === "out" ? "↑ OUT" : tr.side === "tin" ? "↓ TOKEN" : "↑ TOKEN",
+                      col: tr.side === "buy" || tr.side === "in" || tr.side === "tin" ? T.green : tr.side === "sell" ? T.red : T.amber,
+                      sym: tr.mint ? ((tokens || []).find((t4) => t4.liveMint === tr.mint) || {}).sym || tr.mint.slice(0, 4) : "SOL",
+                      sol: tr.solAmt || 0, usd: (tr.solAmt || 0) * SOL_USD,
+                    })) : chainWallet.trades.slice(0, 6).map((t3) => ({ at: t3.at, lbl: "TX", col: T.dim, sym: t3.sym || "—", sol: 0, usd: t3.usd || 0 }))
+                  ).map((r3, i) => (
+                    <div key={i} style={{ display: "flex", gap: 6, fontFamily: T.mono, fontSize: 8.5, color: T.dim, lineHeight: 1.7 }}>
+                      <span style={{ color: r3.col, fontWeight: 900, width: 44 }}>{r3.lbl}</span>
+                      <span style={{ color: accent(symbolHue(r3.sym || "?")), fontWeight: 800 }}>${r3.sym}</span>
+                      {r3.sol > 0 && <span style={{ color: T.text, fontWeight: 800 }}>{r3.sol.toFixed(3)} SOL</span>}
+                      <span>{r3.usd > 0 ? fmt$(r3.usd) : ""}</span>
+                      <span style={{ marginLeft: "auto", color: T.faint }}>
+                        {r3.at ? new Date(r3.at).toLocaleDateString([], { month: "short", day: "numeric" }) : ""}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {!devWallet && (
+            <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 6 }}>
+              Followers get this user's callouts as alerts · friends can also DM & send SOL/$VALO
+            </div>
+          )}
           {/* 💼 PORTFOLIO HOLDINGS — one professional box: total balance, top
               holding, and a dropdown with every token they hold */}
           {(() => {
-            const rows = holds.map((h) => {
-              const val = h.qty * h.t.price;
-              const pnl = (h.t.price - h.entry) * h.qty;
-              const pnlPct = h.entry > 0 ? ((h.t.price - h.entry) / h.entry) * 100 : 0;
-              const days = Math.max(0, (Date.now() - (h.since || Date.now())) / 86400e3);
-              const held = days >= 1 ? `${Math.floor(days)}d` : `${Math.max(1, Math.floor(days * 24))}h`;
-              return { ...h, val, pnl, pnlPct, held };
-            }).sort((a, b) => b.val - a.val);
-            const totalBal = rows.reduce((s, x) => s + x.val, 0);
+            const onChain = !!chainWallet;   // a real wallet ALWAYS outranks paper
+            const rows = onChain
+              ? (chainWallet.holdings || []).filter((h) => !h.spam && !h.dust).map((h) => {
+                  const live = (tokens || []).find((t2) => t2.liveMint === h.mint);
+                  const t2 = live || { id: null, sym: h.sym || h.mint.slice(0, 4), hue: symbolHue(h.sym || "?"), price: h.price || 0, liveMint: h.mint };
+                  const val = h.usd != null ? h.usd : h.qty * (t2.price || 0);
+                  return { t: t2, qty: h.qty, val, pnl: 0, pnlPct: 0, held: "", mint: h.mint, chain: true };
+                }).sort((a, b) => b.val - a.val)
+              : holds.map((h) => {
+                  const val = h.qty * h.t.price;
+                  const pnl = (h.t.price - h.entry) * h.qty;
+                  const pnlPct = h.entry > 0 ? ((h.t.price - h.entry) / h.entry) * 100 : 0;
+                  const days = Math.max(0, (Date.now() - (h.since || Date.now())) / 86400e3);
+                  const held = days >= 1 ? `${Math.floor(days)}d` : `${Math.max(1, Math.floor(days * 24))}h`;
+                  return { ...h, val, pnl, pnlPct, held };
+                }).sort((a, b) => b.val - a.val);
+            const solUsd = onChain && chainWallet.sol != null ? chainWallet.sol * SOL_USD : 0;
+            const totalBal = rows.reduce((s, x) => s + x.val, 0) + solUsd;
             const top = rows[0];
             return (
               <div style={{ marginTop: 10, border: `1px solid ${T.border2}`, borderRadius: 12, background: "linear-gradient(180deg, rgba(22,27,37,0.9), rgba(12,15,22,0.95))", overflow: "hidden" }}>
@@ -3282,11 +4560,19 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.5, color: T.faint }}>TOTAL BALANCE</div>
                     <div style={{ fontFamily: T.mono, fontSize: 17, fontWeight: 900, color: T.text }}>${totalBal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-                    {(() => { const livePnl = rows.reduce((s2, h) => s2 + h.pnl, 0); return (
+                    {onChain && (
+                      <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint }}>
+                        {chainWallet.sol != null ? chainWallet.sol.toFixed(2) + " SOL" : ""} + tokens
+                      </div>
+                    )}
+                    {!onChain && (() => { const livePnl = rows.reduce((s2, h) => s2 + h.pnl, 0); return (
                       <div style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: livePnl >= 0 ? T.green : T.red }}>
                         {livePnl >= 0 ? "▲ +" : "▼ −"}${Math.abs(livePnl).toLocaleString(undefined, { maximumFractionDigits: 2 })} <span style={{ color: T.faint, fontWeight: 700 }}>LIVE PNL</span>
                       </div>
                     ); })()}
+                    {onChain && (
+                      <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.green }}>⛓ live balance</div>
+                    )}
                   </div>
                   {top && (
                     <div onClick={() => onOpenToken(top.t.id)} title={`Open the $${top.t.sym} chart`}
@@ -3300,6 +4586,30 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                   )}
                 </div>
                 <div style={{ display: "flex", borderTop: `1px solid ${T.border}` }}>
+                  <button onClick={() => { setHoldsView((v) => (v === "trades" ? "dev" : "trades")); setHoldsOpen(false); }}
+                    title={holdsView === "trades" ? "Show what this dev launched" : "Back to their positions"}
+                    style={{ flex: "0 0 auto", border: "none", borderRight: `1px solid ${T.border}`,
+                      background: holdsView === "dev" ? "rgba(240,185,11,0.12)" : "rgba(255,255,255,0.02)",
+                      color: holdsView === "dev" ? T.amber : T.faint, padding: "7px 9px", cursor: "pointer",
+                      fontFamily: T.mono, fontSize: 10, fontWeight: 900 }}>{holdsView === "dev" ? "◂" : "⚗"}</button>
+                  {holdsView === "dev" ? (
+                    <>
+                      <button onClick={() => { if (holdsOpen && holdsTab === "launched") setHoldsOpen(false); else { setHoldsTab("launched"); setHoldsOpen(true); } }}
+                        style={{ flex: 1, border: "none", borderRight: `1px solid ${T.border}`,
+                          background: holdsOpen && holdsTab === "launched" ? "rgba(125,92,240,0.1)" : "rgba(255,255,255,0.02)",
+                          color: holdsOpen && holdsTab === "launched" ? VALO_PURPLE : T.dim, padding: "7px 2px",
+                          fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1, cursor: "pointer", whiteSpace: "nowrap" }}>
+                        ⚗ LAUNCHED · {devTokens.length}
+                      </button>
+                      <button onClick={() => { if (holdsOpen && holdsTab === "rugged") setHoldsOpen(false); else { setHoldsTab("rugged"); setHoldsOpen(true); } }}
+                        style={{ flex: 1, border: "none",
+                          background: holdsOpen && holdsTab === "rugged" ? "rgba(234,57,67,0.1)" : "rgba(255,255,255,0.02)",
+                          color: holdsOpen && holdsTab === "rugged" ? T.red : T.dim, padding: "7px 2px",
+                          fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1, cursor: "pointer", whiteSpace: "nowrap" }}>
+                        ☠ RUGGED · {devRugs.length}
+                      </button>
+                    </>
+                  ) : (<>
                   <button onClick={() => { if (holdsOpen && holdsTab === "closed") { setHoldsOpen(false); } else { setHoldsTab("closed"); setHoldsOpen(true); } }}
                     style={{ flex: 1, border: "none", borderRight: `1px solid ${T.border}`,
                       background: holdsOpen && holdsTab === "closed" ? "rgba(234,57,67,0.08)" : "rgba(255,255,255,0.02)",
@@ -3318,7 +4628,55 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                       color: holdsOpen && holdsTab === "open" ? VALO_PURPLE : T.dim, padding: "7px 2px", fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1, cursor: "pointer", whiteSpace: "nowrap", minWidth: 0 }}>
                     {holdsOpen && holdsTab === "open" ? "▴" : "▾"} ALL HOLDINGS · {rows.length}
                   </button>
+                  </>)}
                 </div>
+                {holdsOpen && (holdsTab === "launched" || holdsTab === "rugged") && (() => {
+                  const list = holdsTab === "rugged" ? devRugs : devTokens;
+                  const red = holdsTab === "rugged";
+                  return (
+                    <div style={{ padding: "4px 8px 8px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 9,
+                        color: T.faint, letterSpacing: 1, padding: "4px 3px 6px" }}>
+                        <span>{red ? "☠ TOKENS THAT RUGGED" : "⚗ TOKENS LAUNCHED"}</span>
+                        <b style={{ color: red ? T.red : VALO_PURPLE }}>{list.length}</b>
+                      </div>
+                      {list.length === 0 && (
+                        <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, padding: "10px 4px", textAlign: "center" }}>
+                          {red ? "None of their launches have rugged." : "No launches under this name."}
+                        </div>
+                      )}
+                      <div style={{ maxHeight: 260, overflowY: "auto" }}>
+                        {list.map((t2) => {
+                          const rg = rugState(t2);
+                          const ageH = Math.max(0, Math.round((t2.ageMin || 0) / 60));
+                          const ageTxt = ageH < 24 ? `${ageH}h` : `${(ageH / 24).toFixed(1)}d`;
+                          return (
+                            <div key={"dv" + t2.id}
+                              onClick={() => {
+                                if (t2.offMarket && t2.liveMint && onOpenByMint) { onOpenByMint(t2.liveMint); onClose && onClose(); return; }
+                                onOpenToken(t2.id);
+                              }}
+                              style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 4,
+                                border: `1px solid ${T.border}`, borderLeft: `2px solid ${rg.rugged ? T.red : rg.dying ? T.amber : T.green}`,
+                                background: "#0c0f16", borderRadius: 9, padding: "7px 9px" }}>
+                              <TokenAvatar sym={t2.sym} hue={t2.hue} img={t2.img} size={18} />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: accent(t2.hue) }}>${t2.sym}
+                                  {rg.rugged && <span style={{ color: T.red, fontSize: 7.5, marginLeft: 5, fontWeight: 900 }}>☠ RUGGED −{(rg.drawdown * 100).toFixed(0)}%</span>}
+                                  {!rg.rugged && rg.dying && <span style={{ color: T.amber, fontSize: 7.5, marginLeft: 5, fontWeight: 900 }}>DYING −{(rg.drawdown * 100).toFixed(0)}%</span>}
+                                </div>
+                                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim }}>
+                                  ${fmtP(t2.price)} <span style={{ color: T.faint }}>· MC</span> {fmt$(mcOf(t2))} <span style={{ color: T.faint }}>· {ageTxt} old</span>
+                                </div>
+                              </div>
+                              <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint }}>OPEN ▸</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {holdsOpen && holdsTab === "closed" && (
                   <div style={{ padding: "4px 8px 8px" }}>
                     {(() => { const syms = [...new Set(closedRows.map((c) => c.t.sym))].slice(0, 10);
@@ -3335,7 +4693,9 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                     {closedRows.filter((c) => !cpFilter || c.t.sym === cpFilter).map((c, i) => {
                       const up = c.pnlUsd >= 0;
                       return (
-                        <div key={"c" + i} onClick={() => c.t && c.t.id != null && onOpenToken(c.t.id)}
+                        <div key={"c" + i} onClick={() => { if (!c.t) return;
+                          if (c.t.offMarket && c.t.liveMint && onOpenByMint) { onOpenByMint(c.t.liveMint); onClose && onClose(); return; }
+                          if (c.t.id != null) onOpenToken(c.t.id); }}
                           style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", border: `1px solid ${T.border}`, borderLeft: `2px solid ${up ? T.green : T.red}`,
                             background: "#0c0f16", borderRadius: 9, padding: "7px 9px", marginTop: 4 }}>
                           <TokenAvatar sym={c.t.sym} hue={c.t.hue} img={c.t.img} size={18} />
@@ -3374,7 +4734,9 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                     {rows.map((h, i) => {
                       const up = h.pnl >= 0;
                       return (
-                        <div key={i} onClick={() => onOpenToken(h.t.id)} title={`Open the $${h.t.sym} chart`}
+                        <div key={i} onClick={() => { if (!h.t) return;
+                          if (h.t.offMarket && h.t.liveMint && onOpenByMint) { onOpenByMint(h.t.liveMint); onClose && onClose(); return; }
+                          onOpenToken(h.t.id); }} title={`Open the $${h.t.sym} chart`}
                           style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", border: `1px solid ${T.border}`, borderLeft: `2px solid ${up ? T.green : T.red}`,
                             background: "#0c0f16", borderRadius: 9, padding: "7px 9px", marginTop: 4 }}>
                           <TokenAvatar sym={h.t.sym} hue={h.t.hue} img={h.t.img} size={18} />
@@ -3438,7 +4800,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
         )}
         {/* activity — full tx log with an inclusive date-range filter or show-all */}
         <div style={{ padding: "11px 14px", borderBottom: `1px solid ${T.border}` }}>
-          <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1.5, marginBottom: 6 }}>⚡ ACTIVITY · {txShown.length} TX</div>
+          <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1.5, marginBottom: 6 }}>⚡ ACTIVITY · {txShown.length} TX{txReal ? <span style={{ color: T.green }}> · ⛓ LIVE</span> : ""}</div>
           {/* one uniform line: [from] → [to] [SHOW ALL] */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7, flexWrap: "nowrap" }}>
             <input type="date" value={txFrom} onChange={(e) => { setTxFrom(e.target.value); setTxShowAll(false); }}
@@ -3450,7 +4812,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
           </div>
           <div style={{ maxHeight: 180, overflowY: "auto" }}>
             {txShown.length === 0 && <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center", padding: 14 }}>No transactions in that range.</div>}
-            {(() => { const syms = [...new Set(txShown.map((x) => x.t.sym))].slice(0, 10);
+            {(() => { const syms = [...new Set(txShown.map((x) => (x.t ? x.t.sym : x.sym)).filter(Boolean))].slice(0, 10);
               return syms.length > 1 && (
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 5 }}>
                 <button onClick={() => setTxFilter(null)} style={{ border: `1px solid ${!txFilter ? VALO_PURPLE + "88" : T.border}`, background: !txFilter ? "rgba(125,92,240,0.1)" : "transparent", color: !txFilter ? VALO_PURPLE : T.faint, borderRadius: 999, padding: "2px 8px", fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, cursor: "pointer" }}>ALL</button>
@@ -3460,14 +4822,19 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
                 ))}
               </div>
             ); })()}
-            {txShown.filter((x) => !txFilter || x.t.sym === txFilter).map((x, i) => {
-              const qty = x.tokQty != null ? x.tokQty : (x.sol * SOL_USD) / ((x.priceAt || x.t.price) || 1);
+            {txShown.filter((x) => !txFilter || (x.t ? x.t.sym : x.sym) === txFilter).map((x, i) => {
+              const xsym = x.t ? x.t.sym : x.sym;
+              const qty = x.qty != null ? x.qty : x.tokQty != null ? x.tokQty : (x.sol * SOL_USD) / ((x.priceAt || (x.t && x.t.price)) || 1);
               const qtyTxt = qty >= 1e6 ? (qty / 1e6).toFixed(1) + "M" : qty >= 1e3 ? (qty / 1e3).toFixed(1) + "K" : qty.toFixed(qty >= 10 ? 0 : 2);
               return (
-              <div key={i} onClick={() => (onOpenTrade ? onOpenTrade(x) : onOpenToken(x.t.id))} title={`Open the $${x.t.sym} chart at this ${x.isBuy ? "buy" : "sell"}`}
+              <div key={i} onClick={() => {
+                  if (onOpenTrade) { onOpenTrade(x); return; }
+                  if (x.t && x.t.offMarket && x.t.liveMint && onOpenByMint) { onOpenByMint(x.t.liveMint); onClose && onClose(); return; }
+                  if (x.t && x.t.id != null) x.t ? onOpenToken(x.t.id) : (x.mint && onOpenByMint && onOpenByMint(x.mint));
+                }} title={`Open the $${xsym} chart at this ${x.isBuy ? "buy" : "sell"}`}
                 style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 8, marginBottom: 2, cursor: "pointer", background: i % 2 ? "rgba(255,255,255,0.015)" : "transparent" }}>
-                <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: x.isBuy ? T.green : T.red, width: 30, flex: "0 0 auto" }}>{x.isBuy ? "BUY" : "SELL"}</span>
-                <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: accent(x.t.hue), flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>${x.t.sym}
+                <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: x.move ? T.amber : x.isBuy ? T.green : T.red, width: x.move ? 44 : 30, flex: "0 0 auto" }}>{x.move ? x.moveLbl : x.isBuy ? "BUY" : "SELL"}</span>
+                <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: accent((x.t ? x.t.hue : symbolHue(xsym))), flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>${xsym}
                   <span style={{ color: T.dim, fontSize: 8, fontWeight: 700, marginLeft: 5 }}>{qtyTxt} tok</span></span>
                 <span style={{ fontFamily: T.mono, fontSize: 9, color: T.text, whiteSpace: "nowrap" }}>{(+x.sol).toFixed(2)} SOL <span style={{ color: T.faint }}>· ${(x.sol * SOL_USD).toFixed(0)}</span></span>
                 <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, flex: "0 0 auto" }}>{new Date(x.ts).toLocaleDateString(undefined, { month: "numeric", day: "numeric" })} {new Date(x.ts).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</span>
@@ -3499,12 +4866,13 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
   );
 }
 function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], onOpenToken, onOpenUser, onAccept, onDecline, onCloudReq, notifSetting, setNotifSetting }) {
+  const [whyOpen, setWhyOpen] = useState(null);   // 🤖 which bot-skip explanation is expanded
   const [tab, setTab] = useState("all"); // all | callout | follower | friend
   const shown = notifs.filter((n) => tab === "all" || n.type === tab || (tab === "friend" && n.type === "friendreq"));
   const icon = (t) => (t === "callout" ? "📣" : t === "follower" ? "👥" : t === "tier" ? "🏆"
     : t === "rank" ? "🥇" : t === "system" ? "⚙" : t === "dm" ? "✉️" : "🤝");
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 107, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 107, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, maxHeight: "84vh", display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
           <div style={{ fontWeight: 800, fontSize: 14 }}>🔔 Notifications</div>
@@ -3538,8 +4906,14 @@ function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], o
           {shown.map((n) => {
             const body = n.user && n.text && n.text.startsWith("@" + n.user) ? n.text.slice(("@" + n.user).length).replace(/^\s*/, " ") : n.text;
             return (
-            <div key={n.id} onClick={() => { if (n.tokenId) onOpenToken(n.tokenId); else if (n.user) onOpenUser(n.user); }}
-              title={n.tokenId ? "Open the chart" : "Open profile"}
+            <React.Fragment key={n.id}>
+            <div
+              onClick={() => {
+                // 🤖 a skipped bot explains itself in place; everything else navigates
+                if (n.botSkip) { setWhyOpen((w) => (w === n.id ? null : n.id)); return; }
+                if (n.tokenId) onOpenToken(n.tokenId); else if (n.user) onOpenUser(n.user);
+              }}
+              title={n.botSkip ? "Why it didn't fire" : n.tokenId ? "Open the chart" : "Open profile"}
               style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 9, marginBottom: 3, cursor: "pointer", border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.015)" }}>
               <span style={{ fontSize: 13 }}>{icon(n.type)}</span>
               <span style={{ flex: 1, fontFamily: T.mono, fontSize: 10.5, color: T.text, lineHeight: 1.35 }}>
@@ -3549,6 +4923,12 @@ function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], o
                 )}
                 {body}
               </span>
+              {n.botSkip && (
+                <span style={{ flex: "0 0 auto", fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, letterSpacing: 0.6,
+                  color: T.amber, border: `1px solid ${T.amber}55`, borderRadius: 999, padding: "2px 7px" }}>
+                  {whyOpen === n.id ? "▴" : "WHY?"}
+                </span>
+              )}
               {n.type === "friendreq" && n.reqId && !n.reqDone && (
                 <span style={{ display: "flex", gap: 4, flex: "0 0 auto" }}>
                   <button onClick={(e) => { e.stopPropagation(); onCloudReq && onCloudReq(n, true); }}
@@ -3564,6 +4944,38 @@ function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], o
               )}
               <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, flex: "0 0 auto" }}>{timeAgo(n.ts)}</span>
             </div>
+            {/* 🤖 the full explanation — what stopped it, and how to fix it */}
+            {n.botSkip && whyOpen === n.id && (
+              <div onClick={(e) => e.stopPropagation()}
+                style={{ margin: "0 0 8px", border: `1px solid ${T.amber}44`, borderRadius: 10,
+                  background: "rgba(240,185,11,0.06)", padding: "10px 12px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
+                  <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1,
+                    color: T.amber, border: `1px solid ${T.amber}66`, borderRadius: 999, padding: "2px 7px" }}>{n.botSkip.tag}</span>
+                  <span style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>
+                    {n.botSkip.size > 0 ? `${n.botSkip.size} ${n.botSkip.unit} order · ` : ""}nothing was spent
+                  </span>
+                </div>
+                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.text, lineHeight: 1.7, marginBottom: 7 }}>
+                  <b style={{ color: T.amber }}>Why it didn't fire:</b> {n.botSkip.why}
+                </div>
+                <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.dim, lineHeight: 1.7 }}>
+                  <b style={{ color: T.text }}>How to fix it:</b> {n.botSkip.fix}
+                </div>
+                {n.botSkip.raw && (
+                  <div style={{ marginTop: 7, fontFamily: T.mono, fontSize: 7.5, color: T.faint,
+                    borderTop: `1px solid ${T.border}`, paddingTop: 6, wordBreak: "break-word" }}>{n.botSkip.raw}</div>
+                )}
+                {n.tokenId && (
+                  <button onClick={(e) => { e.stopPropagation(); onOpenToken(n.tokenId); }}
+                    style={{ marginTop: 9, border: `1px solid ${T.border2}`, background: "transparent", color: VALO_PURPLE,
+                      borderRadius: 8, padding: "6px 12px", fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, cursor: "pointer" }}>
+                    open {n.botSkip.sym} chart →
+                  </button>
+                )}
+              </div>
+            )}
+            </React.Fragment>
           ); })}
         </div>
       </div>
@@ -3661,7 +5073,7 @@ function BotHubModal({ view, setView, orders = [], tokens = [], selectedId, onSa
     </div>
   );
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 110, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 110, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 440, maxHeight: "84vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
           <div style={{ fontWeight: 800, fontSize: 14 }}>🤖 {view && view.mode === "edit" ? "Edit bot" : "Pending bots"}</div>
@@ -3722,7 +5134,13 @@ function BotHubModal({ view, setView, orders = [], tokens = [], selectedId, onSa
                       Σ sell {sum}%{legs.length > 0 && sum !== 100 ? " — must equal 100%" : ""}
                     </span>
                   </div>
-                  {legs.map((l, i) => (
+                  {!sideM && legs.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "18px 1fr 1fr 1fr 18px", gap: 5, alignItems: "center",
+          fontFamily: T.mono, fontSize: 7, letterSpacing: 1, color: T.faint, padding: "0 1px 3px" }}>
+          <span /><span>AT ×</span><span>TRAIL %</span><span>SELL %</span><span />
+        </div>
+      )}
+      {legs.map((l, i) => (
                     <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 24px", gap: 6, marginBottom: 5 }}>
                       <div><div style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, marginBottom: 2 }}>MULT ×</div><input value={l.mult} onChange={(e) => setLeg(i, "mult", e.target.value)} style={{ ...inp, padding: "5px 7px", fontSize: 10.5 }} /></div>
                       <div><div style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, marginBottom: 2 }}>TRAIL %</div><input value={l.trail} onChange={(e) => setLeg(i, "trail", e.target.value)} style={{ ...inp, padding: "5px 7px", fontSize: 10.5 }} /></div>
@@ -3774,7 +5192,7 @@ function BotRunStatsModal({ run, onClose, isMobile }) {
   const pnl = run.exits.reduce((s, e) => s + e.pnlUsd, 0);
   const up = pnl >= 0;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 111, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 111, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 420, maxHeight: "84vh", overflowY: "auto", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
           <div>
@@ -3900,6 +5318,7 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
   const [trail, setTrail] = useState(0);
   const [flash, setFlash] = useState(0);
   const [vtQuick, setVtQuick] = useState([0.5, 1, 2, 5]);   // dbl-tap a chip to retype it
+  const [vtPctMode, setVtPctMode] = useState(false);        // chips as % of on-chain balance
   const [vArmEdit, setVArmEdit] = useState(false);  // right-click ARM PAIR → retype the amount
   const [vArmDraft, setVArmDraft] = useState("");
   const vArmCtx = (e) => { e.preventDefault(); e.stopPropagation(); setVArmDraft(String(amount)); setVArmEdit(true); };
@@ -3964,7 +5383,7 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
   );
   return (
     <div data-botui="1" style={{ background: wide ? "transparent" : T.panel, border: wide ? "none" : `1px solid ${T.border2}`, borderRadius: 12, padding: wide ? 0 : 14,
-      ...(wide ? { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" } : {}) }}>
+      ...(wide ? { display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1.15fr)", gap: 10, alignItems: "start" } : {}) }}>
       {!wide && (
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <div style={{ fontFamily: T.mono, fontSize: 11, letterSpacing: 2, color: T.dim, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -4011,11 +5430,25 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
           )}
           ≈ ${(amt * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
       </div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
-        {vtQuick.map((v, ci) => (
-          <button className="qchip" key={ci} onClick={() => setAmount && setAmount(String(v))}
-            {...chipEditProps(() => { askAmt(v, (nv) => setVtQuick((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
-            style={{ ...chip(parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "4px 0", fontSize: 9, fontWeight: 800 }}>{v}</button>
+      <div style={{ display: "flex", gap: 4, marginBottom: 5, alignItems: "center" }}>
+        <button onClick={() => setVtPctMode((m) => !m)}
+          title={vtPctMode ? "Chips are % of your on-chain balance — tap for fixed SOL amounts" : "Chips are fixed amounts — tap for % of your on-chain balance"}
+          style={{ flex: "0 0 auto", border: `1px solid ${vtPctMode ? T.amber : T.border}`, background: vtPctMode ? "rgba(240,185,11,0.1)" : "transparent",
+            color: vtPctMode ? T.amber : T.faint, borderRadius: 7, padding: "4px 7px", cursor: "pointer",
+            fontFamily: T.mono, fontSize: 8.5, fontWeight: 900 }}>{vtPctMode ? "%" : "#"}</button>
+        {(vtPctMode ? [10, 25, 50, 75] : vtQuick).map((v, ci) => (
+          <button className="qchip" key={ci}
+            onClick={() => {
+              if (vtPctMode) {
+                const bal2 = pay === "SOL" ? solBalance : valoWallet;
+                const usable = pay === "SOL" ? Math.max(0, bal2 - 0.0065) : bal2;
+                setAmount && setAmount(String(feeSafe(usable * v / 100, pay)));
+              } else setAmount && setAmount(String(v));
+            }}
+            {...(vtPctMode ? {} : chipEditProps(() => { askAmt(v, (nv) => setVtQuick((A) => A.map((x, j) => (j === ci ? nv : x)))); }))}
+            style={{ ...chip(!vtPctMode && parseFloat(amount) === v), flex: 1, textAlign: "center", padding: "4px 0", fontSize: 9, fontWeight: 800 }}>
+            {vtPctMode ? v + "%" : v}
+          </button>
         ))}
       </div>
       {!compactArm && (() => {
@@ -4044,7 +5477,7 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
       })()}
       </div>
       <div style={wide ? { border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", background: "rgba(255,255,255,0.015)", flex: "1.5 1 300px", minWidth: 290 } : undefined}>
-      <div style={{ display: "flex", gap: 7, marginBottom: wide ? 6 : 9 }}>
+      <div style={{ display: "flex", gap: 7, marginBottom: wide ? 6 : 9, alignItems: "stretch" }}>
         {step("1", "BUY IN", buyLvl, T.green, stage === "buy" && dragSetOn,
           () => {
             if (stage === "buy" && dragSetOn) { onSetDragSet && onSetDragSet(false); onDraftLevel && onDraftLevel(null); return; } // re-tap = cancel
@@ -4057,6 +5490,34 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
             if (buyLvl != null) { setSellLvl(null); onSetDragSet && onSetDragSet(true); }
           },
           () => setSellLvl(null))}
+        {/* live P/L — a small square beside the two steps */}
+        {(() => {
+          const held3 = position && position.amt > 0;
+          const q3 = held3 ? posTokenQty(token, position) : 0;
+          const pnl3 = held3 ? q3 * (token.price - position.entry) : 0;
+          const pc3 = held3 && position.entry > 0 ? ((token.price - position.entry) / position.entry) * 100 : 0;
+          const g3 = pnl3 >= 0;
+          return (
+            <div style={{ flex: "0 0 84px", width: 84, minWidth: 84, aspectRatio: "1 / 1",
+              border: `1.5px solid ${held3 ? (g3 ? T.green : T.red) + "66" : T.border}`, borderRadius: 10,
+              background: held3 ? (g3 ? "rgba(22,199,132,0.07)" : "rgba(234,57,67,0.07)") : "rgba(255,255,255,0.02)",
+              boxShadow: held3 ? `0 0 12px ${g3 ? "rgba(22,199,132,0.22)" : "rgba(234,57,67,0.22)"}` : "none",
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+              padding: 4, textAlign: "center", overflow: "hidden" }}>
+              <div style={{ fontFamily: T.mono, fontSize: 6.5, letterSpacing: 1, color: T.faint }}>LIVE P/L</div>
+              {held3 ? (
+                <>
+                  <div style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 900, lineHeight: 1.1,
+                    color: g3 ? T.green : T.red }}>{g3 ? "+" : "−"}${Math.abs(pnl3).toFixed(0)}</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 800,
+                    color: g3 ? T.green : T.red, opacity: 0.9 }}>{g3 ? "+" : ""}{pc3.toFixed(1)}%</div>
+                </>
+              ) : (
+                <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, lineHeight: 1.3 }}>no<br />position</div>
+              )}
+            </div>
+          );
+        })()}
       </div>
       <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginBottom: 9 }}>
         buy in hits → buys automatically → exit point hits → sells all. Lines stay on the chart until hit.
@@ -4089,7 +5550,7 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
         const pc2 = held2 ? ((token.price - position.entry) / position.entry) * 100 : 0;
         const g2 = pnl2 >= 0;
         return (
-          <div style={{ border: `1.5px solid ${held2 ? (g2 ? T.green : T.red) + "66" : T.border}`, borderRadius: 10, padding: "8px 10px", flex: "1 1 190px", minWidth: 180,
+          <div style={{ display: wide ? "none" : "flex", border: `1.5px solid ${held2 ? (g2 ? T.green : T.red) + "66" : T.border}`, borderRadius: 10, padding: "8px 10px", flex: "1 1 190px", minWidth: 180,
             background: held2 ? (g2 ? "rgba(22,199,132,0.07)" : "rgba(234,57,67,0.07)") : "rgba(255,255,255,0.015)",
             boxShadow: held2 ? `0 0 16px ${g2 ? "rgba(22,199,132,0.25)" : "rgba(234,57,67,0.25)"}` : "none",
             display: "flex", flexDirection: "column", justifyContent: "center" }}>
@@ -4110,9 +5571,11 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
 
 // PC MY POSITIONS — bots and order tickets under one collapsible roof
 function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrders = [], pay = "SOL",
-  onOpenToken, onSellPos, onCloseTickets, onSellRun, onSellAllBots, onCancelBot }) {
+  onOpenToken, onSellPos, onCloseTickets, onSellRun, onSellAllBots, onCancelBot,
+  liveMode = false, chainHoldings = [], onRealSellOne = null, onRealSellAll = null, onOpenMint = null, onBurn = null }) {
   const [open, setOpen] = useState(true);
   const [tab, setTab] = useState("both"); // bots | both | tickets
+  const [showSpam, setShowSpam] = useState(false);
   const unit$ = (p) => (p === "SOL" ? SOL_USD : 0.0125);
   const tickets = Object.entries(positions).map(([id, p]) => {
     const t = tokens.find((x) => String(x.id) === String(id));
@@ -4138,16 +5601,61 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
     <div style={{ marginTop: 10, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 12, padding: 11 }}>
       <button onClick={() => setOpen((v) => !v)}
         style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", border: "none", background: "transparent", cursor: "pointer", padding: 0, fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: T.text }}>
-        <span>{open ? "▾" : "▸"} MY POSITIONS · {tickets.length + runsLive.length}</span>
-        <span style={{ color: ticketPnl + botPnl >= 0 ? T.green : T.red, fontWeight: 900 }}>{ticketPnl + botPnl >= 0 ? "+" : "−"}${Math.abs(ticketPnl + botPnl).toFixed(2)}</span>
+        <span>{open ? "▾" : "▸"} MY POSITIONS · {liveMode ? visHolds(chainHoldings).length + runsLive.length : tickets.length + runsLive.length}</span>
+        {(() => { const v = liveMode ? visHolds(chainHoldings).reduce((s, h) => s + (h.pnlUsd || 0), 0) : ticketPnl + botPnl;
+          return <span style={{ color: v >= 0 ? T.green : T.red, fontWeight: 900 }}>{v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}</span>; })()}
       </button>
       {open && (
         <div style={{ marginTop: 9 }}>
           <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
             <button onClick={() => setTab("bots")} style={{ ...chip(tab === "bots"), flex: 1, textAlign: "center", padding: "6px", fontSize: 8.5, fontWeight: 800 }}>🤖 TRADING BOTS</button>
             <button onClick={() => setTab("both")} style={{ ...chip(tab === "both"), flex: 1, textAlign: "center", padding: "6px", fontSize: 8.5, fontWeight: 800 }}>BOTH</button>
-            <button onClick={() => setTab("tickets")} style={{ ...chip(tab === "tickets"), flex: 1, textAlign: "center", padding: "6px", fontSize: 8.5, fontWeight: 800 }}>🧾 ORDER TICKETS</button>
+            <button onClick={() => setTab("tickets")} style={{ ...chip(tab === "tickets"), flex: 1, textAlign: "center", padding: "6px", fontSize: 8.5, fontWeight: 800 }}>{liveMode ? "⛓ HOLDINGS" : "🧾 ORDER TICKETS"}</button>
           </div>
+          {liveMode && tab !== "bots" && chainHoldings.length > 0 && (
+            <>
+              <button onClick={() => onRealSellAll && onRealSellAll(chainHoldings)}
+                style={{ width: "100%", boxSizing: "border-box", border: "none", borderRadius: 9, padding: "9px", marginBottom: 8,
+                  fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
+                  background: T.red, color: "#170808", cursor: "pointer" }}>
+                ⚡ SELL ALL · {chainHoldings.filter((x) => !x.spam && !x.dust && x.src !== "phantom").length} turbo · instant
+              </button>
+              {chainHoldings.filter((h) => (!h.spam && !h.dust) || showSpam).map((h) => (
+                <div key={h.mint} style={{ display: "flex", alignItems: "center", gap: 8, background: "#0c0f16",
+                  border: `1px solid ${T.amber}33`, borderLeft: `2px solid ${T.amber}`, borderRadius: 9, padding: "8px 9px", marginBottom: 5 }}>
+                  <div onClick={() => onOpenMint && onOpenMint(h.mint)} style={{ minWidth: 0, flex: 1, cursor: onOpenMint ? "pointer" : "default" }}>
+                    <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: T.text }}>
+                      ${h.sym || h.name || h.mint.slice(0, 5)} <span style={{ color: T.amber, fontSize: 7.5 }}>{h.src === "phantom" ? "👻" : "⚡"}</span>
+                    </div>
+                    <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>
+                      {fmtQty(h.qty)} · ${((h.livePrice || h.price || 0) * h.qty).toFixed(2)}
+                      {h.pnlUsd != null && (
+                        <b style={{ color: h.pnlUsd >= 0 ? T.green : T.red, marginLeft: 6 }}>
+                          {h.pnlUsd >= 0 ? "▲+" : "▼−"}${Math.abs(h.pnlUsd).toFixed(2)}{h.pnlPct != null ? ` (${h.pnlPct >= 0 ? "+" : "−"}${Math.abs(h.pnlPct).toFixed(1)}%)` : ""}
+                        </b>
+                      )}
+                      {h.pnlUsd == null && <span style={{ color: T.faint, marginLeft: 6, fontSize: 7.5 }}>no VALO basis</span>}
+                    </div>
+                  </div>
+                  <button onClick={() => onBurn && onBurn(h)} title="Burn this token & close its account — reclaims the ~0.002 SOL rent. For dead/spam tokens nobody will buy."
+                    style={{ border: `1px solid ${T.border2}`, background: "transparent", color: T.faint,
+                      borderRadius: 8, padding: "6px 8px", cursor: "pointer", fontFamily: T.mono, fontSize: 10 }}>🗑</button>
+                  <button onClick={() => onRealSellOne && onRealSellOne(h)}
+                    style={{ border: `1px solid ${T.red}`, background: "rgba(234,57,67,0.12)", color: T.red,
+                      borderRadius: 8, padding: "6px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900 }}>
+                    SELL
+                  </button>
+                </div>
+              ))}
+              {chainHoldings.some((h) => h.spam || h.dust) && (
+                <button onClick={() => setShowSpam((v) => !v)}
+                  style={{ width: "100%", border: `1px dashed ${T.border}`, background: "transparent", color: T.faint,
+                    borderRadius: 8, padding: "6px", cursor: "pointer", fontFamily: T.mono, fontSize: 8, fontWeight: 800, marginBottom: 4 }}>
+                  {showSpam ? "hide" : "show"} {chainHoldings.filter((h) => h.spam || h.dust).length} hidden (spam + dust) 🗑
+                </button>
+              )}
+            </>
+          )}
           {(tab === "tickets" ? tickets.length : tab === "bots" ? runsLive.length : tickets.length + runsLive.length) > 0 && (
             <button onClick={() => { if (showTickets) onCloseTickets(); if (showBots) onSellAllBots(); }}
               style={{ width: "100%", boxSizing: "border-box", border: "none", borderRadius: 9, padding: "9px", marginBottom: 8, fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
@@ -4185,7 +5693,11 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
             </div>
           ))}
           {tickets.length + runsLive.length + pend.length === 0 && (
-            <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center", padding: 12 }}>Nothing open yet.</div>
+            liveMode ? (
+              <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center", padding: 12 }}>
+                No on-chain positions — buy any token and it lives here until fully sold.
+              </div>
+            ) : <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center", padding: 12 }}>Nothing open yet.</div>
           )}
         </div>
       )}
@@ -4193,18 +5705,323 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
   );
 }
 
+// ⚡ TURBO WALLET — the popup-free trading key, entirely on this device.
+function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phantomOk, turboSol = 0, autoOn = false, onToggleAuto = null, phantomSol = 0, valoMint = null }) {
+  const [autoConfirm, setAutoConfirm] = useState(false);   // two-tap arm
+  const [sweepConfirm, setSweepConfirm] = useState(false); // two-tap sweep
+  const [depositCcy, setDepositCcy] = useState("SOL");     // SOL | VALO (post-launch)
+  const [pin, setPin] = useState("");
+  const [fundAmt, setFundAmt] = useState("0.05");
+  const [sweepDest, setSweepDest] = useState("");
+  const [backup, setBackup] = useState(null);   // shown ONCE at creation
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const [collapsed, setCollapsed] = useState(false);   // armed panel folds away
+  const active = turbo && turbo.unlocked;
+  const box = { background: "#0c0f16", border: `1px solid ${active ? "rgba(22,199,132,0.4)" : `${T.amber}44`}`, borderRadius: 10, padding: "10px 12px", marginBottom: 10 };
+  const run = async (fn) => { setBusy(true); setErr(null); try { await fn(); } catch (e) { setErr(String(e.message || e)); } setBusy(false); };
+  if (backup) return (
+    <div style={{ ...box, border: `1.5px solid ${T.red}66` }}>
+      <div style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: T.red, marginBottom: 6 }}>⚠ BACK THIS UP — SHOWN ONCE</div>
+      <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, lineHeight: 1.7, marginBottom: 7 }}>
+        This is your Turbo wallet's private key. It exists ONLY on this device — if this browser's storage is cleared and you don't have this key, any funds in it are gone forever. Save it somewhere safe (it imports into Phantom).
+      </div>
+      <div style={{ fontFamily: T.mono, fontSize: 8, color: T.text, wordBreak: "break-all", background: "#090b10",
+        border: `1px solid ${T.border}`, borderRadius: 8, padding: 8, marginBottom: 8, userSelect: "all" }}>{backup}</div>
+      <button onClick={() => setBackup(null)}
+        style={{ width: "100%", border: "none", borderRadius: 8, padding: "9px", background: T.green, color: "#07130d",
+          fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, cursor: "pointer" }}>I'VE SAVED IT — CONTINUE</button>
+    </div>
+  );
+  return (
+    <div style={box}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 0.8, color: active ? T.green : T.amber }}>
+          {active && (
+            <button onClick={() => setCollapsed((c) => !c)} title={collapsed ? "Expand turbo controls" : "Collapse — keep trading, hide controls"}
+              style={{ border: `1px solid ${T.green}55`, background: "rgba(22,199,132,0.08)", color: T.green, borderRadius: 6,
+                width: 18, height: 18, display: "grid", placeItems: "center", cursor: "pointer", fontSize: 9, fontWeight: 900, padding: 0 }}>
+              {collapsed ? "▾" : "▴"}
+            </button>
+          )}
+          ⚡ TURBO WALLET {active ? "· ARMED" : turbo ? "· LOCKED" : ""}
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          {turbo && <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, color: turboSol > 0 ? T.green : T.dim }}>◎ {turboSol.toFixed(4)} SOL</span>}
+          {active && collapsed && autoOn && (
+            <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, color: T.red }}>🤖</span>
+          )}
+          {active && collapsed && (
+            <button onClick={onLock} title="Disarm — lock the turbo wallet"
+              style={{ border: `1px solid ${T.border2}`, background: "transparent", color: T.faint, borderRadius: 6,
+                padding: "2px 8px", cursor: "pointer", fontFamily: T.mono, fontSize: 8, fontWeight: 800 }}>🔒 LOCK</button>
+          )}
+        </span>
+      </div>
+      {!turbo && (
+        <>
+          <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, lineHeight: 1.7, marginBottom: 7 }}>
+            A trading key held on this device — trades sign instantly with <b style={{ color: T.text }}>zero popups</b>, the Photon/BullX model. Fund it small from Phantom, sweep back anytime. Set a PIN:
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input value={pin} onChange={(e) => setPin(e.target.value)} type="password" inputMode="numeric" placeholder="PIN (6+ digits)"
+              style={{ ...inp, flex: 1, padding: "8px", fontSize: 11 }} />
+            <button disabled={busy || pin.length < 6} onClick={() => run(async () => { const r = await onCreate(pin); setBackup(r.backup); setPin(""); })}
+              style={{ border: "none", borderRadius: 8, padding: "8px 14px", background: pin.length >= 6 ? T.amber : "#1a2030",
+                color: pin.length >= 6 ? "#1d1503" : T.faint, fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, cursor: pin.length >= 6 ? "pointer" : "not-allowed" }}>CREATE</button>
+          </div>
+        </>
+      )}
+      {turbo && !active && (
+        <div>
+        <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.amber, lineHeight: 1.6, marginBottom: 6 }}>
+          Your positions &amp; SOL below are this turbo wallet's — visible while locked, tradeable after you unlock.
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <input value={pin} onChange={(e) => setPin(e.target.value)} type="password" inputMode="numeric" placeholder="PIN to unlock"
+            style={{ ...inp, flex: 1, padding: "8px", fontSize: 11 }} />
+          <button disabled={busy || !pin} onClick={() => run(async () => { const ok = await onUnlock(pin); if (!ok) throw new Error("wrong PIN"); setPin(""); })}
+            style={{ border: "none", borderRadius: 8, padding: "8px 14px", background: T.green, color: "#07130d",
+              fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, cursor: "pointer" }}>UNLOCK</button>
+        </div>
+        </div>
+      )}
+      {active && collapsed && (
+        <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.green, opacity: 0.85 }}>
+          armed · trading silently · ▾ to manage funds
+        </div>
+      )}
+      {active && !collapsed && (
+        <>
+          <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, lineHeight: 1.75, margin: "2px 0 12px" }}>
+            All trades sign instantly with this key — buys land here, sells sell from here. Positions below are this wallet's. Fund it small; sweep back anytime.
+          </div>
+
+          {/* ── AUTOMATION ─────────────────────────────── */}
+          {onToggleAuto && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.5, color: T.faint, marginBottom: 6 }}>AUTOMATION</div>
+              <button
+                onClick={() => {
+                  if (autoOn) { onToggleAuto(false); setAutoConfirm(false); return; }
+                  if (!autoConfirm) { setAutoConfirm(true); setTimeout(() => setAutoConfirm(false), 3200); return; }
+                  setAutoConfirm(false); onToggleAuto(true);
+                }}
+                style={{ width: "100%", border: `1.5px solid ${autoOn ? T.red : autoConfirm ? T.red : T.border2}`,
+                  borderRadius: 10, padding: "11px 10px", cursor: "pointer", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900,
+                  letterSpacing: 0.5, background: autoOn ? "rgba(234,57,67,0.16)" : autoConfirm ? "rgba(234,57,67,0.1)" : "rgba(255,255,255,0.03)",
+                  color: autoOn || autoConfirm ? T.red : T.faint, lineHeight: 1.5,
+                  boxShadow: autoOn ? `0 0 10px ${T.red}55` : "none" }}>
+                {autoOn ? "🤖 LIVE AUTOMATION ARMED — tap to disarm"
+                  : autoConfirm ? "⚠ CONFIRM — bots will spend REAL SOL on triggers"
+                  : "🤖 ARM LIVE AUTOMATION (bots fire real trades)"}
+              </button>
+            </div>
+          )}
+
+          {/* ── DEPOSIT ─────────────────────────────────── */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.5, color: T.faint, marginBottom: 6 }}>DEPOSIT · from any wallet or exchange</div>
+            <div onClick={() => { try { navigator.clipboard.writeText(turbo.pubkey); setErr("address copied ✓"); setTimeout(() => setErr(null), 1500); } catch (e) {} }}
+              title="Tap to copy — send SOL here from any wallet or exchange"
+              style={{ fontFamily: T.mono, fontSize: 8.5, color: T.text, background: "#090b10", border: `1px dashed ${T.amber}55`,
+                borderRadius: 10, padding: "10px 11px", cursor: "pointer", wordBreak: "break-all", lineHeight: 1.7 }}>
+              <div style={{ color: T.amber, fontWeight: 900, fontSize: 8, letterSpacing: 1, marginBottom: 4 }}>📋 TAP TO COPY ADDRESS</div>
+              {turbo.pubkey}
+            </div>
+            <div style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, marginTop: 6, lineHeight: 1.6 }}>
+              fund ≥ 0.03 — Solana reserves ~0.002/token account for rent; buys keep ~0.0065 aside automatically
+            </div>
+          </div>
+
+          {/* ── FUND FROM PHANTOM ───────────────────────── */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.5, color: T.faint, marginBottom: 6 }}>FUND FROM PHANTOM</div>
+            {phantomSol > 0 && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: T.mono,
+                fontSize: 9.5, fontWeight: 800, color: "#AB9FF2", background: "rgba(125,92,240,0.07)",
+                border: "1px solid rgba(125,92,240,0.3)", borderRadius: 9, padding: "8px 11px", marginBottom: 8 }}>
+                <span>👻 phantom holds ◎{phantomSol.toFixed(4)}</span>
+                <span style={{ opacity: 0.85 }}>${(phantomSol * SOL_USD).toFixed(2)}</span>
+              </div>
+            )}
+            {phantomSol > 0.002 && (
+              <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                {[25, 50, 75, 100].map((pc) => {
+                  const v = Math.max(0, (phantomSol - 0.001) * pc / 100);
+                  return (
+                    <button key={pc} onClick={() => setFundAmt(v.toFixed(4))}
+                      title={`Deposit ${v.toFixed(4)} SOL (${pc}% of your Phantom balance)`}
+                      style={{ flex: 1, border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.02)", color: pc === 100 ? T.amber : T.dim,
+                        borderRadius: 8, padding: "7px 0", cursor: "pointer", fontFamily: T.mono, fontSize: 9, fontWeight: 800 }}>
+                      {pc === 100 ? "ALL" : pc + "%"}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 6, marginBottom: 8, alignItems: "stretch" }}>
+              <span style={{ display: "flex", gap: 4, flex: "0 0 auto" }}>
+                <button onClick={() => setDepositCcy("SOL")}
+                  style={{ border: `1px solid ${depositCcy === "SOL" ? T.blue : T.border}`, background: depositCcy === "SOL" ? "rgba(76,154,255,0.12)" : "transparent",
+                    color: depositCcy === "SOL" ? T.blue : T.faint, borderRadius: 8, padding: "0 11px", cursor: "pointer",
+                    fontFamily: T.mono, fontSize: 9, fontWeight: 900 }}>SOL</button>
+                <button onClick={() => valoMint && setDepositCcy("VALO")} disabled={!valoMint}
+                  title={valoMint ? "Deposit $VALO to trade with" : "$VALO deposits unlock when the token launches"}
+                  style={{ border: `1px solid ${depositCcy === "VALO" ? VALO_PURPLE : T.border}`, background: depositCcy === "VALO" ? "rgba(125,92,240,0.12)" : "transparent",
+                    color: !valoMint ? T.faint : depositCcy === "VALO" ? VALO_PURPLE : T.dim, borderRadius: 8, padding: "0 10px",
+                    cursor: valoMint ? "pointer" : "not-allowed", opacity: valoMint ? 1 : 0.55,
+                    fontFamily: T.mono, fontSize: 9, fontWeight: 900 }}>$VALO{!valoMint ? " 🔒" : ""}</button>
+              </span>
+              <input value={fundAmt} onChange={(e) => setFundAmt(e.target.value)} inputMode="decimal" placeholder="0.05"
+                style={{ ...inp, flex: 1, padding: "9px", fontSize: 11.5, textAlign: "center" }} />
+            </div>
+            <button disabled={busy || !(parseFloat(fundAmt) > 0)}
+              title={phantomOk ? "One-click transfer from your connected Phantom" : "Open Phantom to send SOL to your turbo wallet"}
+              onClick={() => run(async () => { const r = await onFund(parseFloat(fundAmt)); if (!r.ok) throw new Error(r.err); })}
+              style={{ width: "100%", border: `1px solid ${T.green}66`, borderRadius: 9, padding: "10px", background: "rgba(22,199,132,0.1)",
+                color: T.green, fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, cursor: "pointer", letterSpacing: 0.5 }}>
+              ↓ {phantomOk ? "FUND FROM PHANTOM" : "OPEN PHANTOM TO SEND"}{parseFloat(fundAmt) > 0 ? ` · ${parseFloat(fundAmt)} SOL` : ""}
+            </button>
+          </div>
+
+          {/* ── WITHDRAW ────────────────────────────────── */}
+          <div style={{ marginBottom: 4 }}>
+            <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.5, color: T.faint, marginBottom: 6 }}>WITHDRAW · empties turbo to exactly 0</div>
+            {!phantomOk && (
+              <input value={sweepDest} onChange={(e) => setSweepDest(e.target.value)} placeholder="withdraw address (paste any SOL wallet)"
+                style={{ ...inp, width: "100%", boxSizing: "border-box", padding: "9px", fontSize: 9.5, marginBottom: 8 }} />
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              {(() => {
+                const sweepSol = Math.max(0, turboSol - 0.000005);
+                const canSweep = sweepSol > 0 && !busy && (phantomOk || sweepDest.trim());
+                return (
+                  <button disabled={!canSweep}
+                    title={sweepSol > 0 ? `Sends your ENTIRE turbo balance (${sweepSol.toFixed(4)} SOL ≈ $${(sweepSol * SOL_USD).toFixed(2)}) ${phantomOk ? "back to your Phantom wallet" : "to the pasted address"} — turbo goes to exactly 0` : "Nothing to sweep — the turbo wallet is empty"}
+                    onClick={() => {
+                      if (!sweepConfirm) { setSweepConfirm(true); setTimeout(() => setSweepConfirm(false), 3400); return; }
+                      setSweepConfirm(false);
+                      run(async () => { const r = await onSweep(phantomOk ? undefined : sweepDest.trim()); if (!r.ok) throw new Error(r.err); });
+                    }}
+                    style={{ flex: 1, border: `1.5px solid ${sweepConfirm ? T.red : `${T.amber}66`}`, borderRadius: 9, padding: "9px",
+                      background: sweepConfirm ? "rgba(234,57,67,0.14)" : "rgba(240,185,11,0.08)",
+                      color: !canSweep ? T.faint : sweepConfirm ? T.red : T.amber, fontFamily: T.mono, fontSize: 9.5, fontWeight: 900,
+                      cursor: canSweep ? "pointer" : "not-allowed", lineHeight: 1.5, opacity: canSweep ? 1 : 0.7,
+                      boxShadow: sweepConfirm ? `0 0 12px ${T.red}55` : "none", transition: "border-color .15s, background .15s" }}>
+                    <div>{sweepConfirm ? "⚠ TAP AGAIN TO CONFIRM" : `↑ SWEEP ${phantomOk ? "→ PHANTOM" : "→ ADDRESS"}`}</div>
+                    <div style={{ fontSize: 8.5, fontWeight: 800, opacity: 0.9, marginTop: 2 }}>
+                      {sweepSol > 0 ? `${sweepConfirm ? "sends " : ""}${sweepSol.toFixed(4)} SOL · $${(sweepSol * SOL_USD).toFixed(2)}${sweepConfirm ? " — turbo → 0" : ""}` : "empty — nothing to sweep"}
+                    </div>
+                  </button>
+                );
+              })()}
+              <button disabled={busy} onClick={onLock}
+                style={{ flex: "0 0 auto", border: `1px solid ${T.border2}`, borderRadius: 9, padding: "9px 15px", background: "transparent",
+                  color: T.faint, fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, cursor: "pointer" }}>🔒 LOCK</button>
+            </div>
+          </div>
+        </>
+      )}
+      {err && <div style={{ fontFamily: T.mono, fontSize: 8, color: T.red, marginTop: 6 }}>{err}</div>}
+    </div>
+  );
+}
+
+// Sits under the BUY/SELL pair whenever on-chain execution is armed. The buttons
+// no longer shout "REAL" at you, so this is what tells you which mode you're in.
+function LiveFundsNotice({ sol = 0, compact = false, autoOn = false, onToggleAuto = null, turboOn = false }) {
+  const [armOpen, setArmOpen] = useState(false);
+  // (Phantom Auto-Confirm tip removed — turbo makes every order instant)
+  return (
+    <div style={{ position: "relative" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+        border: `1px solid ${T.amber}44`, background: "rgba(240,185,11,0.07)", borderRadius: 9,
+        padding: compact ? "5px 8px" : "6px 10px" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+          <span style={{ width: 6, height: 6, borderRadius: 6, background: T.amber, flex: "0 0 auto",
+            boxShadow: `0 0 7px ${T.amber}` }} />
+          <span style={{ fontFamily: T.mono, fontSize: compact ? 7.5 : 8.5, fontWeight: 800,
+            letterSpacing: 0.6, color: T.amber, whiteSpace: "nowrap" }}>
+            LIVE · REAL FUNDS{turboOn ? " · ⚡TURBO" : ""}
+          </span>
+          <span style={{ fontFamily: T.mono, fontSize: compact ? 7 : 7.5, color: T.dim,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            settles on-chain from your wallet · final once approved
+          </span>
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto" }}>
+          {sol > 0 && (
+            <span style={{ fontFamily: T.mono, fontSize: compact ? 7.5 : 8.5, fontWeight: 800, whiteSpace: "nowrap",
+              color: turboOn ? T.amber : T.dim }}>{turboOn ? `◎${sol.toFixed(4)}` : `${sol.toFixed(3)} SOL`}</span>
+          )}
+          {autoOn && (
+            <span title="Live automation armed — manage in portfolio → ⚡ TURBO"
+              style={{ fontFamily: T.mono, fontSize: compact ? 7 : 7.5, fontWeight: 900, color: T.red,
+                border: `1px solid ${T.red}55`, borderRadius: 6, padding: compact ? "2px 6px" : "3px 7px",
+                background: "rgba(234,57,67,0.12)" }}>🤖 ARMED</span>
+          )}
+        </span>
+      </div>
+      {armOpen && typeof document !== "undefined" && createPortal(
+        <div onClick={() => setArmOpen(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(5,7,12,0.6)",
+            backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ width: "100%", maxWidth: 290, background: T.panel, border: `1.5px solid ${T.red}66`,
+              borderRadius: 13, padding: "13px 15px", boxShadow: "0 12px 40px rgba(0,0,0,0.6), 0 0 22px rgba(234,57,67,0.14)" }}>
+            <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 0.8, color: T.red, marginBottom: 7 }}>
+              🤖⛓ ARM LIVE AUTOMATION
+            </div>
+            <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.text, lineHeight: 1.75 }}>
+              While armed, <b>bots and chart-armed orders spend real SOL</b> from your connected wallet the moment their trigger hits — no review screen per order.
+            </div>
+            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, lineHeight: 1.7, margin: "8px 0" }}>
+              · every order stays capped at the server limit<br />
+              · runs only while VALO is open — closing the tab disarms it<br />
+              · without Phantom auto-confirm, each fill still asks your wallet; a missed prompt = a missed fill<br />
+              · a failed exit means the position is <b style={{ color: T.text }}>still held</b> — you'll be alerted to sell manually
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setArmOpen(false)}
+                style={{ flex: 1, border: `1px solid ${T.border2}`, borderRadius: 9, padding: "9px",
+                  background: "transparent", color: T.dim, fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, cursor: "pointer" }}>
+                KEEP PAPER
+              </button>
+              <button onClick={() => { onToggleAuto && onToggleAuto(true); setArmOpen(false); }}
+                style={{ flex: 1.4, border: "none", borderRadius: 9, padding: "9px", background: T.red, color: "#170808",
+                  fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 0.6, cursor: "pointer",
+                  boxShadow: "0 0 16px rgba(234,57,67,0.4)" }}>
+                ⛓ ARM IT
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+    </div>
+  );
+}
+
 // PRO LAYOUT order ticket — one wide bar under the chart, buy & sell side by side
-function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, valoBalance = 0, position, onExecute, onPosTrade, clickMode, setClickMode, realized24 = 0 }) {
+function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, valoBalance = 0, position, onExecute, onPosTrade, clickMode, setClickMode, realized24 = 0, onRealOrder, onChainReady = false, onChainMax = 0, chainHeld = 0, chainSol = 0, autoOn = false, onToggleAuto = null, turboOn = false, liveMode = false, chainHoldings = [], onRealSellOne = null, onRealSellAll = null, onOpenMint = null}) {
   const [poPcts, setPoPcts] = useState([25, 50, 75, 100]);      // dbl-click / right-click to retype
   const [poFixed, setPoFixed] = useState([0.5, 1, 2, 5]);
   const [poSellPcts, setPoSellPcts] = useState([10, 25, 50, 75]);
   const amt = parseFloat(amount) || 0;
   const bal = pay === "SOL" ? solBalance : valoBalance;
   const unit$ = pay === "SOL" ? SOL_USD : 0.0125;
-  const held = position && position.amt > 0 ? position.amt : 0;
-  const livePct = held ? ((token.price / (position.entry || token.price)) - 1) * 100 : 0;
-  const livePnlUsd = held ? (held * (token.price / (position.entry || token.price)) - held) * (position.pay === "SOL" ? SOL_USD : 0.0125) : 0;
+  // live site → the on-chain holding of THIS token drives P/L; demo → paper
+  const chainHold = (liveMode && token) ? (chainHoldings || []).find((h) => h.mint === token.liveMint && !h.spam && !h.dust) : null;
+  const held = chainHold ? chainHold.qty
+    : (position && position.amt > 0 ? position.amt : 0);
+  const livePct = chainHold ? (chainHold.pnlPct != null ? chainHold.pnlPct : 0)
+    : (position && position.amt > 0 ? ((token.price / (position.entry || token.price)) - 1) * 100 : 0);
+  const livePnlUsd = chainHold ? (chainHold.pnlUsd || 0)
+    : (position && position.amt > 0 ? (position.amt * (token.price / (position.entry || token.price)) - position.amt) * (position.pay === "SOL" ? SOL_USD : 0.0125) : 0);
   const gain = livePnlUsd >= 0;
+  const chainAvgEntry = chainHold && chainHold.avgCostUsd ? chainHold.avgCostUsd : null;
   const fire = (side, a) => onExecute({ side, pay: side === "sell" ? (position && position.pay) || pay : pay, amt: a, mode: "instant", tax: taxFor(pay), burn: splitFee(a, pay).total, legs: [] });
   const seg = { border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 11px", background: "rgba(255,255,255,0.015)" };
   return (
@@ -4251,20 +6068,62 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
           <span style={{ fontSize: 9.5, opacity: 0.85 }}>≈ ${(bal * unit$).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD</span>
         </div>
       </div>
-      {/* BUY | SELL side by side */}
-      <div style={{ flex: "2 1 340px", minWidth: 300, display: "flex", gap: 8 }}>
-        <button disabled={!(amt > 0) || bal < amt} onClick={() => fire("buy", amt)}
-          style={{ flex: 1, border: "none", borderRadius: 11, fontFamily: T.mono, fontWeight: 900, fontSize: 14, letterSpacing: 1.2,
-            background: amt > 0 && bal >= amt ? T.green : "#1a2030", color: amt > 0 && bal >= amt ? "#07130d" : T.faint, cursor: amt > 0 && bal >= amt ? "pointer" : "not-allowed",
-            boxShadow: amt > 0 && bal >= amt ? "0 0 16px rgba(22,199,132,0.35)" : "none" }}>
-          🔥 BUY<div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>{amt.toFixed(2)} {pay} · ${Math.round(amt * unit$)}</div>
-        </button>
-        <button disabled={!held} onClick={() => fire("sell", held)}
-          style={{ flex: 1, border: "none", borderRadius: 11, fontFamily: T.mono, fontWeight: 900, fontSize: 14, letterSpacing: 1.2,
-            background: held ? T.red : "#1a2030", color: held ? "#170808" : T.faint, cursor: held ? "pointer" : "not-allowed",
-            boxShadow: held ? "0 0 16px rgba(234,57,67,0.3)" : "none" }}>
-          SELL ALL<div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>{held ? `${held.toFixed(2)} ${((position && position.pay) || pay)}` : "no position"}</div>
-        </button>
+      {/* BUY | SELL side by side — the same two controls in both modes */}
+      <div style={{ flex: "2 1 340px", minWidth: 300, display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ display: "flex", gap: 8, flex: 1 }}>
+          {onChainReady ? (() => {
+            // live: sized in SOL, capped server-side, spendable only up to what
+            // the wallet actually holds — so the button can't promise a fill the
+            // chain will reject.
+            const size = Math.min(amt, onChainMax);
+            const wrongUnit = pay !== "SOL";
+            const shortSol = chainSol > 0 && size > chainSol;
+            const ok = size > 0 && !wrongUnit && !shortSol;
+            return (
+              <button disabled={!ok} onClick={() => ok && onRealOrder && onRealOrder(token, "buy", size)}
+                title={wrongUnit ? "Live orders are priced in SOL — switch the unit to SOL"
+                  : shortSol ? "More than this wallet holds"
+                  : `Spend ${size} SOL from your connected wallet`}
+                style={{ flex: 1, border: "none", borderRadius: 11, fontFamily: T.mono, fontWeight: 900, fontSize: 14, letterSpacing: 1.2,
+                  background: ok ? T.green : "#1a2030", color: ok ? "#07130d" : T.faint, cursor: ok ? "pointer" : "not-allowed",
+                  boxShadow: ok ? "0 0 16px rgba(22,199,132,0.35)" : "none" }}>
+                🔥 BUY
+                <div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>
+                  {wrongUnit ? "switch unit to SOL"
+                    : shortSol ? `wallet holds ${chainSol.toFixed(3)} SOL`
+                    : `${size} SOL · $${Math.round(size * SOL_USD)}${amt > onChainMax ? ` · capped at ${onChainMax}` : ""}`}
+                </div>
+              </button>
+            );
+          })() : (
+            <button disabled={!(amt > 0) || bal < amt} onClick={() => fire("buy", amt)}
+              style={{ flex: 1, border: "none", borderRadius: 11, fontFamily: T.mono, fontWeight: 900, fontSize: 14, letterSpacing: 1.2,
+                background: amt > 0 && bal >= amt ? T.green : "#1a2030", color: amt > 0 && bal >= amt ? "#07130d" : T.faint, cursor: amt > 0 && bal >= amt ? "pointer" : "not-allowed",
+                boxShadow: amt > 0 && bal >= amt ? "0 0 16px rgba(22,199,132,0.35)" : "none" }}>
+              🔥 BUY<div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>{amt.toFixed(2)} {pay} · ${Math.round(amt * unit$)}</div>
+            </button>
+          )}
+          {onChainReady ? (
+            <button disabled={!(chainHeld > 0)} onClick={() => chainHeld > 0 && onRealOrder && onRealOrder(token, "sell", chainHeld)}
+              title={chainHeld > 0 ? `Sell your ${token.sym} back to SOL` : "Nothing held in this wallet"}
+              style={{ flex: 1, border: "none", borderRadius: 11, fontFamily: T.mono, fontWeight: 900, fontSize: 14, letterSpacing: 1.2,
+                background: chainHeld > 0 ? T.red : "#1a2030", color: chainHeld > 0 ? "#170808" : T.faint, cursor: chainHeld > 0 ? "pointer" : "not-allowed",
+                boxShadow: chainHeld > 0 ? "0 0 16px rgba(234,57,67,0.3)" : "none" }}>
+              SELL
+              <div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>
+                {chainHeld > 0 ? `${fmtQty(chainHeld)} ${token.sym} → SOL` : "no position"}
+              </div>
+            </button>
+          ) : (
+            <button disabled={!held} onClick={() => fire("sell", held)}
+              style={{ flex: 1, border: "none", borderRadius: 11, fontFamily: T.mono, fontWeight: 900, fontSize: 14, letterSpacing: 1.2,
+                background: held ? T.red : "#1a2030", color: held ? "#170808" : T.faint, cursor: held ? "pointer" : "not-allowed",
+                boxShadow: held ? "0 0 16px rgba(234,57,67,0.3)" : "none" }}>
+              SELL ALL<div style={{ fontSize: 9, fontWeight: 800, opacity: 0.85 }}>{held ? `${held.toFixed(2)} ${((position && position.pay) || pay)}` : "no position"}</div>
+            </button>
+          )}
+        </div>
+        {onChainReady && <LiveFundsNotice sol={chainSol} autoOn={autoOn} onToggleAuto={onToggleAuto} turboOn={turboOn} />}
       </div>
       {/* partial sells + arm */}
       <div style={{ ...seg, flex: "1 1 190px", minWidth: 180 }}>
@@ -4286,11 +6145,16 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
       <div style={{ ...seg, flex: "1 1 200px", minWidth: 190,
         ...(held ? { border: `1.5px solid ${gain ? T.green : T.red}66`, background: gain ? "rgba(22,199,132,0.07)" : "rgba(234,57,67,0.07)", boxShadow: `0 0 16px ${gain ? "rgba(22,199,132,0.25)" : "rgba(234,57,67,0.25)"}` } : {}) }}>
         <div style={{ ...lbl }}>Live P/L · {token.sym}</div>
-        {held ? (
+        {chainHold && chainHold.pnlUsd == null ? (
+          <>
+            <div style={{ fontFamily: T.mono, fontSize: 15, fontWeight: 900, color: T.text, marginTop: 4 }}>{fmtQty(chainHold.qty)} {token.sym}</div>
+            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, marginTop: 3 }}>holding · no VALO cost basis to price P/L</div>
+          </>
+        ) : held ? (
           <>
             <div style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 900, lineHeight: 1.05, color: gain ? T.green : T.red, textShadow: `0 0 14px ${gain ? "rgba(22,199,132,0.5)" : "rgba(234,57,67,0.5)"}` }}>{gain ? "+" : "−"}${Math.abs(livePnlUsd).toFixed(2)} <span style={{ fontSize: 11 }}>({gain ? "+" : ""}{livePct.toFixed(1)}%)</span></div>
             <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 3 }}>
-              {fmtQty(posTokenQty(token, position))} tokens · avg ${fmtP(position.entry)}
+              {chainHold ? `${fmtQty(chainHold.qty)} ${token.sym}` : `${fmtQty(posTokenQty(token, position))} tokens`} · avg ${chainAvgEntry ? fmtP(chainAvgEntry) : fmtP(position && position.entry)}
               <span style={{ color: (realized24 || 0) >= 0 ? T.green : T.red }}> · R24H {(realized24 || 0) >= 0 ? "+" : "−"}${Math.abs(realized24 || 0).toFixed(2)}</span>
             </div>
           </>
@@ -4447,9 +6311,240 @@ function pnlSeries(range, seed, unreal, realized) {
   return pts.map((p) => p * scale);
 }
 
+// VALO's own wallets — real balances, real Solscan links, no placeholders
+function TreasuryPanel({ isMobile }) {
+  const [d, setD] = useState(null);
+  useEffect(() => {
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch("/api/treasury");
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop && j && !j.error) setD(j);
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 60000);
+    return () => { stop = true; clearInterval(iv); };
+  }, []);
+  if (!d || !d.configured) return null;
+
+  const ROWS = [
+    ["treasury", "🏦 TREASURY", "platform fees collect here", T.green],
+    ["epoch", "🎁 EPOCH VAULT", "rewards paid to callers each epoch", VALO_PURPLE],
+    ["creator", "👤 CREATOR", "the wallet behind VALO", T.blue],
+    ["deployer", "⚙ DEPLOYER", "deployed the contracts", T.amber],
+    ["burn", "🔥 BURN", "tokens removed from supply", T.red],
+  ];
+
+  return (
+    <div style={{ border: `1px solid ${T.border2}`, borderRadius: 12, background: "#0c0f16", overflow: "hidden", marginTop: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: `1px solid ${T.border}` }}>
+        <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, color: T.text }}>⛓ VALO LIVE</span>
+        <span style={{ fontFamily: T.mono, fontSize: 7.5, color: d.live ? T.green : T.faint, letterSpacing: 1 }}>
+          {d.live ? "● TOKEN LIVE" : "○ TOKEN PENDING"}
+        </span>
+        <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 7, color: T.faint }}>verify every figure on Solscan</span>
+      </div>
+
+      {d.token && (
+        <>
+          <a href={d.token.solscan} target="_blank" rel="noopener noreferrer"
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px",
+              borderBottom: `1px solid ${T.border}`, textDecoration: "none", background: "rgba(125,92,240,0.06)" }}>
+            <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: VALO_PURPLE }}>$VALO</span>
+            <span style={{ fontFamily: T.mono, fontSize: 8.5, color: T.dim }}>
+              supply {fmtQty(d.token.supply)} · {d.token.mint.slice(0, 4)}…{d.token.mint.slice(-4)}
+            </span>
+            <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 7.5, color: T.amber, fontWeight: 900 }}>SOLSCAN ↗</span>
+          </a>
+          {d.token.burned != null && d.token.burned > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
+              borderBottom: `1px solid ${T.border}`, background: "rgba(234,57,67,0.06)" }}>
+              <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: T.red, minWidth: 92 }}>🔥 BURNED</span>
+              <span style={{ fontFamily: T.mono, fontSize: 9, color: T.text }}>
+                {fmtQty(d.token.burned)} $VALO
+                <span style={{ color: T.faint }}> of {fmtQty(d.token.launchSupply)} at launch</span>
+              </span>
+              <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: T.red }}>
+                {d.token.burnedPct}%
+              </span>
+            </div>
+          )}
+        </>
+      )}
+      {d.fees && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: `1px solid ${T.border}` }}>
+          <span style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: T.faint, minWidth: 92 }}>⚖ FEE</span>
+          <span style={{ fontFamily: T.mono, fontSize: 9, color: T.dim }}>
+            <b style={{ color: T.text }}>{d.fees.tradeFeePct}%</b> per fill →
+            <span style={{ color: T.red }}> {d.fees.splits.burn}% burn</span> ·
+            <span style={{ color: VALO_PURPLE }}> {d.fees.splits.epoch}% epoch</span> ·
+            <span style={{ color: T.green }}> {d.fees.splits.treasury}% treasury</span>
+          </span>
+        </div>
+      )}
+
+      {ROWS.map(([k, label, blurb, col]) => {
+        const w = d.wallets && d.wallets[k];
+        if (!w) return null;
+        return (
+          <a key={k} href={w.solscan} target="_blank" rel="noopener noreferrer"
+            style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px",
+              borderTop: `1px solid ${T.border}`, textDecoration: "none" }}>
+            <span style={{ flex: "0 0 auto", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: col, minWidth: 92 }}>{label}</span>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: "block", fontFamily: T.mono, fontSize: 9, color: T.text }}>{w.short}</span>
+              {!isMobile && <span style={{ display: "block", fontFamily: T.mono, fontSize: 7, color: T.faint }}>{blurb}</span>}
+            </span>
+            <span style={{ flex: "0 0 auto", textAlign: "right" }}>
+              <span style={{ display: "block", fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: T.text }}>
+                {w.sol != null ? `${w.sol.toFixed(2)} SOL` : "—"}
+              </span>
+              {w.valo != null && (
+                <span style={{ display: "block", fontFamily: T.mono, fontSize: 8, color: VALO_PURPLE }}>{fmtQty(w.valo)} $VALO</span>
+              )}
+            </span>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+function ActivityLedger({ acts = [], tokens = [], onClose, isMobile, onJump }) {
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState("recent");     // recent | oldest | biggest | best | worst
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [side, setSide] = useState("all");        // all | buy | sell
+
+  const rows = useMemo(() => {
+    const ql = q.trim().toLowerCase();
+    const a0 = from ? new Date(from + "T00:00:00").getTime() : -Infinity;
+    const b0 = to ? new Date(to + "T23:59:59").getTime() : Infinity;
+    let out = (acts || []).filter((a) => {
+      if (side !== "all" && (side === "buy") !== (a.side === "buy")) return false;
+      const ts = a.ts || 0;
+      if (ts < a0 || ts > b0) return false;
+      if (!ql) return true;
+      return String(a.sym || "").toLowerCase().includes(ql);
+    });
+    const usd = (a) => (a.pnlMoney != null ? a.pnlMoney * SOL_USD : 0);
+    out = out.slice().sort((x, y) => {
+      if (sort === "oldest") return (x.ts || 0) - (y.ts || 0);
+      if (sort === "biggest") return payUsd(y.amt, y.pay) - payUsd(x.amt, x.pay);
+      if (sort === "best") return usd(y) - usd(x);
+      if (sort === "worst") return usd(x) - usd(y);
+      return (y.ts || 0) - (x.ts || 0);           // recent
+    });
+    return out;
+  }, [acts, q, sort, from, to, side]);
+
+  const totalIn = rows.filter((a) => a.side === "buy").reduce((s, a) => s + payUsd(a.amt, a.pay), 0);
+  const totalOut = rows.filter((a) => a.side === "sell").reduce((s, a) => s + payUsd(a.amt, a.pay), 0);
+  const realized = rows.filter((a) => a.side === "sell" && a.pnlMoney != null)
+    .reduce((s, a) => s + a.pnlMoney * SOL_USD, 0);
+
+  const chip2 = (on) => ({
+    border: `1px solid ${on ? VALO_PURPLE : T.border2}`, background: on ? "rgba(125,92,240,0.14)" : "transparent",
+    color: on ? VALO_PURPLE : T.dim, borderRadius: 7, padding: "4px 9px", cursor: "pointer",
+    fontFamily: T.mono, fontSize: 9, fontWeight: 800, whiteSpace: "nowrap",
+  });
+
+  return (
+    <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 146, background: "rgba(4,6,10,0.8)",
+      backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 620, maxHeight: "88vh",
+        display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`,
+        borderRadius: 14, overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
+          <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, letterSpacing: 1, color: T.text }}>📜 ALL ACTIVITY</span>
+          <span style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{rows.length} of {acts.length}</span>
+          <button onClick={onClose} style={{ marginLeft: "auto", ...chip2(false), fontSize: 11 }}>✕</button>
+        </div>
+
+        {/* search + filters */}
+        <div style={{ padding: "9px 12px", borderBottom: `1px solid ${T.border}`, display: "grid", gap: 7 }}>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a token…  e.g. WADDLES"
+            style={{ ...inp, padding: "8px 10px", fontSize: 11 }} />
+          <div style={{ display: "flex", gap: 5, overflowX: "auto", scrollbarWidth: "none" }}>
+            {[["recent", "NEWEST"], ["oldest", "OLDEST"], ["biggest", "LARGEST"], ["best", "BEST P/L"], ["worst", "WORST P/L"]]
+              .map(([k, l]) => <button key={k} onClick={() => setSort(k)} style={chip2(sort === k)}>{l}</button>)}
+            <span style={{ width: 6 }} />
+            {[["all", "ALL"], ["buy", "BUYS"], ["sell", "SELLS"]]
+              .map(([k, l]) => <button key={k} onClick={() => setSide(k)} style={chip2(side === k)}>{l}</button>)}
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)}
+              style={{ ...inp, flex: 1, padding: "6px 7px", fontSize: 9.5, colorScheme: "dark" }} />
+            <span style={{ color: T.faint, fontFamily: T.mono, fontSize: 9 }}>→</span>
+            <input type="date" value={to} onChange={(e) => setTo(e.target.value)}
+              style={{ ...inp, flex: 1, padding: "6px 7px", fontSize: 9.5, colorScheme: "dark" }} />
+            {(from || to || q || side !== "all") && (
+              <button onClick={() => { setFrom(""); setTo(""); setQ(""); setSide("all"); }} style={chip2(false)}>CLEAR</button>
+            )}
+          </div>
+        </div>
+
+        {/* totals for whatever is filtered */}
+        <div style={{ display: "flex", gap: 1, background: T.border }}>
+          {[["IN", fmt$(totalIn), T.text], ["OUT", fmt$(totalOut), T.text],
+            ["REALIZED", `${realized >= 0 ? "+" : "−"}$${Math.abs(realized).toFixed(2)}`, realized >= 0 ? T.green : T.red]]
+            .map(([k, v, c]) => (
+              <div key={k} style={{ flex: 1, background: "#0c0f16", padding: "7px 10px" }}>
+                <div style={{ fontFamily: T.mono, fontSize: 7, letterSpacing: 1, color: T.faint }}>{k}</div>
+                <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, color: c }}>{v}</div>
+              </div>
+            ))}
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "6px 10px 12px" }}>
+          {rows.length === 0 && (
+            <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center", padding: "28px 10px" }}>
+              Nothing matches those filters.
+            </div>
+          )}
+          {rows.map((a, i) => {
+            const usd = payUsd(a.amt, a.pay);
+            const pnl = a.pnlMoney != null ? a.pnlMoney * SOL_USD : null;
+            const tk = (tokens || []).find((t) => t.sym === a.sym);
+            const d = new Date(a.ts || Date.now());
+            return (
+              <div key={i} onClick={() => { if (tk && onJump) onJump(tk.id, a.tx); }}
+                title={tk ? `Jump to this trade on the $${a.sym} chart` : "This token isn't loaded"}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 9px", marginTop: 4,
+                  border: `1px solid ${T.border}`, borderLeft: `2px solid ${a.side === "buy" ? T.green : T.red}`,
+                  background: "#0c0f16", borderRadius: 9, cursor: tk ? "pointer" : "default" }}>
+                <span style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1,
+                  color: a.side === "buy" ? T.green : T.red, flex: "0 0 30px" }}>{a.side === "buy" ? "BUY" : "SELL"}</span>
+                <span style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: accent(symbolHue(a.sym || "?")), flex: "0 0 auto" }}>${a.sym}</span>
+                <span style={{ fontFamily: T.mono, fontSize: 9, color: T.dim, flex: 1, minWidth: 0 }}>
+                  {(+a.amt || 0).toFixed(2)} {a.pay} · {fmt$(usd)}
+                </span>
+                {pnl != null && (
+                  <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, color: pnl >= 0 ? T.green : T.red }}>
+                    {pnl >= 0 ? "+" : "−"}${Math.abs(pnl).toFixed(2)}
+                  </span>
+                )}
+                <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, flex: "0 0 auto", textAlign: "right" }}>
+                  {d.toLocaleDateString([], { month: "short", day: "numeric" })}<br />
+                  {d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realizedPnl, unrealizedPnl, extraEquity = 0, walletConnected = true, onConnectWallet,
   tab, setTab, range, setRange, mode, setMode, seed, onDeposit, onWithdraw, onSwap,
   hideBalance, setHideBalance, heldSlot, maxDeposit = 0, maxWithdraw = 0, activity = [], onOpenToken,
+  isMobile = false, onOpenActivity, wallet = null, walletChain = null, onDisconnectWallet, onOpenByMintChain,
   username, setUsername, isNameTaken, checkHandle,
   nameChangedAt = 0, setNameChangedAt,
   myCallouts = {}, onOpenMyCallouts,
@@ -4457,9 +6552,54 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   pendingOrders = [], onEditBot, onCancelBot, botTokens = [], botHistory = [], onOpenBotRun,
   botsSlot = null,
   onPosTrade,
-  epochLastHour = 0, epochTotalEarned = 0, valoUsdForEpoch = 0.0125, onOpenClaim }) {
+  epochLastHour = 0, epochTotalEarned = 0, valoUsdForEpoch = 0.0125, onOpenClaim,
+  liveMode = false, chainFills = [], chainLedger = { byMint: {}, realizedSol: 0 }, onOpenChainFill = null,
+  valoMint = null, onRealSwap = null, chainHoldingsLive2 = null,
+  turboState = null, onTurboCreate = null, onTurboUnlock = null, onTurboLock = null,
+  onTurboFund = null, onTurboSweep = null, phantomOk = false, turboSol = 0,
+  turboAutoOn = false, onTurboToggleAuto = null, onCreatorSplit = null, creatorAddr = null }) {
   const bestCalloutPeak = Object.values(myCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0);
   const mask = (s) => (hideBalance ? "••••••" : s);
+  // ⛓/📝 the SITE decides the wallet. Live mode = on-chain, demo = paper.
+  // No toggle: the two books never appear on the same screen, ever.
+  const chainOn = !!(liveMode && ((wallet && wallet.address) || (turboState && turboState.pubkey)) && walletChain);
+  const chSol = (walletChain && walletChain.sol) || 0;
+  const chTokensUsd = walletChain ? visHolds(walletChain.holdings).reduce((s, h) => s + (h.usd || 0), 0) : 0;
+  const chCount = walletChain ? visHolds(walletChain.holdings).length : 0;
+  const chEquity = chSol * SOL_USD + chTokensUsd;
+  // ⛓ PnL — from fills placed through VALO. Coins bought elsewhere have no
+  // basis here, so they're valued but not scored; that's stated, not hidden.
+  const [chDur, setChDur] = useState("ALL");   // 1H · 24H · 7D · ALL
+  const chDurMs = chDur === "1H" ? 36e5 : chDur === "24H" ? 864e5 : chDur === "7D" ? 6048e5 : null;
+  const chRealizedWin = useMemo(() => {
+    if (chDurMs == null) return null;  // ALL → the ledger total is authoritative
+    const cutoff = Date.now() - chDurMs;
+    const basis = {};
+    let realized = 0;
+    for (const f of chainFills) {
+      const m = basis[f.mint] || (basis[f.mint] = { qty: 0, costSol: 0 });
+      if (f.side === "buy") { m.qty += f.qty; m.costSol += f.sol; }
+      else if (m.qty > 0) {
+        const p2 = Math.min(1, f.qty / m.qty);
+        const b = m.costSol * p2;
+        if (f.at >= cutoff) realized += f.sol - b;
+        m.costSol -= b; m.qty = Math.max(0, m.qty - f.qty);
+      } else if (f.at >= cutoff) realized += f.sol;
+    }
+    return realized * SOL_USD;
+  }, [chainFills, chDurMs]);
+  const chPnl = useMemo(() => {
+    const holds = (walletChain && walletChain.holdings) || [];
+    let unrealUsd = 0, tracked = 0;
+    for (const h of holds) {
+      const led = chainLedger.byMint[h.mint];
+      if (!led || !(led.qty > 0)) continue;
+      const q = Math.min(h.qty, led.qty);
+      unrealUsd += (h.price || 0) * q - led.costSol * SOL_USD * (q / led.qty);
+      tracked++;
+    }
+    return { unrealUsd, realUsd: chainLedger.realizedSol * SOL_USD, tracked, total: holds.length };
+  }, [walletChain, chainLedger]);
   // any movement anywhere on the site — manual, bots, exits — flashes the wallet
   const [balFlash, setBalFlash] = useState(0);
   const prevBalRef = useRef({ s: solBalance, v: valoWallet });
@@ -4480,6 +6620,9 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
     return a + p.amt * (t.price / p.entry) * (p.pay === "SOL" ? SOL_USD : valoUsd);
   }, 0);
   const walletUsd = solBalance * SOL_USD + valoWallet * valoUsd;
+  const [chainOpen, setChainOpen] = useState(false);   // real wallet holdings, expanded
+  const [walletView, setWalletView] = useState("turbo"); // headline flips turbo ⇄ phantom
+  const [turboPop, setTurboPop] = useState(false);       // ⚡ turbo overlay off the Wallet tab
   const totalPnl = realizedPnl + unrealizedPnl;
   const totalEquity = walletUsd + Math.max(0, liveValue) + (extraEquity || 0); // + live bots & escrowed arms
   const [swapAmt, setSwapAmt] = useState("1");
@@ -4539,9 +6682,11 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   };
 
   return (
+    <>
     <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14, marginTop: 12, position: "relative", overflow: "hidden" }}>
       {/* PHANTOM GATE — funds stay blurred until the user's own wallet is in */}
-      {!walletConnected && (
+      {/* wallet identity lives in the pill under the username — no header box */}
+      {!walletConnected && !liveMode && (
         <div style={{ position: "absolute", inset: 0, zIndex: 6, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: 20,
           background: "rgba(10,13,19,0.35)", backdropFilter: "blur(2px)" }}>
           <div style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, letterSpacing: 1.5, color: T.text }}>🔒 CONNECT TO UNLOCK</div>
@@ -4556,7 +6701,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           <div style={{ fontFamily: T.mono, fontSize: 7, color: T.faint }}>DEMO · real Phantom hookup goes live at mainnet</div>
         </div>
       )}
-      <div style={!walletConnected ? { filter: "blur(9px)", pointerEvents: "none", userSelect: "none" } : undefined}>
+      <div style={!walletConnected && !liveMode ? { filter: "blur(9px)", pointerEvents: "none", userSelect: "none" } : undefined}>
       {/* username row */}
       {username && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${T.border}` }}>
@@ -4610,6 +6755,53 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           ⏳ {nameErr} · tap to dismiss
         </div>
       )}
+      {liveMode && wallet && wallet.address && onCreatorSplit && creatorAddr && wallet.address === creatorAddr && (
+        <button onClick={onCreatorSplit}
+          title="Split this wallet's SOL: 25% burned · 50% to the epoch vault · 25% stays. One Phantom signature."
+          style={{ width: "100%", border: `1px solid ${T.amber}66`, background: "rgba(240,185,11,0.08)", color: T.amber,
+            borderRadius: 9, padding: "8px", cursor: "pointer", fontFamily: T.mono, fontSize: 9, fontWeight: 900,
+            letterSpacing: 0.5, marginBottom: 10 }}>
+          👑 SPLIT CREATOR FEES · 25% 🔥 burn · 50% 🎁 vault · 25% keep
+        </button>
+      )}
+      {(liveMode || (walletConnected && wallet) || (turboState && turboState.pubkey)) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, paddingBottom: 10,
+          borderBottom: `1px solid ${T.border}`, flexWrap: "wrap" }}>
+          {walletConnected && wallet ? (<>
+          <a href={`https://solscan.io/account/${wallet.address}`} target="_blank" rel="noopener noreferrer"
+            title="Logged in with Phantom — open this address on Solscan"
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, fontFamily: T.mono, fontSize: 8.5,
+              fontWeight: 800, color: "#AB9FF2", textDecoration: "none", border: "1px solid rgba(125,92,240,0.45)",
+              borderRadius: 999, padding: "2px 9px", background: "rgba(125,92,240,0.08)" }}>
+            👻 {wallet.address.slice(0, 4)}…{wallet.address.slice(-4)} ↗
+            {(() => { const ps = (walletChain && walletChain.solVault) != null ? walletChain.solVault
+                : (!turboState && walletChain && walletChain.sol) || 0;
+              return <span style={{ color: ps > 0 ? T.green : T.faint }}>· ◎{(+ps || 0).toFixed(4)}</span>; })()}
+            {wallet.verified && <span style={{ color: T.green, fontSize: 7.5 }}>✓</span>}
+          </a>
+          <button onClick={onDisconnectWallet} title="Log the Phantom wallet out of VALO"
+            style={{ border: `1px solid ${T.border}`, background: "transparent", color: T.faint,
+              borderRadius: 999, padding: "2px 9px", cursor: "pointer", fontFamily: T.mono,
+              fontSize: 8, fontWeight: 800, letterSpacing: 0.5 }}>👻 LOG OUT</button>
+          </>) : liveMode ? (
+            <button onClick={onConnectWallet} title="Log in with Phantom — its balance and address track across the site"
+              style={{ border: "1px solid rgba(125,92,240,0.5)", background: "rgba(125,92,240,0.1)", color: "#AB9FF2",
+                borderRadius: 999, padding: "3px 11px", cursor: "pointer", fontFamily: T.mono,
+                fontSize: 8.5, fontWeight: 900, letterSpacing: 0.5 }}>👻 LOG IN WITH PHANTOM</button>
+          ) : null}
+          {turboState && turboState.pubkey && (
+            <a href={`https://solscan.io/account/${turboState.pubkey}`} target="_blank" rel="noopener noreferrer"
+              title="Your Turbo trading wallet — balance live"
+              style={{ display: "inline-flex", alignItems: "center", gap: 5, fontFamily: T.mono, fontSize: 8.5,
+                fontWeight: 800, color: turboSol > 0 ? T.green : T.amber, textDecoration: "none",
+                border: `1px solid ${turboSol > 0 ? "rgba(22,199,132,0.4)" : `${T.amber}55`}`,
+                borderRadius: 999, padding: "2px 9px", background: "rgba(255,255,255,0.02)" }}>
+              ⚡ {turboState.pubkey.slice(0, 4)}…{turboState.pubkey.slice(-4)} · ◎{turboSol.toFixed(4)}
+            </a>
+          )}
+          <span style={{ fontFamily: T.mono, fontSize: 7, color: T.faint, marginLeft: "auto" }}>read-only · refreshes 30s</span>
+        </div>
+      )}
       {/* social row — followers / following, both open the lists */}
       <div style={{ display: "flex", gap: 16, marginBottom: 10, fontFamily: T.mono, fontSize: 10.5 }}>
         <span onClick={() => onOpenFollowList && onOpenFollowList("followers")} style={{ cursor: "pointer", color: T.dim }}>
@@ -4619,11 +6811,57 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           <b style={{ color: T.text, fontSize: 12 }}>{followingCount}</b> Following
         </span>
       </div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-        {[["wallet", "💼 Wallet"], ["performance", "📈 Performance"]].map(([k, l]) => (
-          <button key={k} onClick={() => setTab(k)}
-            style={{ ...chip(tab === k), flex: 1, textAlign: "center", padding: "7px", fontSize: 11 }}>{l}</button>
-        ))}
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, position: "relative" }}>
+        {/* 💼 Wallet + ⚡ turbo segment: green = armed & ready, red = disarmed */}
+        <span style={{ flex: 1, display: "flex" }}>
+          <button onClick={() => setTab("wallet")}
+            style={{ ...chip(tab === "wallet"), flex: 1, textAlign: "center", padding: "7px", fontSize: 11,
+              borderTopRightRadius: liveMode && turboState ? 0 : undefined, borderBottomRightRadius: liveMode && turboState ? 0 : undefined }}>💼 Wallet</button>
+          {liveMode && (
+            <button data-tour="turbo" onClick={() => setTurboPop((v) => !v)}
+              title={!turboState ? "Set up your ⚡ TURBO wallet"
+                : turboState.unlocked && turboAutoOn ? "◆ single-tap trading ARMED — bots + one-tap buys/sells fire instantly"
+                : turboState.unlocked ? "⚡ TURBO unlocked — arm automation for single-tap trading"
+                : "⚡ TURBO locked (disarmed) — tap to unlock"}
+              style={{ flex: "0 0 auto", padding: "7px 11px", fontSize: 11, fontFamily: T.mono, fontWeight: 900, cursor: "pointer",
+                display: "inline-flex", alignItems: "center", gap: 3,
+                borderRadius: "0 8px 8px 0", borderLeft: "none",
+                border: `1px solid ${!turboState ? T.border2 : turboState.unlocked && turboAutoOn ? VALO_PURPLE : turboState.unlocked ? T.green : T.red}`,
+                background: !turboState ? "rgba(255,255,255,0.03)" : turboState.unlocked && turboAutoOn ? "rgba(125,92,240,0.14)" : turboState.unlocked ? "rgba(22,199,132,0.14)" : "rgba(234,57,67,0.12)",
+                color: !turboState ? T.faint : turboState.unlocked && turboAutoOn ? VALO_PURPLE : turboState.unlocked ? T.green : T.red,
+                boxShadow: turboState && turboState.unlocked && turboAutoOn ? `0 0 11px ${VALO_PURPLE}66` : turboState && turboState.unlocked ? `0 0 9px ${T.green}44` : turboState ? `0 0 8px ${T.red}33` : "none" }}>
+              {turboState && turboState.unlocked && turboAutoOn ? (
+                // ◆ the brand diamond, armed & spinning — same stone as the wordmark
+                <span style={{ position: "relative", width: 13, height: 13, display: "inline-block", perspective: 60 }}>
+                  <span style={{ position: "absolute", inset: 0, display: "block", transformStyle: "preserve-3d", animation: "diamond3d 5s linear infinite" }}>
+                    <span style={{ position: "absolute", inset: 1, display: "block", transform: "rotate(45deg)", borderRadius: 3.5,
+                      background: "linear-gradient(135deg, #a07ff2, #5b93ec)", boxShadow: `0 0 8px ${VALO_PURPLE}aa` }} />
+                    <span style={{ position: "absolute", left: 1, right: 1, top: 1, height: "42%", display: "block", transform: "rotate(45deg)", transformOrigin: "center", borderRadius: 3.5, background: "rgba(255,255,255,0.25)" }} />
+                  </span>
+                </span>
+              ) : "⚡"}
+              {turboPop ? "▴" : ""}
+            </button>
+          )}
+        </span>
+        <button onClick={() => setTab("performance")}
+          style={{ ...chip(tab === "performance"), flex: 1, textAlign: "center", padding: "7px", fontSize: 11 }}>📈 Performance</button>
+        {/* ⚡ TURBO popover — floats OVER the wallet, pushes nothing */}
+        {liveMode && turboPop && (
+          <>
+            <div onClick={() => setTurboPop(false)} style={{ position: "fixed", inset: 0, zIndex: 44 }} />
+            <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 45,
+              maxHeight: "62vh", overflowY: "auto", borderRadius: 12,
+              boxShadow: "0 18px 50px rgba(0,0,0,0.7)", border: `1px solid ${turboState && turboState.unlocked && turboAutoOn ? VALO_PURPLE : turboState && turboState.unlocked ? T.green : T.red}55`,
+              background: T.panel }}>
+              <TurboPanel turbo={turboState} onCreate={onTurboCreate} onUnlock={onTurboUnlock}
+                onLock={onTurboLock} onFund={onTurboFund} onSweep={onTurboSweep}
+                phantomOk={!!(wallet && wallet.address)} turboSol={turboSol}
+                autoOn={turboAutoOn} onToggleAuto={onTurboToggleAuto}
+                phantomSol={(walletChain && walletChain.solVault) || 0} valoMint={valoMint} />
+            </div>
+          </>
+        )}
       </div>
 
       {tab === "wallet" ? (
@@ -4634,49 +6872,164 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               style={{ position: "absolute", right: 0, top: 0, ...chip(false), padding: "3px 8px", fontSize: 11 }}>
               {hideBalance ? "🙈" : "👁"}
             </button>
-            <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1 }}>TOTAL EQUITY</div>
-            <div style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 800,
-              color: balFlash > 0 ? T.green : balFlash < 0 ? T.red : T.text,
-              textShadow: balFlash ? `0 0 14px ${balFlash > 0 ? "rgba(22,199,132,0.7)" : "rgba(234,57,67,0.7)"}` : "none",
-              transition: "color .25s ease, text-shadow .25s ease" }}>{mask(`$${totalEquity.toLocaleString(undefined, { maximumFractionDigits: 0 })}`)}</div>
-            <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 700, color: gain ? T.green : T.red }}>
-              {mask(`${gain ? "▲ +" : "▼ −"}$${Math.abs(totalPnl).toFixed(2)} all-time PnL`)}
+            <div style={{ userSelect: "none" }}>
+              <div onClick={() => chainOn && turboState && setWalletView((v) => (v === "turbo" ? "phantom" : "turbo"))}
+                title={chainOn && turboState ? "Tap to flip between your TURBO and PHANTOM wallet values" : undefined}
+                style={{ fontFamily: T.mono, fontSize: 9, color: chainOn ? (walletView === "phantom" ? "#AB9FF2" : T.amber) : T.faint, letterSpacing: 1,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: chainOn && turboState ? "pointer" : "default" }}>
+                {chainOn ? (turboState ? (walletView === "phantom" ? "👻 PHANTOM WALLET ⇄" : "⚡ TURBO WALLET ⇄") : "⛓ WALLET") : liveMode ? "⛓ WALLET" : "TOTAL EQUITY"}
+              </div>
+              {chainOn ? (
+                <>
+                  {(() => {
+                    const holdsW = (walletChain && walletChain.holdings) || [];
+                    const tokUsdOf = (side) => visHolds(holdsW).filter((h) => (side === "phantom") === (h.src === "phantom")).reduce((s2, h) => s2 + (h.usd || 0), 0);
+                    const vSol = walletView === "phantom"
+                      ? ((walletChain && walletChain.solVault) || 0)
+                      : (walletChain && walletChain.solTrading != null ? walletChain.solTrading : chSol);
+                    const vEq = vSol * SOL_USD + tokUsdOf(walletView === "phantom" ? "phantom" : "turbo");
+                    const showEq = turboState ? vEq : chEquity;
+                    return (
+                      <div onClick={() => turboState && setWalletView((v) => (v === "turbo" ? "phantom" : "turbo"))}
+                        title={turboState ? "Tap to flip turbo ⇄ phantom" : undefined}
+                        style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 800, cursor: turboState ? "pointer" : "default",
+                          color: walletView === "phantom" ? "#AB9FF2" : T.amber }}>
+                        {mask(`$${showEq.toLocaleString(undefined, { maximumFractionDigits: showEq < 100 ? 2 : 0 })}`)}
+                      </div>
+                    );
+                  })()}
+                  {walletView !== "phantom" && (() => {
+                    const holdsL = chainHoldingsLive2 || [];
+                    const unreal = holdsL.reduce((s, h) => s + (h.pnlUsd || 0), 0);
+                    const realized = (chainLedger.realizedSol || 0) * SOL_USD;
+                    const totalPnl = unreal + realized;
+                    const up = totalPnl >= 0;
+                    return (
+                      <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, color: up ? T.green : T.red, margin: "2px 0" }}>
+                        {mask(`${up ? "▲ +" : "▼ −"}$${Math.abs(totalPnl).toFixed(2)} all-time P/L`)}
+                        <span style={{ fontSize: 8, fontWeight: 700, color: T.dim, marginLeft: 6 }}>
+                          {mask(`${unreal >= 0 ? "+" : "−"}$${Math.abs(unreal).toFixed(2)} open · ${realized >= 0 ? "+" : "−"}$${Math.abs(realized).toFixed(2)} realized`)}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                  <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 700, color: T.dim }}>
+                    {walletView === "phantom" && turboState
+                      ? mask(`${(((walletChain && walletChain.solVault) || 0)).toFixed(4)} SOL · $VALO joins at launch · read-only`)
+                      : mask(`${chSol.toFixed(3)} SOL + ${chCount} token${chCount === 1 ? "" : "s"} · read-only`)}
+                  </div>
+                  {walletChain && walletChain.dual && (
+                    <div style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 700, color: T.faint }}>
+                      {mask(`⚡ ${((walletChain.solTrading) || 0).toFixed(4)} ◎ turbo · 👻 ${((walletChain.solVault) || 0).toFixed(4)} ◎ phantom`)}
+                    </div>
+                  )}
+                </>
+              ) : liveMode ? (
+                <>
+                  <div style={{ fontFamily: T.mono, fontSize: 22, fontWeight: 800, color: T.faint }}>$—</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 700, color: T.dim }}>set up your ⚡ TURBO wallet above — or connect Phantom</div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 800,
+                    color: balFlash > 0 ? T.green : balFlash < 0 ? T.red : T.text,
+                    textShadow: balFlash ? `0 0 14px ${balFlash > 0 ? "rgba(22,199,132,0.7)" : "rgba(234,57,67,0.7)"}` : "none",
+                    transition: "color .25s ease, text-shadow .25s ease" }}>{mask(`$${totalEquity.toLocaleString(undefined, { maximumFractionDigits: 0 })}`)}</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 700, color: gain ? T.green : T.red }}>
+                    {mask(`${gain ? "▲ +" : "▼ −"}$${Math.abs(totalPnl).toFixed(2)} all-time PnL`)}
+                  </div>
+                </>
+              )}
             </div>
           </div>
           {/* balance breakdown */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-            <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: "8px 10px" }}>
-              <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>SOL BALANCE</div>
-              <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>{mask(solBalance.toFixed(2))}</div>
-              <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{mask(`$${(solBalance * SOL_USD).toFixed(0)}`)}</div>
+            <div style={{ background: "#0c0f16", border: `1px solid ${chainOn ? `${T.amber}55` : T.border}`, borderRadius: 9, padding: "8px 10px" }}>
+              <div style={{ fontFamily: T.mono, fontSize: 8.5, color: (chainOn || liveMode) ? T.amber : T.faint }}>{(chainOn || liveMode) ? "⛓ SOL" : "SOL BALANCE"}</div>
+              <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>{mask(chainOn ? chSol.toFixed(3) : liveMode ? "—" : solBalance.toFixed(2))}</div>
+              <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{mask(chainOn ? `$${(chSol * SOL_USD).toFixed(0)}` : liveMode ? "connect wallet" : `$${(solBalance * SOL_USD).toFixed(0)}`)}</div>
             </div>
-            <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: "8px 10px" }}>
-              <div style={{ fontFamily: T.mono, fontSize: 8.5, color: VALO_PURPLE }}>$VALO BALANCE</div>
-              <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>{mask(Math.round(valoWallet).toLocaleString())}</div>
-              <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{mask(`$${(valoWallet * valoUsd).toFixed(0)}`)}</div>
-            </div>
-          </div>
-
-          {/* epoch rewards banner — last hour + all-time earned + jump to claim */}
-          <div style={{ background: "linear-gradient(120deg, rgba(240,185,11,0.08), rgba(125,92,240,0.06))", border: "1px solid rgba(240,185,11,0.3)", borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <span style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 800, letterSpacing: 1, color: T.amber }}>🎁 EPOCH REWARDS</span>
-              <button onClick={() => onOpenClaim && onOpenClaim()}
-                style={{ ...chip(false), padding: "4px 10px", fontSize: 9.5, color: T.amber, borderColor: "rgba(240,185,11,0.4)", background: "rgba(240,185,11,0.1)" }}>Claim →</button>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <div>
-                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>LAST HOUR</div>
-                <div style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 800, color: T.green }}>{mask(`${epochLastHour.toFixed(3)}`)}</div>
-                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>{mask(`$${(epochLastHour * valoUsdForEpoch).toFixed(2)} · $VALO`)}</div>
+            {chainOn ? (
+              <div style={{ background: "#0c0f16", border: `1px solid ${T.amber}55`, borderRadius: 9, padding: "8px 10px" }}>
+                <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.amber }}>⛓ TOKENS</div>
+                <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>{mask(`$${chTokensUsd.toFixed(0)}`)}</div>
+                <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{mask(`${chCount} position${chCount === 1 ? "" : "s"}`)}</div>
               </div>
-              <div>
-                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>TOTAL EARNED · all-time</div>
-                <div style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 800, color: VALO_PURPLE }}>{mask(`${epochTotalEarned.toFixed(3)}`)}</div>
-                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>{mask(`$${(epochTotalEarned * valoUsdForEpoch).toFixed(2)} · incl. withdrawn`)}</div>
+            ) : liveMode ? (
+              <div style={{ background: "#0c0f16", border: `1px dashed ${T.amber}44`, borderRadius: 9, padding: "8px 10px" }}>
+                <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.amber }}>⛓ TOKENS</div>
+                <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 700, color: T.faint }}>connect wallet</div>
               </div>
-            </div>
+            ) : (
+              <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: "8px 10px" }}>
+                <div style={{ fontFamily: T.mono, fontSize: 8.5, color: VALO_PURPLE }}>$VALO BALANCE</div>
+                <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>{mask(Math.round(valoWallet).toLocaleString())}</div>
+                <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>{mask(`$${(valoWallet * valoUsd).toFixed(0)}`)}</div>
+              </div>
+            )}
           </div>
+          {chainOn ? (
+            <div style={{ background: "#0c0f16", border: `1px solid ${T.amber}44`, borderRadius: 9, padding: "8px 10px", marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 10.5 }}>
+                <span style={{ color: T.amber }}>⛓ POSITIONS · {chCount}</span>
+                <b style={{ color: T.text }}>{mask(`$${chTokensUsd.toFixed(0)}`)}</b>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 10.5, marginTop: 4 }}>
+                <span style={{ color: T.faint }}>UNREALIZED · est.</span>
+                <b style={{ color: chPnl.tracked === 0 ? T.faint : chPnl.unrealUsd >= 0 ? T.green : T.red }}>
+                  {mask(chPnl.tracked === 0 ? "—" : `${chPnl.unrealUsd >= 0 ? "+" : "−"}$${Math.abs(chPnl.unrealUsd).toFixed(2)}`)}
+                </b>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: T.mono, fontSize: 10.5, marginTop: 4 }}>
+                <span style={{ color: T.faint, display: "flex", alignItems: "center", gap: 6 }}>
+                  REALIZED · est.
+                  <span style={{ display: "flex", gap: 3 }}>
+                    {["1H", "24H", "7D", "ALL"].map((d) => (
+                      <button key={d} onClick={() => setChDur(d)}
+                        style={{ border: `1px solid ${chDur === d ? T.amber : T.border}`, borderRadius: 5,
+                          background: chDur === d ? "rgba(240,185,11,0.12)" : "transparent",
+                          color: chDur === d ? T.amber : T.faint, cursor: "pointer",
+                          fontFamily: T.mono, fontSize: 6.5, fontWeight: 900, padding: "1px 5px" }}>{d}</button>
+                    ))}
+                  </span>
+                </span>
+                {(() => { const v = chDur === "ALL" ? chPnl.realUsd : (chRealizedWin || 0);
+                  return <b style={{ color: chainFills.length === 0 ? T.faint : v >= 0 ? T.green : T.red }}>
+                    {mask(chainFills.length === 0 ? "—" : `${v >= 0 ? "+" : "−"}$${Math.abs(v).toFixed(2)}`)}
+                  </b>; })()}
+              </div>
+              {(chainHoldingsLive2 || ((walletChain && walletChain.holdings) || [])).filter((h) => !h.spam && !h.dust).slice(0, 10).map((h) => {
+                const pnl = h.pnlUsd != null ? h.pnlUsd : (() => {
+                  const led = chainLedger.byMint[h.mint];
+                  const hasBasis = led && led.qty > 0;
+                  const q = hasBasis ? Math.min(h.qty, led.qty) : 0;
+                  return hasBasis ? (h.price || 0) * q - led.costSol * SOL_USD * (q / led.qty) : null;
+                })();
+                return (
+                  <div key={h.mint} onClick={() => onOpenByMintChain && onOpenByMintChain(h.mint)}
+                    title="Open this token"
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8,
+                      fontFamily: T.mono, fontSize: 9.5, marginTop: 6, paddingTop: 6, borderTop: `1px solid ${T.border}`,
+                      cursor: onOpenByMintChain ? "pointer" : "default" }}>
+                    <span style={{ color: T.text, fontWeight: 700, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      ${h.sym || h.name || h.mint.slice(0, 5)}
+                      {h.name && h.sym && h.name !== h.sym && <span style={{ color: T.faint, fontWeight: 400, fontSize: 8 }}> {h.name.slice(0, 16)}</span>}
+                      <span style={{ color: T.faint, fontWeight: 400 }}> {fmtQty(h.qty)}</span>
+                    </span>
+                    <span style={{ flex: "0 0 auto", display: "flex", gap: 8 }}>
+                      {pnl != null && <b style={{ color: pnl >= 0 ? T.green : T.red }}>{mask(`${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}`)}</b>}
+                      <b style={{ color: T.dim }}>{mask(`$${(h.usd || 0).toFixed(0)}`)}</b>
+                    </span>
+                  </div>
+                );
+              })}
+              {chPnl.tracked < chPnl.total && (
+                <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 6, lineHeight: 1.5 }}>
+                  PnL is estimated from orders placed through VALO. Coins acquired elsewhere show value only — VALO has no cost basis for them.
+                </div>
+              )}
+            </div>
+          ) : liveMode ? null : (
           <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: "8px 10px", marginBottom: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 10.5 }}>
               <span style={{ color: T.faint }}>IN LIVE TRADES · {fmtQty(Object.entries(positions || {}).reduce((s, [id, p]) => { const t = (tokens || []).find((x) => String(x.id) === String(id)); return t && p.amt > 0 ? s + posTokenQty(t, p) : s; }, 0))} tokens</span>
@@ -4691,8 +7044,12 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               <b style={{ color: realizedPnl >= 0 ? T.green : T.red }}>{mask(`${realizedPnl >= 0 ? "+" : "−"}$${Math.abs(realizedPnl).toFixed(2)}`)}</b>
             </div>
           </div>
+          )}
       {botsSlot}
       {heldSlot}
+          {/* deposit / withdraw — PAPER machinery, demo only. The swap box below
+              lives in BOTH modes: on live it buys real $VALO. */}
+          {!liveMode && (<>
           {/* deposit / withdraw — clicking fills the max you can do, then confirm */}
           <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: 10, marginBottom: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
@@ -4761,6 +7118,33 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
             </div>
             {dwArmed && <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, textAlign: "center", marginTop: 6 }}>click again to confirm {dwArmed}</div>}
           </div>
+          </>)}
+          {liveMode && (
+            <div style={{ background: "#0c0f16", border: `1px solid ${VALO_PURPLE}44`, borderRadius: 9, padding: 10, marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
+                <span style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1 }}>⇄ SWAP · SOL → $VALO <span style={{ color: T.amber }}>⛓ real</span></span>
+              </div>
+              {valoMint ? (
+                <>
+                  <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.dim, lineHeight: 1.6, marginBottom: 8 }}>
+                    Buys real $VALO on-chain with SOL from your connected wallet — same review &amp; confirm as any live order.
+                  </div>
+                  <button onClick={() => onRealSwap && onRealSwap()}
+                    disabled={!(wallet && wallet.address)}
+                    style={{ width: "100%", border: "none", borderRadius: 8, padding: "9px", fontFamily: T.mono, fontSize: 11,
+                      fontWeight: 800, background: wallet && wallet.address ? VALO_PURPLE : "#1a2030",
+                      color: wallet && wallet.address ? "#0a0713" : T.faint, cursor: wallet && wallet.address ? "pointer" : "not-allowed" }}>
+                    {wallet && wallet.address ? "⛓ SWAP SOL → $VALO" : "connect wallet to swap"}
+                  </button>
+                </>
+              ) : (
+                <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.dim, lineHeight: 1.6, textAlign: "center", padding: "6px 0" }}>
+                  Real $VALO swaps switch on the moment the token launches — this box goes live automatically.
+                </div>
+              )}
+            </div>
+          )}
+          {!liveMode && (<>
           {/* swap SOL ⇄ VALO, no site tax, flippable direction */}
           <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: 10 }}>
             {(() => {
@@ -4807,6 +7191,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           </div>
 
           {/* bot trades — sold auto-bots live here, not in the Live P/L box */}
+          </>)}
           {(botHistory || []).length > 0 && (
             <div style={{ marginTop: 10 }}>
               <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1, marginBottom: 7 }}>🤖 BOT TRADES · tap for full stats</div>
@@ -4827,9 +7212,48 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               </div>
             </div>
           )}
+          {liveMode && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontFamily: T.mono, fontSize: 9, color: T.amber, letterSpacing: 1, marginBottom: 7 }}>
+                ⛓ ACTIVITY <span style={{ fontSize: 7.5, color: T.faint }}>· your real orders through VALO</span>
+              </div>
+              {chainFills.length === 0 ? (
+                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center", padding: "12px 0", border: `1px dashed ${T.border}`, borderRadius: 9 }}>No real trades yet — your on-chain buys & sells show here.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 5, maxHeight: 240, overflowY: "auto" }}>
+                  {[...chainFills].reverse().slice(0, 30).map((f, i) => (
+                    <div key={f.sig || i}
+                      onClick={() => onOpenChainFill && onOpenChainFill(f)}
+                      title="Open the chart at this trade"
+                      style={{ display: "flex", alignItems: "center", gap: 8, background: "#0c0f16", border: `1px solid ${T.border}`,
+                        borderLeft: `2px solid ${f.side === "buy" ? T.green : T.red}`, borderRadius: 8, padding: "7px 9px",
+                        cursor: onOpenChainFill ? "pointer" : "default" }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontFamily: T.mono, fontSize: 10.5, fontWeight: 800, color: f.side === "buy" ? T.green : T.red }}>
+                          {f.side === "buy" ? "BUY" : "SELL"} <span style={{ color: T.text }}>${f.sym}</span>
+                          <span style={{ color: T.amber, fontSize: 7.5, marginLeft: 5 }}>⛓</span>
+                        </div>
+                        <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>
+                          {mask(`${fmtQty(f.qty)} ${f.sym} · ${f.sol.toFixed(4)} SOL`)} · {new Date(f.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </div>
+                      </div>
+                      {f.sig && <a onClick={(e) => e.stopPropagation()} href={`https://solscan.io/tx/${f.sig}`} target="_blank" rel="noopener noreferrer"
+                        title="View on Solscan" style={{ flexShrink: 0, textDecoration: "none", color: T.blue, fontSize: 12 }}>🔗</a>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {!liveMode && (<>
           {/* activity feed — token, amount, PnL if sold, all on one bar, solscan link */}
           <div style={{ marginTop: 10 }}>
-            <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1, marginBottom: 7 }}>📜 ACTIVITY</div>
+            <div onClick={() => onOpenActivity && onOpenActivity()} title="Open every trade — searchable and sortable"
+              style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1, marginBottom: 7 }}>
+              <span style={{ textDecoration: "underline dotted", textUnderlineOffset: 3 }}>📜 ACTIVITY</span>
+              <span style={{ fontSize: 7.5, color: VALO_PURPLE, fontWeight: 900, letterSpacing: 1 }}>VIEW ALL ▸</span>
+            </div>
             {activity.length === 0 ? (
               <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center", padding: "12px 0", border: `1px dashed ${T.border}`, borderRadius: 9 }}>No trades yet — your buys & sells show here.</div>
             ) : (
@@ -4861,13 +7285,55 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                           {mask(`${gain ? "+" : "−"}$${Math.abs(a.pnlMoney * SOL_USD).toFixed(2)}`)}
                         </span>
                       )}
-                      <a href={`https://solscan.io/tx/${a.tx}`} target="_blank" rel="noopener noreferrer" title="View on Solscan"
+                      <a href={`https://solscan.io/tx/${a.txFull || a.tx}`} target="_blank" rel="noopener noreferrer" title="View on Solscan"
                         style={{ flexShrink: 0, textDecoration: "none", color: T.blue, fontSize: 12 }}>🔗</a>
                     </div>
                   );
                 })}
               </div>
             )}
+          </div>
+          </>)}
+        </>
+      ) : chainOn ? (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+            <div>
+              <div style={{ fontFamily: T.mono, fontSize: 9, color: T.amber }}>⛓ REAL PnL · est. from VALO fills</div>
+              <div style={{ fontFamily: T.mono, fontSize: 20, fontWeight: 800,
+                color: chainFills.length === 0 ? T.faint : (chPnl.realUsd + chPnl.unrealUsd) >= 0 ? T.green : T.red }}>
+                {mask(chainFills.length === 0 ? "$—" : `${(chPnl.realUsd + chPnl.unrealUsd) >= 0 ? "+" : "−"}$${Math.abs(chPnl.realUsd + chPnl.unrealUsd).toFixed(2)}`)}
+              </div>
+              <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.dim }}>
+                {mask(`realized ${chPnl.realUsd >= 0 ? "+" : "−"}$${Math.abs(chPnl.realUsd).toFixed(2)} · unrealized ${chPnl.unrealUsd >= 0 ? "+" : "−"}$${Math.abs(chPnl.unrealUsd).toFixed(2)}`)}
+              </div>
+            </div>
+            <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, textAlign: "right" }}>
+              {chainFills.length} fill{chainFills.length === 1 ? "" : "s"}<br />through VALO
+            </div>
+          </div>
+          {chainFills.length === 0 && (
+            <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center", padding: "18px 0", lineHeight: 1.7 }}>
+              No real orders through VALO yet.<br />Fills will appear here the moment one confirms on-chain.
+            </div>
+          )}
+          {[...chainFills].reverse().slice(0, 40).map((f, i) => (
+            <div key={f.sig || i} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8,
+              fontFamily: T.mono, fontSize: 9.5, padding: "7px 2px", borderBottom: `1px solid ${T.border}` }}>
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <b style={{ color: f.side === "buy" ? T.green : T.red }}>{f.side === "buy" ? "▲ BUY" : "▼ SELL"}</b>
+                <span style={{ color: T.text, fontWeight: 700 }}> {f.sym}</span>
+                <span style={{ color: T.faint }}> · {fmtQty(f.qty)} · {f.sol.toFixed(4)} SOL</span>
+              </span>
+              <span style={{ flex: "0 0 auto", display: "flex", gap: 8, alignItems: "baseline" }}>
+                <span style={{ color: T.faint, fontSize: 8 }}>{new Date(f.at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                {f.sig && <a href={`https://solscan.io/tx/${f.sig}`} target="_blank" rel="noopener noreferrer"
+                  style={{ color: T.amber, fontSize: 8, textDecoration: "underline" }}>tx ↗</a>}
+              </span>
+            </div>
+          ))}
+          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 8, lineHeight: 1.5 }}>
+            Amounts are the quoted fill at order time; the exact on-chain figure can differ slightly with slippage — the Solscan link is authoritative. Recorded on this device only.
           </div>
         </>
       ) : (
@@ -4965,12 +7431,18 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
       )}
     </div>
     </div>
+    </>
   );
 }
 
 function PerfChart({ series, mode, height = 130 }) {
   const ref = useRef(null);
-  const [hover, setHover] = useState(null); // {i, x, y, v}
+  const [hover, setHover] = useState(null);
+  const scaleRef = useRef({ key: null, lo: NaN, hi: NaN }); // locked price axis
+  const [logMode, setLogMode] = useState("auto");  // auto | log | linear
+  const [axisMC, setAxisMC] = useState(false);   // right axis shows market cap instead of price
+  const fmtAxis = (v) => (axisMC && mcRatio > 0 ? fmt$(v * mcRatio) : fmtP(v));
+  const [pinCross, setPinCross] = useState(null); // mobile: held crosshair {cx, cy} // {i, x, y, v}
   const geomRef = useRef(null);
   useEffect(() => {
     const c = ref.current; if (!c) return;
@@ -5149,14 +7621,364 @@ function CardMiniChart({ candles, hue, mode, tfMin = 15, count = 90, full = fals
   return <canvas ref={ref} style={{ width: full ? "100%" : "128%", height: full ? "100%" : 52, display: "block" }} />;
 }
 
-function TokenCard({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf = 15, isMobile = false }) {
+const visHolds = (arr) => (arr || []).filter((h) => h && !h.spam && !h.dust);
+// 🧾 turn Solana program errors into something a trader can act on
+const humanSwapError = (raw) => {
+  const m = String(raw || "");
+  if (/0x1789|0x1771|slippage|SlippageToleranceExceeded/i.test(m))
+    return "Price moved faster than your slippage allowed. Raise slippage (fresh launches often need 5-15%) and try again.";
+  if (/0x1|insufficient (lamports|funds)|InsufficientFunds/i.test(m) && /lamports|funds/i.test(m))
+    return "Not enough SOL in your turbo wallet to cover the trade plus network fees.";
+  if (/blockhash|BlockhashNotFound|expired/i.test(m))
+    return "The quote expired before it landed. Try again — it should go straight through.";
+  if (/0x1786|TooLittleSolReceived|TooMuchSolRequired/i.test(m))
+    return "The pool price moved mid-trade. Raise slippage a little and retry.";
+  if (/AccountNotFound|could not find account/i.test(m))
+    return "Token account missing — the first buy of a token creates one. Retry once.";
+  if (/simulation failed/i.test(m) && !/0x/.test(m))
+    return "The network rejected the simulation. Try again in a moment.";
+  return m;
+};
+// 🚫 pump curve launches at ≈$4.2K MC — a pump token priced BELOW that floor
+// (mayhem-mode territory) is broken, drained, or abandoned. Not scanner material.
+const belowLaunch = (t) => {
+  if (!t || !t.liveMint || !/pump$/i.test(t.liveMint)) return false;
+  const mc = t.mc || 0;
+  return mc > 0 && mc < 3800;
+};
+// ✅ only OFFICIAL, valid links ever render: https + the platform's real domain
+const legitSocial = (kind, url) => {
+  if (!url || typeof url !== "string") return null;
+  let u;
+  try { u = new URL(url); } catch (e) { return null; }
+  if (u.protocol !== "https:") return null;
+  const h = u.hostname.toLowerCase().replace(/^www\./, "");
+  const ok = {
+    x: ["x.com", "twitter.com", "mobile.twitter.com"],
+    tg: ["t.me", "telegram.me", "telegram.org"],
+    dc: ["discord.gg", "discord.com"],
+    pump: ["pump.fun"],
+    dex: ["dexscreener.com"],
+    site: null,   // any https site counts as a website
+  }[kind];
+  if (ok === undefined) return null;
+  if (ok === null) return url;
+  return ok.some((d) => h === d || h.endsWith("." + d)) ? url : null;
+};
+// 📐 per-token trading metrics, derived from the shortest live stat window
+const tokMetrics = (t) => {
+  const winMin = t.statWin === "5m" ? 5 : t.statWin === "1h" ? 60 : 1440;
+  const tx = (t.buys || 0) + (t.sells || 0);
+  const flow = (t.greenUsd || 0) + (t.redUsd || 0);
+  const buyRatio = tx > 0 ? (t.buys || 0) / tx : 0;
+  const rateNow = winMin <= 60 ? flow / winMin : (t.vol24 || 0) / 1440;   // $/min lately
+  const rateDay = (t.vol24 || 0) / 1440;                                  // $/min baseline
+  const accel = rateDay > 1 ? rateNow / rateDay : rateNow > 0 ? 3 : 0;    // volume acceleration
+  const ageMs = t.createdAt ? Date.now() - t.createdAt : Infinity;
+  // pump bonding curve ≈ mc / $69K graduation; graduated pools read 100
+  const isPump = !!(t.liveMint && /pump$/i.test(t.liveMint || ""));
+  const curvePct = isPump ? Math.min(100, ((t.mc || 0) / 69000) * 100) : 100;
+  const turnover = (t.mc || 0) > 0 ? (t.vol24 || 0) / t.mc : 0;
+  return { winMin, tx, txRate: tx / winMin, flow, buyRatio, accel, rateNow, ageMs, isPump, curvePct, turnover };
+};
+// 🍀 weighted lottery order — health-biased randomness for hidden gems
+const luckyOrder = (list, seed, onlyElig = false) => {
+  const elig = list.filter((t) => {
+    const m = tokMetrics(t);
+    if (!t.img) return false;                        // zero-metadata tokens are out
+    // anti-dead, honestly measured: SOME real trading in the window we have,
+    // or a live price move. (The old rule demanded a ≤1h window, which most
+    // tokens don't report — it starved the draw down to one or two names.)
+    const alive = m.tx >= 3 || (t.vol24 || 0) > 500 || Math.abs(t.ch || 0) > 0.5;
+    return alive;
+  });
+  const weightOf = (t) => {
+    const m = tokMetrics(t);
+    let w = 1;
+    if ((t.mc || 0) < 50000) w += 1.6;               // undervalued bias
+    if (m.curvePct >= 5 && m.curvePct <= 60) w += 1.2; // ground-floor-but-alive curve
+    if ((t.ch || 0) > 0) w += 0.8;                   // quietly climbing
+    if (m.buyRatio > 0.6) w += 0.8;                  // accumulation over distribution
+    w += Math.min(1.5, (t.traders || 0) / Math.max(10, m.ageMs / 60000) * 0.4); // holders growing vs age
+    return w;
+  };
+  // sample without replacement by weight, deterministic per seed
+  const pool = elig.map((t) => ({ t, w: weightOf(t), r: ((hashStr(String(seed) + (t.liveMint || t.id)) % 10000) + 1) / 10001 }));
+  pool.forEach((x) => { x.key = Math.pow(x.r || 0.0001, 1 / x.w); });     // weighted-lottery key
+  pool.sort((a, b) => b.key - a.key);
+  const picked = pool.map((x) => x.t);
+  if (onlyElig) return picked;
+  const rest = list.filter((t) => !picked.includes(t));
+  return [...picked, ...rest];
+};
+function fmtAge(createdAt) {
+  if (!(createdAt > 0)) return null;
+  const m = Math.max(1, Math.floor((Date.now() - createdAt) / 60000));
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  const d = Math.floor(h / 24);
+  return d < 30 ? `${d}d ${h % 24}h` : `${Math.floor(d / 30)}mo ${d % 30}d`;
+}
+function EpochWeightCard({ cloudUser, liveData }) {
+  const [d, setD] = React.useState(null);
+  React.useEffect(() => {
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch(`/api/epoch${cloudUser ? `?user=${cloudUser.id}` : ""}&t=${Math.floor(Date.now() / 20000)}`.replace("epoch&", "epoch?"));
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop) setD(j);
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 30000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [cloudUser && cloudUser.id]);
+  if (!liveData || !d || !d.configured) return null;
+  return (
+    <div style={{ background: "#0c0f16", border: `1px solid ${T.border2}`, borderRadius: 10, padding: "9px 11px", marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+        <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: T.amber }}>🏋 THIS EPOCH · {d.minsLeft}m left</span>
+        <span style={{ fontFamily: T.mono, fontSize: 8, color: T.dim }}>pool {d.pool != null ? `◎${d.pool.toFixed(3)}` : "—"} · {d.participants} in</span>
+      </div>
+      {d.you ? (
+        <div style={{ fontFamily: T.mono, fontSize: 10, color: T.text, lineHeight: 1.8 }}>
+          your weight <b style={{ color: VALO_PURPLE }}>×{d.you.weight}</b>
+          <span style={{ color: T.dim, fontSize: 8.5 }}> (◎{d.you.volSol} traded this hour)</span><br />
+          projected share <b style={{ color: T.green }}>{(d.you.share * 100).toFixed(1)}%</b>
+          {d.pool != null && d.you.share > 0 && <span style={{ color: T.dim, fontSize: 8.5 }}> ≈ ◎{(d.pool * d.you.share).toFixed(4)} equivalent in $VALO</span>}
+        </div>
+      ) : (
+        <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, lineHeight: 1.6 }}>
+          trade on turbo this hour to earn a slice — every real fill adds weight, callout wins multiply it
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────
+// 🧭 FIRST-RUN TOUR — a guided cursor glides to each control, spotlights
+// it, and says what it does. Copy adapts to mouse vs touch. Any step whose
+// target isn't on screen is skipped, so it never points at nothing.
+// ───────────────────────────────────────────────────────────────────
+function ValoTour({ isMobile, onDone, walletReady = false, turboReady = false }) {
+  const STEPS = React.useMemo(() => ([
+    { sel: '[data-tour="lenses"]', title: "FIVE SCANNER LENSES",
+      pc: "Click here to switch how the board is picked: 🔥 TRENDING, 💪 HOT, 🍼 NEW, 📈 MOVERS, or the 🍀 LUCKY PICK lottery. Each lens streams its own tokens — nothing below its launch price, nothing dead.",
+      mob: "Tap to switch lenses: TRENDING, HOT, NEW, MOVERS, or LUCKY PICK. Pull the scanner down from the top to deal a fresh hand." },
+    { sel: '[data-tour="score"]', title: "THE SCORE EXPLAINS ITSELF",
+      pc: "That number is built from real LP depth, traders, flow balance, age and curve progress — nothing invented. Click it for live buy/sell pressure and vitals; the chart stays exactly where it is.",
+      mob: "Built from real LP, traders, flow and age. Tap it for live pressure and vitals without leaving the scanner." },
+    { sel: '[data-tour="search"]', title: "SEARCH ANYTHING",
+      pc: "Paste a contract address, type a ticker, or look up a trader. Every Solana pair is searchable — the chart opens on the real pool.",
+      mob: "Paste a CA, type a ticker, or find a trader. Tap a result and its chart opens." },
+    { sel: '[data-tour="chart"]', title: "THE CHART",
+      pc: "Drag to pan, scroll to zoom on your cursor, run the price axis to stretch it. ⛰ ALL frames the token's whole history, ◉ LIVE snaps back to the edge, and double-click resets.",
+      mob: "Drag to pan, pinch to zoom. Hold 2 seconds to lock the gray crosshair on screen — the chart freezes completely so you can read exact values. Hold again to release." },
+    { sel: '[data-tour="callout"]', title: "CALL IT",
+      pc: "Stamp your entry market cap on any token. Land 2x and your call rides the site-wide banner — bigger multiples animate harder, and ranking earns epoch bonuses up to +4×.",
+      mob: "Stamp your entry MC on any token. Hit 2x and it rides the banner site-wide, with epoch bonuses for ranking." },
+    { sel: '[data-tour="wallet"]', title: "YOUR WALLET",
+      pc: "Connect Phantom here. Nothing is custodial — VALO never holds your keys, and every fill settles from your own wallet on chain.",
+      mob: "Connect Phantom from this tab. Nothing custodial — every fill settles from your own wallet. Hold the tab to peek your Phantom balance.",
+      skipIf: () => walletReady },
+    { sel: '[data-tour="turbo"]', title: "⚡ TURBO — YOUR TRIGGER",
+      pc: "Fund the turbo wallet and trading becomes one tap: no popup, no signature per trade. The lightning turns into a spinning diamond the moment single-tap trading is armed.",
+      mob: "Fund turbo and trading becomes one tap — no popup per trade. The lightning becomes a spinning diamond when it's armed.",
+      skipIf: () => turboReady },
+    { sel: '[data-tour="buy"]', title: "BUYING FOR REAL",
+      pc: "Buys route through Jupiter straight from your wallet. The 0.6% fee splits on-chain in the same transaction — 40% burned, 40% to the hourly reward vault, 20% treasury. Check any of it on Solscan.",
+      mob: "Buys route through Jupiter from your own wallet. The 0.6% fee splits on-chain in the same transaction: 40% burned, 40% to the reward vault, 20% treasury." },
+    { sel: '[data-tour="claim"]', title: "🎁 HOURLY EPOCHS",
+      pc: "Every real fill earns you weight for the current hour, and leaderboard placements stack bonuses on top. Open this to see your live weight, the vault pool, and where your rewards should land.",
+      mob: "Every real fill earns weight this hour, and ranking stacks bonuses. Open this for your live weight, the vault pool, and your payout wallet." },
+  ]), [walletReady, turboReady]);
+
+  const [i, setI] = React.useState(0);
+  const [rect, setRect] = React.useState(null);
+  const [cursor, setCursor] = React.useState({ x: 0, y: 0 });
+  const [ready, setReady] = React.useState(false);
+
+  // find the first step from `start` that actually exists on screen
+  const resolve = React.useCallback((start) => {
+    for (let k = start; k < STEPS.length; k++) {
+      if (STEPS[k].skipIf && STEPS[k].skipIf()) continue;   // already done it — don't teach it
+      const el = document.querySelector(STEPS[k].sel);
+      if (el) {
+        const r = el.getBoundingClientRect();
+        if (r.width > 8 && r.height > 8 && r.top < window.innerHeight && r.bottom > 0) return { k, r };
+      }
+    }
+    return null;
+  }, [STEPS]);
+
+  React.useEffect(() => {
+    const hit = resolve(i);
+    if (!hit) { onDone(); return; }
+    if (hit.k !== i) { setI(hit.k); return; }
+    const el = document.querySelector(STEPS[hit.k].sel);
+    try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (e) {}
+    const settle = setTimeout(() => {
+      const r2 = el.getBoundingClientRect();
+      setRect({ top: r2.top, left: r2.left, width: r2.width, height: r2.height });
+      setCursor({ x: r2.left + r2.width / 2, y: r2.top + r2.height / 2 });
+      setReady(true);
+    }, 420);
+    return () => clearTimeout(settle);
+  }, [i, resolve, STEPS, onDone]);
+
+  React.useEffect(() => {
+    const onResize = () => {
+      const el = document.querySelector(STEPS[i] && STEPS[i].sel);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setRect({ top: r.top, left: r.left, width: r.width, height: r.height });
+      setCursor({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+    };
+    window.addEventListener("resize", onResize);
+    window.addEventListener("scroll", onResize, true);
+    return () => { window.removeEventListener("resize", onResize); window.removeEventListener("scroll", onResize, true); };
+  }, [i, STEPS]);
+
+  if (!rect || !ready) return null;
+  const st = STEPS[i];
+  const pad = 8;
+  const box = { top: rect.top - pad, left: rect.left - pad, width: rect.width + pad * 2, height: rect.height + pad * 2 };
+  // card goes below the target, or above when there's no room
+  const cardW = Math.min(360, window.innerWidth - 28);
+  const below = box.top + box.height + 250 < window.innerHeight;
+  const cardTop = below ? box.top + box.height + 14 : Math.max(12, box.top - 216);
+  const cardLeft = Math.max(14, Math.min(window.innerWidth - cardW - 14, box.left + box.width / 2 - cardW / 2));
+
+  return createPortal(
+    <div style={{ position: "fixed", inset: 0, zIndex: 4000, pointerEvents: "auto" }}>
+      {/* scrim with a hole punched over the target */}
+      <div onClick={() => setI(i + 1)} style={{ position: "absolute", inset: 0,
+        background: "rgba(4,6,10,0.74)", backdropFilter: "blur(1.5px)",
+        WebkitMaskImage: `radial-gradient(circle at ${box.left + box.width / 2}px ${box.top + box.height / 2}px, transparent 0, transparent ${Math.max(box.width, box.height) * 0.62}px, #000 ${Math.max(box.width, box.height) * 0.62 + 30}px)`,
+        maskImage: `radial-gradient(circle at ${box.left + box.width / 2}px ${box.top + box.height / 2}px, transparent 0, transparent ${Math.max(box.width, box.height) * 0.62}px, #000 ${Math.max(box.width, box.height) * 0.62 + 30}px)` }} />
+      {/* the ring around the highlighted control */}
+      <div style={{ position: "absolute", top: box.top, left: box.left, width: box.width, height: box.height,
+        border: `2px solid ${VALO_PURPLE}`, borderRadius: 12, boxShadow: `0 0 0 3px ${VALO_PURPLE}33, 0 0 26px ${VALO_PURPLE}88`,
+        pointerEvents: "none", transition: "all .5s cubic-bezier(.4,0,.2,1)", animation: "tourPulse 2s ease-in-out infinite" }} />
+      {/* the guide cursor / touch dot */}
+      <div style={{ position: "absolute", top: cursor.y, left: cursor.x, pointerEvents: "none",
+        transition: "all .55s cubic-bezier(.4,0,.2,1)", transform: "translate(-6px, -4px)", zIndex: 2 }}>
+        {isMobile ? (
+          <span style={{ display: "block", width: 26, height: 26, marginLeft: -13, marginTop: -13, borderRadius: "50%",
+            border: `2px solid ${VALO_PURPLE}`, background: `${VALO_PURPLE}44`, animation: "tourTap 1.5s ease-out infinite" }} />
+        ) : (
+          <svg width="26" height="30" viewBox="0 0 26 30" style={{ filter: `drop-shadow(0 2px 6px rgba(0,0,0,0.8))` }}>
+            <path d="M2 2 L2 22 L7.5 17 L11 26 L15 24.2 L11.6 15.6 L19 15.4 Z"
+              fill="#fff" stroke={VALO_PURPLE} strokeWidth="1.6" strokeLinejoin="round" />
+          </svg>
+        )}
+      </div>
+      {/* the explanation card */}
+      <div style={{ position: "absolute", top: cardTop, left: cardLeft, width: cardW,
+        background: T.panel, border: `1px solid ${VALO_PURPLE}77`, borderRadius: 14, padding: 15,
+        boxShadow: "0 24px 60px rgba(0,0,0,0.75)", transition: "all .5s cubic-bezier(.4,0,.2,1)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
+          <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: VALO_PURPLE, letterSpacing: 1.2 }}>{st.title}</span>
+          <span style={{ marginLeft: "auto", display: "flex", gap: 3.5, alignItems: "center" }}>
+            {STEPS.map((_, k) => (
+              <span key={k} style={{ width: k === i ? 14 : 5, height: 5, borderRadius: 3,
+                background: k === i ? VALO_PURPLE : k < i ? `${VALO_PURPLE}66` : T.border2, transition: "all .3s" }} />
+            ))}
+          </span>
+        </div>
+        <div style={{ fontFamily: T.mono, fontSize: 10.5, color: T.text, lineHeight: 1.75 }}>
+          {isMobile ? st.mob : st.pc}
+        </div>
+        <div style={{ display: "flex", gap: 7, marginTop: 13, alignItems: "center" }}>
+          <button onClick={onDone} style={{ background: "transparent", border: "none", cursor: "pointer",
+            fontFamily: T.mono, fontSize: 9.5, color: T.faint }}>skip tour</button>
+          <div style={{ flex: 1 }} />
+          {i > 0 && (
+            <button onClick={() => setI(i - 1)} style={{ ...chip(false), padding: "7px 12px", fontSize: 10, cursor: "pointer" }}>back</button>
+          )}
+          <button onClick={() => (i + 1 >= STEPS.length ? onDone() : setI(i + 1))}
+            style={{ border: "none", borderRadius: 9, padding: "8px 16px", cursor: "pointer",
+              background: VALO_PURPLE, color: "#0b0e15", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900,
+              boxShadow: `0 0 16px ${VALO_PURPLE}66` }}>
+            {i + 1 >= STEPS.length ? "START TRADING" : "next →"}
+          </button>
+        </div>
+      </div>
+    </div>, document.body);
+}
+
+function TokenVitalsPop({ t, isMobile = false, onClose, style = {} }) {
+  const [big, setBig] = React.useState("price");
+  const buys = t.buys || 0, sells = t.sells || 0;
+  const gU = t.greenUsd || 0, rU = t.redUsd || 0;
+  const bp = (gU + rU) > 0 ? gU / (gU + rU) : 0.5;
+  const m = tokMetrics(t);
+  const sc2 = scoreToken(t);
+  const isBig = big === "mc";
+  const d = isBig ? (t.ch24 || t.ch || 0) : (t.ch || 0);
+  return (
+    <div onClick={(e) => e.stopPropagation()}
+      style={{ position: "absolute", zIndex: 40, width: isMobile ? "calc(100% - 12px)" : 232,
+        background: T.panel, border: `1px solid ${ratingColor(sc2)}66`, borderRadius: 12, padding: 12,
+        boxShadow: "0 18px 50px rgba(0,0,0,0.7)", cursor: "default", textAlign: "left", ...style }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
+        <span style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 900, color: ratingColor(sc2) }}>{sc2}</span>
+        <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, lineHeight: 1.5 }}>LP · traders · flow · age<br/>turnover · metadata · curve</span>
+        <span onClick={(e) => { e.stopPropagation(); onClose && onClose(); }} role="button"
+          style={{ marginLeft: "auto", color: T.faint, cursor: "pointer", fontFamily: T.mono, fontSize: 11, padding: "0 2px" }}>✕</span>
+      </div>
+      <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, letterSpacing: 1, marginBottom: 3 }}>B/S PRESSURE · {t.statWin || "24h"}</div>
+      <div style={{ height: 10, borderRadius: 6, overflow: "hidden", display: "flex", border: `1px solid ${T.border}`, marginBottom: 3 }}>
+        <div style={{ width: `${Math.round(bp * 100)}%`, background: "linear-gradient(90deg,#0f9d63,#16c784)" }} />
+        <div style={{ flex: 1, background: "linear-gradient(90deg,#c62f3b,#ea3943)" }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 8, marginBottom: 9 }}>
+        <span style={{ color: T.green }}>▲ {buys} · {fmt$(gU)}</span>
+        <span style={{ color: T.red }}>{sells} ▼ · {fmt$(rU)}</span>
+      </div>
+      <div onClick={() => setBig(isBig ? "price" : "mc")} title="Tap to swap price / market cap"
+        style={{ cursor: "pointer", background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: "8px 10px", marginBottom: 8 }}>
+        <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, letterSpacing: 1 }}>{isBig ? "MARKET CAP" : "LIVE PRICE"} · tap to swap ⇄</div>
+        <div style={{ fontFamily: T.mono, fontSize: 15, fontWeight: 900, color: T.text }}>
+          {isBig ? fmt$(t.mc) : `$${fmtP(t.price)}`}
+        </div>
+        <div style={{ fontFamily: T.mono, fontSize: 8.5, color: d >= 0 ? T.green : T.red }}>
+          Δ {t.statWin || "24h"} {d >= 0 ? "+" : ""}{d.toFixed(2)}%
+        </div>
+        <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 2 }}>
+          {isBig ? `price $${fmtP(t.price)}` : `MC ${fmt$(t.mc)}`}
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, fontFamily: T.mono, fontSize: 8, color: T.dim }}>
+        <span>LP <b style={{ color: T.text }}>{fmt$(t.tvl)}</b></span>
+        <span>vol/min <b style={{ color: T.text }}>{fmt$(m.rateNow || 0)}</b></span>
+        <span>traders <b style={{ color: T.text }}>{t.traders || 0}</b></span>
+        <span>age <b style={{ color: T.text }}>{fmtAge(t.createdAt) || "—"}</b></span>
+      </div>
+    </div>
+  );
+}
+function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf = 15, isMobile = false, onHover, onLeave }) {
+  const [vitalsOpen, setVitalsOpen] = React.useState(null);
+  // ⏱ live age — re-renders each minute so the clock actually moves on screen
+  const [, setAgeTick] = useState(0);
+  useEffect(() => {
+    if (!(t && t.createdAt > 0)) return;
+    const iv = setInterval(() => setAgeTick((x) => x + 1), 30000);
+    return () => clearInterval(iv);
+  }, [t && t.createdAt]);
   const liveEyes = liveViewersOf(t, "pump"); // re-renders ride the price ticks
   const score = scoreToken(t);
-  const rc = ratingColor(score);
+  const rug = rugState(t);
+  const rc = rug.rugged ? T.red : ratingColor(score);
   const net = t.greenUsd - t.redUsd;
   const cs = calloutStyle(calloutCount);
   return (
-    <div onClick={onOpen} className="token-card" style={{
+    <div onClick={onOpen} onMouseEnter={onHover} onMouseLeave={onLeave} className="token-card" style={{
       border: `1px solid ${active ? accent(t.hue, 45) : T.border}`,
       background: cardGrad(t.hue), borderRadius: 18, padding: "14px 18px 0", cursor: "pointer",
       boxShadow: active ? `0 0 0 1px ${accent(t.hue, 45)}` : "none", transition: "border-color .2s",
@@ -5172,7 +7994,7 @@ function TokenCard({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf 
             </span>
             {t.isNew && <span style={{ fontSize: 8, background: T.amber, color: "#1a1508", padding: "1px 5px", borderRadius: 4, fontWeight: 800 }}>NEW</span>}
             <span style={{ fontSize: 8, border: `1px solid ${T.border2}`, color: T.dim, padding: "1px 5px", borderRadius: 4, fontFamily: T.mono }}>
-              {t.chain === "pump" ? "PUMP" : "RBHD"}
+              PUMP
             </span>
             <span title={`${calloutCount} community callouts`} style={{
               fontSize: 8.5, fontFamily: T.mono, fontWeight: 800, padding: "1.5px 7px", borderRadius: 10,
@@ -5188,25 +8010,44 @@ function TokenCard({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf 
             <span style={{ color: T.dim }}>MC {fmt$(mcOf(t))}</span>
             <span style={{ color: T.dim }}>TVL {fmt$(t.tvl)}</span>
           </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 3, fontFamily: T.mono, fontSize: 9.5 }}>
+          <div style={{ display: "flex", gap: 8, marginTop: 3, fontFamily: T.mono, fontSize: 9.5, alignItems: "baseline" }}>
             <span style={{ color: T.green }}>▲{fmt$(t.greenUsd)}</span>
             <span style={{ color: T.red }}>▼{fmt$(t.redUsd)}</span>
             <span style={{ color: net >= 0 ? T.green : T.red, fontWeight: 700 }}>{net >= 0 ? "+" : "−"}{fmt$(Math.abs(net))}</span>
+            {t.statWin && t.market !== false && (t.pool || t.market) && (
+              <span style={{ color: T.faint, fontSize: 7.5, letterSpacing: 0.5 }}>{t.statWin}</span>
+            )}
           </div>
         </div>
-        <div title={`Score ${score} · ${rating(score)}`}
-          style={{ position: "absolute", top: 7, right: 0, zIndex: 3, display: "flex", alignItems: "baseline", gap: 4,
+        <div title={rug.rugged ? `Rugged — down ${(rug.drawdown * 100).toFixed(0)}% from peak with no recovery` : `Score ${score} — tap for live vitals`}
+          data-tour="score"
+          onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setVitalsOpen((v) => (v ? null : { top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) })); }} role="button"
+          style={{ position: "absolute", top: 7, right: 0, zIndex: 3, display: "flex", alignItems: "baseline", gap: 4, cursor: "pointer",
             border: `1px solid ${rc}77`, borderRight: "none", background: `${rc}14`,
             borderRadius: "8px 0 0 8px", padding: "3px 8px 3px 7px", lineHeight: 1,
             boxShadow: `inset 0 0 10px ${rc}18` }}>
           <span style={{ fontSize: isMobile ? 13 : 12, fontWeight: 900, color: rc, fontFamily: T.mono, letterSpacing: -0.3,
             textShadow: `0 0 9px ${rc}55` }}>{score}</span>
-          <span style={{ fontSize: isMobile ? 6.5 : 6, letterSpacing: 1.1, color: rc, fontWeight: 800, opacity: 0.85 }}>{rating(score)}</span>
+          {(rug.rugged || rug.dying) && <span style={{ fontSize: isMobile ? 6.5 : 6, letterSpacing: 1.1, color: rc, fontWeight: 800, opacity: 0.85 }}>{rug.rugged ? "RUGGED" : "DYING"}</span>}
         </div>
+        {vitalsOpen && createPortal(
+          <>
+            <div onClick={(e) => { e.stopPropagation(); setVitalsOpen(null); }} style={{ position: "fixed", inset: 0, zIndex: 118 }} />
+            <TokenVitalsPop t={t} isMobile={isMobile} onClose={() => setVitalsOpen(null)}
+              style={isMobile
+                ? { position: "fixed", zIndex: 119, top: Math.min(vitalsOpen.top, window.innerHeight - 300), left: 8, right: 8, width: "auto" }
+                : { position: "fixed", zIndex: 119, top: Math.min(vitalsOpen.top, window.innerHeight - 320), right: vitalsOpen.right }} />
+          </>, document.body)}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
-        <Meter label="MOMENTUM" value={Math.round(t.momentum)} color={accent(t.hue)} />
-        <Meter label="B/S PRESSURE" value={Math.round(t.buyPressure)} color={t.buyPressure >= 50 ? T.green : T.red} />
+        <Meter label="MOMENTUM" value={Number.isFinite(t.momentum) ? Math.round(t.momentum) : 50} color={accent(t.hue)} />
+        <Meter label="B/S PRESSURE" value={Number.isFinite(t.buyPressure) ? Math.round(t.buyPressure) : 50} color={(t.buyPressure || 50) >= 50 ? T.green : T.red} />
+        {fmtAge(t.createdAt) && (
+          <span title={`Launched ${new Date(t.createdAt).toLocaleString()}`}
+            style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 800, color: (t.ageMin || 0) < 60 ? T.green : T.faint, whiteSpace: "nowrap" }}>
+            ⏱ {fmtAge(t.createdAt)}
+          </span>
+        )}
       </div>
       {/* mirrored chart riding the bottom border, clipped by the card */}
       <div style={{ marginTop: 8, marginLeft: -14, marginRight: -14, marginBottom: 0, opacity: 0.9, pointerEvents: "none", borderBottomLeftRadius: 12, borderBottomRightRadius: 12, overflow: "hidden" }}>
@@ -5218,13 +8059,19 @@ function TokenCard({ t, active, onOpen, calloutCount = 0, miniMode = "line", tf 
 
 // compact token card (mobile collapsed list) — same info, longer format, with
 // a momentum + B/S pressure meter strip squeezed underneath each row
+// repaint a card only when something it actually shows has moved
+const TokenCard = React.memo(TokenCardBase, (a, b) => (
+  a.t === b.t && a.active === b.active && a.calloutCount === b.calloutCount
+  && a.miniMode === b.miniMode && a.tf === b.tf && a.isMobile === b.isMobile
+));
+
 function TokenRow({ t, active, onOpen, calloutCount = 0, tf = 15 }) {
   const score = scoreToken(t);
   const rc = ratingColor(score);
   const cs = calloutStyle(calloutCount);
   const mc = mcOf(t);
   return (
-    <div onClick={onOpen} className="token-card" style={{
+    <div onClick={onOpen} onMouseEnter={onHover} onMouseLeave={onLeave} className="token-card" style={{
       border: `1px solid ${active ? accent(t.hue, 45) : T.border}`,
       background: cardGrad(t.hue), borderRadius: 12, padding: "8px 10px", cursor: "pointer",
       boxShadow: active ? `0 0 0 1px ${accent(t.hue, 45)}` : "none", transition: "border-color .2s",
@@ -5252,6 +8099,7 @@ function TokenRow({ t, active, onOpen, calloutCount = 0, tf = 15 }) {
           <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.dim }}>MC {fmt$(mc)}</div>
           <div style={{ fontFamily: T.mono, fontSize: 9 }}>
             <span style={{ color: T.green }}>▲{fmt$(t.greenUsd)}</span> <span style={{ color: T.red }}>▼{fmt$(t.redUsd)}</span>
+            {t.statWin && (t.pool || t.market) && <span style={{ color: T.faint, fontSize: 7 }}> {t.statWin}</span>}
           </div>
         </div>
         <div style={{ flexShrink: 0, textAlign: "center", background: `${rc}18`, border: `1px solid ${rc}`, borderRadius: 7, padding: "2px 6px", minWidth: 30 }}>
@@ -5345,7 +8193,7 @@ function MobileExpanded({ onClose, chartBlock, tradeStrip, ticketBlock, sym, onC
 
   return (
     <>
-      <div style={{ position: "fixed", inset: 0, zIndex: 44, background: "rgba(4,6,10,0.5)", opacity: 1 - progress, pointerEvents: "none" }} />
+      <div className="valo-fixed-safe" style={{ position: "fixed", inset: 0, zIndex: 44, background: "rgba(4,6,10,0.5)", opacity: 1 - progress, pointerEvents: "none" }} />
 
       <div style={{
         position: "fixed", inset: 0, zIndex: 45, background: T.bg,
@@ -5573,6 +8421,27 @@ function WpFeeTable() {
 }
 
 const PATCH_NOTES = [
+  { v: "3.0.2", name: "PATCH V 3.0.2 — $VALO IS LIVE", date: "August 2026", accent: "#7D5CF0", items: [
+    "◆ $VALO LAUNCHED ON PUMP.FUN — the token is live and the whole terminal is wired to it. Header price, market cap, LP, net flow, 24h volume and the burn tracker all read the real pool every 10 seconds through a dedicated market endpoint. Tap any stat to open the real $VALO chart by CA",
+    "🔥 BURN TRACKER IS CHAIN-TRUTH — burns are measured as genesis supply minus real current supply (SPL burns shrink supply directly), so the number matches what anyone can verify on Solscan. The old simulated counter — and a sine wave that faked price movement — are gone",
+    "🛰 LIVE BY DEFAULT — everyone now opens the app on real chain data from the first paint. No simulated token, price, callout or leaderboard entry is ever created on a live site: the demo cast isn't hidden, it's never built. The installed mobile app launches straight into live too",
+    "📣 CALLOUT BANNER = WALL OF FAME — only calls actually holding 2x+ ride the header, sorted biggest first, and each one animates harder the higher it climbs: glow at 2x, pulse + tier name at 5x, ⚡ shimmer at 10x, 🔥 flare at 20x, and full 👑 legend spectacle at 50x. Only real traders rank",
+    "🏋 HOURLY EPOCH ENGINE — every real fill now logs trading weight, leaderboard placements stack their bonuses (#1 +0.50× … #11–100 +0.10×, capped +4.0×), and the claim modal shows your live weight, the vault pool and your projected share. Payout wallet is yours to set",
+    "👻 SIGN IN WITH YOUR WALLET — one Phantom signature, no email, no transaction. It links your trading side in the same tap, and signing out closes both doors. Email magic-link kept as a fallback",
+    "📊 CHARTS REBUILT TO DEXSCREENER PARITY — candles now open where the previous one closed (the staircase reads properly instead of stacking bricks), bodies sit at 82% of the slot with real seams, wicks are 1px, and the axis stays LINEAR unless a chart truly spans decades — so a bar's height is true to the move",
+    "📐 AXIS THAT NEVER LIES — the live price is always in frame, launch bars keep their origin, two real jumps both fit (the second one used to get beheaded), and a lone monster wick still gets clipped so it can't crush everything else",
+    "📱 MOBILE CHART OVERHAUL — the gray crosshair only appears on a 2-second hold, locks on screen, and freezes the chart completely while you drag it (no pan, no rescaling under your finger); hold again to dismiss. Pans and crosshair drags render at native frame rate, and every wake path — app switch, back-swipe, network blip — resyncs candles and rebuilds a dead socket instantly",
+    "📡 FIVE REAL SCANNER LENSES — 🔥 TRENDING (volume accelerating 3×+, buy pressure, freshness), 💪 HOT (60–95% curve, 50+ tx pace, 80+ traders), 🍼 NEW (1–15min, trading confirmed, ground floor), 📈 MOVERS (velocity with a $2K LP floor so dust can't fake spikes), 🍀 LUCKY PICK (weighted lottery for undervalued gems, animated clover). Each lens streams its own candidates — no more five costumes on one cast",
+    "🚫 SCANNER HYGIENE — nothing below its pump launch price, no sub-12-minute launches outside NEW, no duplicate cards (identity is the mint now, and duplicates merge keeping the richer record), and thin lenses top up with tokens that are actually moving instead of going blank",
+    "🔢 SCORES ARE REAL, AND THEY EXPLAIN THEMSELVES — the number is built from LP depth, real traders, flow balance, survival age, turnover sanity, metadata and graduation distance. SAFE/CAUTION/RISKY text is gone; tap any score for live B/S pressure, price ⇄ market cap, and vitals — right beside the card, without opening the chart",
+    "⛓ DEV WALLET TAB AUDITED LINE BY LINE — real creator balance, their true launch count, DEAD/FADED tallied from chain, every launch tappable, and real wallet movements with working Solscan links. The fees chart was removed on live rather than faked, and creator money now shows what actually arrived",
+    "✅ ONLY OFFICIAL SOCIALS — every link is verified against the platform's real domain over https before it renders. Lookalikes, typosquats and subdomain tricks are blocked, and a token with no socials honestly shows none",
+    "🎚 SLIPPAGE CONTROL — 5% default (1% was killing fills on fresh launches), adjustable to 30%, and swap failures now explain themselves in plain English with 5/10/15/20% buttons right on the dialog plus the chain's own logs for anything unusual",
+    "⛔ ARM-TIME FUNDS GATE — a trigger that can't afford its own fill is refused when you tap it, with the exact math (buy-in + site fee + tx fees vs your turbo balance), instead of arming a line that dies later at the worst moment",
+    "◆ THE DIAMOND MEANS ARMED — the wallet tab's lightning becomes the spinning brand diamond only when single-tap trading is genuinely live. Green ⚡ = unlocked, red ⚡ = locked",
+    "🏷 MARKERS SHOW SIZE — every buy/sell marker now carries the token amount traded, and receipts read '142.3K PINO · 0.497 SOL' for both sides",
+    "⤓ PULL TO REFRESH — yank the top of the scanner on mobile or overscroll on PC to deal a fresh hand for whatever lens you're on. 🍀 LUCKY re-rolls the whole lottery",
+  ]},
   { v: "2.0.2", name: "PATCH V 2.0.2", date: "July 2026", accent: "#16C784", items: [
     "🖐 FILE-STYLE SCANNER DRAG (PC + mobile) — hold a token and it SHRINKS in your grip, a ⠿ $TICKER ghost pill rides your cursor/finger, the tile under you scales up with a dashed glow, and slots flip the moment you clip ~15% into the neighbor. 320ms pickup, half-way jitter killed, and the PC down-drag dead-zone bug is gone — one-slot drags land instantly in both directions",
     "📑 SUBSECTIONS GO LIVE — single-click (tap on mobile) any watchlist subsection header and its tokens BECOME the scanner: everything else clears, the header lights up ● IN SCANNER, click again to restore. Removing a token while its subsection is loaded clears it from the watchlist too — the two stay in sync",
@@ -5591,7 +8460,7 @@ const PATCH_NOTES = [
     "📋 WATCHLIST WALL — left pull-tab on PC with a loose list + your own named SUBSECTIONS: ＋ LIST to create, double-click to rename, drag section headers to reorder, right-click any row to move/remove",
     "📊 MY POSITIONS slide-over — every open bot & ticket in one tab: BOTS | BOTH | TICKETS scoping, live scoped PnL with unrealized + realized, per-asset 10–100% sell chips showing exact SOL/$VALO, scoped SELL ALL",
     "Hold your wallet amount → it morphs into MY POSITIONS · tap any asset → straight to its chart (bots land on ALL BOTS) · partial bot sells are now real exits with proper realized PnL",
-    "🔍 ECOSYSTEM SEARCH — pump.fun-style token cards with score/B/S/momentum/viewers/dev, ALL·PUMP.FUN·ROBINHOOD + 🔥TRENDING/TOP TRADERS/NEW/SAFE⊕RISKY filters living inside the search, metallic GOLD borders + sweeping shine on hot tokens",
+    "🔍 ECOSYSTEM SEARCH — pump.fun-style token cards with score/B/S/momentum/viewers/dev, ALL·PUMP.FUN + 🔥TRENDING/TOP TRADERS/NEW/SAFE⊕RISKY filters living inside the search, metallic GOLD borders + sweeping shine on hot tokens",
     "🔍 in the auto trader header — pull the full search down mid-trade; wallet pill on top: balance, live bot PnL, POSITIONS shortcut",
     "👥 HOLDERS tab beside LIVE TRADES — top-25 book with tokens · $ · % of circ · B/S · P/L · hold time; text enlarged across both tabs; every row opens the trader popup",
     "PC hold-drag REORDER — pull scanner tokens or watchlist rows up/down inside their own tab; right-click adds to scanner / any subsection / removes",
@@ -5678,7 +8547,7 @@ function WhitepaperModal({ onClose, isMobile }) {
   const activeSec = WP_SECTIONS.find((s) => s.id === active) || WP_SECTIONS[0];
 
   return (
-    <div onClick={onClose}
+    <div className="valo-fixed-safe" onClick={onClose}
       style={{ position: "fixed", inset: 0, zIndex: 106, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex",
         alignItems: isMobile ? "flex-start" : "center", justifyContent: "center",
         padding: isMobile ? "max(12px, env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom))" : 16 }}>
@@ -5791,6 +8660,8 @@ function WhitepaperModal({ onClose, isMobile }) {
                 })}
               </div>
             ))}
+            {/* every wallet behind VALO, read live from the chain */}
+            <TreasuryPanel isMobile={isMobile} />
             {/* jump-to-top */}
             <button onClick={() => go(WP_SECTIONS[0].id)}
               style={{ ...chip(false), fontSize: 10, padding: "6px 12px" }}>↑ back to top</button>
@@ -5819,17 +8690,48 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
     setHolders(token.traders);
     if (token.pool) {
       let stop = false;
+      // streamed tape first — a new print shows within a second of landing
+      const fromTape = () => {
+        const tape = typeof window !== "undefined" && window.__VALO_TAPE__
+          ? window.__VALO_TAPE__[token.pool] : null;
+        if (!tape || !tape.length) return false;
+        const mapped = tape.slice(-60).map((x) => ({
+          id: x.tx || String(x.at), at: x.at, isBuy: !!x.isBuy,
+          usd: +x.usd || 0, sol: (+x.usd || 0) / SOL_USD, mc: mcOf(token),
+          trader: x.trader || (x.wallet ? `${x.wallet.slice(0, 4)}…${x.wallet.slice(-4)}` : "market"),
+          wallet: x.wallet || null, pnlPct: null,
+          tx: (x.tx || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || String(x.at).slice(-8),
+          txFull: x.tx || null, live: true,
+        }));
+        setRows((R) => {
+          const cur = R.filter((r0) => r0.live);
+          const fresh = mapped.filter((m) => !cur.some((c0) => c0.id === m.id));
+          if (!fresh.length && cur.length) return R;
+          return [...fresh, ...cur].sort((a, b) => b.at - a.at).slice(0, 40);
+        });
+        return true;
+      };
+      const tapeIv = setInterval(fromTape, 1000);
+      fromTape();
       const load = async () => {
+        if (fromTape()) return;                 // stream is feeding us, skip the fetch
         try {
           const r = await fetch(`/api/trades?pool=${encodeURIComponent(token.pool)}`);
           if (!r.ok) return;
           const j = await r.json();
           if (stop || !Array.isArray(j)) return;
+          // remember short → full so any handle can open the right wallet
+          if (typeof window !== "undefined") {
+            const W = { ...(window.__VALO_WALLETS__ || {}) };
+            for (const x of j) if (x.wallet && x.trader) W[x.trader] = x.wallet;
+            window.__VALO_WALLETS__ = W;
+          }
           const mapped = j.map((x) => ({
             id: x.tx || String(x.at), at: x.at, isBuy: !!x.isBuy,
             usd: +x.usd || 0, sol: (+x.usd || 0) / SOL_USD, mc: mcOf(token),
             trader: x.trader || "unknown", wallet: x.wallet || null, pnlPct: null,
             tx: (x.tx || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || Math.random().toString(16).slice(2, 10),
+            txFull: x.tx || null,     // the real signature — what Solscan needs
             live: true,
           }));
           setRows((R) => {
@@ -5841,8 +8743,8 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
       };
       setRows([]);
       load();
-      const iv = setInterval(load, 8000);
-      return () => { stop = true; clearInterval(iv); };
+      const iv = setInterval(load, 4000);   // REST backstop when no stream is running
+      return () => { stop = true; clearInterval(iv); clearInterval(tapeIv); };
     }
     const seed = Array.from({ length: 14 }, (_, i) => mkRow(token, i * 1400));
     setRows(seed);
@@ -5891,12 +8793,14 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
       } catch (e) { /* sim book stays */ }
     };
     load();
-    const iv = setInterval(load, 60000);
+    const iv = setInterval(load, 20000);  // holder book refreshes with the tape
     return () => { stop = true; clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token.id, token.liveMint]);
   const topHolders = useMemo(() => {
     if (liveHolders) return liveHolders;
+    // ⛓ a real token with no holder data yet → show nothing, never a sim book
+    if (token && token.liveMint && token.pool) return [];
     const supply = 1e9 * (0.35 + ((token.id * 13) % 50) / 100);
     let x = token.id * 77 + 13; const rnd2 = () => { x = (x * 9301 + 49297) % 233280; return x / 233280; };
     const N = 25;
@@ -5939,6 +8843,11 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "20px 1fr 82px 70px 48px" : "18px 1fr 74px 62px 44px", gap: 6, padding: "6px 12px", position: "sticky", top: 0, background: T.panel, borderBottom: `1px solid ${T.border}`, fontFamily: T.mono, fontSize: isMobile ? 9.5 : 8, color: T.faint, letterSpacing: 0.5, zIndex: 1 }}>
             <span>#</span><span>HOLDER · TOKENS</span><span style={{ textAlign: "right" }}>B / S</span><span style={{ textAlign: "right" }}>P/L</span><span style={{ textAlign: "right" }}>HELD</span>
           </div>
+          {!topHolders.length && (
+            <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, padding: "14px 12px", textAlign: "center" }}>
+              ⛓ reading the holder book from chain…
+            </div>
+          )}
           {topHolders.map((h) => (
             <div key={h.i}
               onClick={() => onPickTrader && onPickTrader({ trader: h.name || h.wal, isBuy: true, usd: h.usd, qty: h.qty, holder: true })}
@@ -5995,7 +8904,7 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
               <span style={{ fontFamily: T.mono, fontSize: isMobile ? 11 : 9.5, textAlign: "right", color: r.pnlPct == null ? T.faint : r.pnlPct >= 0 ? T.green : T.red }}>
                 {r.pnlPct == null ? "—" : `${r.pnlPct >= 0 ? "+" : ""}${r.pnlPct.toFixed(0)}%`}
               </span>
-              <a href={`https://solscan.io/tx/${r.tx}`} target="_blank" rel="noopener noreferrer" title="View on Solscan"
+              <a href={`https://solscan.io/tx/${r.txFull || r.tx}`} target="_blank" rel="noopener noreferrer" title="View on Solscan"
                 onClick={(e) => e.stopPropagation()}
                 style={{ textAlign: "center", textDecoration: "none", color: T.blue, fontSize: 11 }}>🔗</a>
             </div>
@@ -6008,10 +8917,26 @@ function LiveTrades({ token, isMobile, onPickTrader, traderPrefs = {} }) {
 
 // ---------------- search bar (tokens + users) with live suggestions ----------------
 // ---- search ecosystem helpers: platform, dev, description (deterministic) ----
-const platOf = (t) => (((t.id * 7 + 3) % 10) < 7 ? "pump" : "rh");
+// token ids may be numbers (simulated) or pool addresses (real market results)
+const tokSeed = (t) => (typeof t?.id === "number" ? t.id : hashStr(String((t && (t.id || t.sym)) || "x")));
+const platOf = () => "pump";   // Solana / pump.fun only
 const devOf = (t) => {
-  const n = CALLERS[(t.id * 5 + 2) % CALLERS.length];
-  const wal = ((t.id * 2654435761) >>> 0).toString(16).padStart(8, "0");
+  // real launcher when the chain told us who it was
+  const real = typeof window !== "undefined" && window.__VALO_CREATORS__ && t && t.liveMint
+    ? window.__VALO_CREATORS__[t.liveMint] : null;
+  if (real && real.creator) {
+    return { name: real.short || real.creator.slice(0, 8), short: real.short,
+      wallet: real.creator, real: true, createdAt: real.createdAt || null };
+  }
+  // a REAL token whose creator we haven't resolved yet: report it as unknown.
+  // Inventing a handle here would attribute someone else's coin to a fiction.
+  if (t && (t.pool || t.liveMint)) {
+    return { name: "unknown", short: t.liveMint ? `${t.liveMint.slice(0, 4)}…${t.liveMint.slice(-4)}` : "—",
+      wallet: null, real: false, unknown: true };
+  }
+  const sd = tokSeed(t);
+  const n = CALLERS[Math.abs(sd * 5 + 2) % CALLERS.length] || CALLERS[0];
+  const wal = ((sd * 2654435761) >>> 0).toString(16).padStart(8, "0");
   return { name: n, short: wal.slice(0, 4).toUpperCase() + "…" + wal.slice(-4).toUpperCase() };
 };
 const DESC_BITS = [
@@ -6024,8 +8949,22 @@ const DESC_BITS = [
   "The dev streams every buyback live. Full transparency.",
   "Micro-cap moonshot with a meme that refuses to die.",
 ];
-const descOf = (t) => (((t.id * 11 + 1) % 13) < 9 ? DESC_BITS[(t.id * 3 + 1) % DESC_BITS.length] : null);
-const gainOf = (t) => { const c = t.candles[t.candles.length - 1]; return ((c.c - c.o) / c.o) * 100; };
+const descOf = (t) => {
+  // real pools: the project's own words, or nothing at all
+  if (t && t.pool) {
+    const info = typeof window !== "undefined" && window.__VALO_TOKINFO__ && t.liveMint
+      ? window.__VALO_TOKINFO__[t.liveMint] : null;
+    return (info && info.description) || null;
+  }
+  return ((tokSeed(t) * 11 + 1) % 13) < 9 ? DESC_BITS[Math.abs(tokSeed(t) * 3 + 1) % DESC_BITS.length] : null;
+};
+const gainOf = (t) => {
+  const cs = t && t.candles;
+  if (!cs || !cs.length) return +t?.ch24 || 0;      // no candles yet → use the real 24h move
+  const c = cs[cs.length - 1];
+  if (!c || !(c.o > 0)) return +t?.ch24 || 0;
+  return ((c.c - c.o) / c.o) * 100;
+};
 const isHotTok = (t) => t.momentum > 78 || Math.abs(gainOf(t)) > 1.4;
 
 // live faded bar-chart backdrop — each card breathes with its own token
@@ -6050,7 +8989,7 @@ function FadedBars({ candles, h = "100%" }) {
       ctx.fillStyle = up ? "rgba(22,199,132,0.30)" : "rgba(234,57,67,0.30)";
       ctx.fillRect(i * bw + bw * 0.16, hh - bh, Math.max(1.4, bw * 0.68), bh);
     });
-  }, [candles[candles.length - 1] && candles[candles.length - 1].c]);
+  }, [candles && candles.length ? candles[candles.length - 1].c : 0]);
   return <canvas ref={ref} style={{ position: "absolute", inset: 0, width: "100%", height: h, opacity: 0.5, pointerEvents: "none",
     maskImage: "linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.55) 45%, rgba(0,0,0,0.95) 100%)",
     WebkitMaskImage: "linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.55) 45%, rgba(0,0,0,0.95) 100%)" }} />;
@@ -6106,8 +9045,33 @@ function TraceMini({ candles, hue = 265, h = 88 }) {
 }
 
 function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "72vh", onWatchAdd, tdProps = null }) {
+  // 🍼 live NEW feed: while the NEW filter is on, pull fresh launches straight
+  // from the source every 12s so the list grows in real time
+  const [freshX, setFreshX] = useState([]);
   const [plat, setPlat] = useState("all");        // all | pump | rh (exclusive)
-  const [flags, setFlags] = useState({ trend: false, top: false, fresh: false, safe: false, risky: false });
+  const [flags, setFlags] = useState({ trend: false, top: false, fresh: false, safe: false, risky: false, hot: false, lucky: false });
+  const [luckySeed, setLuckySeed] = useState(0.5);
+  useEffect(() => {
+    if (!flags.fresh) return;
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch(`/api/tokens?feed=new&t=${Math.floor(Date.now() / 8000)}`);
+        if (!r.ok) return;
+        const rows = await r.json();
+        if (stop || !Array.isArray(rows)) return;
+        const adopted = rows.filter((x) => (+x.mc || 0) < 1e11).map(adoptMarketToken);
+        setFreshX((F) => {
+          const seen = new Set(F.map((t) => t.liveMint || t.pool));
+          const add = adopted.filter((t) => !seen.has(t.liveMint || t.pool));
+          return add.length ? [...add, ...F].slice(0, 120) : F;
+        });
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 12000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [flags.fresh]);
   const [hov, setHov] = useState(null);
   const [, setTick] = useState(0);
   useEffect(() => { const iv = setInterval(() => setTick((x) => x + 1), 1500); return () => clearInterval(iv); }, []);
@@ -6118,15 +9082,49 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
     return n;
   });
   const ql = q.trim().toLowerCase();
-  let list = tokens.filter((t) => !ql || t.sym.toLowerCase().includes(ql) || (t.name || "").toLowerCase().includes(ql) || (t.ca || "").toLowerCase().includes(ql));
+  // one card per TOKEN: merge candidates and dedupe by mint (a token with
+  // three pools was showing three times)
+  const cand = (() => {
+    const all = [...tokens, ...freshX];
+    const seen = new Map();
+    for (const t of all) {
+      const k = t.liveMint || t.pool || t.id;
+      const prev = seen.get(k);
+      if (!prev || (+t.tvl || 0) > (+prev.tvl || 0)) seen.set(k, t);
+    }
+    return [...seen.values()];
+  })();
+  let list = cand.filter((t) => !ql || t.sym.toLowerCase().includes(ql) || (t.name || "").toLowerCase().includes(ql) || (t.ca || "").toLowerCase().includes(ql));
+  // 🍼 brand-new launches live under the NEW filter (or an explicit search), not the default view
+  if (!flags.fresh && !ql) list = list.filter((t) => !(t.createdAt && Date.now() - t.createdAt < 12 * 60e3));
+  // 🚫 below-launch pump tokens: excluded unless explicitly searched for
+  if (!ql) list = list.filter((t) => !belowLaunch(t));
   if (plat !== "all") list = list.filter((t) => platOf(t) === plat);
   if (flags.trend) list = list.filter(isHotTok);
-  if (flags.top) list = list.filter((t) => t.traders > 900);
+  const heatOf = (t) => {
+    const winMin = t.statWin === "5m" ? 5 : t.statWin === "1h" ? 60 : 1440;
+    const tx = (t.buys || 0) + (t.sells || 0);
+    return { winMin, tx, txRate: tx / winMin, volRate: (t.vol24 || 0) / 1440 };
+  };
+  if (flags.hot) list = list.filter((t) => {
+    // 💪 curve 60–95% · velocity · 80+ traders (matches the scanner lens)
+    const m = tokMetrics(t);
+    const curveOk = !m.isPump || (m.curvePct >= 60 && m.curvePct <= 95);
+    return curveOk && m.txRate >= 10 && (m.turnover > 0.4 || m.accel > 1.4) && (t.traders || 0) >= 80;
+  });
+  // 📈 MOVERS (took over the old TOP TRADERS chip): velocity + $2K LP floor
+  if (flags.top) list = list.filter((t) => (t.tvl || 0) >= 2000 && Math.abs(t.ch || 0) > 1);
   if (flags.fresh) list = list.filter((t) => t.isNew || t.ageMin < 90);
   if (flags.safe) list = list.filter((t) => scoreToken(t) >= 62);
   if (flags.risky) list = list.filter((t) => scoreToken(t) < 50);
   // pump/rh picked with nothing else → trending & movers float first
-  list = [...list].sort((a, b) => (isHotTok(b) ? 1 : 0) - (isHotTok(a) ? 1 : 0) || b.momentum - a.momentum);
+  list = flags.lucky
+    ? luckyOrder(list, "eco" + luckySeed)                                 // 🍀 weighted-lottery gems first
+    : flags.fresh
+    ? [...list].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))   // 🍼 newest launch first, real time
+    : flags.top
+    ? [...list].sort((a, b) => Math.abs(b.ch || 0) - Math.abs(a.ch || 0)) // 📈 movers: velocity first
+    : [...list].sort((a, b) => (isHotTok(b) ? 1 : 0) - (isHotTok(a) ? 1 : 0) || b.momentum - a.momentum);
   const fbtn = (on, label, click, col) => (
     <button onClick={click} style={{ ...chip(on), padding: isMobile ? "5px 9px" : "5px 12px", fontSize: isMobile ? 8.5 : 9.5, fontWeight: 900, letterSpacing: 0.5,
       color: on ? (col || VALO_PURPLE) : T.dim, borderColor: on ? `${col || VALO_PURPLE}88` : T.border,
@@ -6135,14 +9133,21 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
   return (
     <div style={{ display: "flex", flexDirection: "column", maxHeight: maxH, minHeight: 0 }}>
       <div style={{ display: "flex", gap: 5, flexWrap: "wrap", padding: "9px 10px", borderBottom: `1px solid ${T.border}`, flexShrink: 0, position: "sticky", top: 0, background: T.panel, zIndex: 2 }}>
-        {fbtn(plat === "all", "ALL", () => setPlat("all"), T.blue)}
-        {fbtn(plat === "pump", "PUMP.FUN", () => setPlat("pump"), T.green)}
-        {fbtn(plat === "rh", "ROBINHOOD", () => setPlat("rh"), "#c6f24e")}
+        {isMobile && fbtn(plat === "all", "ALL", () => setPlat("all"), T.blue)}
+        {fbtn(plat === "pump", "PUMP.FUN", () => setPlat(plat === "pump" ? "all" : "pump"), T.green)}
+
         <span style={{ width: 1, background: T.border, margin: "0 2px" }} />
         {fbtn(flags.trend, "🔥 TRENDING", () => flag("trend"), T.amber)}
-        {fbtn(flags.top, "TOP TRADERS", () => flag("top"), VALO_PURPLE)}
+        {fbtn(flags.hot, "💪 HOT", () => flag("hot"), "#ff9f43")}
+        {fbtn(flags.top, "📈 MOVERS", () => flag("top"), VALO_PURPLE)}
         {fbtn(flags.fresh, "NEW", () => flag("fresh"), T.amber)}
-        {fbtn(flags.safe, "SAFE", () => flag("safe"), T.green)}
+        <button onClick={() => { setLuckySeed(Math.random()); flag("lucky"); }}
+          style={{ ...chip(flags.lucky), display: "inline-flex", alignItems: "center", gap: 4, padding: "5px 10px",
+            fontSize: 9.5, fontWeight: 900, color: flags.lucky ? "#4ade80" : T.dim,
+            borderColor: flags.lucky ? "#4ade8066" : undefined }}>
+          <span className="lucky-charm">🍀</span> LUCKY
+        </button>
+        {isMobile && fbtn(flags.safe, "SAFE", () => flag("safe"), T.green)}
         {fbtn(flags.risky, "RISKY", () => flag("risky"), T.red)}
       </div>
       <div data-ecozone="1" style={{ overflowY: "auto", padding: "8px 8px 12px", minHeight: 0 }}>
@@ -6153,7 +9158,7 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
           const dev = devOf(t); const desc = descOf(t); const hot = isHotTok(t);
           const g = gainOf(t);
           return (
-            <div key={t.id} onClick={() => onPick && onPick(t.id)}
+            <div key={t.id} onClick={() => onPick && onPick(t.id, t)}
               {...(tdProps ? tdProps(t) : {})}
               onMouseEnter={() => !isMobile && setHov(t.id)} onMouseLeave={() => !isMobile && setHov((h) => (h === t.id ? null : h))}
               className={hot ? "goldb" : undefined}
@@ -6199,15 +9204,21 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
                   <span style={{ color: T.green }}>B {fmt$(t.greenUsd)}</span>
                   <span style={{ color: T.red }}>S {fmt$(t.redUsd)}</span>
                   <span>M {Math.round(t.momentum)}</span>
-                  <span>👥{t.traders}</span>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}><EyeOpenIcon c={T.green} s={9} />{liveViewersOf(t, "pump")}</span>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}><EyeClosedIcon c={T.dim} s={9} />{fmtQty(totalViewsOf(t, "pump"))}</span>
+                  <span title={holdersOf(t, null) ? "real on-chain holders" : "estimated"}>👥{holdersOf(t, t.traders)}</span>
+                  {(() => { const v = liveViewersOf(t, "pump"); return v != null ? <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>💬{v}</span> : null; })()}
                   <span style={{ fontSize: 6.5, fontWeight: 800, color: platOf(t) === "pump" ? T.green : "#c6f24e", marginLeft: "auto" }}>{platOf(t) === "pump" ? "PUMP" : "RH"}</span>
                 </div>
-                <button onClick={(e) => { e.stopPropagation(); onOpenUser && onOpenUser(dev.name); }}
-                  title="Open the dev's VALO profile"
+                <button onClick={(e) => {
+                    e.stopPropagation();
+                    if (dev.real && dev.wallet) window.open(`https://solscan.io/account/${dev.wallet}`, "_blank", "noopener");
+                    else if (t && t.liveMint) window.open(`https://solscan.io/token/${t.liveMint}`, "_blank", "noopener");
+                    else onOpenUser && onOpenUser(dev.name);
+                  }}
+                  title={dev.real ? "Open the developer's Solscan account" : "Open this token on Solscan"}
                   style={{ border: "none", background: "none", padding: 0, marginTop: 4, fontFamily: T.mono, fontSize: 7.5, color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
-                  DEV @{dev.name} · {dev.short}
+                  {dev.unknown ? <>DEV <span style={{ opacity: 0.7 }}>unverified</span> · {dev.short}</>
+                    : dev.real ? <>DEV {dev.short} <span style={{ color: T.green }}>✓</span></>
+                    : <>DEV @{dev.name} · {dev.short}</>}
                 </button>
 
               </div>
@@ -6220,9 +9231,23 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
   );
 }
 
-function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, eco = false, isMobile = false, onFullEco }) {
+function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, eco = false, isMobile = false, onFullEco, mktExtra = [], onQuery, liveData = false, valoMint = null }) {
+  // 🛰 live: simulated tokens never appear. + one entry per mint (feeds overlap)
+  const srcTokens = React.useMemo(() => {
+    const all = [...(tokens || []), ...(mktExtra || [])];
+    const real = liveData ? all.filter((t) => t && t.pool) : all;
+    const seen = new Set(); const out = [];
+    for (const t of real) {
+      if (!t) continue;
+      const k = String(t.liveMint || t.ca || t.pool || ("id" + t.id)).toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k); out.push(t);
+    }
+    return out;
+  }, [tokens, mktExtra, liveData, valoMint]);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
+  useEffect(() => { onQuery && onQuery(q); }, [q]);
   const ref = useRef(null);
   useEffect(() => {
     const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -6232,7 +9257,7 @@ function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, ec
   // fake "other users" pool + the current user — API: user directory search
   const users = ["solwhale", "moonboy", "degenlord", "pumpking", "based", "cryptogod", "apehunter", "frostbyte", username].filter(Boolean);
   const ql = q.trim().toLowerCase();
-  const tokMatches = ql ? tokens.filter((t) => t.sym.toLowerCase().includes(ql) || (t.name || "").toLowerCase().includes(ql) || (t.ca || "").toLowerCase().includes(ql)).slice(0, 6) : [];
+  const tokMatches = ql ? srcTokens.filter((t) => t.sym.toLowerCase().includes(ql) || (t.name || "").toLowerCase().includes(ql) || (t.ca || "").toLowerCase().includes(ql) || (t.liveMint || "").toLowerCase().includes(ql)).slice(0, 6) : [];
   const userMatches = ql ? users.filter((u) => u.toLowerCase().includes(ql)).slice(0, 4) : [];
   const hasResults = tokMatches.length + userMatches.length > 0;
 
@@ -6242,7 +9267,7 @@ function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, ec
         <span style={{ fontSize: 12, color: T.faint }}>🔍</span>
         <input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true); }}
           onFocus={(e) => { if (eco && isMobile && onFullEco) { e.target.blur(); onFullEco(); return; } setOpen(true); }}
-          placeholder="Search tokens, CA, or users…"
+          data-tour="search" placeholder="Search tokens, CA, or users…"
           style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: T.text, fontFamily: T.mono, fontSize: 12 }} />
         {q && <button onClick={() => { setQ(""); setOpen(false); }} style={{ background: "none", border: "none", color: T.faint, cursor: "pointer", fontSize: 12 }}>✕</button>}
         <UserSearchFly onOpenUser={(u) => { setOpen(false); onPickUser && onPickUser(u); }} />
@@ -6250,8 +9275,9 @@ function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, ec
       {eco && open && !isMobile && (
         <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 40, background: T.panel, border: `1px solid ${VALO_PURPLE}55`, borderRadius: 12, boxShadow: "0 26px 70px rgba(0,0,0,0.7)", overflow: "hidden",
           opacity: (typeof window !== "undefined" && window.__valoEcoDim) ? 0.07 : 1, pointerEvents: (typeof window !== "undefined" && window.__valoEcoDim) ? "none" : "auto", transition: "opacity .22s ease" }}>
-          <TokenEcosystem tokens={tokens} q={q} isMobile={false} maxH="min(72vh, 760px)" tdProps={(typeof window !== "undefined" && window.__valoTdProps) || null}
-            onPick={(id) => { onPickToken && onPickToken(id); setOpen(false); setQ(""); }}
+          <TokenEcosystem tokens={srcTokens}
+            q={q} isMobile={false} maxH="min(72vh, 760px)" tdProps={(typeof window !== "undefined" && window.__valoTdProps) || null}
+            onPick={(id, tokObj) => { onPickToken && onPickToken(id, tokObj); setOpen(false); setQ(""); }}
             onWatchAdd={typeof window !== "undefined" && window.__valoWatchAdd ? window.__valoWatchAdd : undefined}
             onOpenUser={(u) => { onPickUser && onPickUser(u); }} />
         </div>
@@ -6297,7 +9323,51 @@ function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, ec
 }
 
 // ---------------- marker receipt — single trade OR a consolidated badge group ----------------
-function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {}, setTraderPref, myName, onOpenUser, token = null }) {
+function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {}, setTraderPref, myName, onOpenUser, token = null, liveMode = false }) {
+  // ⛓ real per-mint trades for the trader in this receipt (live site)
+  const [realTr, setRealTr] = useState(null);
+  const [realHold, setRealHold] = useState(null);   // their true qty of THIS mint
+  useEffect(() => {
+    setRealTr(null); setRealHold(null);
+    const tr = info && info.tr;
+    const trader = tr && (tr.trader || tr.user);
+    if (!liveMode || !trader || !token || !token.liveMint) return;
+    const reg = (typeof window !== "undefined" && window.__VALO_WALLETS__) || {};
+    const w = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trader) ? trader : (reg[trader] || (tr && tr.wallet) || null);
+    if (!w) return;
+    try { if (typeof window !== "undefined") window.__VALO_WALLETS__ = { ...(window.__VALO_WALLETS__ || {}), [trader]: w }; } catch (e) {}
+    let stop = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/trader?wallet=${encodeURIComponent(w)}&mint=${encodeURIComponent(token.liveMint)}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        // their actual current balance of this token (includes transfers)
+        try {
+          const rw = await fetch(`/api/wallet?address=${encodeURIComponent(w)}`);
+          if (rw.ok) {
+            const jw = await rw.json();
+            const hh = jw && Array.isArray(jw.holdings) && jw.holdings.find((h2) => h2.mint === token.liveMint);
+            if (!stop) setRealHold(hh ? { qty: hh.qty || 0, usd: hh.usd != null ? hh.usd : (hh.qty || 0) * (token.price || 0) } : { qty: 0, usd: 0 });
+          }
+        } catch (e) {}
+        if (!stop && j && Array.isArray(j.trades)) {
+          // avg-cost walk → per-sell realized pnl, matching the sim row shape
+          let q = 0, cost = 0;
+          const rows = j.trades.map((t2) => {
+            if (t2.side === "buy") { q += t2.tokenAmt; cost += t2.solAmt; return { t: t2.t, side: "buy", amt: t2.solAmt, unit: "SOL", pnlMoney: null }; }
+            const p2 = q > 0 ? Math.min(1, t2.tokenAmt / q) : 0;
+            const basis = cost * p2; cost -= basis; q = Math.max(0, q - t2.tokenAmt);
+            return { t: t2.t, side: "sell", amt: t2.solAmt, unit: "SOL", pnlMoney: t2.solAmt - basis };
+          });
+          setRealTr(rows.reverse());
+          setRealHold((H) => H || { qty: q, usd: q * (token.price || 0), est: true });
+        }
+      } catch (e) {}
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveMode, info && info.tr && (info.tr.trader || info.tr.user), token && token.liveMint]);
   const list = info.list && info.list.length ? info.list : [info];
   const [pg, setPg] = useState(0);
   const i = Math.max(0, Math.min(list.length - 1, pg));
@@ -6333,7 +9403,7 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
   }, 0);
 
   return (
-    <div onClick={onClose}
+    <div className="valo-fixed-safe" onClick={onClose}
       style={{ position: "fixed", inset: 0, zIndex: 107, background: "rgba(4,6,10,0.6)", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div onClick={(e) => e.stopPropagation()}
         style={{ width: "min(92vw, 360px)", background: T.panel, border: `1px solid ${col}`, borderRadius: 14, padding: 16, boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
@@ -6347,16 +9417,29 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
         </div>
 
         {/* follow this trader — pin, colour, marker icon. Applies site-wide. */}
-        {traderKey && traderKey !== "__me__" && (
+        {traderKey && traderKey !== "__me__" && traderKey !== "__mkt__" && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.03)", border: `1px solid ${T.border2}`, borderRadius: 10, padding: "8px 10px", marginBottom: 10 }}>
             {/* the whole wallet block (address + label) opens their profile */}
             <span onClick={() => onOpenUser && onOpenUser(traderKey)} title="View this trader's profile"
               style={{ minWidth: 0, flex: 1, cursor: "pointer" }}>
               <span style={{ display: "block", fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 1 }}>TRADER · tap for profile</span>
               <span style={{ display: "block", fontFamily: T.mono, fontSize: 10.5, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
-                {tr.dev ? "👨‍💻 " : ""}{traderKey}
+                {tr.dev ? "👨‍💻 " : ""}{traderKey === "__mkt__" ? "market" : traderKey}
               </span>
             </span>
+            {(() => {
+              // the real wallet behind this trade — straight to Solscan
+              const w = tr.wallet || (typeof window !== "undefined" && window.__VALO_WALLETS__
+                ? window.__VALO_WALLETS__[traderKey] : null);
+              if (!w) return null;
+              return (
+                <a href={`https://solscan.io/account/${w}`} target="_blank" rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()} title={`${w} on Solscan — every trade they've made`}
+                  style={{ flex: "0 0 auto", display: "grid", placeItems: "center", width: 30, height: 30,
+                    borderRadius: 8, textDecoration: "none", fontSize: 13,
+                    border: `1px solid ${T.amber}77`, background: "rgba(240,185,11,0.12)", color: T.amber }}>🔎</a>
+              );
+            })()}
 
             {/* pin — highlighted while following, neutral grey when not */}
             <button onClick={() => setTraderPref && setTraderPref(traderKey, { following: !following })}
@@ -6403,14 +9486,19 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
         {/* trader dossier — holdings + name/pfp, mini chart, every trade here */}
         {(() => {
           if (!token || !traderKey || traderKey === "__me__" || (tr.sym && token.sym !== tr.sym)) return null;
-          const trades = (traderTradesFor(token, traderKey) || []).slice().sort((a, b) => b.t - a.t);
+          const trades = realTr || (liveMode ? [] : (traderTradesFor(token, traderKey) || []).slice().sort((a, b) => b.t - a.t));
           let hq = info.holderQty, hu = info.holderUsd;
-          if (hq == null) { // seeded fallback when opened from a live-trade tx
+          if (liveMode) {
+            // ⛓ chain truth only: their real balance, or the net of their real
+            // trades — never an invented figure
+            hq = realHold ? realHold.qty : null;
+            hu = realHold ? realHold.usd : null;
+          } else if (hq == null) { // demo keeps its seeded cast
             let s3 = hashStr("hold-" + traderKey + token.sym);
             const r3 = () => { s3 = (s3 * 1664525 + 1013904223) >>> 0; return s3 / 4294967296; };
             hq = Math.floor(4000 + r3() * 420000);
           }
-          if (hu == null) hu = hq * token.price;
+          if (hu == null && hq != null) hu = hq * token.price;
           const ago2 = (ms) => { const m = Math.floor((Date.now() - ms) / 60000); return m < 60 ? `${m}m` : m < 1440 ? `${(m / 60).toFixed(1)}h` : `${(m / 1440).toFixed(1)}d`; };
           return (
             <div style={{ border: `1px solid ${T.border2}`, borderRadius: 11, background: "rgba(255,255,255,0.02)", padding: "9px 10px", marginBottom: 10 }}>
@@ -6428,7 +9516,9 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
                 {/* current holdings on this token */}
                 <span style={{ textAlign: "right", lineHeight: 1.3 }}>
                   <span style={{ display: "block", fontFamily: T.mono, fontSize: 6.5, letterSpacing: 1.2, color: T.faint }}>CURRENT HOLDINGS</span>
-                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: T.text }}>{fmtQty(hq)} <span style={{ color: accent(token.hue) }}>${token.sym}</span> · {fmt$(hu)}</span>
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, color: T.text }}>
+                    {hq == null ? "⛓ …" : <>{fmtQty(hq)} <span style={{ color: accent(token.hue) }}>${token.sym}</span> · {fmt$(hu || 0)}{realHold && realHold.est ? " ~" : ""}</>}
+                  </span>
                 </span>
               </div>
               <TraceMini candles={token.candles} hue={token.hue} h={62} />
@@ -6496,10 +9586,11 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
               animation: flip.n ? `${flip.dir > 0 ? "pageFlipNext" : "pageFlipPrev"} .38s cubic-bezier(.4,.05,.25,1)` : "none" }}>
             {[
               ["TIME", new Date(tr.t).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })],
-              ["AMOUNT", `${tr.amt} ${tr.unit}`],
-              ["FILL PRICE", `$${fmtP(tr.price)}`],
+              ["AMOUNT", `${typeof tr.amt === "number" && tr.amt >= 1000 ? fmtQty(tr.amt) : tr.amt} ${tr.unit}${tr.sol > 0 && tr.unit !== "SOL" ? ` · ${(+tr.sol).toFixed(3)} SOL` : ""}`],
+              ["FILL PRICE", `$${fmtP(isBuy ? tr.price : (tr.entry || tr.price))}`],
               ...(isBuy ? [] : [["EXIT PRICE", `$${fmtP(tr.price)}`]]),
-              ["MARKET CAP", fmt$(tr.mc)],
+              ...(!isBuy && tr.mcEntry > 0 ? [["MC AT ENTRY", `${tr.mcEstimated ? "~" : ""}${fmt$(tr.mcEntry)}`]] : []),
+              [isBuy ? "MC AT FILL" : "MC AT EXIT", tr.mc > 0 ? `${tr.mcEstimated ? "~" : ""}${fmt$(tr.mc)}` : "—"],
               ...(tr.side === "sell" && tr.pnlPct != null
                 ? [["ENTRY", `$${fmtP(tr.entry)}`], ["PNL %", null], ["PNL SOL", null], ["PNL USD", null]]
                 : []),
@@ -6508,8 +9599,8 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
                 <span style={{ color: T.faint, letterSpacing: 1 }}>{k}</span>
                 {v != null ? <b style={{ color: T.text }}>{v}</b> : (
                   k === "PNL %" ? <b style={{ color: gain ? T.green : T.red }}>{pct(tr.pnlPct)}</b>
-                  : k === "PNL SOL" ? <b style={{ color: gain ? T.green : T.red }}>{gain ? "+" : "−"}{Math.abs(pnlSol).toFixed(3)} SOL</b>
-                  : <b style={{ color: gain ? T.green : T.red }}>{gain ? "+" : "−"}${Math.abs(pnlSol * SOL_USD).toFixed(2)}</b>
+                  : k === "PNL SOL" ? <b style={{ color: gain ? T.green : T.red }}>{gain ? "+" : "−"}{Math.abs(pnlSol) < 0.01 ? Math.abs(pnlSol).toFixed(5) : Math.abs(pnlSol).toFixed(4)} SOL</b>
+                  : <b style={{ color: gain ? T.green : T.red }}>{gain ? "+" : "−"}${Math.abs(pnlSol * SOL_USD) < 0.01 ? Math.abs(pnlSol * SOL_USD).toFixed(4) : Math.abs(pnlSol * SOL_USD).toFixed(2)}</b>
                 )}
               </div>
             ))}
@@ -6535,7 +9626,7 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
           <div style={{ marginTop: 10, fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center" }}>PnL is shown on the matching sell marker.</div>
         )}
         {tr.tx && (
-          <a href={`https://solscan.io/tx/${tr.tx}`} target="_blank" rel="noopener noreferrer"
+          <a href={`https://solscan.io/tx/${tr.txFull || tr.tx}`} target="_blank" rel="noopener noreferrer"
             style={{ display: "block", marginTop: 12, textAlign: "center", textDecoration: "none", border: `1px solid ${T.border2}`, borderRadius: 9, padding: "9px", fontFamily: T.mono, fontSize: 11, fontWeight: 700, color: T.blue, background: "rgba(76,154,255,0.08)" }}>
             🔗 View this transaction on Solscan →
           </a>
@@ -6587,12 +9678,18 @@ function StickySearch({ top, children }) {
   );
 }
 
+
 export default function App() {
   const [tokens, setTokens] = useState(() => {
+    // ⛓ LIVE: the board starts EMPTY and fills from chain. No demo cast ever
+    // exists, so nothing simulated can leak into any panel.
+    if (BOOT_LIVE) return [];
     const base = NAMES.slice(0, 8).map((n) => makeToken(n));
     // ◆ the flagship — $VALO itself trades as a first-class chart token
     const v = makeToken(["VALO", "VALO Terminal", "sol"]);
-    v.id = 424242; v.price = 0.0125; v.hue = 262; v.momentum = 74; v.isNew = false;
+    // ⚠️ DEMO ONLY — the real $VALO is fetched from VALO_MINT on live and this
+    // seeded copy is filtered off every live board (no pool = not shown).
+    v.id = 424242; v.price = 0.0125; v.hue = 262; v.momentum = 74; v.isNew = false; v.demoOnly = true;
     v.candles = seedCandles(0.0125, 74); v.traders = 4820; v.tvl = 1950000;
     v.greenUsd = 240000; v.redUsd = 150000;
     return [v, ...base];
@@ -6604,7 +9701,8 @@ export default function App() {
   const [showDevTrades, setShowDevTrades] = useState(false); // overlay dev buys/sells on chart
   const [createdOpen, setCreatedOpen] = useState(false);     // dev "created tokens" sub-section
   const [tf, setTf] = useState(15);
-  const tokensRef = useRef([]); tokensRef.current = tokens; // live mirror for effects that must not re-run on every tick
+  const tokensRef = useRef([]); tokensRef.current = tokens;
+  const selRef = useRef(null); // live mirror for effects that must not re-run on every tick
   const [alerts, setAlerts] = useState([]);     // MARKET ALERTS — rising/falling coins only
   const [socialMsgs, setSocialMsgs] = useState([]); // PUBLIC user chat
   const [username, setUsername] = useState(() => {
@@ -6646,7 +9744,8 @@ export default function App() {
   const [botRuns, setBotRuns] = useState([]);                      // filled bot positions — never touch the Live P/L book
   const [botRunOpen, setBotRunOpen] = useState(null);              // run id → full stats popup
   const [ticketTab, setTicketTab] = useState("ticket");            // PC right column: ticket | auto
-  const [layoutPro, setLayoutPro] = useState(false);               // PC layout B: panels under the chart, feeds on the right
+  const layoutPro = true;   // PC is always the pro desk: panels under the chart, feeds on the right
+  const setLayoutPro = () => {}; // retired switch — kept as a no-op so nothing downstream breaks
   const [pcCrunch, setPcCrunch] = useState(0);                     // PC: chart pulled up over the stats (0..1)
   const pcPullRef = useRef(null);
   const [chartInsetL, setChartInsetL] = useState(0);               // PC: chart pulled in from the left → token strip
@@ -6656,6 +9755,7 @@ export default function App() {
     const mv = (e) => {
       if (pcPullRef.current) {
         const dy = pcPullRef.current.y0 - e.clientY;
+        if (Math.abs(dy) > 3) pcPullRef.current.moved = true;
         setPcCrunch(Math.max(0, Math.min(1, pcPullRef.current.base + dy / 120)));
       }
       const ed = edgeRef.current;
@@ -6664,7 +9764,11 @@ export default function App() {
         else setChartInsetR(Math.max(0, Math.min(240, ed.base - (e.clientX - ed.x0))));
       }
     };
-    const up = () => { pcPullRef.current = null; edgeRef.current = null; };
+    const up = () => {
+      if (pcPullRef.current) { const p0 = pcPullRef.current; setTimeout(() => { if (pcPullRef.current === p0) pcPullRef.current = null; }, 0); pcPullRef.current = p0; }
+      setTimeout(() => { pcPullRef.current = null; }, 60);   // click handler reads `moved` first
+      edgeRef.current = null;
+    };
     window.addEventListener("mousemove", mv); window.addEventListener("mouseup", up);
     return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
   }, []);
@@ -6707,6 +9811,19 @@ export default function App() {
   // manual SELL on a running bot — dumps its whole remaining position at market
   const sellRun = (runId) => {
     const r = botRuns.find((x) => x.id === runId && x.status === "live"); if (!r) return;
+    if (r.real) {
+      const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return;
+      const qtySell = r.tokensLeft || 0; if (!(qtySell > 0)) return;
+      sayPrivate({ type: "note", text: `⛓ selling REAL run — ${fmtQty(qtySell)} ${r.sym}…` });
+      fireRealOrderDirect(t, "sell", qtySell).then((res) => {
+        if (!res.ok) { pushNotif({ type: "system", user: null, tokenId: t.id, text: `⚠⛓ manual run sell failed on ${r.sym} — still held (${res.err})` }); return; }
+        const pnlUsd = (res.sol - r.remaining) * SOL_USD;
+        setBotRuns((R) => R.map((x) => x.id === runId ? { ...x, exits: [...x.exits, { ts: Date.now(), price: t.price, amt: x.remaining, pnlUsd, trail: null, kind: "MANUAL⛓", sig: res.sig }], remaining: 0, tokensLeft: 0, status: "sold" } : x));
+        setPendingOrders((P) => P.filter((o) => o.runId !== runId));
+        sayPrivate({ type: "note", text: `⛓ run closed — ${fmtQty(qtySell)} ${r.sym} → ${res.sol.toFixed(4)} SOL · ${pnlUsd >= 0 ? "+" : "−"}$${Math.abs(pnlUsd).toFixed(2)} real` });
+      });
+      return;
+    }
     const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return;
     const proceeds = r.remaining * (t.price / r.entry);
     if (r.pay === "SOL") setSolBalance((b) => b + proceeds); else setValoWallet((v) => v + proceeds);
@@ -6721,6 +9838,18 @@ export default function App() {
   const sellRunPct = (runId, pctN) => {
     const r = botRuns.find((x) => x.id === runId && x.status === "live"); if (!r) return;
     if (pctN >= 100) { sellRun(runId); return; }
+    if (r.real) {
+      const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return;
+      const qtySell = (r.tokensLeft || 0) * (pctN / 100); if (!(qtySell > 0)) return;
+      const part = +(r.remaining * (pctN / 100)).toFixed(6);
+      fireRealOrderDirect(t, "sell", qtySell).then((res) => {
+        if (!res.ok) { pushNotif({ type: "system", user: null, tokenId: t.id, text: `⚠⛓ partial run sell failed on ${r.sym} — still held (${res.err})` }); return; }
+        const pnlUsd = (res.sol - part) * SOL_USD;
+        setBotRuns((R) => R.map((x) => x.id === runId ? { ...x, exits: [...x.exits, { ts: Date.now(), price: t.price, amt: part, pnlUsd, trail: null, kind: "MANUAL⛓", sig: res.sig }], remaining: +(x.remaining - part).toFixed(6), tokensLeft: Math.max(0, (x.tokensLeft || 0) - qtySell) } : x));
+        sayPrivate({ type: "note", text: `⛓ sold ${pctN}% of ${r.sym} run → ${res.sol.toFixed(4)} SOL · ${pnlUsd >= 0 ? "+" : "−"}$${Math.abs(pnlUsd).toFixed(2)} real` });
+      });
+      return;
+    }
     const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return;
     const part = +(r.remaining * (pctN / 100)).toFixed(6); if (!(part > 0)) return;
     const proceeds = part * (t.price / r.entry);
@@ -6754,9 +9883,42 @@ export default function App() {
     }));
   };
   const sellAllRuns = () => botRuns.filter((r) => r.status === "live").forEach((r) => sellRun(r.id));
-  const sellPos = (t) => { const p0 = positions[t.id]; if (p0 && p0.amt > 0) execute(t, { side: "sell", pay: p0.pay || pay, amt: p0.amt, mode: "instant", tax: taxFor(p0.pay || pay), burn: splitFee(p0.amt, p0.pay || pay).total, legs: [] }, {}); };
+  const sellPos = (t) => {
+    // live + a real on-chain holding of this token → real sell with review
+    if (liveData && onchain.enabled && walletReady && t && t.liveMint) {
+      const held = chainHeldOf(t);
+      if (held > 0) { quoteRealOrder(t, "sell", held); return; }
+    }
+    const p0 = positions[t.id]; if (p0 && p0.amt > 0) execute(t, { side: "sell", pay: p0.pay || pay, amt: p0.amt, mode: "instant", tax: taxFor(p0.pay || pay), burn: splitFee(p0.amt, p0.pay || pay).total, legs: [] }, {});
+  };
   const closeAllTickets = () => Object.keys(positions).forEach((id) => { const t = tokens.find((x) => String(x.id) === String(id)); if (t) sellPos(t); });
   // VISUAL TRADING pair — buy line + sell-all point, armed as one bot
+  // called after any bot/pair arms in live mode — one clear heads-up, at most
+  // once per session per reason, with the exact step to make triggers fire
+  const armedBotReadyCheck = () => {
+    if (!liveData) return;
+    try {
+      if (!liveAuto) {
+        if (!window.__valoWarnedAuto) {
+          window.__valoWarnedAuto = true;
+          pushNotif({ type: "system", user: null, tokenId: null,
+            text: "🤖 Lines armed — but LIVE AUTOMATION is OFF, so triggers will be skipped. Arm it in the portfolio → ⚡ TURBO panel (🤖 ARM LIVE AUTOMATION)." });
+        }
+        sayPrivate({ type: "note", text: "⚠ arm 🤖 AUTO (portfolio → ⚡ TURBO) or this bot's triggers will skip" });
+      } else if (turboLockedButPresent) {
+        if (!window.__valoWarnedTurboLock) {
+          window.__valoWarnedTurboLock = true;
+          pushNotif({ type: "system", user: null, tokenId: null,
+            text: "⚡ Lines armed — but your TURBO wallet is LOCKED, so triggers can't sign. Unlock it (PIN, portfolio → ⚡ TURBO) so bots can fire." });
+        }
+        sayPrivate({ type: "note", text: "⚠ unlock ⚡ TURBO or this bot's triggers will skip" });
+      } else if (pay !== "SOL") {
+        sayPrivate({ type: "note", text: "⚠ live bots fire in SOL only — flip the unit to $SOL" });
+      } else {
+        sayPrivate({ type: "note", text: "✅ armed & live-ready — triggers will fire real fills through ⚡ TURBO" });
+      }
+    } catch (e) {}
+  };
   const armVisualPair = ({ buy, sell, amt: a, trail, editId = null }) => {
     if (!selected || !(buy > 0) || !(sell > 0) || !(a > 0)) return;
     const oldB = editId ? pendingOrders.find((x) => x.id === editId) : null;
@@ -6768,12 +9930,13 @@ export default function App() {
     if (editId) setEditingBotId(null);
     setBotDraftLevel(null); setBotDragSet(false); setVtLines(null);
     sayPrivate({ type: "note", text: `👁 visual pair armed — BUY ${a} ${pay} @ $${fmtP(buy)} → SELL ALL @ $${fmtP(sell)}${trail > 0 ? ` (trail ${trail}%)` : ""}` });
+    armedBotReadyCheck();
   };
   // PC drag-set double-click: arms a bot at that level instantly — no ARM press,
   // and as many as you like
   // wallet escrow: arming a BUY takes the funds instantly; cancelling refunds.
   // No phantom balances — you can never arm more than the wallet holds.
-  const refundEscrow = (amt, payK) => { if (amt > 0) { if (payK === "SOL") setSolBalance((b) => b + amt); else setValoWallet((v) => v + amt); TestLog.push("escrow_refund", { amt, pay: payK }); } };
+  const refundEscrow = (amt, payK) => { if (amt > 0 && !liveData) { if (payK === "SOL") setSolBalance((b) => b + amt); else setValoWallet((v) => v + amt); TestLog.push("escrow_refund", { amt, pay: payK }); } };
   const takeEscrow = (amt, payK, extraCredit = 0) => {
     const bal = (payK === "SOL" ? solBalance : valoWallet) + extraCredit;
     if (bal < amt - 1e-9) {
@@ -6844,6 +10007,8 @@ export default function App() {
   const [buyChipMode, setBuyChipMode] = useState("pct");           // hotbar buy chips: % of wallet ⇄ fixed amounts
   const [buyPcts, setBuyPcts] = useState([10, 25, 50, 75, 100]);   // hold a chip to retype its number
   const [buyFixed, setBuyFixed] = useState([0.5, 1, 2, 5]);
+  const [sellChipMode, setSellChipMode] = useState("pct");         // sell chips: % of bag ⇄ SOL-value
+  const [sellFixed, setSellFixed] = useState([0.5, 1, 2, 5]);
   const [chipEditCfg, setChipEditCfg] = useState(null);            // in-app chip editor (prompt is blocked in iframes)
   const [chipEditVal, setChipEditVal] = useState("");
   const [chipEditErr, setChipEditErr] = useState(false);
@@ -6909,8 +10074,9 @@ export default function App() {
   const [ranksOpen, setRanksOpen] = useState(null);            // badge page: {focus} — tiers + leaderboard tabs
   const [nameChangedAt, setNameChangedAt] = useState(0);      // weekly username-change lock
   // ---- social graph + notifications (API: wire real social service) ----
-  const [followersList, setFollowersList] = useState(() => { const r = seededRand(4242); return Array.from({ length: 7 }, () => randomHandle(r)); });
-  const [followingList, setFollowingList] = useState(() => { const r = seededRand(7777); return Array.from({ length: 5 }, () => randomHandle(r)); });
+  // ⛓ real social graph only — a new account starts at zero, as it should
+  const [followersList, setFollowersList] = useState([]);
+  const [followingList, setFollowingList] = useState([]);
   const [friendsList, setFriendsList] = useState(() => ["degenmike"]);
   const [sentFriendReqs, setSentFriendReqs] = useState([]);
   const [friendReqs, setFriendReqs] = useState([]);          // incoming
@@ -6932,6 +10098,14 @@ export default function App() {
     notifTimer.current = setTimeout(() => setNotifToast(null), 10000); // text fades after 10s
     if (notifSaveRef.current && !n.noSave) notifSaveRef.current(notif); // survives refresh
   };
+  // one exit rule everywhere: ✕ (and tapping the backdrop) drops every open
+  // page and lands you back on the terminal, not on the last thing you opened
+  const closeAllPages = () => {
+    setProfileUser(null); setProfileCloud(null); setOtherFollowList(null); setFollowListOpen(null);
+    setNotifOpen(false); setLbOpen(false); setRanksOpen(null); setCalloutHubOpen(false);
+    setMyCalloutsOpen(false); setWpOpen(false); setClaimOpen(false); setCloudOpen(false);
+    setEcoFull(false); setInstallOpen(false);
+  };
   const navigateToToken = (tokenId) => {
     const tk = tokens.find((t) => String(t.id) === String(tokenId));
     if (!tk) return;
@@ -6943,24 +10117,9 @@ export default function App() {
   };
   // simulated inbound social events — followed callers call out, new followers, friend requests
   useEffect(() => {
-    const iv = setInterval(() => {
-      const roll = Math.random();
-      if (roll < 0.45) {
-        if (!notifSetting) return;                            // gated by the website setting
-        const t = tokens[Math.floor(Math.random() * tokens.length)]; if (!t) return;
-        const from = followingList[Math.floor(Math.random() * followingList.length)] || CALLERS[0];
-        pushNotif({ type: "callout", user: from, tokenId: t.id, sym: t.sym, text: `@${from} called out $${t.sym} @ ${fmt$(mcOf(t))} MC` });
-      } else if (roll < 0.75) {
-        const who = randomHandle(seededRand(Math.floor(Math.random() * 1e9)));
-        setFollowersList((L) => (L.includes(who) ? L : [...L, who]));
-        pushNotif({ type: "follower", user: who, text: `@${who} started following you — they now get your callouts` });
-      } else {
-        const who = randomHandle(seededRand(Math.floor(Math.random() * 1e9)));
-        setFriendReqs((L) => (L.includes(who) ? L : [...L, who]));
-        pushNotif({ type: "friend", user: who, text: `@${who} sent you a friend request` });
-      }
-    }, 26000);
-    return () => clearInterval(iv);
+    // ⛓ LIVE ONLY: followers, friend requests and callout pings come from real
+    // people using the site (Supabase realtime), never from a generator.
+    return () => {};
   }, [tokens, followingList, notifSetting]);
   useEffect(() => {
     setMyMcCallouts((M) => {
@@ -7007,18 +10166,78 @@ export default function App() {
   // right-edge tab positions — draggable up/down so users park them where comfy
   const [chatTabTop, setChatTabTop] = useState(42);    // % of viewport height
   const [walletTabTop, setWalletTabTop] = useState(60);
+  const [railPeek, setRailPeek] = useState(false);       // hold the wallet tab → 👻 phantom amount
+  const railPeekFired = useRef(false);
   const tabDrag = useRef(null);
   const tabJustDragged = useRef(false);
   const tabTouchStart = (which, cur) => (e) => { tabDrag.current = { which, y0: e.touches[0].clientY, top0: cur, moved: false }; };
   // MOBILE chart gestures — top handle crunches the metrics above the chart,
   // bottom handle resizes chart height (content below follows in flow)
-  const [mobChartH, setMobChartH] = useState(348);
+  // 📱 a mobile chart fills the screen by default — the old fixed 348px window
+  // wasted most of the display. Height = viewport minus the header and the
+  // trade bar; the drag handle still lets you shrink it for the panels below.
+  const mobFullH = () => {
+    if (typeof window === "undefined") return 348;
+    return Math.max(300, Math.round(window.innerHeight - 236));
+  };
+  const [mobChartH, setMobChartH] = useState(mobFullH);
+  const [mobUserSized, setMobUserSized] = useState(false);   // did they drag it themselves?
+  useEffect(() => {
+    if (mobUserSized) return;                                 // respect a manual size
+    const onR = () => setMobChartH(mobFullH());
+    window.addEventListener("resize", onR);
+    window.addEventListener("orientationchange", onR);
+    return () => { window.removeEventListener("resize", onR); window.removeEventListener("orientationchange", onR); };
+  }, [mobUserSized]);
+
   const [metricsCrunch, setMetricsCrunch] = useState(0); // 0 = full metrics, 1 = hidden
-  const [priceMode, setPriceMode] = useState(0); // header price tap: 0 price · 1 market cap · 2 your tokens
+  // a freshly opened token starts pulled up: the chart meets the pull bar
+  const mobOpenedRef = useRef(null);
+  const vpH = () => (typeof window !== "undefined"
+    ? Math.round((window.visualViewport && window.visualViewport.height) || window.innerHeight)
+    : 800);
+  useEffect(() => {
+    if (!isMobile || sel == null || mobOpenedRef.current === sel) return;
+    mobOpenedRef.current = sel;
+    setMetricsCrunch(1);
+    // conservative first paint — no overshoot, no scrunch under the header
+    setMobChartH(Math.max(360, Math.round(vpH() * 0.78)));
+    // measure the REAL available space once layout settles, then expand to it
+    let tries = 0;
+    const fit = () => {
+      const mc = document.querySelector("[data-mchart]");
+      if (!mc) { if (++tries < 6) setTimeout(fit, 120); return; }
+      const top = mc.getBoundingClientRect().top;
+      // 📱 full-bleed: everything from the chart's top edge down to the trade
+      // hotbar belongs to the chart. (Was reserving 96px of dead space.)
+      const avail = Math.round(vpH() - top - 58);
+      if (avail > 300) setMobChartH(Math.min(Math.max(360, avail), vpH() - 52));
+    };
+    setTimeout(fit, 160);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile, sel]);
+  // toolbars showing/hiding (PWA + Safari) change the viewport — re-clamp so
+  // the chart never extends past the screen and "scrunches" under the header
+  useEffect(() => {
+    if (!isMobile || typeof window === "undefined" || !window.visualViewport) return;
+    const onVp = () => {
+      setMobChartH((h) => {
+        const mc = document.querySelector("[data-mchart]");
+        const top = mc ? mc.getBoundingClientRect().top : 104;
+        const max = Math.round(vpH() - Math.max(0, top) - 52);
+        return h > max && max > 300 ? max : h;
+      });
+    };
+    window.visualViewport.addEventListener("resize", onVp);
+    return () => window.visualViewport.removeEventListener("resize", onVp);
+  }, [isMobile]);
+  const [priceMode, setPriceMode] = useState(0);
+  const priceTapRef = useRef(0);          // separates a tap from a hold on mobile // header price tap: 0 price · 1 market cap · 2 your tokens
   const chartDrag = useRef(null);
   const chartRaf = useRef(0);
   const chartDragStart = (which) => (e) => {
     e.stopPropagation(); // never arm the sheet's swipe-to-close from a resize handle
+    setMobUserSized(true);          // they chose a size — stop auto-fitting to full screen
     const d = { which, y0: e.touches[0].clientY, h0: mobChartH, c0: metricsCrunch };
     if (which === "bottom") {
       // cap the pull right above the LIVE TRADES / HOLDERS tab — never cover it
@@ -7044,7 +10263,7 @@ export default function App() {
       else {
         d.nextC = Math.round(Math.min(1, Math.max(0, d.c0 - dy / 110)) * 100) / 100; // pull up → crunch away
         // the chart itself rides the pull — height tracks crunch toward full
-        const fullH = Math.max(400, Math.round(window.innerHeight - 205));
+        const fullH = Math.max(400, Math.round(window.innerHeight - 104));
         d.nextH = Math.round(348 + d.nextC * (fullH - 348));
       }
       if (!chartRaf.current) chartRaf.current = requestAnimationFrame(() => {
@@ -7059,7 +10278,7 @@ export default function App() {
       // top-pull SNAP — never rest half-way covering things: either fully up
       // (name + price only) or fully back down
       if (d && d.which === "top" && d.nextC != null) {
-        const fullH = Math.max(400, Math.round(window.innerHeight - 205));
+        const fullH = Math.max(400, Math.round(window.innerHeight - 104));
         if (d.nextC > 0.33) {
           setMetricsCrunch(1); setMobChartH(fullH);
           setTimeout(() => {
@@ -7110,6 +10329,30 @@ export default function App() {
   // person onto every chart, past or future, until you change it.
   // { [trader]: { following: bool, color: "#rrggbb", icon: dataURL|null } }
   const [traderPrefs, setTraderPrefs] = useState({});
+  // real on-chain trades of pinned traders, keyed `${wallet}|${mint}`
+  const [pinnedTrades, setPinnedTrades] = useState({});
+  const pinnedBusy = useRef({});
+  const fetchPinnedTraderTrades = useCallback(async (trader, wallet, mint, tok) => {
+    if (!wallet || !mint) return;
+    const key = `${wallet}|${mint}`;
+    if (pinnedBusy.current[key] && Date.now() - pinnedBusy.current[key] < 20000) return;
+    pinnedBusy.current[key] = Date.now();
+    try {
+      const r = await fetch(`/api/trader?wallet=${encodeURIComponent(wallet)}&mint=${encodeURIComponent(mint)}`);
+      const j = await r.json();
+      if (j && Array.isArray(j.trades)) {
+        // map chain trades → marker shape (price in USD for the axis)
+        const markers = j.trades.map((t) => {
+          const pxUsd = t.priceSol * SOL_USD;
+          return { t: t.t, side: t.side, price: pxUsd, p: pxUsd,
+            amt: t.tokenAmt, unit: (tok && tok.sym) || "", sol: t.solAmt, qty: t.tokenAmt,
+            sym: (tok && tok.sym) || "", tx: t.sig, trader, wallet, real: true,
+            mc: (tok && tok.mc && tok.price) ? pxUsd * (tok.mc / tok.price) : null };
+        });
+        setPinnedTrades((P) => ({ ...P, [key]: markers }));
+      }
+    } catch (e) {}
+  }, []);
   const setTraderPref = (trader, patch) => setTraderPrefs((M) => ({
     ...M,
     [trader]: { following: false, color: pickTraderColor(trader), icon: null, ...(M[trader] || {}), ...patch },
@@ -7269,6 +10512,943 @@ export default function App() {
   const [supplyHeld] = useState(() => rnd(4e7, 9e7));     // circulating held by all claimants
   const [pendingEpochs, setPendingEpochs] = useState([]); // [{epoch, amount, root, weightPct, holdPct, volPct}]
   const [claimOpen, setClaimOpen] = useState(false);
+  const [payoutWallet, setPayoutWallet] = useState(() => { try { return localStorage.getItem("valo-payout-wallet") || null; } catch (e) { return null; } });
+  const [payoutDraft, setPayoutDraft] = useState("");
+  const [payoutMsg, setPayoutMsg] = useState("");
+  useEffect(() => { try { payoutWallet ? localStorage.setItem("valo-payout-wallet", payoutWallet) : localStorage.removeItem("valo-payout-wallet"); } catch (e) {} }, [payoutWallet]);
+  useEffect(() => { if (claimOpen) setPayoutDraft(payoutWallet || ""); /* eslint-disable-next-line */ }, [claimOpen]);
+  // ⛓ real trading (off unless the server enables it)
+  const [onchain, setOnchain] = useState({ enabled: false, maxSol: 0 });
+  // 🎚 slippage: fresh launches move fast — 5% default, user adjustable
+  const [slipBps, setSlipBps] = useState(() => {
+    try { const v = parseInt(localStorage.getItem("valo-slip-bps") || "500", 10); return Number.isFinite(v) ? Math.min(3000, Math.max(50, v)) : 500; } catch (e) { return 500; }
+  });
+  useEffect(() => { try { localStorage.setItem("valo-slip-bps", String(slipBps)); } catch (e) {} }, [slipBps]);
+  const [valoMint, setValoMint] = useState(null);   // real $VALO mint, once launched
+  useEffect(() => { try { if (typeof window !== "undefined") window.__VALO_MINT__ = valoMint || null; } catch (e) {} }, [valoMint]);
+  const [valoTreasury, setValoTreasury] = useState(null);   // fee destination
+  // every confirmed real order, recorded from the quote at fill time.
+  // Quote ≠ exact fill (slippage), so everything derived is labeled estimated.
+  const [realFills, setRealFills] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("valo-real-fills-v1") || "[]"); } catch (e) { return []; }
+  });
+  const realFillsRef = useRef([]);
+  useEffect(() => { realFillsRef.current = realFills; }, [realFills]);
+  // 📜 WHITEPAPER epoch bonuses: rank per duration board → +0.50…+0.10 each,
+  // stacking across boards, capped +4.0. Stored as (1 + Σbonus) on the row.
+  const lbRanksRef = useRef({});             // { period: rank }
+  const lbBonusOf = (r) => r < 1 ? 0 : r === 1 ? 0.5 : r === 2 ? 0.42 : r === 3 ? 0.36 : r === 4 ? 0.32 : r === 5 ? 0.29 : r === 6 ? 0.26 : r === 7 ? 0.23 : r === 8 ? 0.20 : r === 9 ? 0.17 : r === 10 ? 0.14 : r <= 100 ? 0.10 : 0;
+  const lastLbMultRef = useRef(1);
+  const reportMyRank = (period, rank) => {
+    lbRanksRef.current[period] = rank;
+    const total = Object.values(lbRanksRef.current).reduce((a, r) => a + lbBonusOf(r), 0);
+    const mult = 1 + Math.min(4, total);
+    if (Math.abs(mult - lastLbMultRef.current) < 0.01) return;
+    lastLbMultRef.current = mult;
+    (async () => {
+      try {
+        const sb2 = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
+        if (!sb2 || !cloudUser || !liveData) return;
+        const epoch = String(Math.floor(Date.now() / 3600e3));
+        await sb2.from("epoch_activity").upsert({ user_id: cloudUser.id, epoch, callout_mult: mult, updated_at: new Date().toISOString() }, { onConflict: "user_id,epoch" });
+      } catch (e) {}
+    })();
+  };
+  // 🏋 log real volume into the current epoch (hour) — powers reward weights
+  const logEpochVolume = async (sol) => {
+    try {
+      if (!(sol > 0)) return;
+      const sb2 = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
+      if (!sb2 || !cloudUser) return;
+      const epoch = String(Math.floor(Date.now() / 3600e3));      // hour id
+      const { data } = await sb2.from("epoch_activity").select("vol_sol").eq("user_id", cloudUser.id).eq("epoch", epoch).maybeSingle();
+      const cur = (data && +data.vol_sol) || 0;
+      await sb2.from("epoch_activity").upsert({ user_id: cloudUser.id, epoch, vol_sol: cur + sol, updated_at: new Date().toISOString() }, { onConflict: "user_id,epoch" });
+    } catch (e) {}
+  };
+  const recordRealFill = (f) => setRealFills((F) => {
+    // stamp the token's live market cap at THIS instant, so the marker can show
+    // the exact MC the trade happened at (not a later, recomputed value)
+    try { logEpochVolume(f.sol || 0); } catch (e) {}
+    let mcAtFill = f.mcAtFill;
+    if (!(mcAtFill > 0) && f.mint) {
+      const tk = (tokensRef.current || []).find((t) => t.liveMint === f.mint);
+      // effective fill price even when px wasn't recorded: proceeds ÷ qty
+      const pxEff = (f.px > 0) ? f.px : (f.qty > 0 && f.sol > 0 ? (f.sol * SOL_USD) / f.qty : 0);
+      if (tk && tk.mc > 0 && tk.price > 0 && pxEff > 0) {
+        const supply = tk.mc / tk.price;           // supply is ~constant
+        mcAtFill = pxEff * supply;                  // MC at the fill's own price
+      } else if (tk && tk.mc > 0) mcAtFill = tk.mc; // best available
+      if (!(f.px > 0) && pxEff > 0) f = { ...f, px: pxEff };   // record it properly too
+    }
+    const stamped = mcAtFill > 0 ? { ...f, mcAtFill } : f;
+    const next = [...F, stamped].slice(-500);
+    try { localStorage.setItem("valo-real-fills-v1", JSON.stringify(next)); } catch (e) {}
+    return next;
+  });
+  // avg-cost ledger per mint, SOL-denominated
+  const chainLedger = useMemo(() => {
+    const byMint = {};
+    let realizedSol = 0;
+    for (const f of realFills) {
+      const m = byMint[f.mint] || (byMint[f.mint] = { qty: 0, costSol: 0, realizedSol: 0, sym: f.sym });
+      if (f.side === "buy") { m.qty += f.qty; m.costSol += f.sol; }
+      else if (m.qty > 0) {
+        const p = Math.min(1, f.qty / m.qty);
+        const basis = m.costSol * p;
+        m.realizedSol += f.sol - basis; realizedSol += f.sol - basis;
+        m.costSol -= basis; m.qty = Math.max(0, m.qty - f.qty);
+      } else { m.realizedSol += f.sol; realizedSol += f.sol; } // sold coins bought outside VALO — all proceeds count
+    }
+    return { byMint, realizedSol };
+  }, [realFills]);
+  const [realOrder, setRealOrder] = useState(null);   // the order awaiting confirmation
+  const onchainRef = useRef(onchain);
+  useEffect(() => { onchainRef.current = onchain; }, [onchain]);
+  useEffect(() => {
+    let stop = false;
+    const check = async () => {
+      try {
+        const r = await fetch("/api/swap?mode=status");
+        const j = await r.json();
+        // only "on" when the feature is enabled AND Jupiter is actually reachable
+        const ok = !!(j && j.enabled && j.jupiter === "reachable");
+        if (!stop) setOnchain({ enabled: ok, maxSol: (j && j.maxSol) || 0, jupiter: j && j.jupiter, feeBps: (j && j.feeBps) || 0, feeVia: (j && j.feeVia) || "none", feeSplit: (j && j.feeSplit) || null });
+      } catch (e) { /* keep last state; retry below */ }
+    };
+    check();
+    // retry every 20s while routing is down — one bad boot fetch must never
+    // kill live trading for the whole session
+    const iv = setInterval(() => { if (!onchainRef.current.enabled) check(); }, 20000);
+    // PWA/phone wake → re-verify immediately
+    const onVis = () => { if (document.visibilityState === "visible" && !onchainRef.current.enabled) check(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { stop = true; clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+  }, []);
+
+  // ask for a quote, then let the user decide. Two separate steps, always.
+  // how much of this token does the connected wallet actually hold?
+  const chainHoldingOf = (token) => {
+    if (!token || !token.liveMint || !walletChain) return null;
+    return (walletChain.holdings || []).find((x) => x.mint === token.liveMint) || null;
+  };
+  const chainHeldOf = (token) => {
+    const h = chainHoldingOf(token);
+    return h ? h.qty : 0;
+  };
+
+  const friendlyTxErr = (m) => {
+    const s = String(m || "");
+    if (/insufficient funds for rent|InsufficientFundsForRent/i.test(s))
+      return "not enough SOL left for account rent — Solana reserves ~0.002 SOL per new token account plus fees. Lower the size or add ~0.01 SOL.";
+    if (/insufficient lamports|insufficient funds/i.test(s))
+      return "not enough SOL in this wallet for that size + fees.";
+    return s;
+  };
+  const quoteRealOrder = async (token, side, size, opts = {}) => {
+    const owner = opts.owner || tradeAddr;
+    const fullExit = !!opts.fullExit;
+    if (!onchain.enabled || !walletReady || !token || !token.liveMint) return;
+    if (turboLockedButPresent && (!opts.owner || (turbo && opts.owner === turbo.pubkey))) {
+      setRealOrder({ stage: "error", token, side, msg:
+        "⚡ your TURBO wallet is locked — these funds live there. Enter your PIN in the portfolio's TURBO panel to trade." });
+      return;
+    }
+    const SOLM = "So11111111111111111111111111111111111111112";
+    const selling = side === "sell";
+    const inputMint = selling ? token.liveMint : SOLM;
+    const outputMint = selling ? SOLM : token.liveMint;
+
+    // buys are sized in SOL; sells are sized in tokens you actually hold
+    let q = "";
+    let label = "";
+    if (selling) {
+      const h = (opts.heldQty != null) ? { qty: opts.heldQty, raw: opts.raw } : chainHoldingOf(token);
+      const held = h ? h.qty : 0;
+      const qty = Math.min(size, held);
+      if (!(qty > 0)) {
+        setRealOrder({ stage: "error", token, side, msg: `you don't hold any $${token.sym} in this wallet` });
+        return;
+      }
+      // full exit → send the chain's exact integer, so no dust is left stranded
+      const fullExit = qty >= held && h && h.raw;
+      q = fullExit ? `&amountRaw=${h.raw}` : `&amountUi=${qty}`;
+      label = `${fmtQty(qty)} ${token.sym}${fullExit ? " (all)" : ""}`;
+    } else {
+      const SOL_RESERVE = 0.0065;   // rent (ATA + temp wSOL) + fees + wallet floor
+      const bal = (walletChain && walletChain.sol) || 0;
+      const spendable = Math.max(0, bal - SOL_RESERVE);
+      if (bal > 0 && size > spendable) {
+        if (spendable <= 0.0005) {
+          setRealOrder({ stage: "error", token, side, msg:
+            `not enough SOL for a buy — Solana needs ~${SOL_RESERVE} kept aside for account rent + fees. Add SOL to this wallet (it holds ${bal.toFixed(4)}).` });
+          return;
+        }
+        size = +spendable.toFixed(4);   // clamp instead of letting simulation fail
+      }
+      const amount = Math.floor(size * 1e9);
+      if (!(amount > 0)) return;
+      q = `&amount=${amount}`;
+      label = `${size} SOL`;
+    }
+
+    setRealOrder({ stage: "quoting", token, side, size, label, owner, fullExit });
+    try {
+      const r = await fetch(`/api/swap?mode=quote&inputMint=${inputMint}&outputMint=${outputMint}${q}&slippageBps=${slipBps}`);
+      const j = await r.json();
+      if (!r.ok || j.error) { setRealOrder({ stage: "error", token, side, size, label, msg: j.error || "no route" }); return; }
+      setRealOrder({ stage: "review", token, side, size, label, quote: j.quote, inputMint, outputMint, q, owner, fullExit });
+    } catch (e) {
+      setRealOrder({ stage: "error", token, side, size, label, msg: String(e.message || e),
+        errorName: (e && e.errorName) || null, logs: (e && e.logs) || null, program: (e && e.program) || null });
+    }
+  };
+
+  // ⚡ TURBO trading wallet — device-held keypair for popup-free execution
+  const [turbo, setTurbo] = useState(() => {
+    try { const s = JSON.parse(localStorage.getItem("valo-turbo-v1") || "null"); return s && s.pubkey ? { pubkey: s.pubkey, unlocked: false } : null; }
+    catch (e) { return null; }
+  });
+  const turboKpRef = useRef(null);          // decrypted Keypair — memory only
+  // (armed flag + trade address are derived BELOW liveData/wallet — TDZ)
+
+  const turboCrypto = {
+    async derive(pin, salt) {
+      const km = await crypto.subtle.importKey("raw", new TextEncoder().encode(pin), "PBKDF2", false, ["deriveKey"]);
+      return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 120000, hash: "SHA-256" }, km,
+        { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+    },
+    async encrypt(secret64, pin) {
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const key = await this.derive(pin, salt);
+      const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, secret64));
+      const b64 = (u) => btoa(String.fromCharCode(...u));
+      return { salt: b64(salt), iv: b64(iv), ct: b64(ct) };
+    },
+    async decrypt(blob, pin) {
+      const u8 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+      const key = await this.derive(pin, u8(blob.salt));
+      return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: u8(blob.iv) }, key, u8(blob.ct)));
+    },
+  };
+
+  const turboCreate = async (pin) => {
+    const web3 = await loadWeb3();
+    const kp = web3.Keypair.generate();
+    const enc = await turboCrypto.encrypt(kp.secretKey, pin);
+    const rec = { v: 1, pubkey: kp.publicKey.toString(), ...enc, createdAt: Date.now() };
+    localStorage.setItem("valo-turbo-v1", JSON.stringify(rec));
+    turboKpRef.current = kp;
+    setTurbo({ pubkey: rec.pubkey, unlocked: true });
+    // the backup the user MUST take: base58 secret, importable into Phantom
+    const bs58 = (bytes) => { const A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+      let x = 0n; for (const b of bytes) x = (x << 8n) | BigInt(b);
+      let out = ""; while (x > 0n) { out = A[Number(x % 58n)] + out; x /= 58n; }
+      for (const b of bytes) { if (b === 0) out = "1" + out; else break; } return out; };
+    return { pubkey: rec.pubkey, backup: bs58(kp.secretKey) };
+  };
+  const turboUnlock = async (pin) => {
+    try {
+      const rec = JSON.parse(localStorage.getItem("valo-turbo-v1") || "null");
+      if (!rec) return false;
+      const secret = await turboCrypto.decrypt(rec, pin);
+      const web3 = await loadWeb3();
+      turboKpRef.current = web3.Keypair.fromSecretKey(secret);
+      setTurbo({ pubkey: rec.pubkey, unlocked: true });
+      return true;
+    } catch (e) { return false; }   // wrong PIN → AES-GCM auth fails, nothing leaks
+  };
+  const turboLock = () => { turboKpRef.current = null; setTurbo((t) => t ? { ...t, unlocked: false } : t); };
+
+
+  // 🏦 site fee → treasury, turbo-signed, after a confirmed fill. Skipped when
+  // Jupiter already collected in-swap (feeVia "jupiter"). From the treasury,
+    // the epoch-rewards / VALO-burn split is the operator's move.
+  // 👑 creator fee split — 25% burn · 50% epoch vault · 25% stays. Signed by
+  // the creator's own Phantom; only rendered for that wallet.
+  const doCreatorSplit = async () => {
+    try {
+      const split = (onchain && onchain.feeSplit) || {};
+      if (!wallet || !wallet.address || !split.burn || !split.epoch) { pushNotif({ type: "system", text: "⚠ creator split needs VALO_BURN + VALO_EPOCH configured" }); return; }
+      const web3 = await loadWeb3();
+      const conn = null;
+      const balR = await fetch(`/api/wallet?address=${wallet.address}&t=${Date.now()}`);
+      const balJ = await balR.json();
+      const solBal = (balJ && balJ.sol) || 0;
+      const distributable = Math.max(0, solBal - 0.01);            // keep rent + fees
+      if (distributable < 0.001) { pushNotif({ type: "system", text: "👑 creator wallet has nothing to split yet" }); return; }
+      const lam = Math.floor(distributable * 1e9);
+      const burnLam = Math.floor(lam * 0.25), vaultLam = Math.floor(lam * 0.5);
+      const bhx = await getBlockhash();
+      const tx = new web3.Transaction({ feePayer: new web3.PublicKey(wallet.address), recentBlockhash: bhx });
+      tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(wallet.address), toPubkey: new web3.PublicKey(split.burn), lamports: burnLam }));
+      tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(wallet.address), toPubkey: new web3.PublicKey(split.epoch), lamports: vaultLam }));
+      const ph = getProvider();
+      if (!ph) { pushNotif({ type: "system", text: "👻 Phantom not available to sign the split" }); return; }
+      const { signature } = await ph.signAndSendTransaction(tx);
+      pushNotif({ type: "system", text: `👑 creator fees split: 🔥 ${(burnLam / 1e9).toFixed(4)} burned · 🎁 ${(vaultLam / 1e9).toFixed(4)} → epoch vault · kept ${((lam - burnLam - vaultLam) / 1e9).toFixed(4)} · ${signature.slice(0, 8)}…` });
+    } catch (e) { pushNotif({ type: "system", text: `👑 split failed: ${String(e.message || e).slice(0, 80)}` }); }
+  };
+  const payTurboFee = async (notionalSol, feeMeta) => {
+    try {
+      if (!turboActive) return;
+      const bps = (feeMeta && feeMeta.feeBps) || (onchain && onchain.feeBps) || 0;
+      const via = (feeMeta && feeMeta.feeVia) || (onchain && onchain.feeVia) || "none";
+      if (!(bps > 0) || via === "jupiter") return;   // none configured, or already taken in-swap
+      const lam = Math.floor(notionalSol * 1e9 * (bps / 10000));
+      if (lam < 2000) return;                        // dust isn't worth a tx fee
+      const split = (onchain && onchain.feeSplit) || {};
+      const web3 = await loadWeb3();
+      const bhx = await getBlockhash();
+      const tx = new web3.Transaction({ feePayer: new web3.PublicKey(turbo.pubkey), recentBlockhash: bhx });
+      if (split.burn && split.epoch) {
+        // 🔥 50% burned forever · 🎁 50% to the epoch vault — one tx, two legs
+        const half = Math.floor(lam / 2);
+        tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(split.burn), lamports: half }));
+        tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(split.epoch), lamports: lam - half }));
+        await turboSignSend(tx);
+        sayPrivate({ type: "note", text: `⚖ site fee ${(lam / 1e9).toFixed(6)} SOL (${bps / 100}%) → 🔥 ${(half / 1e9).toFixed(6)} burned · 🎁 ${((lam - half) / 1e9).toFixed(6)} epoch vault` });
+      } else if (valoTreasury) {
+        tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(valoTreasury), lamports: lam }));
+        await turboSignSend(tx);
+        sayPrivate({ type: "note", text: `🏦 site fee ${(lam / 1e9).toFixed(6)} SOL → VALO treasury (${bps / 100}%)` });
+      }
+    } catch (e) { /* the trade already succeeded — a fee hiccup never surfaces as a failure */ }
+  };
+
+  // a recent blockhash from wherever answers first — our API, else public RPC
+  const getBlockhash = async () => {
+    try {
+      const j = await (await fetch("/api/sendtx?blockhash=1")).json();
+      if (j && j.blockhash) return j.blockhash;
+    } catch (e) {}
+    try {
+      const r = await fetch("https://api.mainnet-beta.solana.com", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getLatestBlockhash", params: [{ commitment: "finalized" }] }),
+      });
+      const j = await r.json();
+      const v = j && j.result && j.result.value;
+      if (v && v.blockhash) return v.blockhash;
+    } catch (e) {}
+    throw new Error("couldn't fetch a recent blockhash — check your connection");
+  };
+
+  // sign with the turbo key + send — the popup-free path everything routes to
+  const turboSignSend = async (txLike) => {
+    const kp = turboKpRef.current;
+    if (!kp) throw new Error("turbo wallet locked");
+    if (txLike.sign && txLike.message) txLike.sign([kp]);        // VersionedTransaction
+    else { txLike.partialSign ? txLike.partialSign(kp) : txLike.sign(kp); }  // legacy
+    const b64 = btoa(String.fromCharCode(...txLike.serialize()));
+    const sj = await (await fetch("/api/sendtx", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ signed: b64 }) })).json();
+    if (!sj.ok) throw new Error(sj.error || "network rejected it");
+    return sj.signature;
+  };
+
+  // fund: Phantom → turbo (the ONE Phantom approval this whole system needs)
+  const turboFund = async (sol) => {
+    const ph = getProvider();
+    // no injected Phantom (Home Screen PWA / no extension) → deeplink Phantom's
+    // own send flow to the turbo address; the user approves in Phantom and taps
+    // back to the app. No in-app browser, no full-screen break.
+    if (!ph) {
+      if (turbo && turbo.pubkey && typeof window !== "undefined") {
+        const amt = Math.max(0, sol || 0);
+        // Phantom universal link to send SOL to an address
+        const url = `https://phantom.app/ul/v1/send?recipient=${turbo.pubkey}&amount=${amt}&token=SOL`;
+        window.location.href = url;   // same-tab hand-off; returns to the PWA after
+        return { ok: true, deeplink: true };
+      }
+      return { ok: false, err: "no Phantom — copy the deposit address above and send SOL from any wallet" };
+    }
+    if (!wallet || !wallet.address || !turbo) return { ok: false, err: "connect Phantom first" };
+    try {
+      const web3 = await loadWeb3();
+      const bhx = await getBlockhash();
+      const tx = new web3.Transaction({ feePayer: new web3.PublicKey(wallet.address), recentBlockhash: bhx });
+      tx.add(web3.SystemProgram.transfer({
+        fromPubkey: new web3.PublicKey(wallet.address),
+        toPubkey: new web3.PublicKey(turbo.pubkey),
+        lamports: Math.floor(sol * 1e9),
+      }));
+      const out = await ph.signAndSendTransaction(tx);
+      // give the transfer a moment to land, then refresh the panel's number
+      setTimeout(async () => {
+        try {
+          const j = await (await fetch(`/api/wallet?address=${turbo.pubkey}&t=${Date.now()}`)).json();
+          if (j && !j.error) setTurboSolBal(j.sol || 0);
+        } catch (e) {}
+      }, 4000);
+      return { ok: true, sig: out && (out.signature || out) };
+    } catch (e) { return { ok: false, err: String(e.message || e) }; }
+  };
+
+  // sweep: turbo → Phantom, signed by the turbo key (no popup, ever)
+  const turboSweep = async (destOverride) => {
+    const dest = destOverride || (wallet && wallet.address);
+    if (!turboKpRef.current) return { ok: false, err: "unlock turbo first" };
+    if (!dest) return { ok: false, err: "no destination — connect Phantom or paste an address" };
+    try {
+      const web3 = await loadWeb3();
+      const bal = await (await fetch(`/api/wallet?address=${turbo.pubkey}&t=${Date.now()}`)).json();
+      const balLam = Math.floor(((bal && bal.sol) || 0) * 1e9);
+      // Solana's rule: an account may be emptied to EXACTLY 0, or must keep
+      // the rent-exempt minimum (~0.00089) — anything between is rejected.
+      // Sweep = balance − the 5000-lamport fee → final balance is exactly 0.
+      const FEE = 5000, RENT_MIN = 895000;
+      const attempt = async (lam) => {
+        if (lam <= 0) throw new Error("nothing to sweep");
+        const bhx = await getBlockhash();
+        const tx = new web3.Transaction({ feePayer: new web3.PublicKey(turbo.pubkey), recentBlockhash: bhx });
+        tx.add(web3.SystemProgram.transfer({
+          fromPubkey: new web3.PublicKey(turbo.pubkey),
+          toPubkey: new web3.PublicKey(dest),
+          lamports: lam,
+        }));
+        const sig = await turboSignSend(tx);
+        return { sig, lam };
+      };
+      try {
+        const r1 = await attempt(balLam - FEE);                 // full empty → 0
+        setTurboSolBal(0);
+        return { ok: true, sig: r1.sig, sol: r1.lam / 1e9 };
+      } catch (e) {
+        if (!/rent/i.test(String(e.message || e))) throw e;
+        // stale balance or edge case — leave the rent minimum behind instead
+        const r2 = await attempt(balLam - FEE - RENT_MIN);
+        setTurboSolBal(RENT_MIN / 1e9);
+        return { ok: true, sig: r2.sig, sol: r2.lam / 1e9 };
+      }
+    } catch (e) { return { ok: false, err: String(e.message || e) }; }
+  };
+
+
+
+  // 🤖⛓ live automation — bots may spend real funds ONLY while this is armed.
+  // Deliberately NOT persisted: closing the tab disarms it, every session
+  // starts paper-safe, and arming is a conscious act behind a confirm sheet.
+  const [liveAuto, setLiveAuto] = useState(false);
+  const autoQueueRef = useRef(Promise.resolve());
+  const autoBusyRef = useRef(false);
+
+  // headless real order — the bot path. No review modal (that's what "armed"
+  // means), but every other guard stays: server size cap, confirmation poll,
+  // ledger record, wallet refresh. Returns { ok, sig, qty, sol } | { ok:false, err }.
+  const fireRealOrderDirect = (token, side, size) => {
+    const job = async () => {
+      if (!onchain.enabled || !walletReady || !token || !token.liveMint)
+        return { ok: false, err: "live trading not armed" };
+      if (turboLockedButPresent) return { ok: false, err: "⚡ turbo wallet locked — unlock with your PIN in the portfolio" };
+      const SOLM = "So11111111111111111111111111111111111111112";
+      const selling = side === "sell";
+      const inputMint = selling ? token.liveMint : SOLM;
+      const outputMint = selling ? SOLM : token.liveMint;
+      let q = "";
+      if (selling) {
+        const h = chainHoldingOf(token);
+        const held = h ? h.qty : 0;
+        const qty = Math.min(size, held);
+        if (!(qty > 0)) return { ok: false, err: `no $${token.sym} held on-chain` };
+        const fullExit = qty >= held && h && h.raw;
+        q = fullExit ? `&amountRaw=${h.raw}` : `&amountUi=${qty}`;
+      } else {
+        const capped = Math.min(size, onchain.maxSol || size);   // cap enforced here AND server-side
+        const amount = Math.floor(capped * 1e9);
+        if (!(amount > 0)) return { ok: false, err: "zero-size order" };
+        q = `&amount=${amount}`;
+      }
+      try {
+        const ph = getProvider();
+        if (!ph && !turboActive) return { ok: false, err: "Phantom not found" };
+        const r = await fetch(`/api/swap?mode=build&inputMint=${inputMint}&outputMint=${outputMint}${q}&slippageBps=${slipBps}&user=${tradeAddr}`);
+        const j = await r.json();
+        if (!r.ok || j.error || !j.swapTransaction) return { ok: false, err: j.error || "no route" };
+        const web3 = await loadWeb3();
+        const raw = Uint8Array.from(atob(j.swapTransaction), (c) => c.charCodeAt(0));
+        const tx = web3.VersionedTransaction.deserialize(raw);
+        let sig = null;
+        if (turboActive) {
+          sig = await turboSignSend(tx);                      // ⚡ zero prompts
+        } else if (ph && ph.signAndSendTransaction) {
+          const out = await ph.signAndSendTransaction(tx);   // silent if the user enabled auto-confirm
+          sig = out && (out.signature || out);
+        } else if (ph && ph.signTransaction) {
+          const signed = await ph.signTransaction(tx);
+          const b64 = btoa(String.fromCharCode(...signed.serialize()));
+          const send = await fetch("/api/sendtx", { method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ signed: b64 }) });
+          const sj = await send.json();
+          if (!sj.ok) return { ok: false, err: sj.error || "network rejected it", errorName: sj.errorName || null, logs: sj.logs || null, program: sj.program || null };
+          sig = sj.signature;
+        } else return { ok: false, err: "wallet can't sign here" };
+        if (!sig) return { ok: false, err: "not signed" };
+        // wait for the chain — an automated fill that isn't confirmed isn't a fill
+        let landed = null;
+        for (let i = 0; i < 30; i++) {
+          await new Promise((res) => setTimeout(res, 1500));
+          try {
+            const cr = await fetch(`/api/sendtx?sig=${sig}`);
+            const cj = await cr.json();
+            if (cj.status === "failed") { landed = { ok: false, err: cj.err }; break; }
+            if (cj.confirmed) { landed = { ok: true }; break; }
+          } catch (e) {}
+        }
+        if (landed && !landed.ok) return { ok: false, sig, err: `reverted on-chain — funds did not move. ${landed.err || ""}` };
+        const q2 = j.quote || {};
+        const oDec = Number.isInteger(q2.outDecimals) ? q2.outDecimals : 6;
+        const prevHoldQty2 = (() => { try { const hh0 = chainHoldingOf(token); return (hh0 && hh0.qty) || 0; } catch (e) { return 0; } })();
+        const estOutQty = (+q2.outAmount || 0) / Math.pow(10, oDec);
+        const qty = selling ? size : (estOutQty || (token.price > 0 ? (Math.min(size, onchain.maxSol || size) * SOL_USD) / token.price : 0));
+        const sol = selling ? ((+q2.outAmount || 0) / 1e9 || size * ((token.price || 0) / SOL_USD)) : Math.min(size, onchain.maxSol || size);
+        try { if (qty > 0 && sol > 0) recordRealFill({ at: Date.now(), side, mint: token.liveMint, sym: token.sym, qty, sol, sig, px: (sol * SOL_USD) / qty }); } catch (e) {}
+        try { if (landed && landed.ok && sol > 0) payTurboFee(sol, j.quote || j); } catch (e) {}
+        // 🧾 after-sell truth: mark-to-market said one thing; the pool paid
+        // another. When impact+fees moved the result, spell it out.
+        if (selling && landed && landed.ok) {
+          try {
+            const markUsd = (token.price || 0) * qty;              // what the chart valued it at
+            const gotUsd = sol * SOL_USD;                            // what the sell actually returned
+            const led = chainLedger.byMint[token.liveMint];
+            const basisUsd = led && led.qty > 0 ? (led.costSol * SOL_USD) * Math.min(1, qty / led.qty) : null;
+            const slipUsd = markUsd - gotUsd;                        // impact + fees, in dollars
+            if (markUsd > 0 && Math.abs(slipUsd) > Math.max(0.005, markUsd * 0.02)) {
+              const markPnl = basisUsd != null ? markUsd - basisUsd : null;
+              const netPnl = basisUsd != null ? gotUsd - basisUsd : null;
+              const flip = markPnl != null && netPnl != null && markPnl > 0 && netPnl < 0;
+              pushNotif({ type: "system", user: null, tokenId: token.id,
+                text: `🧾 sold ${token.sym}: chart valued it $${markUsd.toFixed(2)} but the pool paid $${gotUsd.toFixed(2)} — impact+fees −$${slipUsd.toFixed(2)} on thin liquidity${
+                  netPnl != null ? `. Net P/L ${netPnl >= 0 ? "+" : "−"}$${Math.abs(netPnl).toFixed(2)}${flip ? ` (mark showed +$${markPnl.toFixed(2)})` : ""}` : ""}` });
+            }
+          } catch (e) {}
+        }
+        // ⚡ instant sellability — insert the holding the moment the buy lands
+        if (!selling && landed && landed.ok) {
+          const addQty = qty > 0 ? qty : 1;
+          setWalletChain((W) => {
+            if (!W) return W;
+            const holds = (W.holdings || []).slice();
+            const idx = holds.findIndex((x) => x.mint === token.liveMint);
+            const pg = token.price || (holds[idx] && holds[idx].price) || 0;
+            if (idx >= 0) holds[idx] = { ...holds[idx], qty: (holds[idx].qty || 0) + (qty > 0 ? qty : 0), pending: !(qty > 0) };
+            else holds.unshift({ mint: token.liveMint, sym: token.sym, name: token.name || token.sym,
+              qty: addQty, usd: addQty * pg, price: pg, account: null, program: null,
+              owner: tradeAddr, src: (turbo && tradeAddr === turbo.pubkey) ? "turbo" : "phantom",
+              pending: !(qty > 0), justBought: true });
+            return { ...W, holdings: holds, holdingsCount: idx >= 0 ? W.holdingsCount : (W.holdingsCount || 0) + 1 };
+          });
+        }
+        try {
+          const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(tradeAddr || wallet.address)}&t=${Date.now()}`);
+          const j2 = await r2.json();
+          if (j2 && !j2.error) {
+            setWalletChain(j2);
+            try { ensureCardsForHoldings(j2.holdings || []); } catch (e) {}
+            if (!selling && landed && landed.ok && !(estOutQty > 0)) {
+              const nh = (j2.holdings || []).find((x) => x.mint === token.liveMint);
+              const gotQty = Math.max(0, ((nh && nh.qty) || 0) - prevHoldQty2);
+              if (gotQty > 0 && sol > 0)
+                recordRealFill({ at: Date.now(), side: "buy", mint: token.liveMint, sym: token.sym,
+                  qty: gotQty, sol, sig, px: (sol * SOL_USD) / gotQty, deltaMeasured: true });
+            }
+          }
+        } catch (e) {}
+        return { ok: true, sig, qty, sol, confirmed: !!(landed && landed.ok) };
+      } catch (e) {
+        return { ok: false, err: friendlyTxErr((e && e.message) || e) };
+      }
+    };
+    // serialize — one real order in flight at a time, always
+    const run = autoQueueRef.current.then(() => { autoBusyRef.current = true; return job(); })
+      .finally(() => { autoBusyRef.current = false; });
+    autoQueueRef.current = run.catch(() => {});
+    return run;
+  };
+
+  // 🗑 burn a dead token + close its account → rent comes back as SOL.
+  const burnAndReclaim = async (h) => {
+    if (!h || !h.mint || !h.account || !walletReady) return;
+    if (turboLockedButPresent) {
+      pushNotif({ type: "system", user: null, tokenId: null, text: "⚡ TURBO is locked — unlock with your PIN to burn from it." });
+      return;
+    }
+    const ph = getProvider();
+    if (!ph && !turboActive) return;
+    try {
+      pushNotif({ type: "system", user: null, tokenId: null,
+        text: `🗑 burning ${h.sym || h.mint.slice(0, 5)} and closing its account — the ~0.002 SOL rent comes back to you…` });
+      const web3 = await loadWeb3();
+      const bh = { blockhash: await getBlockhash() };
+      const hOwner = h.owner || tradeAddr || wallet.address;
+      const hOwnerIsTurbo = !!(turbo && hOwner === turbo.pubkey);
+      const owner = new web3.PublicKey(hOwner);
+      const acct = new web3.PublicKey(h.account);
+      const mint = new web3.PublicKey(h.mint);
+      const prog = new web3.PublicKey(h.program || "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+      // burn: tag 8 + u64 amount (LE) — burn the EXACT raw balance
+      const amt = BigInt(h.raw || "0");
+      const data8 = new Uint8Array(9); data8[0] = 8;
+      new DataView(data8.buffer).setBigUint64(1, amt, true);
+      const ins = [];
+      if (amt > 0n) ins.push(new web3.TransactionInstruction({
+        programId: prog, data: data8,
+        keys: [
+          { pubkey: acct, isSigner: false, isWritable: true },
+          { pubkey: mint, isSigner: false, isWritable: true },
+          { pubkey: owner, isSigner: true, isWritable: false },
+        ],
+      }));
+      // closeAccount: tag 9 — rent → owner
+      ins.push(new web3.TransactionInstruction({
+        programId: prog, data: new Uint8Array([9]),
+        keys: [
+          { pubkey: acct, isSigner: false, isWritable: true },
+          { pubkey: owner, isSigner: false, isWritable: true },
+          { pubkey: owner, isSigner: true, isWritable: false },
+        ],
+      }));
+      const tx = new web3.Transaction({ feePayer: owner, recentBlockhash: bh.blockhash });
+      tx.add(...ins);
+      let sig = null;
+      if (hOwnerIsTurbo && turboActive) {
+        sig = await turboSignSend(tx);
+      } else if (hOwnerIsTurbo && !turboActive) {
+        pushNotif({ type: "system", user: null, tokenId: null, text: "⚡ unlock TURBO (PIN) to burn from it." });
+        return;
+      } else if (ph && ph.signAndSendTransaction) {
+        const out = await ph.signAndSendTransaction(tx);
+        sig = out && (out.signature || out);
+      } else {
+        const signed = await ph.signTransaction(tx);
+        const b64 = btoa(String.fromCharCode(...signed.serialize()));
+        const sj = await (await fetch("/api/sendtx", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ signed: b64 }) })).json();
+        if (!sj.ok) throw new Error(sj.error || "network rejected it");
+        sig = sj.signature;
+      }
+      if (!sig) throw new Error("not signed");
+      for (let k = 0; k < 30; k++) {
+        await new Promise((r2) => setTimeout(r2, 1500));
+        try { const cj = await (await fetch(`/api/sendtx?sig=${sig}`)).json();
+          if (cj.status === "failed") throw new Error(cj.err || "reverted");
+          if (cj.confirmed) break; } catch (e) { if (String(e.message).includes("reverted")) throw e; }
+      }
+      setWalletChain((W) => W ? { ...W, holdings: (W.holdings || []).filter((x) => x.mint !== h.mint), holdingsCount: Math.max(0, (W.holdingsCount || 1) - 1) } : W);
+      pushNotif({ type: "system", user: null, tokenId: null,
+        text: `🗑✓ ${h.sym || h.mint.slice(0, 5)} burned, account closed — rent reclaimed. Gone from your wallet for good.` });
+      try {
+        const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(tradeAddr || wallet.address)}&t=${Date.now()}`);
+        const j2 = await r2.json();
+        if (j2 && !j2.error) setWalletChain(j2);
+      } catch (e) {}
+    } catch (e) {
+      pushNotif({ type: "system", user: null, tokenId: null,
+        text: `⚠🗑 burn failed for ${h.sym || h.mint.slice(0, 5)} — ${String(e.message || e)}. Nothing changed.` });
+    }
+  };
+
+  // sell ONE real holding — human-tapped, so it goes through the review flow
+  const realSellHolding = (h) => {
+    if (!h || !h.mint) return;
+    quoteRealOrder({ id: "chain-" + h.mint, sym: h.sym || h.mint.slice(0, 5), name: h.name || h.sym || "token",
+      liveMint: h.mint, price: h.price || 0, hue: symbolHue(h.sym || "?") }, "sell", h.qty,
+      { owner: h.owner || tradeAddr, raw: h.raw, heldQty: h.qty, fullExit: true });
+  };
+  // sell EVERYTHING — one click, ONE Phantom approval. Every sell tx is built
+  // first, signed together via signAllTransactions, then landed in sequence.
+  // (One literal transaction isn't possible non-custodially: a single swap
+  // route already fills most of Solana's 1232-byte tx limit.)
+  const realSellAllHoldings = async (holds) => {
+    const list = (holds || []).filter((h) => h && h.mint && h.qty > 0 && !h.spam && !h.dust)
+      .map((h) => ({ ...h, owner: h.owner || tradeAddr }))
+      // ⚡ turbo-only: SELL ALL is the trading wallet's button. Phantom is the
+      // vault (deposits/withdrawals) — its rows sell individually if ever needed.
+      .filter((h) => !turbo || h.owner === turbo.pubkey);
+    if (!list.length) return;
+    if (turboLockedButPresent) {
+      pushNotif({ type: "system", user: null, tokenId: null,
+        text: "⚡ TURBO is locked — these positions live in your turbo wallet. Unlock with your PIN (portfolio → TURBO panel) to sell." });
+      return;
+    }
+    const ph = getProvider();
+    if (!ph && !turboActive) { pushNotif({ type: "system", user: null, tokenId: null, text: "⚠ no signer — unlock TURBO or connect Phantom" }); return; }
+    pushNotif({ type: "system", user: null, tokenId: null,
+      text: `⛓ SELL ALL — building ${list.length} sell${list.length === 1 ? "" : "s"}, one approval for the whole batch…` });
+    // 1 · build every unsigned tx (serial — the swap API is rate-limited)
+    const web3 = await loadWeb3();
+    const built = [];
+    for (const h of list) {
+      try {
+        const fullExit = h.raw ? `&amountRaw=${h.raw}` : `&amountUi=${h.qty}`;
+        const r = await fetch(`/api/swap?mode=build&inputMint=${h.mint}&outputMint=So11111111111111111111111111111111111111112${fullExit}&slippageBps=${Math.min(3000, slipBps + 100)}&user=${h.owner}`);
+        const j = await r.json();
+        if (!r.ok || j.error || !j.swapTransaction) throw new Error(j.error || "no route");
+        const raw = Uint8Array.from(atob(j.swapTransaction), (ch) => ch.charCodeAt(0));
+        built.push({ h, tx: web3.VersionedTransaction.deserialize(raw), quote: j.quote || null });
+      } catch (e) {
+        pushNotif({ type: "system", user: null, tokenId: null,
+          text: `⚠⛓ SELL ALL: couldn't build the ${h.sym || h.mint.slice(0, 5)} sell (${String(e.message || e)}) — skipping it, the rest continue.` });
+      }
+    }
+    if (!built.length) { pushNotif({ type: "system", user: null, tokenId: null, text: "⚠⛓ SELL ALL: nothing could be built — nothing was sold." }); return; }
+    // 2 · ONE approval for everything
+    let signed;
+    try {
+      const kp = turboActive ? turboKpRef.current : null;
+      const turboTx = built.filter((b) => turbo && b.h.owner === turbo.pubkey);
+      const phTx = built.filter((b) => !(turbo && b.h.owner === turbo.pubkey));
+      if (turboTx.length && !kp) throw new Error("turbo locked");
+      // ⚡ turbo-owned: sign on-device; 👻 phantom-owned: ONE batch approval
+      turboTx.forEach((b) => b.tx.sign([kp]));
+      let phSigned = [];
+      if (phTx.length) {
+        if (!ph) throw new Error("Phantom needed for vault positions");
+        phSigned = ph.signAllTransactions
+          ? await ph.signAllTransactions(phTx.map((b) => b.tx))
+          : await (async () => { const out = []; for (const b of phTx) out.push(await ph.signTransaction(b.tx)); return out; })();
+      }
+      // reassemble in build order
+      const phMap = new Map(phTx.map((b, i2) => [b, phSigned[i2]]));
+      signed = built.map((b) => phMap.has(b) ? phMap.get(b) : b.tx);
+    } catch (e) {
+      pushNotif({ type: "system", user: null, tokenId: null,
+        text: /turbo locked/.test(String(e.message)) ? "⚡ unlock TURBO (PIN) first — some positions live there. Nothing was sold."
+          : "⛓ SELL ALL cancelled in the wallet — nothing was sold." });
+      return;
+    }
+    // 3 · land + confirm each, record fills
+    let okCount = 0;
+    for (let i2 = 0; i2 < signed.length; i2++) {
+      const b = built[i2], h = b.h;
+      try {
+        const b64 = btoa(String.fromCharCode(...signed[i2].serialize()));
+        const send = await fetch("/api/sendtx", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ signed: b64 }) });
+        const sj = await send.json();
+        if (!sj.ok) throw new Error(sj.error || "network rejected it");
+        const sig = sj.signature;
+        let landed = null;
+        for (let k = 0; k < 30; k++) {
+          await new Promise((r2) => setTimeout(r2, 1500));
+          try { const cj = await (await fetch(`/api/sendtx?sig=${sig}`)).json();
+            if (cj.status === "failed") { landed = { ok: false, err: cj.err }; break; }
+            if (cj.confirmed) { landed = { ok: true }; break; } } catch (e) {}
+        }
+        if (landed && !landed.ok) throw new Error(`reverted on-chain (${landed.err || ""})`);
+        const q2 = b.quote || {};
+        const sol = (+q2.outAmount || 0) / 1e9 || h.qty * ((h.price || 0) / SOL_USD);
+        recordRealFill({ at: Date.now(), side: "sell", mint: h.mint, sym: h.sym || h.mint.slice(0, 5), qty: h.qty, sol, est: !q2.outAmount, sig, px: h.price || 0 });
+        try { if (sol > 0) payTurboFee(sol, q2); } catch (e) {}
+        // the row vanishes NOW — the wallet refresh confirms it a moment later
+        const rmSetter = (h.owner === tradeAddr) ? setWalletChain : setWalletVault;
+        rmSetter((W) => W ? { ...W, holdings: (W.holdings || []).filter((x) => x.mint !== h.mint), holdingsCount: Math.max(0, (W.holdingsCount || 1) - 1) } : W);
+        okCount++;
+        sayPrivate({ type: "note", text: `⛓ sold ${fmtQty(h.qty)} ${h.sym || h.mint.slice(0, 5)} → ${sol.toFixed(4)} SOL` });
+      } catch (e) {
+        pushNotif({ type: "system", user: null, tokenId: null, text: `⚠⛓ SELL ALL: ${h.sym || h.mint.slice(0, 5)} failed (${String(e.message || e)}) — still held.` });
+      }
+    }
+    try {
+      const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(tradeAddr || wallet.address)}&t=${Date.now()}`);
+      const j2 = await r2.json();
+      if (j2 && !j2.error) setWalletChain(j2);
+      if (vaultAddr) {
+        const r3 = await fetch(`/api/wallet?address=${encodeURIComponent(vaultAddr)}&t=${Date.now()}`);
+        const j3 = await r3.json();
+        if (j3 && !j3.error) setWalletVault(j3);
+      }
+    } catch (e) {}
+    pushNotif({ type: "system", user: null, tokenId: null, text: `⛓ SELL ALL done — ${okCount}/${built.length} sold. Each fill is in your activity with its Solscan link.` });
+  };
+
+  // web3.js, fetched only when a real order is actually placed
+  const web3Ref = useRef(null);
+  const loadWeb3 = async () => {
+    if (web3Ref.current) return web3Ref.current;
+    const mod = await import(/* @vite-ignore */ "https://esm.sh/@solana/web3.js@1.95.3");
+    web3Ref.current = mod;
+    return mod;
+  };
+
+  // build → wallet signs → network. VALO never signs.
+  const submitRealOrder = async () => {
+    const o = realOrder;
+    if (!o || o.stage !== "review") return;
+    if (!walletReady) { setRealOrder({ ...o, stage: "error", msg: "no wallet — unlock ⚡ TURBO (portfolio) or connect Phantom" }); return; }
+    const ph = getProvider();
+    const ordOwner0 = o.owner || tradeAddr;
+    const ownerIsTurbo0 = !!(turbo && ordOwner0 === turbo.pubkey);
+    if (!ownerIsTurbo0 && !ph) { setRealOrder({ ...o, stage: "error", msg: "this order signs with Phantom, which isn't available here — use ⚡ TURBO instead" }); return; }
+    if (ownerIsTurbo0 && !turboActive) { setRealOrder({ ...o, stage: "error", msg: "⚡ turbo is locked — unlock with your PIN (portfolio → ⚡ TURBO), then confirm again" }); return; }
+    setRealOrder({ ...o, stage: "signing" });
+    try {
+      const ordOwner = o.owner || tradeAddr;
+      const ownerIsTurbo = !!(turbo && ordOwner === turbo.pubkey);
+      const r = await fetch(`/api/swap?mode=build&inputMint=${o.inputMint}&outputMint=${o.outputMint}${o.q}&slippageBps=${slipBps}&user=${ordOwner}`);
+      const j = await r.json();
+      if (!r.ok || j.error || !j.swapTransaction) throw new Error(j.error || "could not build the transaction");
+
+      // deserialize so Phantom can show the user a real, readable transaction
+      const web3 = await loadWeb3();
+      const raw = Uint8Array.from(atob(j.swapTransaction), (c) => c.charCodeAt(0));
+      const tx = web3.VersionedTransaction.deserialize(raw);
+
+      let sig = null;
+      if (ownerIsTurbo && turboActive) {
+        // ⚡ turbo-owned — signed on-device with the session key. No prompt.
+        sig = await turboSignSend(tx);
+      } else if (ownerIsTurbo && !turboActive) {
+        setRealOrder({ ...o, stage: "error", msg: "⚡ unlock TURBO (PIN) — this position lives in your turbo wallet." });
+        return;
+      } else if (ph && ph.signAndSendTransaction) {
+        // Phantom signs AND submits — one approval, no key ever leaves the wallet
+        const out = await ph.signAndSendTransaction(tx);
+        sig = out && (out.signature || out);
+      } else if (ph.signTransaction) {
+        // older providers: sign here, relay through our RPC
+        const signed = await ph.signTransaction(tx);
+        const b64 = btoa(String.fromCharCode(...signed.serialize()));
+        const send = await fetch("/api/sendtx", { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ signed: b64 }) });
+        const sj = await send.json();
+        if (!sj.ok) {
+          // carry the chain's own diagnosis to the dialog
+          const err = new Error(sj.error || "the network rejected it");
+          err.errorName = sj.errorName || null; err.logs = sj.logs || null; err.program = sj.program || null;
+          throw err;
+        }
+        sig = sj.signature;
+      } else throw new Error("this wallet can't sign transactions here");
+      if (!sig) throw new Error("no signature returned — nothing was sent");
+
+      // submitted — but nothing is true yet. Wait for the chain to say so.
+      setRealOrder({ ...o, stage: "sent", sig });
+      const selling = o.side === "sell";
+      const what = selling
+        ? `sold ${o.label} back to SOL`
+        : `bought $${o.token.sym} with ${o.label}`;
+
+      let landed = null;
+      for (let i = 0; i < 30; i++) {                 // ~45s, then hand it over
+        await new Promise((r) => setTimeout(r, 1500));
+        try {
+          const cr = await fetch(`/api/sendtx?sig=${sig}`);
+          const cj = await cr.json();
+          if (cj.status === "failed") { landed = { ok: false, err: cj.err }; break; }
+          if (cj.confirmed) { landed = { ok: true }; break; }
+        } catch (e) { /* keep waiting — a failed poll is not a failed trade */ }
+      }
+
+      if (landed && !landed.ok) {
+        setRealOrder({ ...o, stage: "error", sig,
+          msg: `the transaction was submitted but reverted on-chain — your funds did not move. ${landed.err || ""}` });
+        return;
+      }
+
+      setRealOrder({ ...o, stage: "done", sig, confirmed: !!(landed && landed.ok) });
+      const prevHoldQty = (() => { try { const hh0 = chainHoldingOf(o.token); return (hh0 && hh0.qty) || 0; } catch (e) { return 0; } })();
+      // ⚡ INSTANT position: a confirmed buy drops the holding into the wallet
+      // immediately so it's sellable NOW — no waiting for a chart tick.
+      if (!selling && landed && landed.ok) {
+        const q2i = o.quote || {};
+        const oDecI = Number.isInteger(q2i.outDecimals) ? q2i.outDecimals : 6;
+        const gotQty = (+q2i.outAmount || 0) / Math.pow(10, oDecI);   // 0 for curve (reconciled by refresh)
+        const setter = ((o.owner || tradeAddr) === tradeAddr) ? setWalletChain : setWalletVault;
+        setter((W) => {
+          if (!W) return W;
+          const holds = (W.holdings || []).slice();
+          const idx = holds.findIndex((x) => x.mint === o.token.liveMint);
+          const addQty = gotQty > 0 ? gotQty : (idx >= 0 ? 0 : 1);   // placeholder qty so the row+sell exist even for curve buys
+          const priceGuess = o.token.price || (holds[idx] && holds[idx].price) || 0;
+          if (idx >= 0) {
+            holds[idx] = { ...holds[idx], qty: (holds[idx].qty || 0) + (gotQty > 0 ? gotQty : 0), usd: ((holds[idx].qty || 0) + (gotQty > 0 ? gotQty : 0)) * priceGuess, pending: gotQty <= 0 };
+          } else {
+            holds.unshift({ mint: o.token.liveMint, sym: o.token.sym, name: o.token.name || o.token.sym,
+              qty: addQty, usd: addQty * priceGuess, price: priceGuess,
+              account: null, program: null, owner: (o.owner || tradeAddr),
+              src: (turbo && (o.owner || tradeAddr) === turbo.pubkey) ? "turbo" : "phantom",
+              pending: gotQty <= 0, justBought: true });
+          }
+          return { ...W, holdings: holds, holdingsCount: idx >= 0 ? W.holdingsCount : (W.holdingsCount || 0) + 1 };
+        });
+      }
+      if (selling && landed && landed.ok) {
+        // near-full exit → the row leaves MY POSITIONS NOW (chain refresh
+        // re-confirms). Partial sells shrink the qty so P/L stays honest.
+        const hh = chainHoldingsLive.find((x) => x.mint === o.token.liveMint && x.owner === (o.owner || tradeAddr))
+          || chainHoldingOf(o.token);
+        if (hh) {
+          const full = (+o.size || 0) >= hh.qty * 0.95;
+          const setter = ((o.owner || tradeAddr) === tradeAddr) ? setWalletChain : setWalletVault;
+          setter((W) => {
+            if (!W) return W;
+            const holds = (W.holdings || []);
+            const nextHolds = full
+              ? holds.filter((x) => x.mint !== o.token.liveMint)
+              : holds.map((x) => x.mint === o.token.liveMint ? { ...x, qty: Math.max(0, x.qty - (+o.size || 0)), usd: Math.max(0, (x.usd || 0) - (+o.size || 0) * (x.price || 0)) } : x);
+            return { ...W, holdings: nextHolds, holdingsCount: full ? Math.max(0, (W.holdingsCount || 1) - 1) : W.holdingsCount };
+          });
+        }
+      }
+      // 🏦 site fee — SOL notional of the fill (spend on buys, proceeds on sells)
+      try {
+        const qf = o.quote || {};
+        const notional = selling ? ((+qf.outAmount || 0) / 1e9 || (+o.size || 0) * ((o.token.price || 0) / SOL_USD)) : (+o.size || 0);
+        if (landed && landed.ok) payTurboFee(notional, qf);
+      } catch (e) {}
+      // record it — quote amounts, decimals from the quote itself
+      try {
+        const q2 = o.quote || {};
+        const oDec = Number.isInteger(q2.outDecimals) ? q2.outDecimals : 6;
+        const estSellSol = (+o.size || 0) * ((o.token.price || 0) / SOL_USD);
+        // on a near-full exit, record the ledger's remaining qty so net → 0
+        // exactly (covers curve sells whose o.size was an estimate)
+        const ledMint = chainLedger.byMint[o.token.liveMint];
+        const sellQty = (o.fullExit && ledMint && ledMint.qty > 0)
+          ? Math.max(+o.size || 0, ledMint.qty) : (+o.size || 0);
+        const fill = selling
+          ? { at: Date.now(), side: "sell", mint: o.token.liveMint, sym: o.token.sym,
+              qty: sellQty, sol: (+q2.outAmount || 0) / 1e9 || estSellSol, est: !q2.outAmount, sig }
+          : { at: Date.now(), side: "buy", mint: o.token.liveMint, sym: o.token.sym,
+              qty: (+q2.outAmount || 0) / Math.pow(10, oDec), sol: +o.size || 0, sig };
+        if (fill.mint && fill.qty > 0 && fill.sol > 0) recordRealFill({ ...fill, px: (fill.sol * SOL_USD) / fill.qty });
+      } catch (e) {}
+      pushNotif({ type: "system", user: null, tokenId: o.token.id,
+        text: landed
+          ? `⛓ real order confirmed — ${what}. Track it on Solscan.`
+          : `⛓ real order sent — ${what}. Still confirming; check Solscan.` });
+
+      // the wallet's holdings just changed. Refresh past the CDN cache, or the
+      // next sell will size itself off the balance from before this one.
+      try {
+        if (ordOwner) {
+          const r2 = await fetch(`/api/wallet?address=${encodeURIComponent(ordOwner)}&t=${Date.now()}`);
+          const j2 = await r2.json();
+          if (j2 && !j2.error) {
+            if (ordOwner === tradeAddr) setWalletChain(j2); else setWalletVault(j2);
+            // adopt the token's card immediately so its chart/price is ready
+            try { ensureCardsForHoldings(j2.holdings || []); } catch (e) {}
+            // curve buys promise no output qty — the chain's delta says what
+            // actually arrived, and THAT becomes the cost basis for live P/L
+            if (!selling && landed && landed.ok) {
+              const q2c = o.quote || {};
+              if (!((+q2c.outAmount || 0) > 0)) {
+                const nh = (j2.holdings || []).find((x) => x.mint === o.token.liveMint);
+                const gotQty = Math.max(0, ((nh && nh.qty) || 0) - prevHoldQty);
+                const spent = +o.size || 0;
+                if (gotQty > 0 && spent > 0)
+                  recordRealFill({ at: Date.now(), side: "buy", mint: o.token.liveMint, sym: o.token.sym,
+                    qty: gotQty, sol: spent, sig, px: (spent * SOL_USD) / gotQty, deltaMeasured: true });
+              }
+            }
+          }
+        }
+      } catch (e) {}
+    } catch (e) {
+      setRealOrder({ ...o, stage: "error", msg: friendlyTxErr(e.message || e) });
+    }
+  };
+
+  const [actAllOpen, setActAllOpen] = useState(false);   // the full, searchable ledger
   const [wpOpen, setWpOpen] = useState(false); // whitepaper modal
   const [claiming, setClaiming] = useState(false);
   const [heldEpochs, setHeldEpochs] = useState(0);        // consecutive epochs held → stacking bonus
@@ -7321,7 +11501,8 @@ export default function App() {
         ]);
         if (stop) return;
         // 🪪 one identity everywhere: portfolio name = chat name = search handle
-        const emailDefault = ((cloudUser.email || "").split("@")[0] || "").toLowerCase();
+        const wAddr = cloudUser.user_metadata && cloudUser.user_metadata.custom_claims && cloudUser.user_metadata.custom_claims.address;
+        const emailDefault = ((cloudUser.email || "").split("@")[0] || (wAddr ? String(wAddr).slice(0, 6).toLowerCase() : "")).toLowerCase();
         const ph = prof.data && prof.data.handle;
         if (ph && ph.toLowerCase() !== emailDefault) setUsername(ph); // your name follows you to this device
         else if (username) sb.from("profiles").update({ handle: username }).eq("id", uid)
@@ -7362,6 +11543,20 @@ export default function App() {
             filledTs: r.filled_ts ? new Date(r.filled_ts).getTime() : Date.now(),
           };
         }));
+        // ⛓ real-fill history — union with local by signature, oldest first
+        try {
+          const { data: rf } = await sb.from("real_fills").select("fills").eq("user_id", uid).maybeSingle();
+          const remote = (rf && Array.isArray(rf.fills)) ? rf.fills : [];
+          if (remote.length) {
+            setRealFills((local) => {
+              const seen = new Set(local.map((f) => f.sig).filter(Boolean));
+              const merged = [...local, ...remote.filter((f) => f && f.sig && !seen.has(f.sig))]
+                .sort((a, b) => (a.at || 0) - (b.at || 0)).slice(-500);
+              try { localStorage.setItem("valo-real-fills-v1", JSON.stringify(merged)); } catch (e) {}
+              return merged;
+            });
+          }
+        } catch (e) { /* fills table may not exist yet — local keeps working */ }
         cloudLoaded.current = true; setCloudSynced(true);
       } catch (e) { console.warn("[VALO ☁] load failed", e); }
     })();
@@ -7376,6 +11571,7 @@ export default function App() {
       try {
         setCloudSynced(false);
         await sb.from("wallets").upsert({ user_id: uid, sol_balance: solBalance, valo_balance: valoWallet, updated_at: new Date().toISOString() });
+        try { await sb.from("real_fills").upsert({ user_id: uid, fills: realFillsRef.current || [], updated_at: new Date().toISOString() }); } catch (e) {}
         await sb.from("watchlists").upsert({ user_id: uid, sections: watchSections, loose: watchLoose, updated_at: new Date().toISOString() });
         await sb.from("positions").delete().eq("user_id", uid);
         const posRows = Object.entries(positions).filter(([, p]) => p && p.amt > 0).map(([k, p]) => {
@@ -7409,7 +11605,7 @@ export default function App() {
     }, 2000);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [solBalance, valoWallet, positions, watchSections, watchLoose, botRuns, cloudUser && cloudUser.id]);
+  }, [solBalance, valoWallet, positions, watchSections, watchLoose, botRuns, realFills, cloudUser && cloudUser.id]);
   // ☁ SOCIAL GRAPH — real follows & friend requests. Acting on a profile that
   // belongs to a REAL account writes the cloud row; the other user's client
   // hears the INSERT/UPDATE live and drops it into their notification feed.
@@ -7455,7 +11651,7 @@ export default function App() {
           return { t: t2, isBuy: r.side === "buy", sol: usd / SOL_USD, valUsd: usd, pnlUsd, key: String(r.token_key), ts: new Date(r.ts).getTime(),
             tokQty: r.tok_qty != null ? +r.tok_qty : null, priceAt: +r.price || t2.price || 0 };
         });
-        setProfileCloud({ id: prof.id, handle: prof.handle, icon: prof.icon, holds, activity,
+        setProfileCloud({ id: prof.id, handle: prof.handle, icon: prof.icon, wallet: prof.wallet || null, holds, activity,
           followers: fCount && fCount.count != null ? fCount.count : 0,
           following: gCount && gCount.count != null ? gCount.count : 0,
           callouts: (cos || []).map((r) => ({ sym: r.sym, mcAt: +r.mc_at || 0, ts: new Date(r.ts).getTime(),
@@ -7465,7 +11661,10 @@ export default function App() {
     };
     (async () => {
       try {
-        const { data: profs } = await sb.from("profiles").select("id, handle, icon").ilike("handle", profileUser).limit(1);
+        let profs = null;
+        try { const r0 = await sb.from("profiles").select("id, handle, icon, wallet").ilike("handle", profileUser).limit(1); profs = r0.data; }
+        catch (e) {}
+        if (!profs) { const r1 = await sb.from("profiles").select("id, handle, icon").ilike("handle", profileUser).limit(1); profs = r1.data; }
         const prof = profs && profs[0];
         if (stop || !prof) { if (!stop) setProfileCloud(null); return; }
         await load(prof);
@@ -7568,6 +11767,17 @@ export default function App() {
     return () => { stop = true; clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudUser && cloudUser.id]);
+  // 📱 safe-area: keep the UI clear of the status bar (clock · wifi · battery)
+  // and the home indicator, in the browser and when installed
+  useEffect(() => {
+    if (!isMobile) return;
+    const root = document.getElementById("root");
+    if (!root) return;
+    root.style.paddingTop = "env(safe-area-inset-top, 0px)";
+    root.style.paddingBottom = "env(safe-area-inset-bottom, 0px)";
+    root.style.boxSizing = "border-box";
+    return () => { root.style.paddingTop = ""; root.style.paddingBottom = ""; };
+  }, [isMobile]);
   // 🔔 PERSISTENT NOTIFICATIONS — your feed follows your account, not the tab
   const notifLoaded = useRef(false);
   useEffect(() => {
@@ -8050,46 +12260,665 @@ export default function App() {
   };
   const [ecoFull, setEcoFull] = useState(false);  // 📱 fullscreen token ecosystem
   const [ecoQ, setEcoQ] = useState("");
-  const [liveData, setLiveData] = useState(() => {
-    if (typeof window === "undefined") return false;
-    const url = /[?&](live|test)=1/.test(window.location.search);
-    return url || window.__VALO_LIVE__ === true; // env bridge set by main.jsx (VITE_LIVE_DATA=1)
-  }); // 🛰 real tokens, simulated wallet
+
+  // 🛰 LIVE ONLY. Every chart, price, token, callout and balance on this site
+  // is real chain data — there is no simulated mode to fall back into.
+  const [liveData, setLiveData] = useState(true);
+  useEffect(() => {
+    if (!liveData) return;
+    let stop = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/treasury");
+        const j = await r.json();
+        if (!stop && j && j.token && j.token.mint) setValoMint(j.token.mint);
+        if (!stop && j && j.wallets && j.wallets.treasury && j.wallets.treasury.address) setValoTreasury(j.wallets.treasury.address);
+      } catch (e) {}
+    })();
+    return () => { stop = true; };
+  }, [liveData]);
+  // 🔎 market-wide search: every Solana / pump.fun token DexScreener
+  // indexes, merged in behind whatever is already on screen
+  const [mktHits, setMktHits] = useState([]);
+
+  useEffect(() => {
+    const q = (ecoQ || "").trim();
+    if (!liveData || q.length < 2) { setMktHits([]); return; }
+    let stop = false;
+    const id = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (stop || !Array.isArray(j)) return;
+        // collapse pools of the same mint, keeping the deepest liquidity
+        const byMint = new Map();
+        for (const x of j) {
+          const key = x.mint || x.id;
+          const prev = byMint.get(key);
+          if (!prev || (+x.tvl || 0) > (+prev.tvl || 0)) byMint.set(key, x);
+        }
+        setMktHits([...byMint.values()].map(adoptMarketToken).map((t) => {
+          // reuse the board's object when we already have this pool, so ids stay stable
+          const have = (tokensRef.current || []).find((b) => String(b.pool || "") === String(t.pool));
+          return have || t;
+        }));
+      } catch (e) { /* keep local results */ }
+    }, 320);
+    return () => { stop = true; clearTimeout(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ecoQ, liveData]);
+
+  // 📜 INFINITE HISTORY — nearing the left edge loads older candles and
+  // prepends them, so you can pan back to a pool's very first trade
+  const candleCache = useRef({});      // "pool:tf" → candles, so re-opening is instant
+  const adoptBusy = useRef({});
+  const ensureCardsForHoldings = useCallback((holds) => {
+    for (const h of (holds || [])) {
+      if (!h || !h.mint || h.spam || h.dust) continue;
+      if (adoptBusy.current[h.mint]) continue;
+      // already have a card for this mint?
+      if (tokensRef.current && tokensRef.current.some((t) => t.liveMint === h.mint)) continue;
+      adoptBusy.current[h.mint] = true;
+      (async () => {
+        try {
+          const r = await fetch(`/api/tokens?search=${encodeURIComponent(h.mint)}`);
+          const j = await r.json();
+          const hit = Array.isArray(j) ? (j.find((x) => x.mint === h.mint) || j[0]) : null;
+          if (hit) {
+            const card = adoptMarketToken(hit);
+            setTokens((Ts) => Ts.some((t) => t.liveMint === h.mint || String(t.pool || "") === String(card.pool)) ? Ts : [...Ts, card]);
+          } else {
+            // no pool/market data — a minimal card so the position still renders
+            setTokens((Ts) => Ts.some((t) => t.liveMint === h.mint) ? Ts : [...Ts, {
+              id: "hold-" + h.mint, sym: h.sym || h.mint.slice(0, 5), name: h.name || h.sym || "token",
+              liveMint: h.mint, pool: null, price: h.price || 0, mc: 0, tvl: 0, hue: symbolHue(h.sym || h.mint),
+              candles: [], greenUsd: 0, redUsd: 0, traders: 0, market: true, chartless: true,
+            }]);
+          }
+        } catch (e) {}
+        adoptBusy.current[h.mint] = false;
+      })();
+    }
+  }, []);
+  const prefetchBusy = useRef({});
+  const preState = useRef({ inFlight: 0, stamps: [], cooldownUntil: 0, timer: null });
+  const prefetchCandles = useCallback(async (tk) => {
+    if (!liveData || !tk || !tk.pool) return;
+    const key = tk.pool + ":" + tf;
+    if (candleCache.current[key] || prefetchBusy.current[key]) return;
+    const st = preState.current;
+    const now = Date.now();
+    if (now < st.cooldownUntil) return;                 // upstream asked us to slow down
+    if (st.inFlight >= 2) return;                       // at most two at a time
+    st.stamps = st.stamps.filter((t) => now - t < 60000);
+    if (st.stamps.length >= 18) return;                 // ~18 prefetches a minute, tops
+    st.stamps.push(now); st.inFlight++;
+    prefetchBusy.current[key] = true;
+    try {
+      const mintQ = tk.liveMint ? `&mint=${encodeURIComponent(tk.liveMint)}` : "";
+      const r = await fetch(`/api/candles?pool=${encodeURIComponent(tk.pool)}&tf=${tf}${mintQ}`);
+      if (r.status === 429 || r.status === 502) preState.current.cooldownUntil = Date.now() + 20000;
+      if (r.ok) {
+        const j = await r.json();
+        if (Array.isArray(j) && j.length >= 5) {
+          candleCache.current[key] = j
+            .map((c) => ({ t: +c.t || undefined, o: +c.o, h: +c.h, l: +c.l, c: +c.c, v: +c.v || 0 }))
+            .filter((c) => [c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v) && v > 0));
+        }
+      }
+    } catch (e) {}
+    preState.current.inFlight = Math.max(0, preState.current.inFlight - 1);
+    prefetchBusy.current[key] = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData, tf]);
+  // only a deliberate hover counts — scrolling past a card must cost nothing
+  const hoverPrefetch = useCallback((tk) => {
+    clearTimeout(preState.current.timer);
+    preState.current.timer = setTimeout(() => prefetchCandles(tk), 220);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefetchCandles]);
+  const cancelPrefetch = useCallback(() => clearTimeout(preState.current.timer), []);
+  const histBusy = useRef({});
+  const histChainRef = useRef({});   // how many pages deep we've gone this session
+  const [histShift, setHistShift] = useState(null); // {id, n, k} — keep the view anchored
+  const loadOlder = useCallback(async (tokenId) => {
+    const t = (tokensRef.current || []).find((x) => x.id === tokenId);
+    if (!t || !t.pool || !t.realCandles || !t.candles || !t.candles.length) return;
+    const oldest = t.candles[0];
+    if (!oldest || !Number.isFinite(oldest.t)) return;          // nothing to page from
+    const key = tokenId + ":" + tf;
+    if (histBusy.current[key]) return;
+    histBusy.current[key] = true;
+    try {
+      const before = Math.floor(oldest.t / 1000);
+      const mintQ = t.liveMint ? `&mint=${encodeURIComponent(t.liveMint)}` : "";
+      const r = await fetch(`/api/candles?pool=${encodeURIComponent(t.pool)}&tf=${tf}&before=${before}${mintQ}`);
+      if (!r.ok) return;
+      const j = await r.json();
+      if (!Array.isArray(j) || !j.length) {
+        const misses = (histBusy.current[key + ":miss"] || 0) + 1;
+        histBusy.current[key + ":miss"] = misses;
+        if (misses >= 3) histBusy.current[key] = "done";   // genuinely at the token's first candle
+        return;
+      }
+      histBusy.current[key + ":miss"] = 0;
+      const older = j
+        .map((c) => ({ t: +c.t, o: +c.o, h: +c.h, l: +c.l, c: +c.c, v: +c.v || 0 }))
+        .filter((c) => Number.isFinite(c.t) && c.t < oldest.t && [c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v) && v > 0));
+      if (!older.length) {
+        const misses = (histBusy.current[key + ":miss"] || 0) + 1;
+        histBusy.current[key + ":miss"] = misses;
+        if (misses >= 3) histBusy.current[key] = "done";
+        return;
+      }
+      histChainRef.current[key] = (histChainRef.current[key] || 0) + 1;
+      setTokens((Ts) => Ts.map((x) => {
+        if (x.id !== tokenId) return x;
+        const merged = sanitizeCandles([...older, ...x.candles]);
+        const trimmed = merged.slice(-20000);                 // deep enough to reach a token's very first candle
+        const added = trimmed.length - x.candles.length;      // what actually survived
+        if (added > 0) setHistShift({ id: tokenId, n: added, k: Date.now() });
+        return { ...x, candles: trimmed };
+      }));
+    } catch (e) { /* leave what we have */ }
+    finally {
+      if (histBusy.current[key] !== "done") histBusy.current[key] = false;
+      // chain a few pages when the chart is asking for a lot at once
+      if (histBusy.current[key] === false && (histChainRef.current[key] || 0) % 4 !== 0) {
+        setTimeout(() => loadOlder(tokenId), 120);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tf]);
+  useEffect(() => { histBusy.current = {}; }, [tf, sel]);  // new frame or token → page freely again
+
+  // ♾ ENDLESS SCANNER — more real tokens append as you reach the bottom
+  const [moreToks, setMoreToks] = useState([]);
+  const moreToksRef = useRef([]); moreToksRef.current = moreToks;
+  // ⛓ the REAL $VALO market row — price, LP, flow, MC, supply. Polled from the
+  // token's own pool so every header stat is chain truth, not a sim tick.
+  const [valoLive, setValoLive] = useState(null);
+  useEffect(() => {
+    if (!liveData || !valoMint) { setValoLive(null); return; }
+    let stop = false;
+    const pull = async () => {
+      try {
+        let hit = null;
+        try {
+          const r = await fetch(`/api/valo?mint=${encodeURIComponent(valoMint)}&t=${Math.floor(Date.now() / 10000)}`);
+          if (r.ok) { const j = await r.json(); if (j && j.indexed && +j.price > 0) hit = j; }
+        } catch (e) {}
+        if (!hit) {
+          // ⛓ fallback: /api/valo may not be deployed yet — read the pool the
+          // same way every other token does so $VALO is never missing
+          try {
+            const r2 = await fetch(`/api/tokens?search=${encodeURIComponent(valoMint)}&t=${Math.floor(Date.now() / 10000)}`);
+            if (r2.ok) {
+              const rows = await r2.json();
+              const m = Array.isArray(rows) ? rows.find((x) => String(x.mint || "").toLowerCase() === String(valoMint).toLowerCase()) : null;
+              if (m && +m.price > 0) hit = { ...m, indexed: true, mint: valoMint };
+            }
+          } catch (e) {}
+        }
+        if (!stop && hit) {
+          setValoLive(hit);
+          // (the canonical $VALO card lives in `tokens` at id 424242 — see the
+          // pin effect below. No second copy here, or the board would show two.)
+        }
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 10000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [liveData, valoMint]);
+  const [scanMode, setScanMode] = useState(() => { try { const v0 = localStorage.getItem("valo-scan-mode") || "trending"; return v0 === "random" ? "lucky" : v0; } catch (e) { return "trending"; } });
+  const [scanModeOpen, setScanModeOpen] = useState(false);
+  const [moversSide, setMoversSide] = useState("gain");   // 📈 gainers ⇄ 📉 losers
+  const scanShuffleRef = useRef(Math.random());
+  const [luckyDraw, setLuckyDraw] = useState(0);        // 🍀 bumps only on a real re-roll
+  useEffect(() => { try { localStorage.setItem("valo-scan-mode", scanMode); } catch (e) {} if (scanMode === "random") scanShuffleRef.current = Math.random(); }, [scanMode]);
+  const SCAN_MODES = [
+    ["trending", "🔥 TRENDING", "volume accelerating ≥3× · buy pressure >70% · fresh <1h"],
+    ["hot", "💪 HOT", "curve 60–95% to graduation · 50+ tx pace · 80+ traders"],
+    ["new", "🍼 NEW", "1–15min old · trading confirmed · curve <15% ground floor"],
+    ["movers", "📈 MOVERS", "price velocity · $2K+ LP so dust can't fake spikes"],
+    ["lucky", "🍀 LUCKY PICK", "weighted lottery — hidden gems with healthy vitals"],
+  ];
+  const scanModeDropdown = (
+    <div data-tour="lenses" style={{ position: "relative", zIndex: 6 }}>
+      <button onClick={() => setScanModeOpen((v) => !v)}
+        title="How the scanner picks and orders tokens"
+        style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6,
+          border: `1px solid ${VALO_PURPLE}55`, background: "rgba(125,92,240,0.1)", color: VALO_PURPLE,
+          borderRadius: 9, padding: "7px 11px", cursor: "pointer", fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 0.5 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+          {scanMode === "lucky"
+            ? <><span className="lucky-charm">🍀</span> LUCKY PICK</>
+            : <>📡 {(SCAN_MODES.find(([k]) => k === scanMode) || SCAN_MODES[0])[1]}</>}
+        </span>
+        <span style={{ fontSize: 8 }}>{scanModeOpen ? "▲" : "▼"}</span>
+      </button>
+      {scanModeOpen && (
+        <>
+          <div onClick={() => setScanModeOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 5 }} />
+          <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 7,
+            background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 10, overflow: "hidden",
+            boxShadow: "0 14px 40px rgba(0,0,0,0.6)" }}>
+            {SCAN_MODES.map(([k, l, d]) => (
+              <button key={k} onClick={() => { setScanMode(k); if (k === "lucky") { scanShuffleRef.current = Math.random(); setLuckyDraw((n) => n + 1); } setScanModeOpen(false); }}
+                style={{ display: "block", width: "100%", textAlign: "left", border: "none", cursor: "pointer",
+                  background: scanMode === k ? "rgba(125,92,240,0.16)" : "transparent",
+                  padding: "8px 11px", borderBottom: `1px solid ${T.border}` }}>
+                <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: scanMode === k ? VALO_PURPLE : T.text, display: "flex", alignItems: "center", gap: 5 }}>
+                  {k === "lucky" ? <><span className="lucky-charm">🍀</span> LUCKY PICK</> : l}
+                  {k === "movers" && scanMode === "movers" && (
+                    <span onClick={(e) => { e.stopPropagation(); setMoversSide((s2) => (s2 === "gain" ? "lose" : "gain")); }}
+                      style={{ marginLeft: "auto", border: `1px solid ${moversSide === "gain" ? T.green : T.red}66`,
+                        color: moversSide === "gain" ? T.green : T.red, borderRadius: 999, padding: "1px 8px", fontSize: 8 }}>
+                      {moversSide === "gain" ? "📈 GAINERS" : "📉 LOSERS"}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint }}>{d}</div>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  // 🍼 NEW mode pulls fresh launches straight from the source while active
+  useEffect(() => {
+    if (!liveData) return;
+    // 📡 every lens streams its own candidate pool while active — the tabs
+    // stop being reshuffles of one shared board
+    const FEEDS = { new: ["new"], hot: ["trending", "top"], movers: ["top", "trending"], lucky: ["new", "trending"], trending: ["trending"] };
+    const feeds = FEEDS[scanMode] || ["trending"];
+    let stop = false;
+    const pull = async () => {
+      try {
+        const rs = await Promise.allSettled(feeds.map((f) => fetch(`/api/tokens?feed=${f}&t=${Math.floor(Date.now() / 8000)}`)));
+        const rows = [];
+        for (const rr of rs) if (rr.status === "fulfilled" && rr.value.ok) {
+          try { const a = await rr.value.json(); if (Array.isArray(a)) rows.push(...a); } catch (e) {}
+        }
+        if (stop || !rows.length) return;
+        const vm = String(valoMint || "").toLowerCase();
+      const fresh = rows.filter((x) => (+x.mc || 0) < 1e11
+        && (!vm || String(x.mint || "").toLowerCase() !== vm))   // ◆ $VALO is pinned, never duplicated
+        .map(adoptMarketToken);
+        setMoreToks((M) => {
+          const idk = (t) => String(t.liveMint || t.ca || t.pool || "").toLowerCase();
+          const seen = new Set([...(tokensRef.current || []), ...M].map(idk));
+          const add = []; const sN = new Set();
+          for (const t of fresh) { const k = idk(t); if (!k || seen.has(k) || sN.has(k)) continue; sN.add(k); add.push(t); }
+          return add.length ? [...add, ...M].slice(0, 260) : M;
+        });
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, scanMode === "new" ? 12000 : 25000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [scanMode, liveData]);
+  const [scanPull, setScanPull] = useState(0);            // ⤓ live pull distance (px)
+  const [scanRefreshing, setScanRefreshing] = useState(false);
+  const scanPullRef = useRef({ y0: 0, on: false, acc: 0, accAt: 0 });
+  const refreshScanNow = useCallback(async () => {
+    if (scanRefreshing) return;
+    setScanRefreshing(true);
+    try {
+      if (scanMode === "lucky") { scanShuffleRef.current = Math.random(); setLuckyDraw((n) => n + 1); }   // 🍀 fresh draw
+      const feeds = scanMode === "new" ? ["new"] : ["trending", "new", "top"];
+      const bust = `&t=${Date.now()}`;
+      const rs = await Promise.allSettled(feeds.map((f) => fetch(`/api/tokens?feed=${f}${bust}`)));
+      const rows = [];
+      for (const rr of rs) if (rr.status === "fulfilled" && rr.value.ok) {
+        try { const a = await rr.value.json(); if (Array.isArray(a)) rows.push(...a); } catch (e) {}
+      }
+      const vm = String(valoMint || "").toLowerCase();
+      const fresh = rows.filter((x) => (+x.mc || 0) < 1e11
+        && (!vm || String(x.mint || "").toLowerCase() !== vm))   // ◆ $VALO is pinned, never duplicated
+        .map(adoptMarketToken);
+      setMoreToks((M) => {
+        const idk = (t) => String(t.liveMint || t.ca || t.pool || "").toLowerCase();
+        const seen = new Set([...(tokensRef.current || []), ...M].map(idk));
+        const add = []; const seenNew = new Set();
+        for (const t of fresh) { const k = idk(t); if (!k || seen.has(k) || seenNew.has(k)) continue; seenNew.add(k); add.push(t); }
+        return add.length ? [...add, ...M].slice(0, 220) : M;
+      });
+    } catch (e) {}
+    setTimeout(() => setScanRefreshing(false), 500);
+  }, [scanMode, scanRefreshing]);
+  // shared handlers: touch pull (mobile + PC trackpads) and wheel overscroll (PC)
+  const scanPullTouch = {
+    onTouchStart: (e) => {
+      const sc = e.currentTarget.closest("[data-scanscroll]");
+      const top = sc ? sc.scrollTop <= 2 : (document.scrollingElement || document.documentElement).scrollTop <= 2;
+      const t0 = e.touches && e.touches[0];
+      scanPullRef.current = { ...scanPullRef.current, y0: t0 ? t0.clientY : 0, on: top };
+    },
+    onTouchMove: (e) => {
+      const st = scanPullRef.current; if (!st.on) return;
+      const t0 = e.touches && e.touches[0]; if (!t0) return;
+      const dy = t0.clientY - st.y0;
+      if (dy > 14) setScanPull(Math.min(110, (dy - 14) * 0.6));
+    },
+    onTouchEnd: () => {
+      const fire = scanPull >= 64;
+      setScanPull(0); scanPullRef.current.on = false;
+      if (fire) refreshScanNow();
+    },
+  };
+  const scanPullWheel = (e) => {
+    const sc = e.currentTarget;
+    const st = scanPullRef.current;
+    if (sc.scrollTop > 0 || e.deltaY >= 0) { st.acc = 0; if (scanPull) setScanPull(0); return; }
+    const now = Date.now();
+    if (now - st.accAt > 700) st.acc = 0;
+    st.accAt = now; st.acc += -e.deltaY;
+    // dead zone: casual scroll-to-top never opens the strip — only a
+    // deliberate continued pull does
+    setScanPull(st.acc > 90 ? Math.min(110, (st.acc - 90) * 0.4) : 0);
+    if (st.acc >= 330) { st.acc = 0; setScanPull(0); refreshScanNow(); }
+    // auto-reset: the instant wheeling stops, the strip lets go — no stuck
+    // half-open state squeezing the column
+    clearTimeout(st.resetT);
+    st.resetT = setTimeout(() => { st.acc = 0; setScanPull(0); }, 450);
+  };
+  const scanPullStrip = (
+    <div style={{ height: scanRefreshing ? 30 : scanPull > 8 ? scanPull : 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center",
+      transition: scanPull ? "none" : "height .22s ease", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.2,
+      color: scanRefreshing || scanPull >= 64 ? T.green : T.faint }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <span style={{ display: "inline-block", animation: scanRefreshing ? "spin 0.8s linear infinite" : "none",
+          transform: !scanRefreshing ? `rotate(${Math.min(180, scanPull * 2.2)}deg)` : undefined }}>↻</span>
+        {scanRefreshing ? "DEALING FRESH TOKENS…" : scanPull >= 64 ? "RELEASE TO REFRESH" : "PULL FOR FRESH " + ((SCAN_MODES.find(([k]) => k === scanMode) || [])[1] || "").replace(/^\S+ /, "")}
+      </span>
+    </div>
+  );
+
+
+  const [pageScrolled, setPageScrolled] = useState(false);
+  const [scanScrolled, setScanScrolled] = useState(false);  // PC scanner column
+  const [topFlash, setTopFlash] = useState(false);          // ▲ pressed → purple
+  const flashTop = () => { setTopFlash(true); setTimeout(() => setTopFlash(false), 420); };
+  useEffect(() => {
+    if (!isMobile) return;
+    const onS = () => setPageScrolled(window.scrollY > 260);
+    onS();
+    window.addEventListener("scroll", onS, { passive: true });
+    return () => window.removeEventListener("scroll", onS);
+  }, [isMobile]);
+  useEffect(() => {
+    if (!isMobile) return;
+    const onScroll = () => {
+      const left = document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
+      if (left < 520) loadMoreTokens();
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile, liveData]);
+  const morePage = useRef(1);
+  const moreBusy = useRef(false);
+  const feedOrder = ["trending", "top", "new"];
+  const feedIdx = useRef(0);
+  const loadMoreTokens = useCallback(async () => {
+    if (!liveData || moreBusy.current) return;
+    moreBusy.current = true;
+    let page = morePage.current + 1;
+    let feed = feedOrder[feedIdx.current];
+    // exhausted this feed's pages? advance to the next feed at page 1
+    if (page > 10) {
+      feedIdx.current = (feedIdx.current + 1) % feedOrder.length;
+      feed = feedOrder[feedIdx.current];
+      page = 1;
+    }
+    try {
+      // cache-bust the "new" feed so fresh launches actually show up
+      const bust = feed === "new" ? `&t=${Math.floor(Date.now() / 8000)}` : "";
+      const r = await fetch(`/api/tokens?feed=${feed}&page=${page}${bust}`);
+      if (r.ok) {
+        const j = await r.json();
+        if (Array.isArray(j) && j.length) {
+          morePage.current = page;
+          setMoreToks((M) => {
+            // one card per TOKEN: dedupe across everything already shown by
+            // MINT (big tokens like $PUMP have dozens of pools — one is enough)
+            const seenMint = new Set([
+              ...M.map((m) => m.liveMint || m.mint).filter(Boolean),
+              ...(tokensRef.current || []).map((t) => t.liveMint).filter(Boolean),
+            ]);
+            const seenPool = new Set([...M.map((m) => m.pool), ...(tokensRef.current || []).map((t) => t.pool).filter(Boolean)]);
+            const byMint2 = new Map();
+            for (const x of j) {
+              if ((+x.mc || 0) > 1e11) continue;              // broken trillion-dollar FDV rows
+              const key = x.mint || x.id;
+              const prev = byMint2.get(key);
+              if (!prev || (+x.tvl || 0) > (+prev.tvl || 0)) byMint2.set(key, x);
+            }
+            const add = [...byMint2.values()]
+              .filter((x) => !seenPool.has(x.id) && !(x.mint && seenMint.has(x.mint)))
+              .map(adoptMarketToken)
+              // never re-create a card the board already holds — that orphaned
+              // the current selection and froze the chart
+              .filter((t) => !(tokensRef.current || []).some((b) => String(b.pool || "") === String(t.pool)));
+            return [...M, ...add];
+          });
+        }
+      }
+    } catch (e) {}
+    moreBusy.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData]);
+  // opening a searched token adopts it into the board so charts, tickets and
+  // bots all work on it exactly like any other card
+  // opening/closing a chart must never scroll the scanner away from you
+  const scanSpotRef = useRef(0);
+  const holdScroll = () => {
+    const el = scannerRef.current;
+    const top = el ? el.scrollTop : null;
+    const win = typeof window !== "undefined" ? window.scrollY : 0;
+    scanSpotRef.current = win;                       // remembered across chart open/close
+    const restore = () => {
+      if (el && top != null) el.scrollTop = top;
+      if (typeof window !== "undefined" && Math.abs(window.scrollY - win) > 4) window.scrollTo(0, win);
+    };
+    requestAnimationFrame(restore);
+    // mobile re-lays out as the chart mounts, so hold the spot a moment longer
+    setTimeout(restore, 60);
+    setTimeout(restore, 220);
+  };
+  // open a token we only know by mint (a dev's launch history, for example)
+  const openTokenByMint = useCallback(async (mint) => {
+    if (!mint) return;
+    const lc = String(mint).toLowerCase();
+    const have = [...(tokensRef.current || []), ...(moreToksRef.current || [])]
+      .find((t) => t && String(t.liveMint || "").toLowerCase() === lc);
+    if (have) { setSel(have.id); setClickMode(null); return; }
+    try {
+      const r = await fetch(`/api/search?q=${encodeURIComponent(mint)}`);
+      if (!r.ok) return;
+      const j = await r.json();
+      // never substitute: we asked for ONE mint, so only an exact match counts
+      const hit = Array.isArray(j) ? j.find((x) => String(x.mint || "").toLowerCase() === String(mint).toLowerCase()) : null;
+      if (hit) {
+        const card = adoptMarketToken(hit);
+        setTokens((Ts) => (Ts.some((t) => String(t.pool || "") === String(card.pool)) ? Ts : [...Ts, card]));
+        setSel(card.id); setClickMode(null);
+        return;
+      }
+      // no pool anywhere — still open a card from the wallet's own record so
+      // the order ticket (and its SELL) works on a token you already hold
+      const h = ((walletChain && walletChain.holdings) || []).find((x) => x.mint === mint);
+      // sanitize the symbol — mangled dust symbols crash the chart label
+      const cleanSym = String((h && (h.sym || h.name)) || mint.slice(0, 5)).replace(/[^\x20-\x7E]/g, "").slice(0, 12) || mint.slice(0, 5);
+      const card = {
+        id: "mint-" + mint, sym: cleanSym,
+        name: String((h && (h.name || h.sym)) || "wallet token").replace(/[^\x20-\x7E]/g, "").slice(0, 24) || "wallet token",
+        liveMint: mint, pool: null,
+        price: (h && h.price) || 0, mc: 0, tvl: 0, hue: symbolHue(cleanSym),
+        candles: [], greenUsd: 0, redUsd: 0, traders: 0, market: true, chartless: true,
+      };
+      setTokens((Ts) => (Ts.some((t) => t.liveMint === mint) ? Ts : [...Ts, card]));
+      setSel(card.id); setClickMode(null);
+    } catch (e) {}
+  }, []);
+  const openAnyToken = useCallback((id, tokObj = null) => {
+    holdScroll();
+    const board = tokensRef.current || [];
+    // paint instantly from cache if we've already seen this pool
+    const paintCached = (tk) => {
+      if (!tk || !tk.pool) return;
+      const hit = candleCache.current[tk.pool + ":" + tf];
+      if (hit && hit.length && (!tk.candles || !tk.candles.length)) {
+        setTokens((Ts) => Ts.map((x) => (x.id === tk.id
+          ? { ...x, candles: sanitizeCandles(hit), realCandles: true, price: hit[hit.length - 1].c } : x)));
+      }
+    };
+    const local = board.find((t) => t.id === id);
+    if (local) { paintCached(local); setSel(local.id); setClickMode(null); return; }
+    let hit = [...mktHits, ...moreToks].find((t) => t.id === id);
+    if (!hit && tokObj) hit = tokObj;               // search-local tokens (fresh feed) open too
+    if (!hit) return;
+    if (!hit.pool && hit.liveMint) { openTokenByMint(hit.liveMint); setClickMode(null); return; }
+    // resolve everything BEFORE touching state, so we never select an id that
+    // isn't on the board (that mismatch is what froze the chart)
+    const dupe = board.find((t) => (hit.pool && String(t.pool || "") === String(hit.pool))
+      || (hit.liveMint && String(t.liveMint || "") === String(hit.liveMint)));
+    if (dupe) { paintCached(dupe); setSel(dupe.id); setClickMode(null); return; }
+    const cached = candleCache.current[hit.pool + ":" + tf];
+    const seeded = cached && cached.length
+      ? { ...hit, candles: sanitizeCandles(cached), realCandles: true, price: cached[cached.length - 1].c }
+      : hit;
+    setTokens((Ts) => (Ts.some((t) => t.id === seeded.id) ? Ts : [...Ts, seeded]));
+    setSel(seeded.id); setClickMode(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mktHits, moreToks]);
+  // 🚀 new launches stream into the live feed as they happen
+  const [freshPools, setFreshPools] = useState([]);
+  useEffect(() => {
+    if (!liveData) { setFreshPools([]); return; }
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch("/api/new");
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop && Array.isArray(j)) setFreshPools(j.slice(0, 12));
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 20000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [liveData]);
+  useEffect(() => { if (typeof window !== "undefined") window.__VALO_LIVE_ON__ = liveData; }, [liveData]);
+  // 💵 live SOL price — every dollar conversion depends on it
+  const [solTick, setSolTick] = useState(0);
+  useEffect(() => {
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch("/api/solprice");
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop && j && j.price > 0) { setSolUsd(j.price); setSolTick((v) => v + 1); }
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 45000);
+    return () => { stop = true; clearInterval(iv); };
+  }, []);
   const liveArrRef = useRef([]);           // DexScreener top pump pairs → token overrides
   const liveBindRef = useRef({ byPool: {}, byTok: {} }); // 🔒 pool ⇄ card bindings — stable all session
   const liveDataRef = useRef(false);
   useEffect(() => {
     liveDataRef.current = liveData;
-    TestLog.on = liveData || /[?&]test=1/.test(window.location.search);
+    // only on a developer machine, and only when asked for explicitly
+    const localHost = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname);
+    TestLog.on = localHost && /[?&]test=1/.test(window.location.search);
     if (!liveData) return;
     let stop = false;
     const load = async () => {
-      // primary: our own cached serverless API (GeckoTerminal upstream, keyless)
+      // primary: our own cached serverless API — THREE feeds in parallel so the
+      // first screen is rich and varied even when trending is one token's pools
       try {
-        const r = await fetch("/api/tokens");
+        const rs = await Promise.allSettled([
+          fetch("/api/tokens"), fetch("/api/tokens?feed=new"), fetch("/api/tokens?feed=top"),
+        ]);
+        const arrs = [];
+        for (const rr of rs) {
+          if (rr.status === "fulfilled" && rr.value.ok) {
+            try { const a = await rr.value.json(); if (Array.isArray(a)) arrs.push(a); } catch (e) {}
+          }
+        }
+        const r = { ok: arrs.length > 0 };
         if (r.ok) {
-          const arr = await r.json();
+          const arr0 = [].concat(...arrs);
+          // boot list: one row per token, no broken-FDV pools
+          const seenM = new Set(); const arr = [];
+          for (const x of (Array.isArray(arr0) ? arr0 : [])) {
+            if ((+x.mc || 0) > 1e11) continue;
+            const k = x.mint || x.id; if (seenM.has(k)) continue; seenM.add(k); arr.push(x);
+          }
           if (!stop && Array.isArray(arr) && arr.length) {
-            const mapped = arr.slice(0, 14).map((x) => ({
+            const mapped = arr.slice(0, 24).map((x) => ({
               sym: (x.sym || "???").toUpperCase().slice(0, 10), name: x.name || "live token",
-              price: +x.price || 0, mc: +x.mc || 0, tvl: +x.tvl || 0,
+              price: +x.price || 0, mc: saneMc(x), tvl: +x.tvl || 0,
               img: x.img || null, pool: x.id, mint: x.mint || null,
               greenUsd: +x.greenUsd || 0, redUsd: +x.redUsd || 0,
               traders: +x.traders || 0, ch24: +x.ch24 || 0,
+              statWin: x.statWin || "24h", ch: +x.ch || 0,
+              buys: +x.buys || 0, sells: +x.sells || 0, vol24: +x.vol24 || 0,
             }));
             liveArrRef.current = mapped;
+            // adopted/live token objects refresh straight from the feed rows
+            const byPoolRow = new Map(mapped.map((lv) => [lv.pool, lv]));
+            setTokens((Ts) => Ts.map((t3) => {
+              const row = t3.pool && byPoolRow.get(t3.pool);
+              return row ? { ...t3, price: row.price || t3.price, mc: row.mc || t3.mc, tvl: row.tvl || t3.tvl,
+                ch24: row.ch24 != null ? row.ch24 : t3.ch24, ch: row.ch != null ? row.ch : t3.ch,
+                buys: row.buys || t3.buys, sells: row.sells || t3.sells, vol24: row.vol24 || t3.vol24 } : t3;
+            }));
+            // 🔄 anything with a pool NOT in this feed batch (watchlist tokens,
+            // adopted cards that fell off trending) refreshes via multi-pool
+            const stale = (tokensRef.current || []).filter((t3) => t3.pool && !byPoolRow.has(t3.pool)).map((t3) => t3.pool);
+            if (stale.length) {
+              (async () => {
+                try {
+                  for (let ci = 0; ci < stale.length && ci < 60; ci += 30) {
+                    const r2 = await fetch(`/api/tokens?pools=${encodeURIComponent(stale.slice(ci, ci + 30).join(","))}`);
+                    if (!r2.ok) continue;
+                    const rows = await r2.json();
+                    if (!Array.isArray(rows) || !rows.length) continue;
+                    const m2 = new Map(rows.map((lv) => [lv.id, lv]));
+                    setTokens((Ts) => Ts.map((t3) => {
+                      const row = t3.pool && m2.get(t3.pool);
+                      return row ? { ...t3, price: +row.price || t3.price, mc: +row.mc || t3.mc, tvl: +row.tvl || t3.tvl,
+                        ch24: row.ch24 != null ? +row.ch24 : t3.ch24, ch: row.ch != null ? +row.ch : t3.ch,
+                        buys: +row.buys || t3.buys, sells: +row.sells || t3.sells, vol24: +row.vol24 || t3.vol24 } : t3;
+                    }));
+                  }
+                } catch (e) {}
+              })();
+            }
             // 🔒 bind each pool to ONE card, permanently for this session
             const B = liveBindRef.current;
             for (const lv of mapped) {
               if (B.byPool[lv.pool] != null) { B.byTok[B.byPool[lv.pool]] = lv; continue; } // refresh bound data
-              const free = (tokensRef.current || []).find((t3) => t3.sym !== "VALO" && !t3.pool && B.byTok[t3.id] == null && !Object.values(B.byPool).includes(t3.id));
+              const free = (tokensRef.current || []).find((t3) => t3.sym !== "VALO" && !t3.pool && !t3.market && B.byTok[t3.id] == null && !Object.values(B.byPool).includes(t3.id));
               if (free) { B.byPool[lv.pool] = free.id; B.byTok[free.id] = lv; }
             }
             return;
           }
         }
       } catch (e) { /* fall through to DexScreener */ }
-      // fallback: direct DexScreener (local dev without serverless functions)
+      // fallback: direct DexScreener — LOCAL DEV ONLY (no serverless there).
+      // In production a failed fetch just waits for the 15s retry; the old
+      // behavior filled the first screen with pump-search results.
+      if (typeof window !== "undefined" && !/^(localhost|127\.)/.test(window.location.hostname)) return;
       try {
         const r = await fetch("https://api.dexscreener.com/latest/dex/search?q=pump");
         const j = await r.json();
@@ -8113,41 +12942,342 @@ export default function App() {
   useEffect(() => {
     if (!liveData || sel == null) return;
     let stale = false;
-    const t0 = tokensRef.current ? tokensRef.current.find((x) => x.id === sel) : null;
+    const t0 = (tokens || []).find((x) => x.id === sel) || (tokensRef.current || []).find((x) => x.id === sel) || null;
     const pool = t0 && t0.pool;
     if (!pool) return;
-    (async () => {
+    const pull = async () => {
       try {
-        const r = await fetch(`/api/candles?pool=${encodeURIComponent(pool)}&tf=${tf}`);
+        const mintQ = t0 && t0.liveMint ? `&mint=${encodeURIComponent(t0.liveMint)}` : "";
+        const r = await fetch(`/api/candles?pool=${encodeURIComponent(pool)}&tf=${tf}${mintQ}`);
         if (!r.ok) return;
         const j = await r.json();
-        if (stale || !Array.isArray(j) || j.length < 10) return;
-        const mapped = j.slice(-260).map((c) => ({ o: +c.o, h: +c.h, l: +c.l, c: +c.c }));
-        setTokens((Ts) => Ts.map((x) => (x.id === sel ? { ...x, candles: mapped, price: mapped[mapped.length - 1].c } : x)));
-      } catch (e) { /* keep synthetic candles */ }
-    })();
-    return () => { stale = true; };
-  }, [liveData, sel, tf]);
+        if (stale || !Array.isArray(j) || !j.length) return;
+        let mapped = j.slice(-260).map((c) => ({ t: +c.t || undefined, o: +c.o, h: +c.h, l: +c.l, c: +c.c, v: +c.v || 0 }))
+          .filter((c) => [c.o, c.h, c.l, c.c].every((v) => Number.isFinite(v) && v > 0));
+        if (!mapped.length) return;         // even ONE real candle beats fake history
+        // drop wild prints: anything ±50× off the median close distorts the scale
+        const med = [...mapped].map((c) => c.c).sort((a, b) => a - b)[Math.floor(mapped.length / 2)];
+        mapped = mapped.filter((c) => c.h <= med * 50 && c.l >= med / 50);
+        if (!mapped.length) return;
+        candleCache.current[pool + ":" + tf] = mapped;
+        setTokens((Ts) => Ts.map((x) => (x.id === sel ? { ...x, candles: sanitizeCandles(mapped), realCandles: true, price: mapped[mapped.length - 1].c } : x)));
+      } catch (e) { /* keep what's drawn */ }
+    };
+    let tries = 0;
+    const pullWithRetry = async () => {
+      await pull();
+      const cur = tokensRef.current.find((x) => x.id === sel) || {};
+      if (stale) return;
+      if (!cur.realCandles && tries < 6) {
+        tries++;
+        setTimeout(pullWithRetry, Math.min(8000, 800 * tries));   // ~30s of trying
+      } else if (!cur.realCandles) {
+        // no real history exists (token minutes old) → the chart starts NOW at
+        // the real live price and builds forward from real trades — exactly
+        // what DexScreener shows, never a fabricated backstory
+        setTokens((Ts) => Ts.map((x) => (x.id === sel
+          ? { ...x, candles: (x.price > 0 ? [{ t: Date.now(), o: x.price, h: x.price, l: x.price, c: x.price, v: 0 }] : []),
+              realCandles: true, tapeOk: true, freshChart: true }
+          : x)));
+      }
+    };
+    pullWithRetry();
+    // keep pulling: short timeframes refresh fast, long ones slowly
+    // Birdeye serves history on a 5-minute edge cache; the trade tape keeps the
+    // newest candle live, so polling harder would only burn compute units
+    const every = tf <= 1 ? 60000 : tf <= 15 ? 120000 : 300000;
+    const iv = setInterval(pull, every);
+    // 📱 every wake path resyncs instantly — mobile suspends timers, so
+    // returning from background/app-switch/radio-blip must never show a
+    // frozen chart while it waits for the next slow poll
+    let lastPull = Date.now();
+    const wPull = () => { lastPull = Date.now(); pull(); };
+    const onWake = () => { if (!document.hidden && Date.now() - lastPull > 4000) wPull(); };
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("focus", onWake);
+    window.addEventListener("pageshow", onWake);
+    window.addEventListener("online", onWake);
+    return () => { stale = true; clearInterval(iv);
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("focus", onWake);
+      window.removeEventListener("pageshow", onWake);
+      window.removeEventListener("online", onWake); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData, sel, tf, (tokens.find((x) => x.id === sel) || {}).pool]);
+  const [fsHint, setFsHint] = useState("");
+  const [installOpen, setInstallOpen] = useState(false);
+  const installEvtRef = useRef(null);
+  const standalone = typeof window !== "undefined" &&
+    (window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true);
+  const iOS = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  useEffect(() => {
+    const grab = (e) => { e.preventDefault(); installEvtRef.current = e; };
+    window.addEventListener("beforeinstallprompt", grab);
+    return () => window.removeEventListener("beforeinstallprompt", grab);
+  }, []);
+  const doInstall = async () => {
+    const evt = installEvtRef.current;
+    if (evt) { evt.prompt(); try { await evt.userChoice; } catch (e) {} installEvtRef.current = null; setInstallOpen(false); return; }
+    setInstallOpen(true); // iOS (or a browser without the prompt) → show the steps
+  };
+  // ⛶ mobile fullscreen: Android/Chrome can go truly immersive; iOS Safari
+  // reserves that for installed apps, so we tell people how to get it
+  const goFullscreen = async () => {
+    const el = document.documentElement;
+    try {
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        await (document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen());
+        return;
+      }
+      if (el.requestFullscreen) { await el.requestFullscreen({ navigationUI: "hide" }); return; }
+      if (el.webkitRequestFullscreen) { el.webkitRequestFullscreen(); return; }
+      throw new Error("unsupported");
+    } catch (e) {
+      setInstallOpen(true); // no web fullscreen here — installing is the real answer
+    }
+  };
   const [isFs, setIsFs] = useState(false);                          // ⛶ fullscreen state (Esc exits natively)
   useEffect(() => {
     const on = () => setIsFs(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", on);
     return () => document.removeEventListener("fullscreenchange", on);
   }, []);
-  const connectPhantom = async () => {
-    try {
-      const ph = typeof window !== "undefined" && window.solana;
-      if (ph && ph.isPhantom) { await ph.connect(); setWalletConnected(true); return; }
-    } catch (e) { /* user dismissed — stay locked */ return; }
-    // no extension (or mobile in-app) — pre-mainnet demo unlock
-    setWalletConnected(true);
-  };
-  const [valoStatsOpen, setValoStatsOpen] = useState(false); // ◆ $VALO token stats pop-out
-  // the SITE burn keeps climbing with everyone else's trades, live
+  const [wallet, setWallet] = useState(null);        // { address, verified }
+  const [walletBusy, setWalletBusy] = useState(false);
+  const [walletChain, setWalletChain] = useState(null); // real on-chain balances
+  // what trading surfaces DISPLAY as balance. On the live site paper numbers
+  // never appear — connected shows the real wallet, unconnected shows zero.
+  // live site → the TRADING wallet's real SOL. walletChain already follows the
+  // turbo wallet when armed (else Phantom), so this is the true spendable
+  // balance — never the paper balance, and never gated on a Phantom connection.
+  const dispSol = liveData ? ((walletChain && walletChain.sol) || 0) : solBalance;
+  const dispValo = liveData ? 0 : valoWallet;
+  // ⚡ signing needs an UNLOCKED turbo; viewing needs only that one EXISTS.
+  // Once created, the turbo wallet IS the trading wallet — positions, balances
+  // and P/L all track it, locked or not. The PIN gates signatures, not sight.
+  const turboActive = !!(liveData && turbo && turbo.unlocked && turboKpRef.current);
+  const turboLockedButPresent = !!(liveData && turbo && !turboActive);
+  // a wallet is "ready" if EITHER exists — Phantom is optional once turbo does
+  const walletReady = !!((wallet && wallet.address) || (liveData && turbo && turbo.pubkey));
+  const tradeAddr = (liveData && turbo && turbo.pubkey) ? turbo.pubkey : (wallet && wallet.address) || null;
+  // 📡 publish the trading wallet to the profile so other users' views of you
+  // resolve to REAL chain data (balance, activity, markers). Fails silently
+  // until the `wallet` column exists (see migration note).
   useEffect(() => {
+    if (!liveData || !tradeAddr || !cloudUser || !sb) return;
+    (async () => {
+      try { await sb.from("profiles").update({ wallet: tradeAddr }).eq("id", cloudUser.id); } catch (e) {}
+    })();
+  }, [liveData, tradeAddr, cloudUser && cloudUser.id]);
+
+  // ⚡ the turbo wallet's own SOL balance — polled whenever a turbo exists,
+  // locked or not, so the panel always shows what's in it
+  const [turboSolBal, setTurboSolBal] = useState(0);
+  useEffect(() => {
+    if (!turbo || !turbo.pubkey || !liveData) { setTurboSolBal(0); return; }
+    let stop = false;
+    const pull = async () => {
+      try {
+        const j = await (await fetch(`/api/wallet?address=${turbo.pubkey}&t=${Date.now()}`)).json();
+        if (!stop && j && !j.error) setTurboSolBal(j.sol || 0);
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 30000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [turbo && turbo.pubkey, liveData]);
+
+  // ⛓ holdings enriched with live P/L — avg cost from the fills ledger, price
+  // from the live card when the token is loaded (ticks every 2.2s), else the
+  // wallet snapshot. This one list feeds every positions surface.
+
+
+
+  const getProvider = () => {
+    if (typeof window === "undefined") return null;
+    const p = window.phantom?.solana || window.solana;
+    return p && p.isPhantom ? p : null;
+  };
+
+  // read the connected wallet's real holdings (never its keys)
+  const loadWalletChain = useCallback(async (addr) => {
+    if (!addr) return;
+    try {
+      const r = await fetch(`/api/wallet?address=${encodeURIComponent(addr)}`);
+      if (!r.ok) return;
+      const j = await r.json();
+      if (j && !j.error) {
+        setWalletChain(j);
+        // adopt a card for every non-spam holding so MY POSITIONS + its chart
+        // are complete on load, without needing a click to hydrate them
+        try { ensureCardsForHoldings(j.holdings || []); } catch (e) {}
+      }
+    } catch (e) {}
+  }, []);
+
+  const connectPhantom = async () => {
+    const ph = getProvider();
+    if (!ph) {
+      // Home Screen PWA (standalone) has no injected wallet. DON'T browse-deeplink
+      // into Phantom's in-app browser — that throws the user out of full screen.
+      // Turbo is the site's wallet and needs no Phantom, so steer there instead.
+      const isPhone = typeof navigator !== "undefined" && /iPhone|iPad|Android/i.test(navigator.userAgent);
+      const inStandalone = typeof window !== "undefined" &&
+        (window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true);
+      if (inStandalone && isPhone) {
+        pushNotif({ type: "system", user: null, tokenId: null,
+          text: "⚡ In the installed app, use your TURBO wallet (portfolio → ⚡ TURBO) — it trades with no popups and needs no Phantom. Deposit SOL to its address from Phantom or any wallet." });
+        // open the portfolio drawer straight to the turbo panel
+        try { setPortfolioDrawer(true); } catch (e) {}
+        return;
+      }
+      if (typeof window !== "undefined") {
+        window.open(isPhone
+          ? `https://phantom.app/ul/browse/${encodeURIComponent(window.location.href)}`
+          : "https://phantom.app/download", "_blank", "noopener");
+      }
+      return;
+    }
+    setWalletBusy(true);
+    try {
+      const res = await ph.connect();                       // user approves in Phantom
+      const addr = (res && res.publicKey ? res.publicKey : ph.publicKey)?.toString();
+      if (!addr) throw new Error("no public key");
+
+      // prove they hold the key — a signature, not a transaction. Nothing moves.
+      let verified = false;
+      try {
+        const nonce = Math.random().toString(36).slice(2, 10);
+        const msg = `VALO — verify wallet ownership\n\nwallet: ${addr}\nnonce: ${nonce}\n\nThis signature proves you hold this wallet.\nIt authorises nothing and moves no funds.`;
+        const sig = await ph.signMessage(new TextEncoder().encode(msg), "utf8");
+        verified = !!(sig && (sig.signature || sig));
+      } catch (e) { /* they declined the signature — still connected, just unverified */ }
+
+      setWallet({ address: addr, verified });
+      setWalletConnected(true);
+      loadWalletChain(addr);
+      pushNotif({ type: "system", user: null, tokenId: null,
+        text: verified
+          ? `Wallet ${addr.slice(0, 4)}…${addr.slice(-4)} connected and verified — trading stays on paper.`
+          : `Wallet ${addr.slice(0, 4)}…${addr.slice(-4)} connected. Sign the message any time to verify ownership.` });
+    } catch (e) {
+      // user dismissed the Phantom prompt — leave everything as it was
+    }
+    setWalletBusy(false);
+  };
+
+  const disconnectWallet = async () => {
+    const ph = getProvider();
+    try { if (ph && ph.disconnect) await ph.disconnect(); } catch (e) {}
+    setWallet(null); setWalletChain(null); setWalletConnected(false);
+  };
+
+  // keep the TRADING wallet's real figures current — Phantom normally, the
+  // turbo wallet the moment it's armed (that's where positions live then)
+  const [walletVault, setWalletVault] = useState(null);   // the non-trading wallet (Phantom while turbo trades)
+  const vaultAddr = (liveData && turbo && turbo.pubkey && wallet && wallet.address && wallet.address !== turbo.pubkey)
+    ? wallet.address : null;
+  useEffect(() => {
+    if (!tradeAddr) return;
+    const pull = async () => {
+      loadWalletChain(tradeAddr);
+      if (vaultAddr) {
+        try {
+          const j = await (await fetch(`/api/wallet?address=${encodeURIComponent(vaultAddr)}&t=${Date.now()}`)).json();
+          if (j && !j.error) setWalletVault(j);
+        } catch (e) {}
+      } else setWalletVault(null);
+    };
+    pull();                                           // immediate on arm/switch
+    const iv = setInterval(pull, 30000);
+    const onVis = () => { if (!document.hidden) pull(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tradeAddr, vaultAddr]);
+
+  // reconnect silently if Phantom already trusts this site, and follow account changes
+  useEffect(() => {
+    const ph = getProvider();
+    if (!ph) return;
+    ph.connect({ onlyIfTrusted: true })
+      .then((res) => {
+        const addr = (res && res.publicKey ? res.publicKey : ph.publicKey)?.toString();
+        if (addr) { setWallet({ address: addr, verified: false }); setWalletConnected(true); loadWalletChain(addr); }
+      })
+      .catch(() => {});
+    const onAcc = (pk) => {
+      const addr = pk && pk.toString ? pk.toString() : null;
+      if (addr) { setWallet({ address: addr, verified: false }); loadWalletChain(addr); }
+      else { setWallet(null); setWalletChain(null); setWalletConnected(false); }
+    };
+    ph.on && ph.on("accountChanged", onAcc);
+    return () => { ph.off && ph.off("accountChanged", onAcc); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [valoStatsOpen, setValoStatsOpen] = useState(false); // ◆ $VALO token stats pop-out
+  // 🧭 first-run tour — shows once, then only when asked for
+  const [tourOn, setTourOn] = useState(false);
+  useEffect(() => {
+    let seen = true;
+    try { seen = localStorage.getItem("valo-tour-v1") === "done"; } catch (e) {}
+    if (!seen) { const t = setTimeout(() => setTourOn(true), 1400); return () => clearTimeout(t); }
+  }, []);
+  const endTour = useCallback(() => {
+    setTourOn(false);
+    try { localStorage.setItem("valo-tour-v1", "done"); } catch (e) {}
+  }, []);
+  // ◆ tapping any $VALO stat opens the REAL token chart (by CA) once launched
+  // ◆ keep THE $VALO card (id 424242) synced to our CA + live market data
+  useEffect(() => {
+    if (!valoMint) return;
+    // create a placeholder immediately so the chart can always be opened;
+    // the market row fills it in as soon as it lands
+    if (!valoLive || !valoLive.indexed || !(valoLive.price > 0)) {
+      setTokens((Ts) => {
+        if (Ts.some((t) => t && t.id === 424242)) return Ts;
+        return [...Ts, {
+          id: 424242, sym: "VALO", name: "VALO Terminal", liveMint: valoMint, ca: valoMint,
+          pool: null, hue: 262, isValo: true, price: 0, mc: 0, tvl: 0, vol24: 0,
+          buys: 0, sells: 0, greenUsd: 0, redUsd: 0, ch: 0, ch24: 0, statWin: "24h",
+          traders: 0, momentum: 50, buyPressure: 50, ageMin: 1, candles: [],
+          socials: {}, dev: { wallet: "", trades: [], launches: [], withdrawals: [], feeHistory: [],
+            tokensLaunched: 0, rugged: 0, creatorRewardsSol: 0, feesDay: 0, feesMonth: 0, feesYear: 0 },
+          trending: { reason: "$VALO — the terminal's own token, live on pump.fun.", tweet: null, desc: "" },
+        }];
+      });
+      return;
+    }
+    setTokens((Ts) => {
+      const base = (() => { try { return adoptMarketToken(valoLive); } catch (e) { return null; } })();
+      if (!base) return Ts;
+      const card = { ...base, id: 424242, sym: "VALO", name: "VALO Terminal",
+        liveMint: valoMint, ca: valoMint, hue: 262, isValo: true };
+      const i = Ts.findIndex((t) => t && t.id === 424242);
+      if (i < 0) return [...Ts, card];
+      // preserve candles the chart already streamed for it
+      const prev = Ts[i];
+      const next = [...Ts];
+      next[i] = { ...card, candles: (prev.candles && prev.candles.length) ? prev.candles : card.candles };
+      return next;
+    });
+  }, [valoMint, valoLive]);
+  const openValoChart = useCallback(() => {
+    setClickMode(null);
+    setSel(424242);            // ◆ always OUR token — the card is pinned to the CA
+  }, []);
+  // 🔥 SITE BURN — real. $VALO launches with a fixed 1B supply, and SPL burns
+  // reduce total supply directly, so burned = 1B − current supply. Measured
+  // from the pool's own MC ÷ price. Demo keeps the simulated ticker.
+  useEffect(() => {
+    if (liveData && valoMint) {
+      if (valoLive && Number.isFinite(valoLive.burned)) setBurned(Math.max(0, valoLive.burned));
+      else if (valoLive && valoLive.price > 0 && valoLive.mc > 0) setBurned(Math.max(0, 1e9 - valoLive.mc / valoLive.price));
+      return;                                  // never fake-tick a live token
+    }
     const iv = setInterval(() => setBurned((b) => b + 40 + Math.random() * 140), 2600);
     return () => clearInterval(iv);
-  }, []);
+  }, [liveData, valoMint, valoLive && valoLive.mc, valoLive && valoLive.price]);
   useEffect(() => {
     const on = () => setIsMobile(window.innerWidth < 900);
     window.addEventListener("resize", on);
@@ -8308,25 +13438,113 @@ export default function App() {
   useEffect(() => {
     const iv = setInterval(() => {
       setTokens((Ts) => Ts.map((t, ti) => {
+        // real-market cards are driven by the live feeds, not the simulation —
+        // skipping them keeps the tick cheap no matter how many are loaded
+        if (t.market && t.id !== selRef.current) return t;
         // LIVE DATA: this token mirrors a real pump.fun pair — each tick glides
         // the close toward the actual DexScreener price. Trading stays simulated.
-        const lv = liveDataRef.current && (liveBindRef.current.byTok[t.id] || liveArrRef.current[ti]);
+        const lv = liveDataRef.current && (
+          // a card that already carries its own pool matches ONLY by that pool
+          t.pool
+            ? (liveBindRef.current.byTok[t.id] && liveBindRef.current.byTok[t.id].pool === t.pool
+                ? liveBindRef.current.byTok[t.id]
+                : (liveArrRef.current || []).find((x) => x.pool === t.pool) || null)
+            : (liveBindRef.current.byTok[t.id] || liveArrRef.current[ti])
+        );
         if (lv) {
           const prev = t.price;
           const target = lv.price;
           const c = prev + (target - prev) * 0.5;
-          const cd = { o: prev, h: Math.max(prev, c) * 1.0004, l: Math.min(prev, c) * 0.9996, c };
-          const candlesL = [...t.candles.slice(1), cd];
+          const ratio = prev > 0 && target > 0 ? target / prev : 1;
+          if (target > 0 && !t.realCandles && (ratio > 4 || ratio < 0.25)) {
+            // this card just moved to a different price scale — RESCALE the
+            // existing candles so the shape survives (a flat reseed looked
+            // exactly like a dead chart)
+            const k = ratio;
+            const scaled = (t.candles || []).map((c) => ({
+              t: c.t, v: c.v, o: c.o * k, h: c.h * k, l: c.l * k, c: c.c * k,
+            }));
+            return { ...t, candles: scaled.length ? scaled : t.candles, price: target,
+              supply: lv.mc > 0 && lv.price > 0 ? lv.mc / lv.price : t.supply,
+              sym: lv.sym, name: lv.name, mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
+              img: lv.img || t.img, pool: lv.pool || t.pool, liveMint: lv.mint || t.liveMint,
+              traders: lv.traders || t.traders, ageMin: t.ageMin + 0.04 };
+          }
+          let candlesL;
+          if (!(prev > 0) && target > 0) {
+            // first real price for a card born at 0 — SEED, never draw a bar
+            // from the floor. That bar was the "giant green candle from
+            // nowhere" and it crushed the whole axis.
+            candlesL = (t.candles && t.candles.length)
+              ? t.candles
+              : [{ t: Date.now(), v: 0, o: target, h: target, l: target, c: target }];
+            return { ...t, candles: candlesL, price: target,
+              sym: lv.sym || t.sym, name: lv.name || t.name, mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
+              img: lv.img || t.img, pool: lv.pool || t.pool, liveMint: lv.mint || t.liveMint,
+              supply: lv.mc > 0 && lv.price > 0 ? lv.mc / lv.price : t.supply, ageMin: t.ageMin + 0.04 };
+          }
+          if (t.pool && t.candles && t.candles.length) {
+            // real history: the newest candle tracks the live price — and when
+            // its time bucket closes, a NEW candle opens instead of one bar
+            // silently absorbing hours of movement between history refreshes.
+            const cs = t.candles;
+            const last = cs[cs.length - 1];
+            const cx = lv.price > 0 ? lv.price : c;   // exact on real pools
+            const dt = cs.length > 1 ? Math.max(15000, cs[cs.length - 1].t - cs[cs.length - 2].t) : 60000;
+            if (Date.now() >= last.t + dt * 1.5) {
+              // bucket rolled over → open a fresh candle at the last close
+              candlesL = [...cs.slice(-599),
+                { t: last.t + dt, v: 0, o: last.c, h: Math.max(last.c, cx), l: Math.min(last.c, cx), c: cx }];
+            } else {
+              candlesL = [...cs.slice(0, -1),
+                { t: last.t, v: last.v, o: last.o, h: Math.max(last.h, cx), l: Math.min(last.l, cx), c: cx }];
+            }
+          } else {
+            // no real pool → NOTHING is traded, so nothing is invented. The
+            // chart shows a flat tick at the reported price, rolled by time —
+            // honest emptiness instead of fabricated volatility.
+            const now = Date.now();
+            const cs = t.candles || [];
+            const last = cs[cs.length - 1];
+            if (last && now < (last.t || 0) + 60000) {
+              const cx = target > 0 ? target : c;
+              candlesL = [...cs.slice(0, -1),
+                { t: last.t, v: 0, o: last.o, h: Math.max(last.h, cx), l: Math.min(last.l, cx), c: cx }];
+            } else {
+              const cx = target > 0 ? target : c;
+              candlesL = [...cs.slice(-599), { t: now, v: 0, o: cx, h: cx, l: cx, c: cx }];
+            }
+          }
           const driftL = (c - prev) / (prev || 1);
-          return { ...t, candles: candlesL, price: c, sym: lv.sym, name: lv.name,
+          const supL = lv.mc > 0 && lv.price > 0 ? lv.mc / lv.price : t.supply;
+          // real pool → the exact reported price, never an eased one
+          const pExact = t.pool && lv.price > 0 ? lv.price : c;
+          return { ...t, candles: candlesL, price: pExact, supply: supL,
+            mc: supL > 0 ? pExact * supL : (lv.mc || t.mc),
+            sym: lv.sym, name: lv.name,
             mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
             img: lv.img || t.img, pool: lv.pool || t.pool, liveMint: lv.mint || t.liveMint,
             traders: lv.traders || t.traders,
+            // re-anchor supply from the reported MC so price × supply stays true
+            supply: lv.mc > 0 && lv.price > 0 ? lv.mc / lv.price : t.supply,
             greenUsd: lv.greenUsd > 0 ? lv.greenUsd : Math.max(0, t.greenUsd * (1 + driftL * 2)),
             redUsd: lv.redUsd > 0 ? lv.redUsd : Math.max(1, t.redUsd * (1 - driftL * 1.2)),
+            statWin: lv.statWin || t.statWin || "24h",
+            vol24: lv.vol24 > 0 ? lv.vol24 : t.vol24,
+            // real short-window inputs → real momentum/pressure → real score
+            ...(() => {
+              const flow = (lv.buys || 0) + (lv.sells || 0);
+              if (!(flow > 0)) return {};
+              const bp = Math.max(1, Math.min(99, Math.round((lv.buys / flow) * 100)));
+              const chW = +lv.ch || 0;
+              const chCoef = lv.statWin === "5m" ? 6 : lv.statWin === "1h" ? 2 : 0.5;
+              const mo = Math.max(1, Math.min(99, Math.round(50 + chW * chCoef + (bp - 50) * 0.4)));
+              return { buyPressure: bp, momentum: mo };
+            })(),
             ageMin: t.ageMin + 0.04 };
         }
         const candles = tickCandles(t.candles, t.momentum, t.buyPressure);
+        if (!candles.length) return t;                  // history still loading — leave it alone
         const price = candles[candles.length - 1].c;
         const drift = (price - t.price) / t.price;
         return {
@@ -8344,11 +13562,14 @@ export default function App() {
 
   // surge + hard-drop detector → BIG announcements in public feed
   useEffect(() => {
+    if (liveData) return;            // ⛓ live: only real market moves speak
     const iv = setInterval(() => {
       setTokens((Ts) => {
         const now = Date.now();
         for (const t of Ts) {
-          const last = t.candles[t.candles.length - 1];
+          const cs5 = t.candles || [];
+          const last = cs5.length ? cs5[cs5.length - 1] : null;
+          if (!last || !(last.o > 0)) continue;      // no series yet → nothing to alert on
           const gain = ((last.c - last.o) / last.o) * 100;
           const cd = alertCooldown.current[t.id] || 0;
           if (now - cd < 60000) continue;
@@ -8367,15 +13588,16 @@ export default function App() {
       });
     }, 9000);
     return () => clearInterval(iv);
-  }, [sayAlert]);
+  }, [sayAlert, liveData]);
 
   // new launches — API: pump.fun mint stream
   useEffect(() => {
+    if (liveData) return;            // ⛓ live: real launches arrive from the NEW feed
     const iv = setInterval(() => {
       if (poolRef.current.length) {
         const t = makeToken(poolRef.current.shift(), true);
         setTokens((Ts) => [t, ...Ts]);
-        sayAlert({ tone: "launch", pre: "🚀 NEW TOKEN LAUNCHED —", sym: t.sym, tokenId: t.id, hot: `${t.chain === "pump" ? "PUMP.FUN" : "ROBINHOOD CHAIN"} · SYNTH CHART LIVE` });
+        sayAlert({ tone: "launch", pre: "🚀 NEW TOKEN LAUNCHED —", sym: t.sym, tokenId: t.id, hot: `PUMP.FUN · SYNTH CHART LIVE` });
         // API: fetch token metadata (image) for the new mint. In production:
         //   const meta = await fetch(`https://api.dexscreener.com/…/${mint}`)
         //   resolve meta.info.imageUrl and setTokens to attach t.img.
@@ -8384,7 +13606,7 @@ export default function App() {
       }
     }, 16000);
     return () => clearInterval(iv);
-  }, [sayAlert]);
+  }, [sayAlert, liveData]);
 
   // metadata image resolver — attaches a real picture once it "loads"
   const resolveImage = useCallback((t) => {
@@ -8409,6 +13631,7 @@ export default function App() {
       "careful, liquidity is thin", "gm legends", "dev is active, good sign",
       "sold too early again 💀", "we eating good tonight", "what's the play here",
     ];
+    if (liveData) return;              // live mode → only real people talk here
     const iv = setInterval(() => {
       setTokens((Ts) => {
         const withToken = Math.random() > 0.45 && Ts.length;
@@ -8422,16 +13645,24 @@ export default function App() {
       });
     }, 5200);
     return () => clearInterval(iv);
-  }, [saySocial, chatOn]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saySocial, chatOn, liveData]);
 
   // community callouts — API: social/telegram callout feed
   useEffect(() => {
+    if (liveData) return;            // ⛓ live: ONLY real traders' callouts ride the banner
     const iv = setInterval(() => {
       setTokens((Ts) => {
         if (!Ts.length) return Ts;
         // bias toward high-momentum coins
-        const weighted = Ts.flatMap((t) => Array(Math.max(1, Math.round(t.momentum / 18))).fill(t));
+        const weighted = Ts.flatMap((t) => {
+          // adopted market tokens carry no .momentum — never build Array(NaN)
+          const m = Number.isFinite(t && t.momentum) ? t.momentum : 18;
+          const n = Math.max(1, Math.min(50, Math.round(m / 18) || 1));
+          return Array(n).fill(t);
+        });
         const t = weighted[Math.floor(Math.random() * weighted.length)];
+        if (!t) return Ts;
         const mcNow = mcOf(t);
         // entry MC sampled from the past — some will be deep 2x+ calls
         const mcAt = mcNow * rnd(0.18, 0.98);
@@ -8443,7 +13674,7 @@ export default function App() {
       });
     }, 4200);
     return () => clearInterval(iv);
-  }, []);
+  }, [liveData]);
 
   const calloutCountFor = useCallback((id) => callouts.filter((c) => c.tokenId === id).length, [callouts]);
 
@@ -8493,13 +13724,14 @@ export default function App() {
 
   // background: other users trading into the vault — API: on-chain fee events
   useEffect(() => {
+    if (liveData) return;            // ⛓ live: the vault fills from real fees only
     const iv = setInterval(() => {
       const otherVol = rnd(200, 9000);
       setPoolVol((v) => v + otherVol);
       setVaultTotal((v) => v + otherVol * (TAX.VALO / 100) / 2);
     }, 3000);
     return () => clearInterval(iv);
-  }, []);
+  }, [liveData]);
 
   // per-coin room chatter — API: coin room websocket
   useEffect(() => {
@@ -8510,11 +13742,13 @@ export default function App() {
       "watching for a retest", "loaded a bit more", "careful up here",
       "callouts stacking on this fast", "clean bounce off support",
     ];
+    if (liveData) return;              // real coin rooms carry real voices only
     const iv = setInterval(() => {
       sayCoin(sel, { user: CALLERS[Math.floor(Math.random() * CALLERS.length)], text: LINES[Math.floor(Math.random() * LINES.length)] });
     }, 6500);
     return () => clearInterval(iv);
-  }, [sel, chatOn, sayCoin]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel, chatOn, sayCoin, liveData]);
 
   // floating market flow — API: live trade stream
   useEffect(() => {
@@ -8529,9 +13763,184 @@ export default function App() {
   }, [sel]);
 
   const selected = tokens.find((t) => t.id === sel) || null;
+  const [scorePop, setScorePop] = useState(false);       // vitals popup off the score chip
+  const [scoreBig, setScoreBig] = useState("price");     // which figure leads: price | mc
+  const minAgoRef = useRef({});                          // tokenId → [{ts, price, mc}] ring for 1-min deltas
+  useEffect(() => {
+    if (!selected) return;
+    const arr = minAgoRef.current[selected.id] || (minAgoRef.current[selected.id] = []);
+    const now = Date.now();
+    arr.push({ ts: now, price: selected.price || 0, mc: selected.mc || 0 });
+    while (arr.length && now - arr[0].ts > 95000) arr.shift();
+    if (arr.length > 60) arr.splice(0, arr.length - 60);
+  }, [selected && selected.id, selected && selected.price]);
+  useEffect(() => { setScorePop(false); }, [sel]);
+  // 📍 real-fill markers for the OPEN token — buys & sells on its chart,
+  // rebuilt from the persistent fills ledger so they survive a refresh/relogin
+  const chartRealMarkers = useMemo(() => {
+    if (!selected || !selected.liveMint) return [];
+    const mine = (realFills || [])
+      .filter((f) => f.mint === selected.liveMint && f.qty > 0)
+      .sort((a, b) => (a.at || 0) - (b.at || 0));
+    // walk the fills to compute avg cost & realized P/L at each point — the
+    // same running-basis math the portfolio uses, attached to each marker
+    let qty = 0, costUsd = 0;
+    const supply = (selected.mc > 0 && selected.price > 0) ? selected.mc / selected.price : 0;
+    return mine.map((f) => {
+      const px = f.px || (f.qty > 0 ? (f.sol * SOL_USD) / f.qty : 0);
+      let pnlMoney = null, pnlPct = null, entryAvg = null;
+      if (f.side === "buy") { qty += f.qty; costUsd += f.sol * SOL_USD; }
+      else if (qty > 0) {
+        const avg = costUsd / qty;                 // avg cost USD/token
+        entryAvg = avg;
+        const proceeds = px * Math.min(f.qty, qty);
+        const basis = avg * Math.min(f.qty, qty);
+        pnlMoney = (proceeds - basis) / SOL_USD;   // in SOL, MarkerReceipt scales
+        pnlPct = basis > 0 ? ((proceeds - basis) / basis) * 100 : null;
+        const p2 = Math.min(1, f.qty / qty);
+        costUsd -= costUsd * p2; qty = Math.max(0, qty - f.qty);
+      }
+      return {
+        t: f.at, side: f.side, price: px, p: px,
+        amt: f.qty, unit: f.sym, sol: f.sol, qty: f.qty,
+        sym: f.sym, tx: f.sig, real: true, mine: true,
+        trader: "__me__",
+        fillPrice: px, entry: entryAvg,
+        // the TRUE MC recorded at fill time wins; else derive from supply × fill
+        // price; else (no data) null so the receipt shows "—" not a wrong number
+        mc: (f.mcAtFill > 0) ? f.mcAtFill : (supply > 0 && px > 0 ? px * supply : null),
+        mcEntry: (entryAvg > 0 && supply > 0) ? entryAvg * supply : null,   // MC at the avg entry
+        mcEstimated: !(f.mcAtFill > 0),
+        pnlMoney, pnlPct,
+        qtyTokens: f.qty, solValue: f.sol, est: !!f.est,
+      };
+    });
+  }, [realFills, selected && selected.liveMint, selected && selected.mc, selected && selected.price]);
+  // mints just sold to zero — suppress until the chain's cache catches up, so
+  // a stale snapshot can't resurrect a position you already closed
+  const recentlyClosed = useMemo(() => {
+    const net = {};    // mint → net token qty from the ledger
+    const lastSell = {};
+    for (const f of (realFills || [])) {
+      if (!f.mint) continue;
+      net[f.mint] = (net[f.mint] || 0) + (f.side === "buy" ? (f.qty || 0) : -(f.qty || 0));
+      if (f.side === "sell") lastSell[f.mint] = Math.max(lastSell[f.mint] || 0, f.at || 0);
+    }
+    const now = Date.now();
+    const out = new Set();
+    for (const m in net) {
+      // net ≤ 0.5% of the largest buy → effectively flat, and sold recently
+      if (net[m] <= 1e-6 && lastSell[m] && now - lastSell[m] < 90000) out.add(m);
+    }
+    return out;
+  }, [realFills]);
+
+  // 🫙 what the pool would ACTUALLY pay right now, per mint (quote-driven)
+  const [netIfSold, setNetIfSold] = useState({});
+  useEffect(() => {
+    if (!liveData || !onchain.enabled) return;
+    let stop = false;
+    const SOLM = "So11111111111111111111111111111111111111112";
+    const pull = async () => {
+      try {
+        const holds = ((walletChain && walletChain.holdings) || []).filter((h) => h.qty > 0 && !h.spam && !h.dust).slice(0, 4);
+        for (const h of holds) {
+          if (stop) return;
+          const tk = (tokensRef.current || []).find((t2) => t2.liveMint === h.mint);
+          const dec = 6;   // pump tokens are 6-dec; quote amount is approximate anyway
+          const amt = Math.floor(h.qty * Math.pow(10, dec));
+          if (!(amt > 0)) continue;
+          const r = await fetch(`/api/swap?mode=quote&inputMint=${h.mint}&outputMint=${SOLM}&amount=${amt}&slippageBps=${slipBps}`);
+          if (!r.ok) continue;
+          const j = await r.json();
+          const outSol = j && j.quote && (+j.quote.outAmount || 0) / 1e9;
+          if (outSol > 0 && !stop) setNetIfSold((N) => ({ ...N, [h.mint]: { netUsd: outSol * SOL_USD, at: Date.now() } }));
+        }
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 25000);
+    return () => { stop = true; clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData, onchain.enabled, walletChain && walletChain.holdings && walletChain.holdings.length]);
+  const chainHoldingsLive = useMemo(() => {
+    const tHolds = ((walletChain && walletChain.holdings) || []).map((h) => ({ ...h,
+      owner: tradeAddr, src: (turbo && tradeAddr === turbo.pubkey) ? "turbo" : "phantom" }));
+    const vHolds = ((walletVault && walletVault.holdings) || []).map((h) => ({ ...h,
+      owner: vaultAddr, src: "phantom" }));
+    const holds = [...tHolds, ...vHolds].filter((h) => !recentlyClosed.has(h.mint));
+    return holds.map((h) => {
+      const card = (tokens || []).find((t) => t.liveMint === h.mint);
+      const price = (card && card.price > 0) ? card.price : (h.price || 0);
+      const led = chainLedger.byMint[h.mint];
+      if (!led || !(led.qty > 0) || !(price > 0)) return { ...h, dust: h.dust, spam: h.spam, livePrice: price, pnlUsd: null, pnlPct: null };
+      const q = Math.min(h.qty, led.qty);
+      const basisUsd = led.costSol * SOL_USD * (q / led.qty);
+      const pnlUsd = price * q - basisUsd;
+      const net = netIfSold[h.mint];
+      const netPnlUsd = net && net.netUsd > 0 ? net.netUsd - basisUsd : null;
+      return { ...h, livePrice: price, netUsd: net ? net.netUsd : null, netPnlUsd,
+        avgCostUsd: q > 0 ? basisUsd / q : null,
+        pnlUsd, pnlPct: basisUsd > 0 ? (pnlUsd / basisUsd) * 100 : null };
+    });
+  }, [walletChain, walletVault, tokens, chainLedger, tradeAddr, vaultAddr, recentlyClosed]);
+  // 🧾 combined chain — the portfolio's truth: both wallets, one book
+  const combinedChain = useMemo(() => {
+    if (!walletChain) return null;
+    const v = walletVault;
+    return {
+      ...walletChain,
+      sol: (walletChain.sol || 0) + ((v && v.sol) || 0),
+      solTrading: walletChain.sol || 0,
+      solVault: (v && v.sol) || 0,
+      tokensUsd: (walletChain.tokensUsd || 0) + ((v && v.tokensUsd) || 0),
+      holdingsCount: ((walletChain.holdings || []).length) + (((v && v.holdings) || []).length),
+      holdings: chainHoldingsLive,
+      dual: !!v,
+    };
+  }, [walletChain, walletVault, chainHoldingsLive]);
+
+  selRef.current = sel;
+  const selPoolRef = useRef(null);
+  useEffect(() => { if (selected) selPoolRef.current = selected.pool || null; }, [selected && selected.id, selected && selected.pool]);
+  useEffect(() => {
+    if (sel == null || selected) return;                 // healthy
+    const pool = selPoolRef.current;
+    const again = pool ? tokens.find((t) => String(t.pool || "") === String(pool)) : null;
+    if (again) setSel(again.id);                          // same token, new object
+    else { setSel(null); setClickMode(null); }            // truly gone → back to the board
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel, selected, tokens]);
 
   // core execute — marker always lands on the live candle at fill price
   const execute = (t, o, spot) => {
+    if (liveData && o && o.mode !== "auto") {
+      // instant paper fills stay closed on live — real market orders go through
+      // the ⚡ ticket/hotbar. BOTS fall through: arming levels is exactly how
+      // live automation works (their triggers fire REAL turbo fills).
+      pushNotif({ type: "system", user: null, tokenId: t && t.id,
+        text: "⛓ live site — use the ⚡ BUY/SELL buttons for real orders, or launch a bot: its triggers fire real turbo fills." });
+      return;
+    }
+    if (liveData && o && o.mode === "auto" && !walletReady) {
+      pushNotif({ type: "system", user: null, tokenId: t && t.id,
+        text: "🤖 set up your ⚡ TURBO wallet (portfolio) before launching live bots — triggers sign with it." });
+      return;
+    }
+    if (liveData && o && o.mode === "auto" && o.side !== "sell") {
+      // ⛔ not enough funds → no arm. Required: buy-in + 0.6% site fee + tx/rent buffer.
+      const amtSol = o.pay === "SOL" ? (+o.amt || 0) : 0;
+      if (amtSol > 0) {
+        const feeBpsNow = ((onchain && onchain.feeBps) || 60) / 10000;
+        const need = amtSol * (1 + feeBpsNow) + 0.004;   // swap tx + fee tx + rent headroom
+        const have = (walletChain && (walletChain.solTrading != null ? walletChain.solTrading : walletChain.sol)) || 0;
+        if (have < need) {
+          pushNotif({ type: "system", user: null, tokenId: t && t.id,
+            text: `⛔ not enough funds to arm — need ◎${need.toFixed(4)} (◎${amtSol} buy-in + ${(feeBpsNow * 100).toFixed(1)}% site fee + tx fees), turbo has ◎${have.toFixed(4)}.` });
+          return;
+        }
+      }
+    }
     TestLog.push("order", { sym: t && t.sym, side: o.side, mode: o.mode, amt: o.amt, pay: o.pay, px: t && t.price });
     // AUTO STRATEGY = a bot, full stop. It arms at the user's buy-in price and
     // fills only when the market reaches it — never an instant market buy.
@@ -8548,6 +13957,7 @@ export default function App() {
       const legs = (o.legs || []).filter((l) => l.mult > 1 && l.alloc > 0);
       const tp = !legs.length && o.legs && o.legs[0] && o.legs[0].mult > 1 ? o.legs[0].mult : null;
       setPendingOrders((P) => [...P, { id: Date.now() + Math.random(), tokenId: t.id, side: "buy", level: lvl, dir, amt: o.amt, pay: o.pay, tax: o.tax, stopLoss: parseFloat(o.stopLoss) > 0 ? lvl * (1 - parseFloat(o.stopLoss) / 100) : null, tpMult: tp, legs, ts: Date.now() }]);
+      armedBotReadyCheck();
       sayPrivate({ type: "note", text: `🤖 auto strategy armed — BUY ${o.amt} ${o.pay} on ${t.sym} waits @ $${fmtP(lvl)}${o.stopLoss > 0 ? ` · SL $${fmtP(o.stopLoss)}` : ""}${tp ? ` · TP ${tp}×` : ""}` });
       return;
     }
@@ -8559,7 +13969,7 @@ export default function App() {
         sayPrivate({ type: "note", text: `⛔ insufficient ${o.pay} — tried to buy ${o.amt}, wallet holds ${bal.toFixed(3)}` });
         return;
       }
-      if (o.pay === "SOL") setSolBalance((b) => Math.max(0, b - o.amt)); else setValoWallet((v) => Math.max(0, v - o.amt));
+      if (!liveData) { if (o.pay === "SOL") setSolBalance((b) => Math.max(0, b - o.amt)); else setValoWallet((v) => Math.max(0, v - o.amt)); }
     }
     const fee = splitFee(o.amt, o.pay);
     setBurned((b) => b + fee.burn);        // burn pool only
@@ -8572,7 +13982,7 @@ export default function App() {
     // compute PnL $ for sells against average entry
     const posEntry = positions[t.id]?.entry ?? t.price;
     const sellPnlPct = o.side === "sell" ? ((t.price - posEntry) / posEntry) * 100 : 0;
-    const sellPnlMoney = o.side === "sell" ? (o.amt * sellPnlPct) / 100 : 0;
+    const sellPnlMoney = o.side === "sell" ? (payUsd(o.amt, o.pay || pay) * sellPnlPct) / 100 : 0;
     if (o.side === "sell") setRealizedPnl((r) => r + sellPnlMoney);
     // sells credit proceeds back — principal plus the P/L, live
     if (o.side === "sell" && o.amt > 0) {
@@ -8610,6 +14020,31 @@ export default function App() {
 
     // marker always stamps the LATEST candle at the executed price, and carries
     // its full receipt so it can be clicked open later
+    // your order moves a simulated market (never a real one)
+    if (!t.pool) {
+      const usdIn = payUsd(o.amt, o.pay);
+      const depth = Math.max(1000, (t.tvl || 0) * 0.9);       // effective liquidity
+      const raw = usdIn / depth;                              // fraction of the pool
+      const impact = Math.max(-0.12, Math.min(0.12, (o.side === "buy" ? raw : -raw) * 0.8));
+      if (Math.abs(impact) > 0.0002) {
+        setTokens((Ts) => Ts.map((x) => {
+          if (x.id !== t.id) return x;
+          const np = Math.max(1e-12, x.price * (1 + impact));
+          const cs = x.candles || [];
+          const last = cs.length ? cs[cs.length - 1] : null;
+          // the current candle absorbs the move, wick and all
+          const candles = last
+            ? [...cs.slice(0, -1), { ...last, c: np, h: Math.max(last.h, np), l: Math.min(last.l, np) }]
+            : cs;
+          return { ...x, price: np, candles,
+            mc: x.supply > 0 ? np * x.supply : x.mc,
+            greenUsd: o.side === "buy" ? (x.greenUsd || 0) + usdIn : x.greenUsd,
+            redUsd: o.side === "sell" ? (x.redUsd || 0) + usdIn : x.redUsd,
+            buyPressure: Math.max(1, Math.min(99, (x.buyPressure || 50) + (o.side === "buy" ? 2 : -2))),
+            momentum: Math.max(1, Math.min(99, (x.momentum || 50) + (o.side === "buy" ? 3 : -3))) };
+        }));
+      }
+    }
     setTradesByToken((M) => ({
       ...M,
       [t.id]: [...(M[t.id] || []), {
@@ -8653,7 +14088,32 @@ export default function App() {
           const gain = (l.mult - 1) * 100 * rnd(0.85, 1);
           const money = (o.amt * l.alloc / 100) * (gain / 100);
           const legAmt = o.amt * l.alloc / 100;
-          setTradesByToken((M) => ({ ...M, [t.id]: [...(M[t.id] || []), {
+          // your order moves a simulated market (never a real one)
+    if (!t.pool) {
+      const usdIn = payUsd(o.amt, o.pay);
+      const depth = Math.max(1000, (t.tvl || 0) * 0.9);       // effective liquidity
+      const raw = usdIn / depth;                              // fraction of the pool
+      const impact = Math.max(-0.12, Math.min(0.12, (o.side === "buy" ? raw : -raw) * 0.8));
+      if (Math.abs(impact) > 0.0002) {
+        setTokens((Ts) => Ts.map((x) => {
+          if (x.id !== t.id) return x;
+          const np = Math.max(1e-12, x.price * (1 + impact));
+          const cs = x.candles || [];
+          const last = cs.length ? cs[cs.length - 1] : null;
+          // the current candle absorbs the move, wick and all
+          const candles = last
+            ? [...cs.slice(0, -1), { ...last, c: np, h: Math.max(last.h, np), l: Math.min(last.l, np) }]
+            : cs;
+          return { ...x, price: np, candles,
+            mc: x.supply > 0 ? np * x.supply : x.mc,
+            greenUsd: o.side === "buy" ? (x.greenUsd || 0) + usdIn : x.greenUsd,
+            redUsd: o.side === "sell" ? (x.redUsd || 0) + usdIn : x.redUsd,
+            buyPressure: Math.max(1, Math.min(99, (x.buyPressure || 50) + (o.side === "buy" ? 2 : -2))),
+            momentum: Math.max(1, Math.min(99, (x.momentum || 50) + (o.side === "buy" ? 3 : -3))) };
+        }));
+      }
+    }
+    setTradesByToken((M) => ({ ...M, [t.id]: [...(M[t.id] || []), {
             t: Date.now(), side: "sell", p: null,
             amt: legAmt, unit, price: t.price, mc: mcOf(t),
             pnlPct: gain, pnlMoney: money, entry: o.limitBuy || t.price, sym: t.sym, bot: true,
@@ -8674,6 +14134,7 @@ export default function App() {
     const lvl = level != null && isFinite(level) && level > 0 ? level : selected.price;
     const dir = lvl <= selected.price ? -1 : 1; // -1 fills when price falls to level, +1 when it rises
     setPendingOrders((P) => [...P, { id: Date.now() + Math.random(), tokenId: selected.id, side, level: lvl, dir, amt, pay, tax, stopLoss: null, tpMult: null, ts: Date.now() }]);
+    armedBotReadyCheck();
     sayPrivate({ type: "note", text: `🤖 bot armed — ${side.toUpperCase()} ${amt} ${pay} on ${selected.sym} @ $${fmtP(lvl)} · fills only when price hits the marker` });
   };
 
@@ -8708,6 +14169,71 @@ export default function App() {
       const t = tokens.find((x) => String(x.id) === String(o.tokenId));
       if (!t) return;
       if (o.side === "buy") {
+        const goReal = liveAuto && liveData && onchain.enabled && walletReady && !turboLockedButPresent && o.pay === "SOL" && t.liveMint;
+        if (liveData && !goReal) {
+          // LIVE SITE, but this order can't fire real (automation disarmed, no
+          // wallet, or no route). It does NOT fall back to paper — the live
+          // site never writes a paper fill. Refund the arm escrow and say why.
+          refundEscrow(o.amt, o.pay);
+          // 🔎 exact cause + how to fix it, carried on the notification so
+          // tapping it opens a full explanation instead of a vague line
+          const solNow = (walletChain && (walletChain.solTrading != null ? walletChain.solTrading : walletChain.sol)) || 0;
+          const needSol = (+o.amt || 0) * (1 + ((onchain && onchain.feeBps) || 60) / 10000) + 0.004;
+          const diag = !liveAuto
+            ? { why: "live automation is disarmed", fix: "Open portfolio → ⚡ TURBO and arm 🤖 LIVE AUTOMATION. Bots can only sign for you while that's on — the wallet tab shows a spinning diamond when it is.", tag: "AUTOMATION OFF" }
+            : turboLockedButPresent
+            ? { why: "your ⚡ turbo wallet is locked", fix: "Unlock turbo with your PIN (portfolio → ⚡ TURBO). Bots sign with that key, so a locked wallet can't fill. It stays unlocked for the session.", tag: "TURBO LOCKED" }
+            : !walletReady
+            ? { why: "no wallet is connected", fix: "Set up the ⚡ turbo wallet or connect Phantom, then re-arm. Nothing was spent.", tag: "NO WALLET" }
+            : (o.pay === "SOL" && solNow < needSol)
+            ? { why: `not enough SOL — needed ◎${needSol.toFixed(4)}, turbo had ◎${solNow.toFixed(4)}`, fix: `The trigger fired but the wallet couldn't cover ◎${(+o.amt || 0).toFixed(4)} plus the site fee and network fees. Top up turbo and re-arm.`, tag: "SHORT FUNDS" }
+            : !onchain.enabled
+            ? { why: "live routing was reconnecting", fix: "The router briefly dropped. Nothing was spent and the next trigger will fire normally — re-arm if the level has already passed.", tag: "ROUTER BLIP" }
+            : o.pay !== "SOL"
+            ? { why: "live orders are SOL-only", fix: "Set the buy-in to SOL on the ticket and re-arm. $VALO-denominated orders don't route on chain yet.", tag: "WRONG UNIT" }
+            : !t.liveMint
+            ? { why: "this token has no live route", fix: "The pool isn't routable through Jupiter yet — common for a token minutes old. Try again once it has liquidity.", tag: "NO ROUTE" }
+            : { why: "the route check failed", fix: "The quote didn't come back in time. Nothing was spent — re-arm to try again, and raise slippage if it keeps happening.", tag: "QUOTE FAILED" };
+          const why = diag.why;
+          pushNotif({ type: "system", user: null, tokenId: t.id,
+            botSkip: { ...diag, sym: t.sym, at: Date.now(), size: +o.amt || 0, unit: o.pay || "SOL" },
+            text: `🤖 bot trigger hit on ${t.sym} but was SKIPPED — ${why}. Nothing was bought. Tap for details.` });
+          sayPrivate({ type: "note", text: `⚠ bot skipped on ${t.sym}: ${why}` });
+          return;
+        }
+        if (goReal) {
+          // paper escrow goes back — this buy spends REAL SOL from the wallet
+          refundEscrow(o.amt, o.pay);
+          const runId = "run" + Date.now() + Math.random();
+          const size = Math.min(o.amt, onchain.maxSol || o.amt);
+          sayPrivate({ type: "note", text: `⛓🤖 bot triggered — placing REAL buy of ${size} SOL into ${t.sym}…` });
+          fireRealOrderDirect(t, "buy", size).then((res) => {
+            if (!res.ok) {
+              pushNotif({ type: "system", user: null, tokenId: t.id,
+                botSkip: { tag: "FILL FAILED", why: humanSwapError(res.err), sym: t.sym, at: Date.now(), size, unit: "SOL",
+                  fix: "The trigger fired and the swap was attempted, but the network rejected it. No funds moved. Raising slippage fixes most of these — re-arm to try again.",
+                  raw: res.err || null },
+                text: `⛓🤖 bot buy MISSED on ${t.sym} — ${humanSwapError(res.err)} Tap for details.` });
+              sayPrivate({ type: "note", text: `⚠ bot buy missed on ${t.sym}: ${res.err}` });
+              return;
+            }
+            // the run's book is REAL: tokens actually received, SOL actually spent
+            setBotRuns((R) => [...R, { id: runId, tokenId: o.tokenId, pool: t.pool || null, sym: t.sym, hue: t.hue,
+              entry: t.price, level: o.level, amt: size, remaining: size, pay: "SOL", legs: o.legs || [],
+              stopLossPrice: o.stopLoss || null, filledTs: Date.now(), exits: [], status: "live",
+              real: true, qtyTokens: res.qty, tokensLeft: res.qty, buySig: res.sig }]);
+            sayPrivate({ type: "note", text: `⛓🎯 REAL bot fill — bought ${fmtQty(res.qty)} ${t.sym} with ${size} SOL @ $${fmtP(t.price)}` });
+            const follow = [];
+            if (o.vtSell > 0) follow.push({ id: Date.now() + Math.random(), tokenId: o.tokenId, side: "sell", level: o.vtSell, dir: o.vtSell <= t.price ? -1 : 1, amt: size, pay: "SOL", tax: o.tax, runId, vt: true, trail: o.vtTrail || null, exitKind: "VT", ts: Date.now() });
+            else {
+              if (o.stopLoss > 0) follow.push({ id: Date.now() + Math.random(), tokenId: o.tokenId, side: "sell", level: o.stopLoss, dir: -1, amt: size, pay: "SOL", tax: o.tax, runId, exitKind: "SL", ts: Date.now() });
+              if (Array.isArray(o.legs) && o.legs.length) o.legs.forEach((l, i) => { if (l.mult > 1 && l.alloc > 0) follow.push({ id: Date.now() + Math.random() + i, tokenId: o.tokenId, side: "sell", level: t.price * l.mult, dir: 1, amt: +((size * l.alloc) / 100).toFixed(6), pay: "SOL", tax: o.tax, runId, trail: l.trail, exitKind: "TP", ts: Date.now() }); });
+              else if (o.tpMult > 1) follow.push({ id: Date.now() + Math.random() + 1, tokenId: o.tokenId, side: "sell", level: t.price * o.tpMult, dir: 1, amt: size, pay: "SOL", tax: o.tax, runId, exitKind: "TP", ts: Date.now() });
+            }
+            if (follow.length) setPendingOrders((P) => [...P, ...follow]);
+          });
+          return; // real path owns this fill — paper code below must not run
+        }
         // fill → a RUNNING BOT with its own book, kept out of the Live P/L box
         // funds already escrowed at arm time — the fill just converts them
         TestLog.push("bot_fill", { sym: t.sym, amt: o.amt, pay: o.pay, px: t.price });
@@ -8732,6 +14258,40 @@ export default function App() {
         // exit leg of a running bot — settle against the run's own book
         const r = botRuns.find((x) => x.id === o.runId && x.status === "live"); if (!r) return;
         const portion = Math.min(o.amt, r.remaining); if (portion <= 0) return;
+        if (liveData && !r.real) {
+          pushNotif({ type: "system", user: null, tokenId: t.id,
+            text: `🤖 a paper-era bot leg on ${r.sym} was retired — the live site doesn't settle paper trades.` });
+          setPendingOrders((P) => P.filter((x) => x.runId !== r.id));
+          setBotRuns((R) => R.map((x) => x.id === r.id ? { ...x, status: "sold" } : x));
+          return;
+        }
+        if (r.real) {
+          // real run → real sell, proportional in actual tokens
+          const frac = Math.min(1, portion / r.amt);
+          const qtySell = Math.min((r.tokensLeft || 0), (r.qtyTokens || 0) * frac);
+          if (!(qtySell > 0)) return;
+          sayPrivate({ type: "note", text: `⛓🤖 ${o.exitKind || "TP"} hit on ${r.sym} — placing REAL sell of ${fmtQty(qtySell)}…` });
+          fireRealOrderDirect(t, "sell", qtySell).then((res) => {
+            if (!res.ok) {
+              // a failed automated exit is the one people must hear about LOUDLY
+              pushNotif({ type: "system", user: null, tokenId: t.id,
+                text: `⚠⛓ bot ${o.exitKind || "exit"} FAILED on ${r.sym} — position is STILL HELD (${res.err}). Sell manually from the portfolio.` });
+              sayPrivate({ type: "note", text: `⚠⛓ ${o.exitKind || "exit"} failed on ${r.sym}: ${res.err} — still holding` });
+              return;
+            }
+            const remaining = +(r.remaining - portion).toFixed(6);
+            const tokensLeft = Math.max(0, (r.tokensLeft || 0) - qtySell);
+            const done = remaining <= r.amt * 0.001 || tokensLeft <= 0;
+            const costFrac = r.amt * frac;                        // SOL basis of this slice
+            const pnlUsd = (res.sol - costFrac) * SOL_USD;        // real proceeds vs real basis
+            setBotRuns((R) => R.map((x) => x.id === r.id ? { ...x,
+              exits: [...x.exits, { ts: Date.now(), price: t.price, amt: portion, pnlUsd, trail: o.trail || null, kind: (o.exitKind || "TP") + "⛓", sig: res.sig }],
+              remaining, tokensLeft, status: done ? "sold" : "live" } : x));
+            if (done) setPendingOrders((P) => P.filter((x) => x.runId !== r.id));
+            sayPrivate({ type: "note", text: `⛓🤖 ${o.exitKind || "TP"} filled — sold ${fmtQty(qtySell)} ${r.sym} for ${res.sol.toFixed(4)} SOL · ${pnlUsd >= 0 ? "+" : "−"}$${Math.abs(pnlUsd).toFixed(2)} real` });
+          });
+          return; // real path owns it — paper settlement below must not run
+        }
         const proceeds = portion * (t.price / r.entry);
         if (r.pay === "SOL") setSolBalance((b) => b + proceeds); else setValoWallet((v) => v + proceeds);
         const pnlUsd = (proceeds - portion) * (r.pay === "SOL" ? SOL_USD : 0.0125);
@@ -8748,23 +14308,182 @@ export default function App() {
         sayPrivate({ type: "note", text: `🎯 marker hit — SELL ${o.amt} ${o.pay} filled on ${t.sym} @ $${fmtP(t.price)} (armed @ $${fmtP(o.level)})` });
       }
     });
-  }, [tokens]);
+  }, [tokens, liveAuto, botRuns]);
 
-  const shownBase = tokens.filter((t) =>
-    filter === "all" ? true : filter === "new" ? t.isNew :
-    filter === "safe" ? scoreToken(t) >= 66 : filter === "risky" ? scoreToken(t) < 40 : t.chain === filter);
+  const shownBase = useMemo(() => {
+    const flowOf = (t) => (+t.greenUsd || 0) + (+t.redUsd || 0);
+    const tradesOf = (t) => (+t.buys24 || 0) + (+t.sells24 || 0) || (+t.traders || 0);
+    const list = tokens.filter((t) => {
+      if (filter === "all") return true;
+      if (filter === "new") {
+        // launched in the last 6 hours — measured, not flagged
+        const age = +t.ageMin || 0;
+        return t.pool ? (age > 0 && age <= 360) : !!t.isNew;
+      }
+      if (filter === "trending") {
+        // real money moving through it right now
+        return flowOf(t) >= 25000 && tradesOf(t) >= 150;
+      }
+      if (filter === "traders") {
+        // busy AND one-sided: lots of participants leaning hard one way
+        const bp = t.buyPressure != null ? t.buyPressure : 50;
+        return tradesOf(t) >= 300 && (bp >= 62 || bp <= 38);
+      }
+      if (filter === "safe") return scoreToken(t) >= 66;
+      if (filter === "risky") return scoreToken(t) < 40;
+      return true;
+    });
+    // each filter sorts by the thing it claims to measure
+    if (filter === "new") return list.slice().sort((a, b) => (+a.ageMin || 0) - (+b.ageMin || 0));
+    if (filter === "trending") return list.slice().sort((a, b) => flowOf(b) - flowOf(a));
+    if (filter === "traders") return list.slice().sort((a, b) => tradesOf(b) - tradesOf(a));
+    if (filter === "all") {
+      // the main board leads with whatever is actually catching attention:
+      // money through it, trade count, and how one-sided the flow is
+      const heat = (t) => {
+        const flow = flowOf(t), tr = tradesOf(t);
+        const bp = t.buyPressure != null ? Math.abs(t.buyPressure - 50) : 0;
+        const young = (+t.ageMin || 1e9) < 1440 ? 1.35 : 1;   // fresh launches punch up
+        return (Math.log10(1 + flow) * 2 + Math.log10(1 + tr) * 1.6 + bp / 18) * young;
+      };
+      return list.slice().sort((a, b) => heat(b) - heat(a));
+    }
+    return list;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tokens, filter]);
   // curated slots: a dropped token claims that exact position on the left rail
-  const shown = scanOrder
+  const shownCore = scanOrder
     ? scanOrder.map((id) => tokens.find((t) => t.id === id)).filter(Boolean)
     : shownBase;
+  // ♾ endless by default; a chosen subsection narrows to exactly its tokens
+  const shownRaw = scanSec
+    ? shownCore
+    : (moreToks.length
+        // market cards live in the endless list — the board copy stays hidden
+        // so opening one never moves it up the scanner
+        ? [...shownCore.filter((t) => !t.market), ...moreToks]
+        : shownCore);
+  // in live mode, once real pools are on the board the simulated cards retire
+  // 🛰 LIVE MEANS LIVE: simulated tokens never appear on a live board — not even
+  // for the second before the first market fetch lands. (This used to wait for
+  // a real token to arrive, so slow connections briefly saw the sim cast.)
+  // 🛰 LIVE MEANS LIVE: only tokens backed by a real pool. The old rule let the
+  // seeded demo $VALO through — the REAL $VALO arrives from its own mint.
+  const shownLive = liveData ? shownRaw.filter((t) => t && (t.pool || (t.isValo && valoMint))) : shownRaw;
+  // one card per pool / mint / symbol — duplicates from different feeds collapse
+  const shown = useMemo(() => {
+    const byKey = new Map(); let out = [];
+    // richness score: when two records are the same token, the fuller one wins
+    // and donates its missing fields to the survivor
+    const rich = (t) => (t.img ? 4 : 0) + (t.pool ? 3 : 0) + (t.createdAt ? 2 : 0)
+      + (Number.isFinite(t.traders) ? 1 : 0) + ((t.vol24 || 0) > 0 ? 1 : 0) + ((t.tvl || 0) > 0 ? 1 : 0);
+    const mergeTok = (a, b) => {
+      const keep = rich(b) > rich(a) ? b : a, other = keep === a ? b : a;
+      const merged = { ...keep };
+      // fill only what the winner is missing — never overwrite live values
+      for (const f of ["img", "pool", "liveMint", "ca", "createdAt", "traders", "vol24", "tvl", "mc", "price", "name", "socials", "dev"]) {
+        if ((merged[f] == null || merged[f] === "" || merged[f] === 0) && other[f] != null && other[f] !== "") merged[f] = other[f];
+      }
+      return merged;
+    };
+    for (const t of shownLive) {
+      if (!t) continue;
+      // MINT is the identity; pool/ca/id only when there is no mint
+      const k = String(t.liveMint || t.ca || t.pool || ("id" + t.id)).toLowerCase();
+      if (byKey.has(k)) { byKey.set(k, mergeTok(byKey.get(k), t)); continue; }
+      byKey.set(k, t);
+    }
+    out = [...byKey.values()];
+    // 📡 the scan-mode lens: order (and lightly filter) the board
+    const seedSort = (arr) => {
+      const sd = scanShuffleRef.current;
+      return [...arr].sort((a, b) => (hashStr(sd + "" + (a.liveMint || a.id)) % 997) - (hashStr(sd + "" + (b.liveMint || b.id)) % 997));
+    };
+    const heat2 = (t) => { const w = t.statWin === "5m" ? 5 : t.statWin === "1h" ? 60 : 1440; return ((t.buys || 0) + (t.sells || 0)) / w; };
+    // 🍼 just-launched tokens only show under the NEW lens — everywhere else
+    // they'd crowd out charts that are actually moving
+    {
+      const keepIds = new Set([sel, ...Object.keys(positions || {}).map(Number)]);
+      const keep = (t) => keepIds.has(t.id) || (t.liveMint && chainLedger.byMint[t.liveMint] && chainLedger.byMint[t.liveMint].qty > 0);
+      // 🚫 below-launch pump tokens never ride any lens (held/selected excepted)
+      out = out.filter((t) => !belowLaunch(t) || keep(t));
+      if (scanMode !== "new") {
+        out = out.filter((t) => !(t.createdAt && Date.now() - t.createdAt < 12 * 60e3) || keep(t));
+      }
+    }
+    // ⛑ backfill: whatever the lens, an empty scanner helps no one — thin
+    // matches get topped up with tokens that are actually MOVING right now
+    const movingRank = (arr) => [...arr].sort((a, b) =>
+      (Math.abs(b.ch || 0) + tokMetrics(b).txRate * 2) - (Math.abs(a.ch || 0) + tokMetrics(a).txRate * 2));
+    const withBackfill = (matches) => {
+      if (matches.length >= 6) return matches;
+      const restMv = movingRank(out.filter((t) => !matches.includes(t) && ((Math.abs(t.ch || 0) > 0.3) || tokMetrics(t).tx > 0)));
+      const res = [...matches, ...restMv];
+      // on live, "show the board rather than a void" must never mean sim tokens —
+      // `out` is already real-only there, so this stays honest
+
+      // absolute floor: at the boot instant every ch/tx is 0, so nothing
+      // qualifies as moving either - show the board rather than a void;
+      // the lens re-ranks the moment live stats land
+      return res.length ? res : out;
+    };
+    if (scanMode === "lucky") {
+      const picked = luckyOrder(out, "lucky" + scanShuffleRef.current, true);
+      // the token you're viewing always stays on the board (opening a chart
+      // must never make the list shrink underneath you)
+      const withSel = picked.some((t) => t.id === sel)
+        ? picked
+        : [...picked, ...out.filter((t) => t.id === sel)];
+      return withBackfill(withSel);
+    }
+    if (scanMode === "new") {
+      // 🍼 1–15min old · ≥5 baseline tx (deployed AND trading) · curve <15% =
+      // ground floor. Strictly newest first.
+      const fresh = out.filter((t) => {
+        const m = tokMetrics(t);
+        return (m.ageMs <= 15 * 60e3 && m.tx >= 5 && (!m.isPump || m.curvePct < 15)) || t.id === sel;
+      });
+      return withBackfill(fresh.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+    }
+    if (scanMode === "hot") {
+      // 💪 nearing graduation (curve 60–95%) · real velocity (>50 tx / 5min
+      // pace) · turnover rising · ≥80 unique traders
+      const hot = out.filter((t) => {
+        const m = tokMetrics(t);
+        const curveOk = !m.isPump || (m.curvePct >= 60 && m.curvePct <= 95);
+        return (curveOk && m.txRate >= 10 && (m.turnover > 0.4 || m.accel > 1.4) && (t.traders || 0) >= 80) || t.id === sel;
+      });
+      return withBackfill(hot.sort((a, b) => tokMetrics(b).txRate - tokMetrics(a).txRate));
+    }
+    if (scanMode === "movers") {
+      // 📈 price velocity over the rolling short window · ≥$2K liquidity so
+      // dust trades can't fake a spike · gainers ⇄ losers toggle
+      const mv = out.filter((t) => ((t.tvl || 0) >= 2000 && Math.abs(t.ch || 0) > 1
+        && (moversSide === "lose" ? (t.ch || 0) < 0 : (t.ch || 0) > 0)) || t.id === sel);
+      return withBackfill(mv.sort((a, b) => Math.abs(b.ch || 0) - Math.abs(a.ch || 0) || heat2(b) - heat2(a)));
+    }
+    // 🔥 trending: volume acceleration (now ≥3× the day's pace) + net buy
+    // pressure (>70%) + freshness (<1h) — scored, hottest composite first
+    const scoreOf = (t) => {
+      const m = tokMetrics(t);
+      let s2 = 0;
+      if (m.accel >= 3) s2 += 3; else s2 += Math.min(2.5, m.accel);
+      if (m.buyRatio >= 0.7) s2 += 2; else s2 += m.buyRatio;
+      if (m.ageMs < 3600e3) s2 += 1.5;
+      if ((t.ch || 0) > 0) s2 += 0.5;             // curve climbing proxy
+      return s2;
+    };
+    return [...out].sort((a, b) => scoreOf(b) - scoreOf(a));
+  }, [shownLive, scanMode, moversSide, luckyDraw, sel]);
   shownRef.current = shown;
 
   const gTvl = tokens.reduce((a, t) => a + t.tvl, 0);
   const gNet = tokens.reduce((a, t) => a + t.greenUsd - t.redUsd, 0);
   const unrealizedPnl = Object.entries(positions).reduce((a, [id, p]) => {
     const tk = tokens.find((x) => x.id === +id);
-    if (!tk || !p) return a;
-    return a + p.amt * ((tk.price - p.entry) / p.entry);
+    if (!tk || !p || !(p.entry > 0)) return a;
+    // dollars, not SOL — this is what made it disagree with the bot figure
+    return a + payUsd(p.amt, p.pay) * ((tk.price - p.entry) / p.entry);
   }, 0);
   const botUnrealized = botRuns.reduce((a, r) => {
     if (r.status !== "live") return a;
@@ -8875,19 +14594,355 @@ export default function App() {
 
   // Markers on the chart = your trades + (optionally) the dev's + any trader you
   // are following. Followed traders stay pinned while you trade until unpinned.
+  useEffect(() => { if (selected && selected.liveMint) fetchHolders(selected.liveMint);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected && selected.liveMint]);
+  // 👤 who actually launched the selected token (real creator wallet)
+  const [tokCreator, setTokCreator] = useState(null);
+  // ⛓ chain truth for the dev panel: their real launches + real wallet moves
+  const [devPanel, setDevPanel] = useState(null);        // {w, launches, moves, sol, loading}
+  useEffect(() => {
+    if (!devView || !liveData || !tokCreator || !tokCreator.creator) return;
+    const w = tokCreator.creator;
+    if (devPanel && devPanel.w === w && !devPanel.loading) return;
+    let stop = false;
+    setDevPanel({ w, launches: null, moves: null, sol: null, loading: true });
+    (async () => {
+      try {
+        const [rl, rt, rw] = await Promise.allSettled([
+          fetch(`/api/creator?wallet=${encodeURIComponent(w)}`),
+          fetch(`/api/trader?wallet=${encodeURIComponent(w)}`),
+          fetch(`/api/wallet?address=${encodeURIComponent(w)}`),
+        ]);
+        const jl = rl.status === "fulfilled" && rl.value.ok ? await rl.value.json() : null;
+        const jt = rt.status === "fulfilled" && rt.value.ok ? await rt.value.json() : null;
+        const jw = rw.status === "fulfilled" && rw.value.ok ? await rw.value.json() : null;
+        if (stop) return;
+        let launches = (jl && jl.launches) || [];
+        // ⚓ floor of truth: THIS token is theirs by definition — if the pump
+        // catalog omitted it (or came back empty), it still shows
+        const selNow = selected;
+        if (selNow && selNow.liveMint && tokCreator && tokCreator.creator === w && !launches.some((l2) => l2.mint === selNow.liveMint)) {
+          launches = [{ mint: selNow.liveMint, sym: selNow.sym, name: selNow.name || selNow.sym,
+            createdAt: selNow.createdAt || null, mc: selNow.mc || 0,
+            complete: !(/pump$/i.test(selNow.liveMint)) || ((selNow.mc || 0) / 69000) * 100 >= 100,
+            img: selNow.img || null }, ...launches];
+        }
+        setDevPanel({
+          w,
+          launches,
+          moves: (jt && Array.isArray(jt.trades)) ? jt.trades.filter((t2) => t2.side === "out" || t2.side === "in").slice(0, 14) : [],
+          sol: jw ? jw.sol || 0 : null,
+          loading: false,
+        });
+      } catch (e) { if (!stop) setDevPanel({ w, launches: [], moves: [], sol: null, loading: false }); }
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devView, liveData, tokCreator && tokCreator.creator]);
+  useEffect(() => {
+    setTokCreator(null);
+    if (!selected || !selected.liveMint) return;
+    let stop = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/creator?mint=${encodeURIComponent(selected.liveMint)}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop && j && j.creator) {
+          setTokCreator(j);
+          if (typeof window !== "undefined") {
+            window.__VALO_CREATORS__ = { ...(window.__VALO_CREATORS__ || {}), [selected.liveMint]: j };
+          }
+          // the token's TRUE launch time (pump created_timestamp) overrides the
+          // pool date — a graduated token's pool is days younger than the coin
+          if (j.createdAt > 0) {
+            const mintFix = selected.liveMint;
+            setTokens((Ts) => Ts.map((x) => (x.liveMint === mintFix && Math.abs((x.createdAt || 0) - j.createdAt) > 3600e3
+              ? { ...x, createdAt: j.createdAt, ageMin: Math.max(1, Math.round((Date.now() - j.createdAt) / 60000)) }
+              : x)));
+          }
+        }
+      } catch (e) {}
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected && selected.liveMint]);
+
+  // 🔗 real links for the selected live token (site, X, telegram, pump.fun…)
+  const [tokLinks, setTokLinks] = useState(null);
+  useEffect(() => {
+    setTokLinks(null);
+    if (!selected || !selected.liveMint) return;
+    let stop = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/tokeninfo?mint=${encodeURIComponent(selected.liveMint)}&pool=${encodeURIComponent(selected.pool || "")}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop && j && !j.error) {
+          setTokLinks(j);
+          if (typeof window !== "undefined" && selected.liveMint) {
+            window.__VALO_TOKINFO__ = { ...(window.__VALO_TOKINFO__ || {}), [selected.liveMint]: j };
+          }
+        }
+      } catch (e) {}
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected && selected.liveMint, selected && selected.pool]);
+
+  // (market prints are shown in the LIVE TRADES tab, not as chart markers)
+  const realChartTrades = [];
+
+
+  const [liveViewers, setLiveViewers] = useState({});  // mint → real VALO viewers
+  const holderCache = useRef({});      // mint → { holders, replies, at }
+  const holderBusy = useRef({});
+  // batch fetch real holder counts (+ pump.fun engagement). Re-pulls on a
+  // timer so "holders coming & going" is a LIVE number, not a one-shot.
+  const fetchHoldersBatch = useCallback(async (mints) => {
+    const want = (mints || []).filter((m) => m && !holderBusy.current[m] &&
+      (!holderCache.current[m] || Date.now() - (holderCache.current[m].at || 0) > 20000)).slice(0, 30);
+    if (!want.length) return;
+    want.forEach((m) => { holderBusy.current[m] = true; });
+    try {
+      const r = await fetch(`/api/holders?mints=${encodeURIComponent(want.join(","))}`);
+      if (r.ok) {
+        const j = await r.json();
+        let changed = false;
+        for (const m of want) {
+          const d = j && j[m];
+          if (d && Number.isFinite(d.holders) && d.holders > 0) {
+            holderCache.current[m] = { holders: d.holders, replies: d.replies, at: Date.now() };
+            if (typeof window !== "undefined") {
+              window.__VALO_HOLDERS__ = { ...(window.__VALO_HOLDERS__ || {}), [m]: d.holders };
+              if (Number.isFinite(d.replies)) window.__VALO_PUMP_REPLIES__ = { ...(window.__VALO_PUMP_REPLIES__ || {}), [m]: d.replies };
+            }
+            changed = true;
+          }
+        }
+        if (changed) setHolderTick((v) => v + 1);
+      }
+    } catch (e) {}
+    want.forEach((m) => { holderBusy.current[m] = false; });
+  }, []);
+  const fetchHolders = useCallback((mint) => { if (mint) fetchHoldersBatch([mint]); }, [fetchHoldersBatch]);
+  const [holderTick, setHolderTick] = useState(0);
+  const prevHolders = useRef({});     // mint → last count, for ↑/↓ arrows
+  useEffect(() => {
+    if (!liveData) return;
+    const pull = () => {
+      const mints = (tokens || []).map((t) => t.liveMint).filter(Boolean).slice(0, 30);
+      if (mints.length) {
+        for (const m of mints) { const c = holderCache.current[m]; if (c) prevHolders.current[m] = c.holders; }
+        fetchHoldersBatch(mints);
+      }
+    };
+    pull();
+    const iv = setInterval(pull, 25000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData, tokens.length]);
+  const tapeRef = useRef({});          // rolling per-pool trade tape → candles
+  const [streamOn, setStreamOn] = useState(false);
+  const streamRef = useRef(null);
+  useEffect(() => {
+    const url = typeof window !== "undefined" ? window.__VALO_STREAM__ : null;
+    if (!url || !liveData) { setStreamOn(false); return; }
+    let ws = null, closed = false, retry = 0, timer = null;
+    let lastMsgAt = Date.now();
+    const connect = () => {
+      try { ws = new WebSocket(url); } catch (e) { return; }
+      streamRef.current = ws;
+      ws.onopen = () => { retry = 0; lastMsgAt = Date.now(); setStreamOn(true); wantMint(); };
+      ws.onclose = () => {
+        setStreamOn(false);
+        if (closed) return;
+        retry = Math.min(retry + 1, 6);
+        timer = setTimeout(connect, 1000 * retry);      // quietly reconnect
+      };
+      ws.onerror = () => { try { ws.close(); } catch (e) {} };
+      ws.onmessage = (ev) => {
+        lastMsgAt = Date.now();
+        let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+        if (m.type === "viewers" && m.mint) {
+          setLiveViewers((V) => {
+            const next = V[m.mint] === m.count ? V : { ...V, [m.mint]: m.count };
+            if (typeof window !== "undefined") window.__VALO_VIEWERS__ = next;
+            return next;
+          });
+          return;
+        }
+        const incoming = m.type === "trade" ? [m.trade] : m.type === "backfill" ? m.trades : null;
+        if (!incoming || !incoming.length) return;
+        const tk = tokensRef.current.find((x) => x.liveMint && x.liveMint === incoming[0].mint);
+        if (!tk || !tk.pool) return;
+        const key = tk.pool;
+        const prev = tapeRef.current[key] || [];
+        const seen = new Set(prev.map((x) => x.tx || x.at));
+        const merged = [...prev, ...incoming.filter((x) => !seen.has(x.tx || x.at))]
+          .sort((a, b) => a.at - b.at).slice(-1200);
+        tapeRef.current[key] = merged;
+        // publish for the LIVE TRADES feed — it reads this every second
+        if (typeof window !== "undefined") {
+          const T0 = window.__VALO_TAPE__ || {};
+          T0[key] = merged;                       // mutate in place — no full copy
+          const keys = Object.keys(T0);
+          if (keys.length > 6) delete T0[keys[0]]; // only the pools in play
+          window.__VALO_TAPE__ = T0;
+        }
+        const tape = candlesFromTrades(merged, tf);
+        if (tape.length < 2) return;
+        // the OHLCV history owns the series; the tape only refines its live edge.
+        // Without this the tape would BECOME the chart and history never lands.
+        const cur = tokensRef.current.find((x) => x.id === tk.id);
+        // history owns the series — unless the feed has no OHLCV for this pool,
+        // in which case the tape is the only chart there is
+        const hasHistory = cur && cur.realCandles && (cur.candles || []).length >= 20;
+        const tapeMayOwn = cur && cur.tapeOk && !hasHistory;
+        // live flow: what actually traded in the last 10 minutes
+        const since = Date.now() - 600000;
+        const win = merged.filter((x) => x.at >= since);
+        let buyUsd = 0, sellUsd = 0;
+        for (const x of win) { if (x.isBuy) buyUsd += +x.usd || 0; else sellUsd += +x.usd || 0; }
+        const flowTotal = buyUsd + sellUsd;
+        const pressure = flowTotal > 0 ? Math.round((buyUsd / flowTotal) * 100) : null;
+        const first = tape[0], last = tape[tape.length - 1];
+        const moved = first && first.o > 0 ? ((last.c - first.o) / first.o) * 100 : 0;
+        const mom = Math.max(1, Math.min(99, Math.round(50 + moved * 1.5 + ((pressure ?? 50) - 50) * 0.5)));
+        setTokens((Ts) => Ts.map((x) => (x.id === tk.id
+          ? { ...x, candles: hasHistory ? mergeTapeCandles(x.candles, tape) : (tapeMayOwn ? tape : x.candles),
+              realCandles: x.realCandles || tapeMayOwn, price: last.c,
+              // MC follows the trade because supply is the anchor, not mc
+              mc: x.supply > 0 ? last.c * x.supply : x.mc,
+              greenUsd: buyUsd > 0 ? buyUsd : x.greenUsd,
+              redUsd: sellUsd > 0 ? sellUsd : x.redUsd,
+              buyPressure: pressure != null ? pressure : x.buyPressure,
+              momentum: flowTotal > 0 ? mom : x.momentum,
+              liveFlow: true, lastTradeAt: Date.now() }
+          : x)));
+      };
+    };
+    connect();
+    // 📱 zombie watchdog: on any wake, a socket that isn't OPEN — or has been
+    // silent >20s — gets torn down and rebuilt on the spot (iOS kills sockets
+    // without ever firing close; readyState lies)
+    const onWsWake = () => {
+      if (document.hidden || closed) return;
+      const dead = !ws || ws.readyState !== 1 || Date.now() - lastMsgAt > 20000;
+      if (dead) { try { ws && ws.close(); } catch (e) {} clearTimeout(timer); retry = 0; connect(); }
+      else { try { wantMint(); } catch (e) {} }        // alive → refresh the subscription
+    };
+    document.addEventListener("visibilitychange", onWsWake);
+    window.addEventListener("focus", onWsWake);
+    window.addEventListener("pageshow", onWsWake);
+    window.addEventListener("online", onWsWake);
+    return () => { closed = true; clearTimeout(timer); try { ws && ws.close(); } catch (e) {}
+      document.removeEventListener("visibilitychange", onWsWake);
+      window.removeEventListener("focus", onWsWake);
+      window.removeEventListener("pageshow", onWsWake);
+      window.removeEventListener("online", onWsWake); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData, tf]);
+  // tell the worker which token we're watching
+  const wantMint = () => {
+    const ws = streamRef.current;
+    const mint = selected && selected.liveMint;
+    if (ws && ws.readyState === 1 && mint) ws.send(JSON.stringify({ type: "watch", mint }));
+  };
+  useEffect(() => { wantMint(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected && selected.liveMint, streamOn]);
+
+  // 🕯 the tape becomes candles: real prints drive the live end of the chart
+  useEffect(() => {
+    if (!liveData || !selected || !selected.pool) return;
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch(`/api/trades?pool=${encodeURIComponent(selected.pool)}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (stop || !Array.isArray(j) || !j.length) return;
+        // keep a rolling tape per pool so candles fill in as prints accumulate
+        const key = selected.pool;
+        const prev = tapeRef.current[key] || [];
+        const seen = new Set(prev.map((x) => x.tx || x.at));
+        const merged = [...prev, ...j.filter((x) => !seen.has(x.tx || x.at))]
+          .sort((a, b) => a.at - b.at).slice(-1200);
+        tapeRef.current[key] = merged;
+        // publish for the LIVE TRADES feed — it reads this every second
+        if (typeof window !== "undefined") {
+          const T0 = window.__VALO_TAPE__ || {};
+          T0[key] = merged;                       // mutate in place — no full copy
+          const keys = Object.keys(T0);
+          if (keys.length > 6) delete T0[keys[0]]; // only the pools in play
+          window.__VALO_TAPE__ = T0;
+        }
+        const tape = candlesFromTrades(merged, tf);
+        if (tape.length < 2) return;
+        setTokens((Ts) => Ts.map((x) => {
+          if (x.id !== selected.id) return x;
+          const ok = x.realCandles && (x.candles || []).length >= 20;   // history first
+          return { ...x, candles: ok ? mergeTapeCandles(x.candles, tape) : x.candles,
+            realCandles: x.realCandles, price: tape[tape.length - 1].c };
+        }));
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, streamOn ? 30000 : 5000);   // socket live → REST just backstops
+    return () => { stop = true; clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData, selected && selected.id, selected && selected.pool, tf, streamOn]);
+
+  // fetch pinned traders' real on-chain trades for the open token, live-refresh
+  useEffect(() => {
+    if (!liveData || !selected || !selected.liveMint) return;
+    const reg = (typeof window !== "undefined" && window.__VALO_WALLETS__) || {};
+    const walletOf = (trader) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trader) ? trader : (reg[trader] || null);
+    const pins = Object.entries(traderPrefs).filter(([, p]) => p && p.following).map(([k]) => k).filter((k) => k !== "__me__");
+    // 👨‍💻 dev-trades chip on → the creator wallet joins the tracked set
+    const devW = showDevTrades ? (((typeof window !== "undefined" && window.__VALO_CREATORS__) || {})[selected.liveMint] || {}).creator : null;
+    if (!pins.length && !devW) return;
+    const pull = () => {
+      pins.forEach((tr) => { const w = walletOf(tr); if (w) fetchPinnedTraderTrades(tr, w, selected.liveMint, selected); });
+      if (devW) fetchPinnedTraderTrades("__dev__", devW, selected.liveMint, selected);
+    };
+    pull();
+    const iv = setInterval(pull, 30000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData, selected && selected.liveMint, showDevTrades, tokCreator && tokCreator.creator, JSON.stringify(Object.entries(traderPrefs).filter(([, p]) => p && p.following).map(([k]) => k))]);
+
   const chartTrades = useMemo(() => {
     if (!selected) return [];
     const mine = (tradesByToken[selected.id] || []).map((t) => ({ ...t, trader: t.trader || "__me__" }));
     const dev = showDevTrades ? (selected.dev.trades || []) : [];
     const hist = histMarker && histMarker.sym === selected.sym ? [histMarker] : [];
-    const followed = Object.entries(traderPrefs)
-      .filter(([, p]) => p && p.following)
-      .flatMap(([trader]) => {
-        if (trader === "__me__") return [];
-        if (trader === selected.dev.wallet) return showDevTrades ? [] : (selected.dev.trades || []);
+    const walletOf = (trader) => {
+      if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trader)) return trader;   // already an address
+      const reg = (typeof window !== "undefined" && window.__VALO_WALLETS__) || {};
+      return reg[trader] || null;
+    };
+    const followedKeys = Object.entries(traderPrefs).filter(([, p]) => p && p.following).map(([k]) => k);
+    // live site → REAL pinned-trader markers from chain; demo → synthetic
+    const followed = followedKeys.flatMap((trader) => {
+      if (trader === "__me__") return [];
+      if (!liveData) {
+        if (selected.dev && trader === selected.dev.wallet) return showDevTrades ? [] : (selected.dev.trades || []);
         return traderTradesFor(selected, trader);
-      });
-    const all = [...mine, ...dev, ...hist, ...followed];
+      }
+      const w = walletOf(trader);
+      if (!w || !selected.liveMint) return [];
+      return (pinnedTrades[`${w}|${selected.liveMint}`] || []);
+    });
+    const liveReal = liveData && selected.pool;
+    // 👨‍💻 the creator's REAL trades on this mint (dev-trades chip)
+    const devW2 = liveReal && showDevTrades ? (((typeof window !== "undefined" && window.__VALO_CREATORS__) || {})[selected.liveMint] || {}).creator : null;
+    const devReal = devW2 ? (pinnedTrades[`${devW2}|${selected.liveMint}`] || []).map((m) => ({ ...m, trader: (tokCreator && tokCreator.short) || "dev", dev: true })) : [];
+    const all = liveReal
+      ? [...mine, ...hist, ...chartRealMarkers, ...followed, ...devReal]   // your fills + pinned + the dev, all real
+      : [...mine, ...dev, ...hist, ...followed];  // simulation keeps its own cast
     // de-dupe by tx so a followed dev doesn't double-draw
     const seen = new Set();
     return all.filter((t) => {
@@ -8895,7 +14950,7 @@ export default function App() {
       if (seen.has(t.tx)) return false;
       seen.add(t.tx); return true;
     });
-  }, [selected, tradesByToken, showDevTrades, histMarker, traderPrefs]);
+  }, [selected, tradesByToken, showDevTrades, histMarker, traderPrefs, realChartTrades, liveData, chartRealMarkers, pinnedTrades]);
 
   // trending button + callout widget — shared between the desktop header row
   // and the mobile chart-tools row (noBox drops the frame on mobile)
@@ -9028,41 +15083,177 @@ export default function App() {
                         userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" }}>
                     <TokenAvatar sym={selected.sym} hue={selected.hue} img={selected.img} size={22} />
                     <span style={{ fontWeight: 800, fontSize: 16 }}>{selected.sym}<span style={{ color: T.faint, fontWeight: 400 }}>/SOL</span></span>
-                    <span onClick={() => setPriceMode((m) => (m + 1) % 3)} title="Tap: price → market cap → your tokens"
-                      style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 3 }}>
+                    <span
+                      onClick={(e) => { e.stopPropagation(); setPriceMode((m) => (m + 1) % 3); }}
+                      onTouchStart={(e) => { e.stopPropagation(); priceTapRef.current = Date.now(); }}
+                      onTouchEnd={(e) => {
+                        e.stopPropagation();
+                        // a quick tap cycles; a long press belongs to the watchlist gesture
+                        if (Date.now() - (priceTapRef.current || 0) < 400) {
+                          e.preventDefault();
+                          setPriceMode((m) => (m + 1) % 3);
+                        }
+                      }}
+                      title="Tap: price → market cap → your tokens"
+                      style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700, cursor: "pointer",
+                        textDecoration: "underline dotted", textUnderlineOffset: 3,
+                        WebkitTapHighlightColor: "transparent", touchAction: "manipulation",
+                        padding: "2px 0" }}>
                       {priceMode === 1 ? `MC ${fmt$(mcOf(selected))}`
-                        : priceMode === 2 ? `${positions[selected.id] && positions[selected.id].amt > 0 ? fmtQty(posTokenQty(selected, positions[selected.id])) : "0"} ${selected.sym}`
+                        : priceMode === 2 ? (positions[selected.id] && positions[selected.id].amt > 0
+                            ? `${fmtQty(posTokenQty(selected, positions[selected.id]))} ${selected.sym}`
+                            : `no ${selected.sym} held`)
                         : `$${fmtP(selected.price)}`}
                     </span>
                     </span>
                     {isMobile && (
-                      <span style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, whiteSpace: "nowrap" }}>
-                        MC <b style={{ color: T.text, fontWeight: 800 }}>{fmt$(mcOf(selected))}</b>
+                      <span onClick={(e) => { e.stopPropagation(); const ca = selected.liveMint || selected.ca;
+                          try { navigator.clipboard.writeText(ca); } catch (er) {}
+                          setCaCopied(selected.id); setTimeout(() => setCaCopied(null), 1400); }}
+                        title="Copy the contract address"
+                        style={{ fontFamily: T.mono, fontSize: 10, cursor: "pointer", flex: "0 0 auto",
+                          color: caCopied === selected.id ? T.green : T.faint,
+                          border: `1px solid ${caCopied === selected.id ? T.green : T.border2}`,
+                          background: caCopied === selected.id ? "rgba(22,199,132,0.14)" : "rgba(255,255,255,0.03)",
+                          borderRadius: 6, padding: "1px 5px", lineHeight: 1.5 }}>
+                        {caCopied === selected.id ? "✓" : "⧉"}
                       </span>
                     )}
-                    <span style={{ fontSize: 8.5, border: `1px solid ${ratingColor(scoreToken(selected))}66`, background: `${ratingColor(scoreToken(selected))}14`, color: ratingColor(scoreToken(selected)), padding: "2px 7px", borderRadius: 5, fontFamily: T.mono, fontWeight: 800 }}>
-                      {scoreToken(selected)} {rating(scoreToken(selected))}
+                    <span onClick={() => setScorePop((v) => !v)} role="button"
+                      title="Live vitals — tap for the breakdown"
+                      style={{ fontSize: 10, border: `1px solid ${ratingColor(scoreToken(selected))}88`, background: `${ratingColor(scoreToken(selected))}18`, color: ratingColor(scoreToken(selected)), padding: "2px 9px", borderRadius: 6, fontFamily: T.mono, fontWeight: 900, cursor: "pointer", position: "relative" }}>
+                      {scoreToken(selected)}{scorePop ? " ▴" : ""}
                     </span>
+                    {scorePop && (() => {
+                      const buys = selected.buys || 0, sells = selected.sells || 0;
+                      const gU = selected.greenUsd || 0, rU = selected.redUsd || 0;
+                      const bp = (gU + rU) > 0 ? gU / (gU + rU) : 0.5;
+                      const ring = minAgoRef.current[selected.id] || [];
+                      const now = Date.now();
+                      const past = ring.find((x) => now - x.ts >= 58000) || ring[0];
+                      const dP = past && past.price > 0 ? ((selected.price - past.price) / past.price) * 100 : null;
+                      const dM = past && past.mc > 0 ? ((selected.mc - past.mc) / past.mc) * 100 : null;
+                      const m = tokMetrics(selected);
+                      const big = scoreBig === "mc";
+                      const sc2 = scoreToken(selected);
+                      return (
+                        <div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 60, width: 236,
+                          background: T.panel, border: `1px solid ${ratingColor(sc2)}55`, borderRadius: 12, padding: 12,
+                          boxShadow: "0 18px 50px rgba(0,0,0,0.65)", cursor: "default", textAlign: "left" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
+                            <span style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 900, color: ratingColor(sc2) }}>{sc2}</span>
+                            <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, lineHeight: 1.5 }}>LP · traders · flow · age<br/>turnover · metadata · curve</span>
+                          </div>
+                          {/* B/S pressure bar — live window */}
+                          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, letterSpacing: 1, marginBottom: 3 }}>B/S PRESSURE · {selected.statWin || "24h"}</div>
+                          <div style={{ height: 10, borderRadius: 6, overflow: "hidden", display: "flex", border: `1px solid ${T.border}`, marginBottom: 3 }}>
+                            <div style={{ width: `${Math.round(bp * 100)}%`, background: "linear-gradient(90deg,#0f9d63,#16c784)" }} />
+                            <div style={{ flex: 1, background: "linear-gradient(90deg,#c62f3b,#ea3943)" }} />
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 8, marginBottom: 9 }}>
+                            <span style={{ color: T.green }}>▲ {buys} · {fmt$(gU)}</span>
+                            <span style={{ color: T.red }}>{sells} ▼ · {fmt$(rU)}</span>
+                          </div>
+                          {/* live price / MC — tap to swap the lead figure */}
+                          <div onClick={() => setScoreBig(big ? "price" : "mc")} title="Tap to swap price / market cap"
+                            style={{ cursor: "pointer", background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 9, padding: "8px 10px", marginBottom: 8 }}>
+                            <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, letterSpacing: 1 }}>{big ? "MARKET CAP" : "LIVE PRICE"} · tap to swap ⇄</div>
+                            <div style={{ fontFamily: T.mono, fontSize: 15, fontWeight: 900, color: T.text }}>
+                              {big ? fmt$(selected.mc) : `$${fmtP(selected.price)}`}
+                            </div>
+                            <div style={{ fontFamily: T.mono, fontSize: 8.5, color: (big ? dM : dP) == null ? T.faint : (big ? dM : dP) >= 0 ? T.green : T.red }}>
+                              {(big ? dM : dP) == null ? "1m Δ — warming up…" : `1m Δ ${(big ? dM : dP) >= 0 ? "+" : ""}${(big ? dM : dP).toFixed(2)}%`}
+                            </div>
+                            <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 2 }}>
+                              {big ? `price $${fmtP(selected.price)}` : `MC ${fmt$(selected.mc)}`}
+                            </div>
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, fontFamily: T.mono, fontSize: 8, color: T.dim }}>
+                            <span>LP <b style={{ color: T.text }}>{fmt$(selected.tvl)}</b></span>
+                            <span>vol/min <b style={{ color: T.text }}>{fmt$(m.rateNow || 0)}</b></span>
+                            <span>traders <b style={{ color: T.text }}>{selected.traders || 0}</b></span>
+                            <span>age <b style={{ color: T.text }}>{fmtAge(selected.createdAt) || "—"}</b></span>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
-                  <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap",
+                  <div style={{ display: "flex", gap: 5, alignItems: "center",
+                    flexWrap: isMobile ? "nowrap" : "wrap",
+                    overflowX: isMobile ? "auto" : "visible", overflowY: "visible",
+                    scrollbarWidth: "none", WebkitOverflowScrolling: "touch",
+                    // chart pulled up → the socials fold away with the stats
+                    ...(isMobile ? {
+                      maxHeight: metricsCrunch > 0.5 ? 0 : 44,
+                      opacity: metricsCrunch > 0.5 ? 0 : 1,
+                      marginTop: metricsCrunch > 0.5 ? 0 : undefined,
+                      overflow: metricsCrunch > 0.5 ? "hidden" : undefined,
+                      pointerEvents: metricsCrunch > 0.5 ? "none" : "auto",
+                      transition: "max-height .22s ease, opacity .18s ease",
+                    } : {}),
                     paddingRight: !isMobile && myMcCallouts[selected.id]
                       ? Math.max(64, ("×" + myMcCallouts[selected.id].peak.toFixed(1)).length * 15 + 26) : 0 }}>
                     {/* socials */}
                     {/* CA — tap to copy the contract address */}
-                    <button onClick={() => { try { navigator.clipboard.writeText(selected.ca); } catch (e) {} setCaCopied(selected.id); setTimeout(() => setCaCopied(null), 1400); }}
+                    {!isMobile && (
+                    <button onClick={() => { const ca = selected.liveMint || selected.ca; try { navigator.clipboard.writeText(ca); } catch (e) {} setCaCopied(selected.id); setTimeout(() => setCaCopied(null), 1400); }}
                       title={`Copy contract address\n${selected.ca}`}
                       style={{ display: "flex", alignItems: "center", gap: 4, height: 26, borderRadius: 7, border: `1px solid ${caCopied === selected.id ? T.green : T.border2}`, background: caCopied === selected.id ? "rgba(22,199,132,0.15)" : "rgba(255,255,255,0.03)", color: caCopied === selected.id ? T.green : T.dim, fontFamily: T.mono, fontSize: 9.5, fontWeight: 700, padding: "0 8px", cursor: "pointer" }}>
-                      {caCopied === selected.id ? "✓ copied" : <>📋 CA <span style={{ color: T.faint }}>{selected.ca.slice(0, 4)}…{selected.ca.slice(-4)}</span></>}
+                      {caCopied === selected.id ? "✓ copied" : <>📋 CA <span style={{ color: T.faint }}>{(selected.liveMint || selected.ca).slice(0, 4)}…{(selected.liveMint || selected.ca).slice(-4)}</span></>}
                     </button>
-                    {[["𝕏", selected.socials.x, "#e6e9ef"], ["✈", selected.socials.tg, "#4c9aff"], ["🌐", selected.socials.site, "#a98fff"], ["💊", selected.socials.pump, "#16c784"]].filter(([, url]) => url).map(([ic, url, col], i) => (
+                    )}
+                    {/* real destinations for live tokens — the actual coin page */}
+                    {tokLinks && tokLinks.links && [
+                      ["💊", tokLinks.links.pumpfun, "#16c784", "Open on pump.fun"],
+                      ["📈", tokLinks.links.dexscreener, "#4c9aff", "Open on DexScreener"],
+                      ["🔎", tokLinks.links.solscan, "#a98fff", "Open on Solscan"],
+                      ["🪐", tokLinks.links.jupiter, "#f0b90b", "Trade on Jupiter"],
+                    ].filter(([, u]) => u).map(([ic, url, col, tip], i) => (
+                      <a key={"L" + i} href={url} target="_blank" rel="noopener noreferrer" title={tip}
+                        style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 26, minWidth: 26,
+                          borderRadius: 7, border: `1px solid ${col}55`, background: `${col}14`, color: col,
+                          fontSize: 12, textDecoration: "none", padding: "0 5px" }}>{ic}</a>
+                    ))}
+                    {tokLinks && [
+                      ["𝕏", legitSocial("x", tokLinks.socials && tokLinks.socials.twitter), "#e6e9ef", "Their official X"],
+                      ["✈", legitSocial("tg", tokLinks.socials && tokLinks.socials.telegram), "#4c9aff", "Their official Telegram"],
+                      ["🎮", legitSocial("dc", tokLinks.socials && tokLinks.socials.discord), "#8b9cff", "Their official Discord"],
+                      ["🌐", legitSocial("site", tokLinks.websites && tokLinks.websites[0]), "#a98fff", "Their official website"],
+                    ].filter(([, u]) => u).map(([ic, url, col, tip], i) => (
+                      <a key={"S" + i} href={url} target="_blank" rel="noopener noreferrer" title={tip}
+                        style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 26, minWidth: 26,
+                          borderRadius: 7, border: `1px solid ${col}55`, background: `${col}14`, color: col,
+                          fontSize: 11.5, textDecoration: "none", padding: "0 5px" }}>{ic}</a>
+                    ))}
+                    {!tokLinks && !liveData && [["𝕏", selected.socials.x, "#e6e9ef"], ["✈", selected.socials.tg, "#4c9aff"], ["🌐", selected.socials.site, "#a98fff"], ["💊", selected.socials.pump, "#16c784"]].filter(([, url]) => url).map(([ic, url, col], i) => (
                       <a key={i} href={url} target="_blank" rel="noopener noreferrer" title="Open social"
                         style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 7, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)", color: col, fontSize: 12, textDecoration: "none", cursor: "pointer" }}>{ic}</a>
                     ))}
-                    {isMobile && (
-                      <span style={{ display: "inline-flex", alignItems: "center", height: 26, overflow: "visible" }}>
-                        {calloutWidget(true, 30, true)}
-                      </span>
-                    )}
+                    {(() => {
+                      const d = (() => { try { return devOf(selected); } catch (e) { return null; } })();
+                      if (!d) return null;
+                      const label = d.real ? d.short : (d.unknown ? d.short : `@${d.name}`);
+                      return (
+                        <button onClick={() => {
+                            if (d.real && d.wallet) window.open(`https://solscan.io/account/${d.wallet}`, "_blank", "noopener");
+                            else if (selected && selected.liveMint) window.open(`https://solscan.io/token/${selected.liveMint}`, "_blank", "noopener");
+                            else setProfileUser(d.name);
+                          }}
+                          title={d.real ? `Launched by ${d.wallet} — open their Solscan account`
+                                        : `Creator not resolved yet — open the token on Solscan (deployer visible in its first txs)`}
+                          style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap", flex: "0 0 auto",
+                            height: isMobile ? 26 : "auto", boxSizing: "border-box",
+                            border: `1px solid ${d.real ? T.amber + "77" : T.border2}`,
+                            background: d.real ? "rgba(240,185,11,0.10)" : "rgba(255,255,255,0.03)",
+                            color: d.real ? T.amber : T.dim, borderRadius: 7,
+                            padding: isMobile ? "0 8px" : "4px 9px",
+                            fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, cursor: "pointer" }}>
+                          👤 DEV {d.unknown ? "unverified" : label}
+                          {d.real && <span style={{ fontSize: 7.5, opacity: 0.8 }}>✓</span>}
+                        </button>
+                      );
+                    })()}
+
                     {/* why it's trending — desktop; on mobile it moves to the chart-tools row */}
                     {!isMobile && trendingBtn}
                     {!isMobile && (
@@ -9089,17 +15280,15 @@ export default function App() {
                     <button onClick={() => setChartMode("candles")} style={{ ...chip(chartMode === "candles"), padding: "4px 7px", fontSize: 9.5 }}>▮</button>
                     <button onClick={() => setChartMode("line")} style={{ ...chip(chartMode === "line"), padding: "4px 7px", fontSize: 9.5 }}>∿</button>
                     {trendingBtn}
-                    <button onClick={() => setMetricsCrunch((c) => (c > 0.5 ? 0 : 1))}
-                      title={metricsCrunch > 0.5 ? "Expand the metrics" : "Collapse the metrics"}
-                      style={{ ...chip(metricsCrunch > 0.5), padding: "4px 7px", fontSize: 9.5, fontWeight: 900, color: metricsCrunch > 0.5 ? VALO_PURPLE : T.dim, borderColor: metricsCrunch > 0.5 ? `${VALO_PURPLE}66` : T.border }}>
-                      {metricsCrunch > 0.5 ? "▸" : "▾"} STATS
-                    </button>
                     <button onClick={() => setShowDevTrades((v) => !v)} title="Show developer buys & sells on the chart"
                       style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
                         border: `1px solid ${showDevTrades ? accent(selected.hue) : T.border2}`,
                         background: showDevTrades ? `${accent(selected.hue)}22` : "rgba(255,255,255,0.03)",
                         color: showDevTrades ? accent(selected.hue) : T.dim, borderRadius: 7, padding: "4px 9px",
                         fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, cursor: "pointer" }}>👨‍💻 Dev buys</button>
+                    <span style={{ display: "inline-flex", alignItems: "center", height: 24, flex: "0 0 auto", overflow: "visible" }}>
+                      <span data-tour="callout">{calloutWidget(true, 26, true)}</span>
+                    </span>
                   </div>
                 )}
 
@@ -9109,7 +15298,7 @@ export default function App() {
                   ? { maxHeight: Math.round((1 - metricsCrunch) * 130), opacity: 1 - metricsCrunch, overflow: "hidden", pointerEvents: metricsCrunch > 0.85 ? "none" : "auto", transition: "max-height .28s ease, opacity .28s ease" }
                   : layoutPro
                   ? { display: "none" } /* pro layout: the skinny strip below replaces this block */
-                  : { maxHeight: Math.round((1 - pcCrunch) * 160), opacity: 1 - pcCrunch, overflow: "hidden", pointerEvents: pcCrunch > 0.85 ? "none" : "auto", transition: pcPullRef.current ? "none" : "max-height .2s ease, opacity .2s ease" }}>
+                  : { maxHeight: pcCrunch > 0.92 ? 0 : Math.round((1 - pcCrunch) * 160), opacity: 1 - pcCrunch, overflow: "hidden", marginBottom: pcCrunch > 0.92 ? 0 : undefined, pointerEvents: pcCrunch > 0.85 ? "none" : "auto", transition: pcPullRef.current ? "none" : "max-height .2s ease, opacity .2s ease, margin-bottom .2s ease" }}>
                 <div style={{ display: "flex", gap: 12, marginBottom: 10, flexWrap: "wrap", fontFamily: T.mono, fontSize: 10.5 }}>
                   <span style={{ color: T.faint }}>MOM <b style={{ color: accent(selected.hue) }}>{Math.round(selected.momentum)}</b></span>
                   <span style={{ color: T.faint }}>B/S <b style={{ color: selected.buyPressure >= 50 ? T.green : T.red }}>{Math.round(selected.buyPressure)}</b></span>
@@ -9161,7 +15350,7 @@ export default function App() {
                   );
                 })()}
                 {/* durations — always visible above the chart */}
-                <div style={{ display: "flex", gap: 4, marginBottom: 10, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 4, marginBottom: isMobile ? 0 : 10, flexWrap: "wrap" }}>
                   {TIMEFRAMES.map((f) => (
                     <button key={f.k} onClick={() => setTf(f.m)} style={{ ...chip(tf === f.m), padding: "3px 8px" }}>{f.k}</button>
                   ))}
@@ -9176,7 +15365,21 @@ export default function App() {
                         {p.icon
                           ? <img src={p.icon} alt="" style={{ width: 14, height: 14, borderRadius: 4, objectFit: "cover" }} />
                           : <span style={{ width: 10, height: 10, borderRadius: "50%", background: p.color }} />}
-                        <span style={{ fontFamily: T.mono, fontSize: 9, color: T.text, maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k === "__dev__" ? "developer" : k}</span>
+                        <span onClick={() => {
+                            // same stats panel as tapping one of their markers
+                            const theirs = (chartTrades || []).filter((tr) => {
+                              const key = tr.market ? "__mkt__" : (tr.trader || (tr.dev ? "__dev__" : "__me__"));
+                              return key === k;
+                            });
+                            if (!theirs.length) return;
+                            const buys = theirs.filter((tr) => tr.side === "buy");
+                            setMarkerInfo({ side: buys.length >= theirs.length - buys.length ? "buy" : "sell",
+                              list: theirs, sym: selected && selected.sym, trader: k });
+                          }}
+                          title={`See every ${k === "__dev__" ? "developer" : k} trade on $${selected ? selected.sym : ""}`}
+                          style={{ fontFamily: T.mono, fontSize: 9, color: T.text, maxWidth: 110, overflow: "hidden",
+                            textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer",
+                            textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{k === "__dev__" ? "developer" : k}</span>
                         <button onClick={() => setTraderPref(k, { following: false })} title="Unpin"
                           style={{ border: "none", background: "none", color: T.faint, cursor: "pointer", fontSize: 10, padding: 0, lineHeight: 1 }}>✕</button>
                       </span>
@@ -9189,7 +15392,7 @@ export default function App() {
                       const full = metricsCrunch > 0.05 || mobChartH > 360;
                       if (full) { setMetricsCrunch(0); setMobChartH(348); }
                       else {
-                        setMetricsCrunch(1); setMobChartH(Math.max(400, Math.round(window.innerHeight - 205)));
+                        setMetricsCrunch(1); setMobChartH(Math.max(400, Math.round(window.innerHeight - 104)));
                         // settle, then shave any overlap with LIVE TRADES / HOLDERS
                         setTimeout(() => {
                           const lth = document.querySelector("[data-lth]"); const mc = document.querySelector("[data-mchart]");
@@ -9205,8 +15408,10 @@ export default function App() {
                   </div>
                 )}
                 {!isMobile && (
-                  <div onMouseDown={(e) => { e.preventDefault(); pcPullRef.current = { y0: e.clientY, base: pcCrunch }; }}
-                    title="Drag up — the chart rises and the stats fold away (callout row and CA stay put)"
+                  <div onMouseDown={(e) => { e.preventDefault(); pcPullRef.current = { y0: e.clientY, base: pcCrunch, moved: false }; }}
+                    onClick={() => { if (pcPullRef.current && pcPullRef.current.moved) return;
+                      setPcCrunch((c) => (c > 0.5 ? 0 : 1)); }}
+                    title="Click or drag — the chart rises over the stats, leaving the name, price and socials"
                     style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "2px 0 6px", cursor: "ns-resize" }}>
                     <div style={{ width: 76, height: 5, borderRadius: 3, background: pcCrunch > 0 ? VALO_PURPLE : T.border2, boxShadow: pcCrunch > 0 ? `0 0 8px ${VALO_PURPLE}` : "none" }} />
                   </div>
@@ -9243,7 +15448,7 @@ export default function App() {
                         style={{ position: "absolute", right: -4, top: 0, bottom: 0, width: 9, cursor: "col-resize", zIndex: 6 }} />
                     </>
                   )}
-                  <ProChart candles={selected.candles} hue={selected.hue} synthetic={!selected.hasDex}
+                  <ProChart candles={selected.candles} hue={selected.hue} synthetic={!selected.hasDex} createdAt={selected.createdAt || null}
                     mode={chartMode} tfMin={tf} trades={chartTrades} traderPrefs={traderPrefs} theme={themeIdx}
                     clickMode={clickMode} onChartTrade={chartTrade} onMarkerClick={(tr) => { setMarkerInfo(tr); if (tr && tr.tx) setHighlightTx(tr.tx); }}
                     highlightTx={highlightTx}
@@ -9260,12 +15465,20 @@ export default function App() {
                     ]}
                     botRuns={botRuns.filter((r) => r.status === "live" && String(r.tokenId) === String(selected.id))}
                     botSetMode={!isMobile && ticketTab === "auto" && botDragSet}
+                    shiftArm={!isMobile && ticketTab === "auto"}
                     onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
-                    onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop(at); }}
+                    onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at) setArmPop({ ...(at || {}), level: lvl, side: botSide }); }}
                     onBotArm={(lvl) => armAtLevel(lvl)}
                     onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq} eyesToken={selected}
+                    onCancelLine={(id) => { cancelBot(id); setSelLineId(null); }}
+            onNeedHistory={() => selected && loadOlder(selected.id)}
+            mcRatio={selected && selected.price > 0 ? mcOf(selected) / selected.price : 0}
+            historyShift={histShift && selected && histShift.id === selected.id ? histShift : null}
+                    onNeedHistory={() => selected && loadOlder(selected.id)}
+                    mcRatio={selected && selected.price > 0 ? mcOf(selected) / selected.price : 0}
+                    historyShift={histShift && selected && histShift.id === selected.id ? histShift : null}
                     onLineSelect={(id) => setSelLineId(id)}
-                    isMobile={isMobile} height={isMobile ? mobChartH : 480 + extraH + Math.round(pcCrunch * 150)} />
+                    isMobile={isMobile} height={isMobile ? mobChartH : 480 + extraH + Math.round(pcCrunch * 196)} />
 
                   {/* MOBILE bottom handle — pull up for a skinnier chart, down for taller;
                       everything below follows in flow so it stays right under the chart */}
@@ -9327,13 +15540,7 @@ export default function App() {
                     </div>
                   )}
 
-                  <div style={{ position: "absolute", left: 0, bottom: 30, width: 180, height: "100%", overflow: "hidden", pointerEvents: "none", zIndex: 4 }}>
-                    {tape.map((x) => (
-                      <div key={x.id} className="tape-item" style={{ left: x.left, color: x.isBuy ? T.green : T.red, textShadow: `0 0 8px ${x.isBuy ? "rgba(22,199,132,0.7)" : "rgba(234,57,67,0.7)"}` }}>
-                        {x.text}
-                      </div>
-                    ))}
-                  </div>
+          
                 </div>
 
                 {/* metrics — single line, short tags; folds away in pro layout */}
@@ -9489,15 +15696,24 @@ export default function App() {
       onContextMenu={(e) => e.preventDefault()}
       style={{ display: "flex", gap: 0, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, overflow: "hidden", marginBottom: 8, fontFamily: T.mono,
         userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" }}>
-      {[
-        [posArm ? "TAP TO OPEN" : "SOL", posArm
+      {(() => {
+        const sbLive = !!(liveData && walletChain && (turbo || (wallet && wallet.address)));
+        const sbSol = sbLive ? ((walletChain && walletChain.sol) || 0) : solBalance;
+        return [
+        [posArm ? "TAP TO OPEN" : sbLive ? "⛓ SOL" : "SOL", posArm
           ? <b data-poscell="1" onClick={() => { setPosArm(false); setPosDrawer(true); }}
               style={{ color: VALO_PURPLE, cursor: "pointer", textShadow: `0 0 8px ${VALO_PURPLE}` }}>📊 MY POSITIONS</b>
-          : <b data-poscell="1" onClick={() => { setPay("SOL"); setAmount(String(feeSafe(solBalance, "SOL"))); }}
+          : <b data-poscell="1" onClick={() => { setPay("SOL");
+                setAmount(String(sbLive ? Math.min(sbSol, onchain.maxSol || sbSol) : feeSafe(solBalance, "SOL"))); }}
               {...chipEditProps(() => setPosArm(true))}
-              style={{ color: T.blue, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{solBalance.toFixed(2)}</b>],
-        ["$VALO", <b onClick={() => { setPay("VALO"); setAmount(String(feeSafe(valoWallet, "VALO"))); }}
-          style={{ color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(valoWallet)}</b>],
+              style={{ color: sbLive ? T.amber : T.blue, cursor: "pointer", textDecoration: "underline dotted",
+                textUnderlineOffset: 2 }}>{sbLive ? sbSol.toFixed(3) : solBalance.toFixed(2)}</b>],
+        sbLive
+          ? ["⛓ TOKENS", <b onClick={() => setPortfolioDrawer(true)}
+              style={{ color: T.amber, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
+              ${(walletChain ? visHolds(walletChain.holdings).reduce((s3, h3) => s3 + (h3.usd || 0), 0) : 0).toFixed(0)}</b>]
+          : ["$VALO", <b onClick={() => { setPay("VALO"); setAmount(String(feeSafe(valoWallet, "VALO"))); }}
+              style={{ color: VALO_PURPLE, cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(valoWallet)}</b>],
         [mobPnlMode === "live" ? "LIVE BOT PNL" : `BOT PNL · ${mobPnlMode}`, (() => {
           const v = mobPnlMode === "live" ? botUnrealized : botPnlWindow(mobPnlMode);
           const onDur = mobPnlMode !== "live";
@@ -9518,8 +15734,8 @@ export default function App() {
               transition: "background .15s, border-color .15s, box-shadow .15s" }}>
             {v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}</button>;
         })()],
-        ["TOTAL", <b style={{ color: T.text }}>${(solBalance * SOL_USD + valoWallet * 0.0125 + strategyEquityUsd).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b>],
-      ].map(([k, v], i) => (
+        ["TOTAL", <b style={{ color: T.text }}>${((sbLive ? sbSol * SOL_USD + (walletChain ? visHolds(walletChain.holdings).reduce((s3, h3) => s3 + (h3.usd || 0), 0) : 0) : solBalance * SOL_USD + valoWallet * 0.0125) + (sbLive ? 0 : strategyEquityUsd)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b>],
+      ]; })().map(([k, v], i) => (
         <div key={i} data-wtotal={k === "TOTAL" ? "1" : undefined} style={{ flex: 1, textAlign: "center", padding: "6px 2px", borderLeft: i ? `1px solid ${T.border}` : "none", minWidth: 0 }}>
           <div style={{ color: T.faint, fontSize: 6.5, letterSpacing: 0.8, marginBottom: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k}</div>
           <div style={{ fontSize: 9.5, fontWeight: 800 }}>{v}</div>
@@ -9541,6 +15757,31 @@ export default function App() {
     const sellCol = !pos ? T.red : pnlPct > 0.05 ? T.green : pnlPct < -0.05 ? T.red : "#4a5266";
     const bidSol = pay === "SOL" ? a : (a * selected.price) / SOL_USD;
     const sellAllSol = pay === "SOL" ? held : (held * selected.price) / SOL_USD;
+    // live mode, mobile
+    const mLive = !!(onchain.enabled && walletReady && selected && selected.liveMint);
+    const mChainHeld = mLive ? chainHeldOf(selected) : 0;
+    const mChainSol = (walletChain && walletChain.sol) || 0;
+    // real turbo $VALO holding (0 until the token launches — and that's the truth)
+    const mChainValo = (() => {
+      const vm = typeof window !== "undefined" && window.__VALO_MINT__;
+      if (!walletChain || !vm) return 0;
+      const h = (walletChain.holdings || []).find((x) => x.mint === vm && x.src !== "phantom");
+      return h ? h.qty || 0 : 0;
+    })();
+    const mBuySize = Math.min(a, onchain.maxSol || 0);
+    const mSpendable = Math.max(0, mChainSol - 0.0065);
+    const mNoWallet = liveData && !turbo && !(wallet && wallet.address);
+    const mTurboLocked = liveData && turbo && !turboActive;
+    const mBuyBad = mNoWallet ? "set up ⚡TURBO in portfolio"
+      : mTurboLocked ? "unlock ⚡TURBO (PIN in portfolio)"
+      : pay !== "SOL" ? "switch unit to SOL"
+      : !(mBuySize > 0) ? "set an amount"
+      : (mChainSol > 0 && mBuySize > mSpendable)
+        ? (mSpendable > 0.0005 ? `max ${mSpendable.toFixed(4)} (rent+fees reserved)` : `add SOL — ~0.0065 needed for rent+fees`)
+        : null;
+    // the sell chips set a %; live sells apply it to the real balance
+    const mSellPct = pctSel && pctSel.side === "sell" ? pctSel.p : 100;
+    const mSellQty = mChainHeld > 0 ? mChainHeld * (mSellPct / 100) : 0;
     const bestMult = bestMultByToken[selected.id];
     const confirmTap = (side, fire) => {
       if (hbConfirmRef.current && hbConfirmRef.current.side === side) {
@@ -9554,7 +15795,11 @@ export default function App() {
     };
     const setPct = (p, ofHoldings) => {
       if (ofHoldings) setAmount(pay === "SOL" ? (held * p / 100).toFixed(4) : Math.floor(held * p / 100).toString());
-      else { const bal = pay === "SOL" ? solBalance : myHoldings; setAmount(String(feeSafe(bal * p / 100, pay))); }
+      else {
+        // live → % of the REAL trading-wallet SOL (minus rent reserve); demo → paper
+        const bal = pay === "SOL" ? (liveData ? Math.max(0, mChainSol - 0.0065) : solBalance) : myHoldings;
+        setAmount(String(feeSafe(bal * p / 100, pay)));
+      }
     };
     return (
     <div>
@@ -9583,9 +15828,14 @@ export default function App() {
       {/* settlement flip (shows your live balance of each) + amount */}
       <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
         <button onClick={() => setPay(pay === "SOL" ? "VALO" : "SOL")}
-          title="Tap to swap settlement — the label is your live balance"
-          style={{ ...chip(true), padding: "6px 8px", fontSize: 9, minWidth: 62, lineHeight: 1.3 }}>
-          {pay === "SOL" ? `${solBalance.toFixed(1)} SOL` : `${fmtQty(valoWallet)} $VALO`}
+          title="Tap to switch between $SOL and $VALO"
+          style={{ ...chip(true), padding: "4px 8px", fontSize: 9, minWidth: 62, lineHeight: 1.25, textAlign: "center" }}>
+          <span style={{ display: "block", fontWeight: 900, fontSize: 10.5, color: pay === "SOL" ? T.blue : VALO_PURPLE }}>
+            {pay === "SOL" ? "$SOL" : "$VALO"} ⇅
+          </span>
+          <span style={{ display: "block", fontSize: 7, color: T.faint }}>
+            {pay === "SOL" ? `${(liveData ? mChainSol : solBalance).toFixed(liveData ? 4 : 1)}` : fmtQty(liveData ? mChainValo : valoWallet)} held
+          </span>
         </button>
         <input value={amount} onChange={(e) => { setAmount(e.target.value); setPctSel(null); }}
           style={{ ...inp, flex: 1, minWidth: 0, padding: "6px 6px", fontSize: 12.5, textAlign: "center" }} />
@@ -9601,12 +15851,18 @@ export default function App() {
       <div style={{ display: "flex", gap: 6 }}>
         {/* BUY side */}
         <div style={{ flex: 1, background: "rgba(22,199,132,0.06)", border: "1px solid rgba(22,199,132,0.28)", borderRadius: 10, padding: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, letterSpacing: 0.8, color: T.green }}>BUY</span>
+            <span style={{ display: "inline-flex", border: `1px solid rgba(22,199,132,0.35)`, borderRadius: 6, overflow: "hidden" }}>
+              {[["pct", "%"], ["fix", "◎"]].map(([m, l]) => (
+                <button key={m} onClick={() => setBuyChipMode(m)}
+                  style={{ border: "none", padding: "2px 8px", fontFamily: T.mono, fontSize: 7.5, fontWeight: 900,
+                    cursor: "pointer", background: buyChipMode === m ? T.green : "transparent",
+                    color: buyChipMode === m ? "#07130d" : T.faint }}>{l}</button>
+              ))}
+            </span>
+          </div>
           <div style={{ display: "flex", gap: 3, marginBottom: 5 }}>
-            <button onClick={() => setBuyChipMode((m) => (m === "pct" ? "fix" : "pct"))}
-              title="Switch between % of wallet and fixed amounts"
-              style={{ flex: "0 0 auto", ...chip(false), padding: "5px 5px", fontSize: 7.5, fontWeight: 900, color: T.green, borderColor: "rgba(22,199,132,0.4)" }}>
-              {buyChipMode === "pct" ? "%" : pay === "SOL" ? "◎" : "$V"}
-            </button>
             {buyChipMode === "pct" ? buyPcts.map((p, ci) => {
               const on = pctSel && pctSel.side === "buy" && pctSel.p === p;
               return (
@@ -9625,6 +15881,15 @@ export default function App() {
                 style={{ flex: 1, ...chip(parseFloat(amount) === v), padding: "5px 0", fontSize: 8, textAlign: "center", fontWeight: 800, color: T.green }}>{v}</button>
             ))}
           </div>
+          {mLive ? (
+            <button disabled={!!mBuyBad} onClick={() => !mBuyBad && quoteRealOrder(selected, "buy", mBuySize)}
+              style={{ width: "100%", border: "none", borderRadius: 8, padding: "10px 4px", fontFamily: T.mono, fontWeight: 900,
+                background: mBuyBad ? "#1a2030" : T.green, color: mBuyBad ? T.faint : "#07130d", cursor: mBuyBad ? "not-allowed" : "pointer",
+                boxShadow: mBuyBad ? "none" : "0 0 12px rgba(22,199,132,0.28)", lineHeight: 1.15 }}>
+              <div style={{ fontSize: 13 }}>⚡ BUY</div>
+              <div style={{ fontSize: 8, opacity: 0.9 }}>{mBuyBad || `${mBuySize} SOL`}</div>
+            </button>
+          ) : (
           <button onClick={() => confirmTap("buy", () => execute(selected, { side: "buy", pay, amt: a, mode: "instant", tax: taxFor(pay), burn: splitFee(a, pay).total, legs: [] }))}
             style={{ width: "100%", border: "none", borderRadius: 8, padding: "10px 4px", fontFamily: T.mono, fontWeight: 900,
               background: hbConfirm === "buy" ? T.amber : T.green, color: hbConfirm === "buy" ? "#1d1503" : "#07130d", cursor: "pointer",
@@ -9632,11 +15897,40 @@ export default function App() {
             <div style={{ fontSize: hbConfirm === "buy" ? 11.5 : 13 }}>{hbConfirm === "buy" ? "⚠ CONFIRM BUY" : "⚡ BUY"}</div>
             <div style={{ fontSize: 8, opacity: 0.9 }}>{hbConfirm === "buy" ? "tap again to fire" : `${bidSol.toFixed(2)} SOL`}</div>
           </button>
+          )}
         </div>
         {/* SELL side */}
         <div style={{ flex: 1, background: "rgba(234,57,67,0.06)", border: "1px solid rgba(234,57,67,0.28)", borderRadius: 10, padding: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <span style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 900, letterSpacing: 0.8, color: T.red }}>SELL</span>
+            <span style={{ display: "inline-flex", border: `1px solid rgba(234,57,67,0.35)`, borderRadius: 6, overflow: "hidden" }}>
+              {[["pct", "%"], ["fix", "◎"]].map(([m, l]) => (
+                <button key={m} onClick={() => setSellChipMode(m)}
+                  style={{ border: "none", padding: "2px 8px", fontFamily: T.mono, fontSize: 7.5, fontWeight: 900,
+                    cursor: "pointer", background: sellChipMode === m ? T.red : "transparent",
+                    color: sellChipMode === m ? "#170808" : T.faint }}>{l}</button>
+              ))}
+            </span>
+          </div>
           <div style={{ display: "flex", gap: 3, marginBottom: 5 }}>
-            {sellPcts.map((p, ci) => {
+            {sellChipMode === "fix" ? sellFixed.map((v, ci) => {
+              // sell tokens WORTH v SOL — converted to the equivalent % of the
+              // bag so every existing paper/live sell path applies unchanged
+              const bagQty = mLive ? mChainHeld : held;
+              const px = selected.price || 0;
+              const bagSolValue = px > 0 ? (bagQty * px) / SOL_USD : 0;
+              const eq = bagSolValue > 0 ? Math.min(100, (v / bagSolValue) * 100) : 0;
+              const on = pctSel && pctSel.side === "sell" && Math.abs(pctSel.p - eq) < 0.01 && eq > 0;
+              return (
+                <button className="qchip" key={"sf" + ci} disabled={!(eq > 0)}
+                  onClick={() => { if (eq > 0) { setPct(eq, true); setPctSel({ side: "sell", p: eq }); } }}
+                  {...chipEditProps(() => { askAmt(v, (nv) => setSellFixed((A) => A.map((x, j) => (j === ci ? nv : x)))); })}
+                  style={{ flex: 1, ...chip(false), padding: "5px 0", fontSize: 8, textAlign: "center",
+                    fontWeight: on ? 900 : 800, color: on ? "#170808" : eq > 0 ? T.red : T.faint,
+                    background: on ? T.red : "transparent", borderColor: on ? T.red : T.border,
+                    opacity: eq > 0 ? 1 : 0.45 }}>{v}◎</button>
+              );
+            }) : sellPcts.map((p, ci) => {
               const on = pctSel && pctSel.side === "sell" && pctSel.p === p;
               return (
                 <button className="qchip" key={ci} onClick={() => { setPct(p, true); setPctSel({ side: "sell", p }); }} disabled={held <= 0}
@@ -9652,6 +15946,27 @@ export default function App() {
             })}
           </div>
           <div style={{ display: "flex", gap: 4 }}>
+            {mLive ? (
+              <>
+                <button disabled={!(mSellQty > 0)} onClick={() => mSellQty > 0 && quoteRealOrder(selected, "sell", mSellQty)}
+                  style={{ flex: 1.5, border: "none", borderRadius: 8, padding: "10px 2px", fontFamily: T.mono, fontWeight: 900,
+                    background: mSellQty > 0 ? sellCol : "#1a2030", color: mSellQty > 0 ? "#170808" : T.faint,
+                    cursor: mSellQty > 0 ? "pointer" : "not-allowed", lineHeight: 1.15 }}>
+                  <div style={{ fontSize: 12 }}>⚡ SELL</div>
+                  <div style={{ fontSize: 7.5, opacity: 0.9 }}>
+                    {mSellQty > 0 ? `${mSellPct}% ≈ ${((mSellQty * (selected.price || 0)) / SOL_USD).toFixed(4)} ◎` : "no position"}
+                  </div>
+                </button>
+                <button disabled={!(mChainHeld > 0)} onClick={() => mChainHeld > 0 && quoteRealOrder(selected, "sell", mChainHeld)}
+                  style={{ flex: 1, border: `1px solid ${sellCol}`, borderRadius: 8, padding: "10px 2px", fontFamily: T.mono, fontWeight: 800,
+                    background: `${sellCol}22`, color: sellCol, cursor: mChainHeld > 0 ? "pointer" : "not-allowed",
+                    opacity: mChainHeld > 0 ? 1 : 0.5, lineHeight: 1.1 }}>
+                  <div style={{ fontSize: 9 }}>ALL</div>
+                  <div style={{ fontSize: 7, opacity: 0.85 }}>{mChainHeld > 0 ? `≈ ${((mChainHeld * (selected.price || 0)) / SOL_USD).toFixed(4)} ◎` : "—"}</div>
+                </button>
+              </>
+            ) : (
+              <>
             <button onClick={() => confirmTap("sell", () => execute(selected, { side: "sell", pay, amt: a, mode: "instant", tax: taxFor(pay), burn: splitFee(a, pay).total, legs: [] }))}
               style={{ flex: 1.5, border: "none", borderRadius: 8, padding: "10px 2px", fontFamily: T.mono, fontWeight: 900,
                 background: hbConfirm === "sell" ? T.amber : sellCol, color: hbConfirm === "sell" ? "#1d1503" : "#170808", cursor: "pointer", lineHeight: 1.15,
@@ -9666,9 +15981,12 @@ export default function App() {
               <div style={{ fontSize: 9 }}>{hbConfirm === "sellall" ? "⚠2×" : "ALL"}</div>
               <div style={{ fontSize: 7, opacity: 0.85 }}>{held > 0 ? `${sellAllSol.toFixed(1)}◎` : "—"}</div>
             </button>
+              </>
+            )}
           </div>
         </div>
       </div>
+      {mLive && <div style={{ marginTop: 6 }}><LiveFundsNotice sol={mChainSol} compact autoOn={liveAuto} onToggleAuto={setLiveAuto} turboOn={turboActive} /></div>}
     </div>
     );
   })();
@@ -9725,14 +16043,16 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFire]);
 
-  // banner items — every callout renders; ≥2x calls get green MC trail
+  // 🏆 banner items — ONLY real winners ride the header: a callout must be
+  // holding ≥2x right now. The tier it reaches drives how hard it animates.
   const bannerItems = callouts.map((c) => {
     const t = tokens.find((x) => x.id === c.tokenId);
     if (!t) return null;
     const mcNow = mcOf(t);
-    const mult = mcNow / c.mcAt;
+    const mult = c.mcAt > 0 ? mcNow / c.mcAt : 0;
+    if (!(mult >= 2)) return null;                 // under 2x never shows
     return { ...c, t, mcNow, mult };
-  }).filter(Boolean);
+  }).filter(Boolean).sort((a, b) => b.mult - a.mult);
 
   return (
     <div style={{
@@ -9884,33 +16204,44 @@ export default function App() {
                   {...chipEditProps(() => setMobHeadPill("epoch"))}
                   style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
                     border: `1.5px solid ${T.blue}`, background: "rgba(59,130,246,0.14)",
-                    borderRadius: 9, padding: "5px 12px", lineHeight: 1.1,
+                    borderRadius: 9, padding: "5px 8px", lineHeight: 1.1,
                     userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent",
                     boxShadow: `0 0 14px ${T.blue}55`,
                     animation: cloudUser ? "none" : "claimPulse 2.6s ease-in-out infinite" }}>
-                <span style={{ fontSize: 13 }}>☁</span>
+                <span style={{ fontSize: 12 }}>☁</span>
                 <span style={{ textAlign: "left" }}>
-                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1, color: T.blue }}>
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 0.4, color: T.blue }}>
                     {cloudUser ? "SIGNED IN" : "SIGN UP"}
                   </span>
-                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 7.5, color: cloudUser ? (cloudSynced ? T.green : T.amber) : "rgba(138,168,248,0.85)", letterSpacing: 0.5 }}>
-                    {cloudUser ? (cloudSynced ? "● SYNCED · SIGN OUT" : "● SYNCING…") : "or sign in · free"}
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 6.8, color: cloudUser ? (cloudSynced ? T.green : T.amber) : "rgba(138,168,248,0.85)", letterSpacing: 0.2 }}>
+                    {cloudUser ? (cloudSynced ? "● SYNCED" : "● SYNCING…") : "free · sign in"}
                   </span>
                 </span>
               </button>
                 )}
+                {/* ⛶ fullscreen — right of the account pill */}
+                <button onClick={goFullscreen} title="Fullscreen"
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: "0 0 auto",
+                    width: 30, height: 30, marginLeft: 5, borderRadius: 8,
+                    border: `1px solid ${VALO_PURPLE}55`, background: "rgba(125,92,240,0.12)",
+                    color: VALO_PURPLE, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 0 }}>⛶</button>
               </div>
             </div>
             {/* tidy stats strip */}
             <div style={{ display: "flex", gap: 0, fontFamily: T.mono, fontSize: 10, background: "rgba(255,255,255,0.02)", border: `1px solid ${T.border}`, borderRadius: 9, overflow: "hidden" }}>
               {[
-                ["PRICE", <b style={{ color: VALO_PURPLE }}>${valoUsdPrice.toFixed(4)}</b>],
-                ["TVL", <b>{fmt$(gTvl)}</b>],
-                ["NET", <b style={{ color: gNet >= 0 ? T.green : T.red }}>{gNet >= 0 ? "+" : "−"}{fmt$(Math.abs(gNet))}</b>],
-                ["24H PnL", <b style={{ color: platformPnl >= 0 ? T.green : T.red }}>{platformPnl >= 0 ? "+" : "−"}${Math.abs(platformPnl).toFixed(0)}</b>],
+                ["PRICE", <b style={{ color: VALO_PURPLE }}>{valoLive ? `$${fmtP(valoLive.price)}` : `$${valoUsdPrice.toFixed(4)}`}</b>],
+                [valoLive ? "MC" : "TVL", <b>{valoLive ? fmt$(valoLive.mc || 0) : fmt$(gTvl)}</b>],
+                ["NET", (() => {
+                  const n = valoLive ? ((valoLive.greenUsd || 0) - (valoLive.redUsd || 0)) : gNet;
+                  return <b style={{ color: n >= 0 ? T.green : T.red }}>{n >= 0 ? "+" : "−"}{fmt$(Math.abs(n))}</b>;
+                })()],
+                [valoLive ? "24H VOL" : "24H PnL", valoLive
+                  ? <b>{fmt$(valoLive.vol24 || 0)}</b>
+                  : <b style={{ color: platformPnl >= 0 ? T.green : T.red }}>{platformPnl >= 0 ? "+" : "−"}${Math.abs(platformPnl).toFixed(0)}</b>],
                 ["🔥 BURN", <b onClick={() => setBurnOpen(true)} style={{ color: "#f97316", cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(burned)}</b>],
               ].map(([k, v], i) => (
-                <div key={k} onClick={() => { if (k !== "🔥 BURN") { setSel(424242); setClickMode(null); } }}
+                <div key={k} onClick={() => { if (k !== "🔥 BURN") openValoChart(); }}
                   style={{ flex: 1, textAlign: "center", padding: "6px 2px", borderLeft: i ? `1px solid ${T.border}` : "none", cursor: k !== "🔥 BURN" ? "pointer" : "default" }}>
                   <div style={{ color: T.faint, fontSize: 7.5, letterSpacing: 0.8, marginBottom: 2 }}>{k}</div>
                   {v}
@@ -9923,19 +16254,31 @@ export default function App() {
           <div>
             <div style={{ fontFamily: T.mono, fontSize: 9.5, color: VALO_PURPLE, letterSpacing: 1.5, fontWeight: 700 }}>
               $VALO · LIVE ON PUMP.FUN
+              {valoLive && <span style={{ marginLeft: 7, fontSize: 7.5, fontWeight: 900, color: T.green,
+                border: `1px solid ${T.green}55`, background: "rgba(22,199,132,0.12)", borderRadius: 999, padding: "1px 6px" }}>● ON CHAIN</span>}
             </div>
             <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 0.5, marginTop: 2 }}>
-              Metrics below track the $VALO token · simulated feed · not financial advice
+              {valoLive
+                ? "Live from the $VALO pool · updates every 15s · not financial advice"
+                : "Metrics below track the $VALO token · not financial advice"}
             </div>
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
             {[
-              ["PRICE", `$${valoUsdPrice.toFixed(4)}`, VALO_PURPLE, "Current $VALO price"],
-              ["TVL", fmt$(gTvl), T.text, null],
-              ["NET FLOW", `${gNet >= 0 ? "+" : "−"}${fmt$(Math.abs(gNet))}`, gNet >= 0 ? T.green : T.red, null],
-              ["24H PnL", `${platformPnl >= 0 ? "+" : "−"}$${Math.abs(platformPnl).toFixed(0)}`, platformPnl >= 0 ? T.green : T.red, "Your realized + unrealized PnL across all coins"],
+              ["PRICE", valoLive ? `$${fmtP(valoLive.price)}` : `$${valoUsdPrice.toFixed(4)}`, VALO_PURPLE,
+                valoLive ? "Live $VALO price from the pool" : "Current $VALO price"],
+              [valoLive ? "MARKET CAP" : "TVL", valoLive ? fmt$(valoLive.mc || 0) : fmt$(gTvl), T.text,
+                valoLive ? "Real $VALO market cap" : null],
+              ...(valoLive ? [["LP", fmt$(valoLive.tvl || 0), T.text, "Real pool liquidity"]] : []),
+              ["NET FLOW", (() => {
+                const n = valoLive ? ((valoLive.greenUsd || 0) - (valoLive.redUsd || 0)) : gNet;
+                return `${n >= 0 ? "+" : "−"}${fmt$(Math.abs(n))}`;
+              })(), (valoLive ? ((valoLive.greenUsd || 0) - (valoLive.redUsd || 0)) : gNet) >= 0 ? T.green : T.red,
+                valoLive ? `Real buy vs sell dollars · ${valoLive.statWin || "24h"}` : null],
+              ...(valoLive ? [["24H VOL", fmt$(valoLive.vol24 || 0), T.text, "Real 24h volume"]]
+                : [["24H PnL", `${platformPnl >= 0 ? "+" : "−"}$${Math.abs(platformPnl).toFixed(0)}`, platformPnl >= 0 ? T.green : T.red, "Your realized + unrealized PnL across all coins"]]),
             ].map(([k, v, col, tip]) => (
-              <div key={k} onClick={() => { setSel(424242); setClickMode(null); }} title={(tip ? tip + " · " : "") + "Tap: open the $VALO chart"}
+              <div key={k} onClick={openValoChart} title={(tip ? tip + " · " : "") + "Tap: open the $VALO chart"}
                 style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${T.border}`, borderRadius: 9, padding: "6px 13px", minWidth: 78, cursor: "pointer" }}>
                 <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>{k}</div>
                 <div style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: col }}>{v}</div>
@@ -9961,6 +16304,16 @@ export default function App() {
               {unreadCount > 0 && <span style={{ position: "absolute", top: -6, right: -6, minWidth: 16, height: 16, borderRadius: 8, background: T.red, color: "#fff", fontFamily: T.mono, fontSize: 9, fontWeight: 900, display: "grid", placeItems: "center", padding: "0 4px" }}>{unreadCount}</span>}
             </button>
             {/* WHITEPAPER */}
+            {/* 🧭 replay the tour any time */}
+            <button onClick={() => setTourOn(true)} title="Show me around VALO"
+              style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                border: `1px solid ${T.border2}`, background: "rgba(125,92,240,0.06)", borderRadius: 9, padding: "6px 12px" }}>
+              <span style={{ fontSize: 15 }}>🧭</span>
+              <span style={{ textAlign: "left", lineHeight: 1.15 }}>
+                <span style={{ display: "block", fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: VALO_PURPLE }}>TOUR</span>
+                <span style={{ display: "block", fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 0.3 }}>show me around</span>
+              </span>
+            </button>
             <button onClick={() => setWpOpen(true)} title="Read the VALO whitepaper"
               style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
                 border: `1px solid ${T.border2}`, background: "rgba(76,154,255,0.06)", borderRadius: 9, padding: "6px 12px" }}>
@@ -9971,18 +16324,9 @@ export default function App() {
               </span>
             </button>
 
-            {!isMobile && (
-            <button onClick={() => setLayoutPro((v) => !v)}
-              title={layoutPro ? "Back to the side-panel layout" : "Pro layout — trading desk under the chart, feeds on the right"}
-              style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginRight: 8,
-                border: `1px solid ${T.amber}`, background: "rgba(240,185,11,0.12)", color: T.amber,
-                borderRadius: 9, padding: "7px 13px", fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 1,
-                boxShadow: `0 0 12px ${T.amber}44` }}>
-              {layoutPro ? "◧ SIDE LAYOUT" : "⿲ PRO LAYOUT"}
-            </button>
-            )}
+
             {/* CLAIM REWARDS */}
-            <button onClick={() => setClaimOpen(true)} title="Claim your rolling hourly airdrop"
+            <button data-tour="claim" onClick={() => setClaimOpen(true)} title="Claim your rolling hourly airdrop"
               style={{
                 display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
                 border: `1px solid ${claimable > 0 ? "rgba(22,199,132,0.5)" : T.border}`,
@@ -10023,24 +16367,33 @@ export default function App() {
               <div key={dup} className="ticker-half" aria-hidden={dup === 1}>
                 {bannerItems.length === 0 && (
                   <span style={{ fontFamily: T.mono, fontSize: 11, color: T.faint, padding: "0 40px" }}>
-                    Waiting for community callouts…
+                    No 2x calls running right now — land one and it rides here
                   </span>
                 )}
-                {bannerItems.map((c) => (
-                  <button key={`${dup}-${c.id}`} onClick={() => { setSel(c.t.id); setClickMode(null); }}
-                    style={{ background: "transparent", border: "none", cursor: "pointer", padding: "8px 0", display: "inline-flex", alignItems: "center", gap: 6, fontFamily: T.mono, fontSize: 11, whiteSpace: "nowrap" }}>
-                    <span style={{ color: T.dim }}>@{c.user}</span>
-                    <span style={{ color: accent(c.t.hue), fontWeight: 800 }}>${c.t.sym}</span>
-                    {c.mult >= 2 ? (
-                      <span style={{ color: T.green, fontWeight: 800, textShadow: "0 0 8px rgba(22,199,132,0.5)" }}>
-                        ▲ {c.mult.toFixed(1)}x · in @ {fmt$(c.mcAt)} MC → now {fmt$(c.mcNow)} MC
+                {bannerItems.map((c) => {
+                  const { tier } = calloutTier(c.mult);
+                  // escalation ladder — the bigger the call, the louder it rides
+                  const lvl = c.mult >= 50 ? 5 : c.mult >= 20 ? 4 : c.mult >= 10 ? 3 : c.mult >= 5 ? 2 : 1;
+                  const col = tier.color;
+                  const cls = ["", "cb-glow", "cb-pulse", "cb-shimmer", "cb-flare", "cb-legend"][lvl];
+                  return (
+                    <button key={`${dup}-${c.id}`} onClick={() => { setSel(c.t.id); setClickMode(null); }}
+                      className={cls}
+                      style={{ background: lvl >= 3 ? `${col}12` : "transparent", border: lvl >= 4 ? `1px solid ${col}55` : "none",
+                        borderRadius: lvl >= 3 ? 8 : 0, cursor: "pointer", padding: lvl >= 3 ? "6px 10px" : "8px 0",
+                        display: "inline-flex", alignItems: "center", gap: 6, fontFamily: T.mono, fontSize: 11, whiteSpace: "nowrap",
+                        ["--cbCol"]: col }}>
+                      <span style={{ color: T.dim }}>@{c.user}</span>
+                      <span style={{ color: accent(c.t.hue), fontWeight: 800 }}>${c.t.sym}</span>
+                      <span style={{ color: col, fontWeight: 900, textShadow: `0 0 ${5 + lvl * 3}px ${col}${lvl >= 3 ? "cc" : "77"}` }}>
+                        {lvl >= 5 ? "👑 " : lvl >= 4 ? "🔥 " : lvl >= 3 ? "⚡ " : "▲ "}{c.mult.toFixed(1)}x
                       </span>
-                    ) : (
-                      <span style={{ color: T.faint }}>called @ {fmt$(c.mcAt)} MC</span>
-                    )}
-                    <span style={{ color: T.border2, padding: "0 14px" }}>◆</span>
-                  </button>
-                ))}
+                      {lvl >= 2 && <span style={{ color: col, fontSize: 8.5, fontWeight: 800, letterSpacing: 1, opacity: 0.9 }}>{tier.label}</span>}
+                      <span style={{ color: T.dim, fontSize: 10 }}>in @ {fmt$(c.mcAt)} → {fmt$(c.mcNow)}</span>
+                      <span style={{ color: T.border2, padding: "0 14px" }}>◆</span>
+                    </button>
+                  );
+                })}
               </div>
             ))}
           </div>
@@ -10056,20 +16409,42 @@ export default function App() {
             <StickySearch top={headerH}>
               <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <SearchBar tokens={tokens} username={username} full eco isMobile onFullEco={() => setEcoFull(true)} onPickToken={(id) => { setSel(id); setClickMode(null); }} onPickUser={(u) => setProfileUser(u)} />
+                  <SearchBar tokens={tokens} username={username} full eco isMobile liveData={liveData} valoMint={valoMint} onFullEco={() => setEcoFull(true)} mktExtra={[...mktHits, ...moreToks]} onQuery={setEcoQ} onPickToken={openAnyToken} onPickUser={(u) => setProfileUser(u)} />
                 </div>
                 <button onClick={() => setCompactList((v) => !v)} title={compactList ? "Expand cards" : "Compact list"}
                   style={{ flex: "0 0 auto", border: `1px solid ${compactList ? VALO_PURPLE : T.border2}`, background: T.panel, color: compactList ? VALO_PURPLE : T.dim,
                     borderRadius: 9, padding: "0 13px", fontSize: 15, fontWeight: 900, cursor: "pointer" }}>{compactList ? "▦" : "▤"}</button>
               </div>
+              {/* ▲ back to the top — a full row that fades in once you're down the list */}
+              <div onClick={() => { flashTop(); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                style={{ marginTop: 5, height: pageScrolled ? 22 : 0, opacity: pageScrolled ? 1 : 0,
+                  overflow: "hidden",
+                  transition: "height .18s ease, opacity .18s ease, background .18s, color .18s, box-shadow .18s",
+                  display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+                  background: topFlash ? "rgba(125,92,240,0.28)" : "rgba(15,19,28,0.42)",
+                  border: pageScrolled ? `1px solid ${topFlash ? VALO_PURPLE : T.border2 + "55"}` : "none",
+                  boxShadow: topFlash ? `0 0 14px ${VALO_PURPLE}88` : "none",
+                  borderRadius: 8, color: topFlash ? VALO_PURPLE : T.faint, fontFamily: T.mono, fontSize: 10,
+                  letterSpacing: 2, backdropFilter: "blur(3px)" }}>▲</div>
             </StickySearch>
 
-            <div style={{ display: "grid", gap: compactList ? 6 : 10, paddingRight: 6 }}>
+            <div {...scanPullTouch} style={{ display: "grid", gap: compactList ? 6 : 10, paddingRight: 6 }}>
+              {scanPullStrip}
+              <div>{scanModeDropdown}</div>
               {secBanner}
+              {liveData && !shown.length && (
+                <div style={{ border: `1px dashed ${T.border2}`, borderRadius: 12, padding: "26px 14px", textAlign: "center",
+                  fontFamily: T.mono, fontSize: 10, color: T.faint, lineHeight: 1.9 }}>
+                  <div style={{ fontSize: 16, marginBottom: 6 }}>🛰</div>
+                  loading live tokens from chain…
+                  <div style={{ fontSize: 8.5, opacity: 0.8 }}>real markets only · nothing simulated</div>
+                </div>
+              )}
               {shown.map((t) => (
                 compactList
                   ? <div key={t.id} data-mslot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 10, transition: "opacity .12s, transform .12s" }} {...tdProps(t)}><TokenRow t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} tf={tf}
-                      onOpen={() => { setSel(sel === t.id ? null : t.id); setClickMode(null); }} /></div>
+                      onOpen={() => { if (sel === t.id) { holdScroll(); setSel(null); setClickMode(null); } else openAnyToken(t.id); }}
+                onHover={() => hoverPrefetch(t)} onLeave={cancelPrefetch} /></div>
                   : <div key={t.id} data-slot={t.id} data-mslot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ position: "relative", opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
                       onDrop={(e) => { e.preventDefault(); const id = dragIdOf(e); if (id == null || id === t.id) return;
                         const base = (scanOrder || shown.map((x) => x.id));
@@ -10078,7 +16453,8 @@ export default function App() {
                         if (already >= 0) { [n[si], n[already]] = [n[already], n[si]]; } else n[si] = id;
                         setScanOrder(n); window.__valoDrag = null; }}>
                     <TokenCard t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf} isMobile={isMobile}
-                      onOpen={() => { setSel(sel === t.id ? null : t.id); setClickMode(null); }} /></div>
+                      onOpen={() => { if (sel === t.id) { holdScroll(); setSel(null); setClickMode(null); } else openAnyToken(t.id); }}
+                onHover={() => hoverPrefetch(t)} onLeave={cancelPrefetch} /></div>
               ))}
             </div>
 
@@ -10098,7 +16474,7 @@ export default function App() {
           width: `calc(100%/1.13 + ${Math.round(pullR / 1.13)}px)`, "--stkTop": `${Math.round((headerH + 8) / 1.13)}px`, zoom: 1.13 }}>
           {/* scanner — slides left as the chart is pulled over, stays same width */}
           {scanCollapsed ? (
-          <div ref={scannerRef} style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start", transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s" }}>
+          <div ref={scannerRef} style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start", zIndex: 5, transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s" }}>
             <button onClick={() => setScanCollapsed(false)} title="Expand the scanner"
               style={{ width: 40, height: 250, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10,
                 background: T.panel, border: `1px solid ${VALO_PURPLE}44`, borderRadius: 12, cursor: "pointer", color: T.dim, padding: 0,
@@ -10110,13 +16486,39 @@ export default function App() {
             </button>
           </div>
           ) : (
-          <div ref={scannerRef} style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start",
+          <div ref={scannerRef} data-scanscroll="1" {...scanPullTouch}
+            onWheel={(e) => { e.stopPropagation(); scanPullWheel(e); }}
+            onScroll={(e) => { const el = e.currentTarget;
+              setScanScrolled(el.scrollTop > 180);
+              if (el.scrollHeight - el.scrollTop - el.clientHeight < 380) loadMoreTokens(); }}
+            style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start", zIndex: 5,
             transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s", display: "grid", gap: 10,
             maxHeight: "calc((100vh - 30px) / 1.13 - var(--stkTop))", overflowY: "auto", padding: "2px 10px 2px 2px" }}>
+            <button onClick={() => { flashTop(); const el = scannerRef.current; if (el) el.scrollTo({ top: 0, behavior: "smooth" }); }}
+              title="Back to the top of the scanner"
+              style={{ position: "sticky", top: 0, zIndex: 3, justifySelf: "stretch", marginRight: 30,
+                height: scanScrolled ? 22 : 0, opacity: scanScrolled ? 1 : 0, overflow: "hidden",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                background: topFlash ? "rgba(125,92,240,0.28)" : "rgba(15,19,28,0.42)",
+                border: `1px solid ${topFlash ? VALO_PURPLE : T.border2 + "55"}`, borderRadius: 8,
+                boxShadow: topFlash ? `0 0 14px ${VALO_PURPLE}88` : "none",
+                cursor: "pointer", color: topFlash ? VALO_PURPLE : T.faint, fontSize: 11, letterSpacing: 2,
+                marginBottom: scanScrolled ? -22 : 0, backdropFilter: "blur(3px)",
+                transition: "height .18s ease, opacity .18s ease, background .18s, color .18s, box-shadow .18s" }}>▲</button>
             <button onClick={() => setScanCollapsed(true)} title="Fold the scanner into a rail"
               style={{ position: "sticky", top: 0, zIndex: 3, justifySelf: "end", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center",
                 background: "rgba(15,19,28,0.9)", border: `1px solid ${T.border2}`, borderRadius: 7, cursor: "pointer", color: T.dim, fontSize: 12, marginBottom: -34 }}>‹</button>
+            {scanPullStrip}
+            <div style={{ margin: "0 34px 8px 0" }}>{scanModeDropdown}</div>
             {secBanner}
+            {liveData && !shown.length && (
+              <div style={{ border: `1px dashed ${T.border2}`, borderRadius: 12, padding: "26px 14px", textAlign: "center",
+                fontFamily: T.mono, fontSize: 10, color: T.faint, lineHeight: 1.9 }}>
+                <div style={{ fontSize: 16, marginBottom: 6 }}>🛰</div>
+                loading live tokens from chain…
+                <div style={{ fontSize: 8.5, opacity: 0.8 }}>real markets only · nothing simulated</div>
+              </div>
+            )}
             {shown.map((t) => (
               <div key={t.id} data-slot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ position: "relative", opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s, transform .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => { e.preventDefault(); const id = dragIdOf(e); if (id == null || id === t.id) return;
@@ -10126,7 +16528,8 @@ export default function App() {
                   if (already >= 0) { [n[si], n[already]] = [n[already], n[si]]; } else n[si] = id;
                   setScanOrder(n); window.__valoDrag = null; }}>
               <TokenCard t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} miniMode={cardMini} tf={tf} isMobile={isMobile}
-                onOpen={() => { setSel(sel === t.id ? null : t.id); setClickMode(null); }} /></div>
+                onOpen={() => { if (sel === t.id) { holdScroll(); setSel(null); setClickMode(null); } else openAnyToken(t.id); }}
+                onHover={() => hoverPrefetch(t)} onLeave={cancelPrefetch} /></div>
             ))}
           </div>
           )}
@@ -10137,7 +16540,7 @@ export default function App() {
               {/* search — the chart's exact width, glued under the callout
                   banner, riding along as you scroll */}
               <div style={{ position: "sticky", top: "calc(var(--stkTop, 8px) - 8px)", zIndex: 34, margin: "0 0 8px" }}>
-                <SearchBar tokens={tokens} username={username} full eco onPickToken={(id) => { setSel(id); setClickMode(null); }} onPickUser={(u) => setProfileUser(u)} />
+                <SearchBar tokens={tokens} username={username} full eco liveData={liveData} valoMint={valoMint} mktExtra={[...mktHits, ...moreToks]} onQuery={setEcoQ} onPickToken={openAnyToken} onPickUser={(u) => setProfileUser(u)} />
               </div>
 
               {chartBlock}
@@ -10171,7 +16574,7 @@ export default function App() {
                   setEditLineReq({ id, level: base ? (isExit ? base.vtSell : base.level) : null, n: Date.now() });
                 }} />
                     ) : ticketTab === "auto" ? (
-                      <AutoTraderPanel onOpenSearch={isMobile ? () => setEcoFull(true) : null} solBalance={solBalance} valoWallet={valoWallet} position={positions[selected.id]} token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
+                      <AutoTraderPanel onOpenSearch={isMobile ? () => setEcoFull(true) : null} solBalance={dispSol} valoWallet={dispValo} position={positions[selected.id]} token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
                         wide
                         dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
                         onStageSide={(m) => setBotSide(m)} onArmPair={armVisualPair}
@@ -10185,8 +16588,12 @@ export default function App() {
                         onCancelBot={cancelBot} onSellRun={sellRun} onOpenBotRun={(id) => setBotRunOpen(id)}
                         onOpenTokenAuto={(tid, botId) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(botId || null); }} />
                     ) : (
-                      <ProOrderBar token={selected} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
-                        solBalance={solBalance} valoBalance={valoWallet} position={positions[selected.id]}
+                      <ProOrderBar token={selected}
+                        onRealOrder={quoteRealOrder}
+                        onChainReady={!!(onchain.enabled && walletReady && selected && selected.liveMint)}
+                        onChainMax={onchain.maxSol || 0}
+                        chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0} autoOn={liveAuto} onToggleAuto={setLiveAuto} turboOn={turboActive} liveMode={liveData} chainHoldings={chainHoldingsLive} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
+                        solBalance={dispSol} valoBalance={dispValo} position={positions[selected.id]}
                         clickMode={clickMode} setClickMode={setClickMode}
                         realized24={realized24For(selected.sym)}
                         onExecute={(o) => execute(selected, o)} onPosTrade={onPosTrade} />
@@ -10245,7 +16652,7 @@ export default function App() {
             </div>
             {selected && (
               <div style={{ marginTop: -10 }}>
-                <MyPositionsHub tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
+                <MyPositionsHub liveMode={liveData} chainHoldings={chainHoldingsLive} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} onBurn={burnAndReclaim} tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
                   onOpenToken={(id) => { setSel(id); setClickMode(null); }} onSellPos={sellPos} onCloseTickets={closeAllTickets}
                   onSellRun={sellRun} onSellAllBots={sellAllRuns} onCancelBot={cancelBot} />
               </div>
@@ -10279,7 +16686,7 @@ export default function App() {
                   setEditLineReq({ id, level: base ? (isExit ? base.vtSell : base.level) : null, n: Date.now() });
                 }} />
             ) : selected && ticketTab === "auto" ? (
-              <AutoTraderPanel onOpenSearch={isMobile ? () => setEcoFull(true) : null} solBalance={solBalance} valoWallet={valoWallet} position={positions[selected.id]} token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
+              <AutoTraderPanel onOpenSearch={isMobile ? () => setEcoFull(true) : null} solBalance={dispSol} valoWallet={dispValo} position={positions[selected.id]} token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
                 dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
                 onStageSide={(m) => setBotSide(m)} onArmPair={armVisualPair}
                 onSetDragSet={(v) => setBotDragSet(!!v)} onLinesChange={(l) => setVtLines(l)}
@@ -10292,14 +16699,18 @@ export default function App() {
                 onCancelBot={cancelBot} onSellRun={sellRun} onOpenBotRun={(id) => setBotRunOpen(id)}
                 onOpenTokenAuto={(tid, botId) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(botId || null); }} />
             ) : selected ? (
-              <DesktopTradePanel token={selected} onExecute={(o, tok) => execute(tok || selected, o)}
+              <DesktopTradePanel token={selected} botRuns={botRuns} chainHeld={chainHeldOf(selected)} chainSol={(walletChain && walletChain.sol) || 0} autoOn={liveAuto} onToggleAuto={setLiveAuto} turboOn={turboActive} liveMode={liveData} chainHoldings={chainHoldingsLive} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint}
+                onRealOrder={quoteRealOrder}
+                onChainReady={!!(onchain.enabled && walletReady && selected && selected.liveMint)}
+                onChainMax={onchain.maxSol || 0}
+                onExecute={(o, tok) => execute(tok || selected, o)}
                 clickMode={clickMode} setClickMode={setClickMode}
                 amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
                 pctSel={pctSel} setPctSel={setPctSel}
                 pendingOrders={pendingOrders} onOpenBot={(id) => { setTicketTab("auto"); setEditingBotId(id); }} onCancelBot={cancelBot} onPosTrade={onPosTrade}
                 onDraftLevel={(lvl, tid, side) => setBotDraftLevel(lvl ? { tokenId: tid, level: lvl, side: side || botSide } : null)}
                 realized24={realized24For(selected.sym)}
-                position={positions[selected.id]} solBalance={solBalance} valoBalance={valoWallet}
+                position={positions[selected.id]} solBalance={dispSol} valoBalance={dispValo}
                 positions={positions} tokens={tokens} bestMult={bestMultByToken[selected.id]}
                 onOpenToken={(id) => { setSel(id); setClickMode(null); }}
                 onCloseAll={() => {
@@ -10317,7 +16728,7 @@ export default function App() {
             )}
             {/* MY POSITIONS — bots + tickets, visible on every tab */}
             {selected && (
-              <MyPositionsHub tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
+              <MyPositionsHub liveMode={liveData} chainHoldings={chainHoldingsLive} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} onBurn={burnAndReclaim} tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
                 onOpenToken={(id) => { setSel(id); setClickMode(null); }} onSellPos={sellPos} onCloseTickets={closeAllTickets}
                 onSellRun={sellRun} onSellAllBots={sellAllRuns} onCancelBot={cancelBot} />
             )}
@@ -10345,8 +16756,26 @@ export default function App() {
               › COLLAPSE WALLET
             </button>
             <PortfolioPanel big
-              solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom}
+              solBalance={dispSol} valoWallet={dispValo} positions={positions} tokens={tokens}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={combinedChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger} chainHoldingsLive2={chainHoldingsLive}
+              turboState={turbo} onTurboCreate={turboCreate} onTurboUnlock={turboUnlock} onTurboLock={turboLock}
+              onTurboFund={turboFund} onTurboSweep={turboSweep} phantomOk={!!(wallet && wallet.address)}
+              turboSol={turboSolBal} turboAutoOn={liveAuto} onTurboToggleAuto={setLiveAuto} onCreatorSplit={doCreatorSplit} creatorAddr={(onchain && onchain.feeSplit && onchain.feeSplit.creator) || null}
+              valoMint={valoMint}
+              onRealSwap={() => {
+                if (!valoMint) return;
+                const amt2 = Math.min(Math.max(parseFloat(amount) || 0.01, 0.001), onchain.maxSol || 0.01);
+                quoteRealOrder({ id: "valo-live", sym: "VALO", name: "VALO", liveMint: valoMint, price: 0, hue: 265 }, "buy", amt2);
+              }}
+              onOpenChainFill={(f) => {
+                openTokenByMint(f.mint);
+                const px = f.px || ((f.sol * SOL_USD) / Math.max(f.qty, 1e-12));
+                setHistMarker({ t: f.at, side: f.side, p: px, price: px,
+                  amt: f.side === "buy" ? f.sol : f.qty, unit: f.side === "buy" ? "SOL" : f.sym,
+                  sym: f.sym, tx: f.sig, real: true });
+                setHighlightTx(f.sig);
+                if (typeof setPortfolioDrawer === "function") setPortfolioDrawer(false);
+              }}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
@@ -10441,8 +16870,10 @@ export default function App() {
                 });
                 const row = (t, secId) => {
                   const score = scoreToken(t); const rc = ratingColor(score);
-                  const base = t.candles[Math.max(0, t.candles.length - 96)].c;
-                  const ch = ((t.price - base) / base) * 100;
+                  const cs3 = t.candles || [];
+                  const b3 = cs3.length ? cs3[Math.max(0, cs3.length - 96)] : null;
+                  const base = b3 ? b3.c : (t.price || 0);
+                  const ch = base > 0 ? ((t.price - base) / base) * 100 : 0;
                   const exp = watchExp === t.id;
                   return (
                     <div key={t.id}>
@@ -10469,10 +16900,10 @@ export default function App() {
                             <span>24H Δ <b style={{ color: ch >= 0 ? T.green : T.red }}>{pct(ch)}</b></span>
                             <span>PRICE <b style={{ color: T.text }}>${fmtP(t.price)}</b></span>
                             <span>MC <b style={{ color: T.text }}>{fmt$(mcOf(t))}</b></span>
-                            <span>CIRC <b style={{ color: T.text }}>{fmtQty(1e9 * (0.35 + ((t.id * 13) % 50) / 100))}</b></span>
-                            <span>TOP 10 HOLD <b style={{ color: T.amber }}>{(16 + ((t.id * 7) % 26)).toFixed(1)}%</b></span>
+                            <span>CIRC <b style={{ color: T.text }}>{fmtQty(1e9 * (0.35 + (Math.abs(tokSeed(t) * 13) % 50) / 100))}</b></span>
+                            <span>TOP 10 HOLD <b style={{ color: T.amber }}>{(16 + (Math.abs(tokSeed(t) * 7) % 26)).toFixed(1)}%</b></span>
                             <span>MOM <b style={{ color: t.momentum > 60 ? T.green : T.dim }}>{Math.round(t.momentum)}</b></span>
-                            <span>HOLDERS <b style={{ color: T.text }}>{t.traders}</b></span>
+                            <span>HOLDERS <b style={{ color: T.text }}>{holdersOf(t, t.traders)}</b></span>
                           </div>
                           <button onClick={() => { setSel(t.id); setClickMode(null); setWatchExp(null); }}
                             style={{ width: "100%", border: `1px solid ${VALO_PURPLE}`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE, borderRadius: 9, padding: "9px", fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1.2, cursor: "pointer" }}>
@@ -10543,16 +16974,247 @@ export default function App() {
 
       {/* TRADE MARKER RECEIPT */}
       {markerInfo && (
-        <MarkerReceipt info={markerInfo} token={selected} isMobile={isMobile} onClose={() => setMarkerInfo(null)}
+        <MarkerReceipt liveMode={liveData} info={markerInfo} token={selected} isMobile={isMobile} onClose={() => setMarkerInfo(null)}
           onOpenUser={(u) => setProfileUser(u)}
           onHighlight={(tx) => setHighlightTx(tx)}
           traderPrefs={traderPrefs} setTraderPref={setTraderPref} myName={username} />
       )}
 
       {/* WHITEPAPER MODAL — interactive reader with expandable TOC sidebar */}
+      {realOrder && (
+        <div onClick={() => !["signing", "sent"].includes(realOrder.stage) && setRealOrder(null)}
+          className="valo-fixed-safe"
+          style={{ position: "fixed", inset: 0, zIndex: 160, background: "rgba(4,6,10,0.86)",
+            backdropFilter: "blur(5px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 14 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 400, background: T.panel,
+            border: `1.5px solid ${T.amber}77`, borderRadius: 14, overflow: "hidden" }}>
+            <div style={{ padding: "10px 13px", borderBottom: `1px solid ${T.border}`, background: "rgba(240,185,11,0.08)" }}>
+              <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1, color: T.amber }}>
+                ⛓ REAL ORDER
+              </div>
+              <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 3 }}>
+                This spends actual funds from your wallet. It is not paper trading.
+              </div>
+            </div>
+
+            <div style={{ padding: "12px 13px" }}>
+              {realOrder.stage === "quoting" && (
+                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.dim, textAlign: "center", padding: "18px 0" }}>
+                  finding the best route…
+                </div>
+              )}
+
+              {realOrder.stage === "review" && realOrder.quote && realOrder.quote.curve && (
+                <>
+                  <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, color: T.text, marginBottom: 8 }}>
+                    {realOrder.side === "sell" ? `Sell ${realOrder.label} on the pump.fun curve` : `Buy $${realOrder.token.sym} with ${realOrder.label} on the pump.fun curve`}
+                  </div>
+                  <div style={{ fontFamily: T.mono, fontSize: 9, color: T.dim, lineHeight: 1.7, marginBottom: 4 }}>
+                    This token hasn't migrated to a DEX yet, so the trade runs against pump.fun's bonding curve — the exact output is set by the curve at execution, protected by your slippage setting. Phantom will show the final transaction before anything moves.
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 11 }}>
+                    <button onClick={() => setRealOrder(null)}
+                      style={{ flex: 1, border: `1.5px solid ${T.red}66`, borderRadius: 11, padding: "13px 6px",
+                        background: "rgba(234,57,67,0.08)", color: T.red, fontFamily: T.mono, fontSize: 11.5,
+                        fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>✕ CANCEL</button>
+                    <button onClick={submitRealOrder}
+                      style={{ flex: 1.6, border: "none", borderRadius: 11, padding: "13px 6px",
+                        background: realOrder.side === "sell" ? T.red : T.green, color: realOrder.side === "sell" ? "#170808" : "#07130d",
+                        fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>
+                      ✓ CONFIRM {realOrder.side === "sell" ? "SELL" : "BUY"}
+                    </button>
+                  </div>
+                </>
+              )}
+              {realOrder.stage === "review" && realOrder.quote && !realOrder.quote.curve && (() => {
+                const q = realOrder.quote;
+                const oDec = Number.isInteger(q.outDecimals) ? q.outDecimals : 6;
+                const oUnit = Math.pow(10, oDec);
+                const outUi = (+q.outAmount || 0) / oUnit;
+                const worst = (+q.otherAmountThreshold || 0) / oUnit;
+                const impact = q.priceImpactPct;
+                const hot = impact != null && impact > 3;
+                return (
+                  <>
+                    <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, color: T.text, marginBottom: 8 }}>
+                      {realOrder.side === "sell"
+                        ? `Sell ${realOrder.label} for SOL`
+                        : `Buy $${realOrder.token.sym} with ${realOrder.label}`}
+                    </div>
+                    {[["you receive (est.)",
+                        realOrder.side === "sell" ? `${((+q.outAmount || 0) / 1e9).toFixed(5)} SOL` : `${fmtQty(outUi)} ${realOrder.token.sym}`, T.green],
+                      ["worst case",
+                        realOrder.side === "sell" ? `${((+q.otherAmountThreshold || 0) / 1e9).toFixed(5)} SOL` : `${fmtQty(worst)} ${realOrder.token.sym}`, T.dim],
+                      ["price impact", impact != null ? `${impact}%` : "—", hot ? T.red : T.dim],
+                      ["slippage limit", `${(q.slippageBps / 100).toFixed(2)}%`, T.dim],
+                      ["route", q.routeLabels && q.routeLabels.length ? q.routeLabels.join(" → ") : `${q.routeHops} hop(s)`, T.faint]]
+                      .map(([k, v, c]) => (
+                        <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 10,
+                          fontFamily: T.mono, fontSize: 9.5, padding: "4px 0", borderTop: `1px solid ${T.border}` }}>
+                          <span style={{ color: T.faint }}>{k}</span>
+                          <span style={{ color: c, fontWeight: 800, textAlign: "right" }}>{v}</span>
+                        </div>
+                      ))}
+                    {hot && (
+                      <div style={{ marginTop: 8, padding: "7px 9px", borderRadius: 8,
+                        border: `1px solid ${T.red}66`, background: "rgba(234,57,67,0.1)",
+                        fontFamily: T.mono, fontSize: 8.5, color: T.red, lineHeight: 1.5 }}>
+                        ⚠ Price impact above 3% — this pool is thin and you will lose value on the fill.
+                      </div>
+                    )}
+                    <div style={{ display: "flex", gap: 8, marginTop: 11 }}>
+                      <button onClick={() => setRealOrder(null)}
+                        style={{ flex: 1, border: `1.5px solid ${T.red}66`, borderRadius: 11, padding: "13px 6px",
+                          background: "rgba(234,57,67,0.08)", color: T.red, fontFamily: T.mono, fontSize: 11.5,
+                          fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>
+                        ✕ CANCEL
+                      </button>
+                      <button onClick={submitRealOrder}
+                        style={{ flex: 1.6, border: "none", borderRadius: 11, padding: "13px 6px",
+                          background: realOrder.side === "sell" ? T.red : T.green, color: realOrder.side === "sell" ? "#170808" : "#07130d",
+                          fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, letterSpacing: 1, cursor: "pointer",
+                          boxShadow: realOrder.side === "sell" ? "0 0 18px rgba(234,57,67,0.4)" : "0 0 18px rgba(22,199,132,0.4)" }}>
+                        ✓ CONFIRM {realOrder.side === "sell" ? "SELL" : "BUY"}
+                      </button>
+                    </div>
+                    <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 8, lineHeight: 1.5 }}>
+                      Phantom does one final key check after this — that step belongs to your wallet, not to any website. Tip: Phantom's settings let you enable auto-confirm for trusted sites if you want true one-tap orders.
+                    </div>
+                  </>
+                );
+              })()}
+
+              {realOrder.stage === "signing" && (
+                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.amber, textAlign: "center", padding: "18px 0", lineHeight: 1.7 }}>
+                  order confirmed — Phantom is doing its key check…<br />
+                  <span style={{ fontSize: 8.5, color: T.faint }}>
+                    approve it there (or enable auto-confirm for VALO in Phantom's settings to skip this step next time)
+                  </span>
+                </div>
+              )}
+
+              {realOrder.stage === "sent" && (
+                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.amber, textAlign: "center", padding: "18px 0", lineHeight: 1.7 }}>
+                  submitted — waiting for the chain to confirm…<br />
+                  <span style={{ fontSize: 8.5, color: T.faint }}>
+                    don't close this. It usually lands in a few seconds.
+                  </span>
+                  {realOrder.sig && (
+                    <div>
+                      <a href={`https://solscan.io/tx/${realOrder.sig}`} target="_blank" rel="noopener noreferrer"
+                        style={{ display: "inline-block", marginTop: 8, fontFamily: T.mono, fontSize: 9,
+                          color: T.amber, textDecoration: "underline" }}>follow it on Solscan ↗</a>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {realOrder.stage === "done" && (
+                <div style={{ textAlign: "center", padding: "10px 0" }}>
+                  <div style={{ fontSize: 26 }}>✓</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: T.green, marginTop: 4 }}>
+                    {realOrder.confirmed ? "CONFIRMED" : "SENT · STILL CONFIRMING"}
+                  </div>
+                  {realOrder.sig && (
+                    <a href={`https://solscan.io/tx/${realOrder.sig}`} target="_blank" rel="noopener noreferrer"
+                      style={{ display: "inline-block", marginTop: 8, fontFamily: T.mono, fontSize: 9,
+                        color: T.amber, textDecoration: "underline" }}>view on Solscan ↗</a>
+                  )}
+                  <button onClick={() => { setRealOrder(null); if (tradeAddr) loadWalletChain(tradeAddr); }}
+                    style={{ width: "100%", marginTop: 12, border: `1px solid ${T.border2}`, borderRadius: 10,
+                      padding: "10px", background: "transparent", color: T.dim, fontFamily: T.mono, fontSize: 10, cursor: "pointer" }}>
+                    Done
+                  </button>
+                </div>
+              )}
+
+              {realOrder.stage === "error" && (
+                <div style={{ padding: "6px 0" }}>
+                  <div style={{ fontFamily: T.mono, fontSize: 10, color: T.red, lineHeight: 1.6 }}>
+                    Nothing was sent.<br />
+                    <span style={{ color: T.text, fontSize: 10.5 }}>{humanSwapError(realOrder.msg)}</span>
+                    {humanSwapError(realOrder.msg) !== realOrder.msg && (
+                      <><br /><span style={{ color: T.faint, fontSize: 8 }}>{realOrder.msg}</span></>
+                    )}
+                    {realOrder.errorName && <><br /><span style={{ color: T.amber, fontSize: 9 }}>program says: {realOrder.errorName}</span></>}
+                    {Array.isArray(realOrder.logs) && realOrder.logs.length > 0 && (
+                      <details style={{ marginTop: 8 }}>
+                        <summary style={{ cursor: "pointer", fontFamily: T.mono, fontSize: 8.5, color: T.dim }}>chain logs (tap to copy for support)</summary>
+                        <div onClick={() => { try { navigator.clipboard.writeText(realOrder.logs.join("\n")); } catch (e) {} }}
+                          style={{ marginTop: 5, maxHeight: 160, overflowY: "auto", background: "#0a0d14",
+                            border: `1px solid ${T.border}`, borderRadius: 7, padding: 8, cursor: "copy",
+                            fontFamily: T.mono, fontSize: 7.5, color: T.faint, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                          {realOrder.logs.join("\n")}
+                        </div>
+                      </details>
+                    )}
+                    {/* 🎚 fix it right here — raise slippage without hunting for a setting */}
+                    {/slippage|0x1789|0x1771|moved/i.test(String(realOrder.msg || "")) && (
+                      <div style={{ marginTop: 10, borderTop: `1px solid ${T.border}`, paddingTop: 9 }}>
+                        <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 5 }}>
+                          SLIPPAGE · now {(slipBps / 100).toFixed(1)}%
+                        </div>
+                        <div style={{ display: "flex", gap: 5 }}>
+                          {[500, 1000, 1500, 2000].map((b) => (
+                            <button key={b} onClick={() => setSlipBps(b)}
+                              style={{ flex: 1, padding: "6px 0", borderRadius: 7, cursor: "pointer",
+                                border: `1px solid ${slipBps === b ? T.amber : T.border2}`,
+                                background: slipBps === b ? "rgba(240,185,11,0.14)" : "transparent",
+                                color: slipBps === b ? T.amber : T.dim, fontFamily: T.mono, fontSize: 10, fontWeight: 900 }}>
+                              {b / 100}%
+                            </button>
+                          ))}
+                        </div>
+                        <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, marginTop: 5, lineHeight: 1.5 }}>
+                          Higher slippage lands the trade but accepts a worse price. Fresh launches often need 10-15%.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => setRealOrder(null)}
+                    style={{ width: "100%", marginTop: 10, border: `1px solid ${T.border2}`, borderRadius: 10,
+                      padding: "10px", background: "transparent", color: T.dim, fontFamily: T.mono, fontSize: 10, cursor: "pointer" }}>
+                    Close
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {actAllOpen && (
+        <ActivityLedger acts={myActivity} tokens={tokens} isMobile={isMobile}
+          onClose={() => setActAllOpen(false)}
+          onJump={(tokenId, tx) => {
+            // land on that chart with the marker lit, but don't open its receipt
+            setActAllOpen(false);
+            openAnyToken(tokenId);
+            if (tx) { setHighlightTx(tx); setTimeout(() => setHighlightTx(null), 6000); }
+          }} />
+      )}
       {wpOpen && <WhitepaperModal onClose={() => setWpOpen(false)} isMobile={isMobile} />}
-      {calloutHubOpen && <CalloutHubModal onClose={() => setCalloutHubOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
+      {calloutHubOpen && <CalloutHubModal onMyRank={reportMyRank} onClose={closeAllPages} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
         onOpenUser={(u) => { setCalloutHubOpen(false); setProfileUser(u); }} />}
+      {isMobile && quickArmOn && armPop && (
+        <button data-armpop="1" onClick={() => { const fn = quickArmRef.current; fn && fn(); setArmPop(null); }}
+          title="Arm this strategy at the line you just set"
+          style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: 96, zIndex: 137,
+            border: "none", borderRadius: 999, padding: "10px 20px", fontFamily: T.mono, fontWeight: 900, letterSpacing: 1.2,
+            background: T.blue, color: "#07101d", cursor: "pointer",
+            boxShadow: `0 6px 24px rgba(46,112,204,0.6), 0 0 14px ${T.blue}77`,
+            animation: "coPop .18s ease", textAlign: "center", lineHeight: 1.3, maxWidth: "86vw" }}>
+          {(() => {
+            const amtN = parseFloat(amount) || 0;
+            const lvl = armPop.level || (selected && selected.price) || 0;
+            return (
+              <>
+                <span style={{ fontSize: 12 }}>⚡ ARM {armPop.side === "sell" ? "EXIT" : "BUY-IN"} @ ${fmtP(lvl)}</span>
+                <span style={{ display: "block", fontSize: 8.5, fontWeight: 800, opacity: 0.85 }}>{amtN} {pay} · tap to arm · line stays until hit</span>
+              </>
+            );
+          })()}
+        </button>
+      )}
       {!isMobile && quickArmOn && armPop && (
         <button data-armpop="1" onClick={() => { const fn = quickArmRef.current; fn && fn(); setArmPop(null); }}
           title="Arm this strategy at the line you just set"
@@ -10560,24 +17222,92 @@ export default function App() {
             border: "none", borderRadius: 9, padding: "7px 14px", fontFamily: T.mono, fontWeight: 900, letterSpacing: 1.2,
             background: T.blue, color: "#07101d", cursor: "pointer", boxShadow: `0 4px 18px rgba(46,112,204,0.55), 0 0 10px ${T.blue}66`,
             animation: "coPop .18s ease", textAlign: "left", lineHeight: 1.25 }}>
-          <span style={{ fontSize: 11.5 }}>⚡ ARM · {(parseFloat(amount) || 0).toFixed(1)} {pay}</span>
-          <span style={{ display: "block", fontSize: 8, fontWeight: 800, opacity: 0.8 }}>
-            ≈ ${((parseFloat(amount) || 0) * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })} buy-in
-          </span>
+          {(() => {
+            const amtN = parseFloat(amount) || 0;
+            const unitUsd = pay === "SOL" ? SOL_USD : 0.0125;
+            const inUsd = amtN * unitUsd;
+            const lvl = armPop.level || (selected && selected.price) || 0;
+            const entry = (selected && positions[selected.id] && positions[selected.id].entry)
+              || (selected && selected.price) || 0;
+            const isExit = armPop.side === "sell" || (entry > 0 && lvl > entry);
+            const tokQty = entry > 0 ? inUsd / entry : 0;
+            const outUsd = tokQty * lvl;                    // what the line returns
+            const pnl = outUsd - inUsd;
+            const mult = entry > 0 ? lvl / entry : 1;
+            return (
+              <>
+                <span style={{ fontSize: 11.5 }}>⚡ ARM · {amtN.toFixed(1)} {pay}</span>
+                <span style={{ display: "block", fontSize: 8, fontWeight: 800, opacity: 0.85 }}>
+                  ≈ ${inUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })} in
+                  {isExit && outUsd > 0 && (
+                    <> · exit ${outUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}</>
+                  )}
+                </span>
+                {isExit && outUsd > 0 && (
+                  <span style={{ display: "block", fontSize: 9, fontWeight: 900,
+                    color: pnl >= 0 ? "#0b3d24" : "#3d0b0b" }}>
+                    {pnl >= 0 ? "▲ +" : "▼ −"}${Math.abs(pnl).toLocaleString(undefined, { maximumFractionDigits: 0 })} · ×{mult.toFixed(2)}
+                  </span>
+                )}
+              </>
+            );
+          })()}
         </button>
       )}
-      {liveData && (
-        <div style={{ position: "fixed", bottom: 8, left: "50%", transform: "translateX(-50%)", zIndex: 54, pointerEvents: "none",
-          background: "rgba(15,19,28,0.85)", border: `1px solid ${T.amber}55`, borderRadius: 999, padding: "4px 14px",
-          fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, letterSpacing: 1.5, color: T.amber,
-          boxShadow: "0 6px 20px rgba(0,0,0,0.5)" }}>
-          📄 PAPER TRADING — LIVE PRICES · NO REAL FUNDS
+      {installOpen && !standalone && (
+        <>
+          <div onClick={() => setInstallOpen(false)}
+            style={{ position: "fixed", inset: 0, zIndex: 204, background: "rgba(4,6,10,0.72)", backdropFilter: "blur(4px)" }} />
+          <div style={{ position: "fixed", left: 10, right: 10, bottom: 14, zIndex: 205,
+            background: T.panel, border: `1px solid ${VALO_PURPLE}66`, borderRadius: 16, padding: "16px 16px 14px",
+            boxShadow: "0 20px 60px rgba(0,0,0,0.7)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
+              <span style={{ width: 26, height: 26, borderRadius: 7, transform: "rotate(45deg)",
+                background: "linear-gradient(135deg, #a07ff2, #5b93ec)", boxShadow: `0 0 12px ${VALO_PURPLE}` }} />
+              <span style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 900, letterSpacing: 1, color: T.text, marginLeft: 4 }}>VALO FULLSCREEN</span>
+              <button onClick={() => setInstallOpen(false)} style={{ marginLeft: "auto", ...chip(false), padding: "3px 9px", fontSize: 11 }}>✕</button>
+            </div>
+            <div style={{ fontFamily: T.mono, fontSize: 10, lineHeight: 1.65, color: T.dim, marginBottom: 12 }}>
+              {iOS
+                ? "Safari won't hide its bars for a web page — Apple only allows that for installed apps. Add VALO to your home screen and it opens with no address bar and no bottom toolbar at all."
+                : "Install VALO to run it without any browser bars — it opens straight into the terminal."}
+            </div>
+            {iOS ? (
+              <div style={{ display: "grid", gap: 7 }}>
+                {[["1", "Tap the Share button ⬆ in Safari's bottom bar"],
+                  ["2", "Scroll down and pick “Add to Home Screen”"],
+                  ["3", "Open VALO from the new icon — true fullscreen"]].map(([n, txt]) => (
+                  <div key={n} style={{ display: "flex", alignItems: "center", gap: 9,
+                    border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "9px 11px" }}>
+                    <span style={{ width: 19, height: 19, borderRadius: "50%", background: VALO_PURPLE, color: "#0a0713",
+                      display: "grid", placeItems: "center", fontFamily: T.mono, fontSize: 10, fontWeight: 900, flex: "0 0 auto" }}>{n}</span>
+                    <span style={{ fontFamily: T.mono, fontSize: 10, color: T.text }}>{txt}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <button onClick={doInstall}
+                style={{ width: "100%", border: "none", background: VALO_PURPLE, color: "#0a0713", borderRadius: 11,
+                  padding: "12px", fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>
+                ⬇ INSTALL VALO
+              </button>
+            )}
+          </div>
+        </>
+      )}
+      {fsHint && (
+        <div onClick={() => setFsHint("")}
+          style={{ position: "fixed", left: 12, right: 12, bottom: 74, zIndex: 205, cursor: "pointer",
+            background: "rgba(15,19,28,0.96)", border: `1px solid ${VALO_PURPLE}66`, borderRadius: 12,
+            padding: "11px 13px", fontFamily: T.mono, fontSize: 10, lineHeight: 1.5, color: T.text,
+            boxShadow: "0 12px 40px rgba(0,0,0,0.65)" }}>
+          ⛶ {fsHint}
         </div>
       )}
       {/* rail tabs — one row so they can never overlap each other, parked
           clear of the FULLSCREEN button that owns the corner */}
       {!isMobile && (
-        <div style={{ position: "fixed", top: 0, right: 172, zIndex: 56, display: "flex", alignItems: "flex-start", gap: 8 }}>
+        <div className="valo-fixed-safe" style={{ position: "fixed", top: 0, right: 172, zIndex: 56, display: "flex", alignItems: "flex-start", gap: 8 }}>
       {sb && !isMobile && (
         <button onClick={() => setCloudOpen(true)}
           title={cloudUser ? `Signed in as ${cloudUser.email} — portfolio syncs to the cloud` : "Sign in — your paper portfolio, watchlist and bots follow you across devices"}
@@ -10600,14 +17330,59 @@ export default function App() {
             <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, letterSpacing: 1.5, color: VALO_PURPLE, marginBottom: 4 }}>☁ VALO ACCOUNT</div>
             {cloudUser ? (
               <>
-                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.text, marginBottom: 4 }}>Signed in as <b>{cloudUser.email}</b></div>
+                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.text, marginBottom: 4 }}>Signed in as <b>{cloudUser.email
+                  || (cloudUser.user_metadata && cloudUser.user_metadata.custom_claims && cloudUser.user_metadata.custom_claims.address
+                      ? `👻 ${String(cloudUser.user_metadata.custom_claims.address).slice(0, 4)}…${String(cloudUser.user_metadata.custom_claims.address).slice(-4)}`
+                      : "wallet account")}</b></div>
                 <div style={{ fontFamily: T.mono, fontSize: 8.5, color: cloudSynced ? T.green : T.amber, marginBottom: 12 }}>{cloudSynced ? "● portfolio synced to the cloud" : "● syncing…"}</div>
                 <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, lineHeight: 1.6, marginBottom: 12 }}>Wallet, positions, activity, watchlist and live bots follow this account on any device.</div>
-                <button onClick={async () => { try { await sb.auth.signOut(); } catch (e) {} setCloudOpen(false); }}
+                <button onClick={async () => {
+                    try { await sb.auth.signOut(); } catch (e) {}
+                    // 🔗 one identity, one exit: the Phantom trading link
+                    // disconnects with the account
+                    try { await disconnectWallet(); } catch (e) {}
+                    setCloudOpen(false);
+                  }}
                   style={{ width: "100%", border: `1px solid ${T.red}66`, background: "rgba(234,57,67,0.1)", color: T.red, borderRadius: 9, padding: "9px", fontFamily: T.mono, fontSize: 10, fontWeight: 900, cursor: "pointer" }}>⎋ SIGN OUT</button>
               </>
             ) : (
               <>
+                <button onClick={async () => {
+                    try {
+                      setCloudMsg("");
+                      if (!sb) { setCloudMsg("cloud not configured"); return; }
+                      if (typeof sb.auth.signInWithWeb3 !== "function") {
+                        setCloudMsg("wallet sign-in needs a newer @supabase/supabase-js — using email for now");
+                        return;
+                      }
+                      const ph = typeof window !== "undefined" && (window.phantom?.solana || window.solana);
+                      if (!ph) { setCloudMsg("Phantom not detected — install it or use email below"); return; }
+                      const { error } = await sb.auth.signInWithWeb3({
+                        chain: "solana", wallet: ph,
+                        statement: "Sign in to VALO. This signature only proves wallet ownership. No transaction, no fees.",
+                      });
+                      if (error) setCloudMsg(String(error.message || error).slice(0, 90));
+                      else {
+                        setCloudOpen(false);
+                        // 🔗 same wallet, both doors: the trading-side Phantom
+                        // connects off the session you just approved
+                        try { connectPhantom(); } catch (e) {}
+                      }
+                    } catch (e) { setCloudMsg(String(e && e.message || e).slice(0, 90)); }
+                  }}
+                  style={{ width: "100%", border: `1px solid ${VALO_PURPLE}88`, background: "rgba(125,92,240,0.16)", color: VALO_PURPLE,
+                    borderRadius: 9, padding: "11px", fontFamily: T.mono, fontSize: 11, fontWeight: 900, cursor: "pointer",
+                    letterSpacing: 0.5, marginBottom: 10, boxShadow: `0 0 14px ${VALO_PURPLE}33` }}>
+                  👻 SIGN IN WITH YOUR WALLET
+                </button>
+                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, textAlign: "center", marginBottom: 10 }}>
+                  one signature · no transaction · no email needed
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                  <div style={{ flex: 1, height: 1, background: T.border }} />
+                  <span style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint }}>or use email</span>
+                  <div style={{ flex: 1, height: 1, background: T.border }} />
+                </div>
                 <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, lineHeight: 1.6, marginBottom: 10 }}>
                   Enter your email — you'll get a one-tap magic link. Your paper wallet, positions, watchlist and bots then sync across devices.
                 </div>
@@ -10632,14 +17407,13 @@ export default function App() {
         </>
       )}
       {!isMobile && (
-        <button onClick={() => setLiveData((v) => !v)}
-          title={liveData ? "LIVE DATA ON — real pump.fun pairs via DexScreener; wallet & fills stay simulated. Click to return to the demo feed." : "Pull REAL Solana pump tokens (DexScreener) into the terminal — paper trading on live prices"}
-          style={{ display: "flex", alignItems: "center", gap: 6, width: 152, height: 26, boxSizing: "border-box", justifyContent: "center",  flex: "0 0 auto",
-            background: liveData ? "rgba(22,199,132,0.14)" : "rgba(15,19,28,0.72)", border: `1px solid ${liveData ? T.green : T.border}`, borderTop: "none", borderRadius: "0 0 9px 9px", padding: "0 8px", cursor: "pointer",
-            boxShadow: liveData ? "0 0 10px rgba(22,199,132,0.35)" : "none" }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: liveData ? T.green : "#39414f", boxShadow: liveData ? `0 0 6px ${T.green}` : "none" }} />
-          <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: liveData ? T.green : "rgba(138,148,168,0.7)", fontWeight: 800 }}>{liveData ? "LIVE DATA · PAPER" : "LIVE DATA"}</span>
-        </button>
+        <div title="Every price, chart and balance here is real chain data"
+          style={{ display: "flex", alignItems: "center", gap: 6, width: 152, height: 26, boxSizing: "border-box", justifyContent: "center", flex: "0 0 auto",
+            background: "rgba(22,199,132,0.14)", border: `1px solid ${T.green}`, borderTop: "none", borderRadius: "0 0 9px 9px", padding: "0 8px",
+            boxShadow: "0 0 10px rgba(22,199,132,0.35)" }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.green, boxShadow: `0 0 6px ${T.green}` }} />
+          <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: T.green, fontWeight: 800 }}>⛓ LIVE CHAIN DATA</span>
+        </div>
       )}
         </div>
       )}
@@ -10656,7 +17430,7 @@ export default function App() {
         </button>
       )}
       {ecoFull && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 102, background: T.bg, display: "flex", flexDirection: "column",
+        <div className="valo-fixed-safe" style={{ position: "fixed", inset: 0, zIndex: 102, background: T.bg, display: "flex", flexDirection: "column",
           opacity: ecoDim ? 0.06 : 1, pointerEvents: ecoDim ? "none" : "auto", transition: "opacity .22s ease" }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "max(10px, env(safe-area-inset-top)) 10px 8px", borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
             <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.04)", border: `1px solid ${VALO_PURPLE}`, borderRadius: 9, padding: "8px 10px" }}>
@@ -10669,15 +17443,17 @@ export default function App() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "8px 10px 2px", padding: "7px 13px", borderRadius: 20,
             border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)", fontFamily: T.mono, flexShrink: 0 }}>
-            <span style={{ fontSize: 8, color: T.faint }}>💼 <b style={{ color: T.text, fontSize: 10.5 }}>${(solBalance * SOL_USD + valoWallet * 0.0125).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b></span>
+            <span style={{ fontSize: 8, color: liveData ? T.amber : T.faint }}>{liveData ? "⚡" : "💼"} <b style={{ color: T.text, fontSize: 10.5 }}>${(liveData && combinedChain
+              ? ((combinedChain.solTrading != null ? combinedChain.solTrading : combinedChain.sol) || 0) * SOL_USD + visHolds(combinedChain.holdings).filter((h) => h.src !== "phantom").reduce((s2, h) => s2 + (h.usd || 0), 0)
+              : solBalance * SOL_USD + valoWallet * 0.0125).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b></span>
             <span style={{ fontSize: 8, color: T.faint }}>🤖 <b style={{ color: botUnrealized >= 0 ? T.green : T.red, fontSize: 10.5 }}>{botUnrealized >= 0 ? "+" : "−"}${Math.abs(botUnrealized).toFixed(2)}</b></span>
             <button onClick={() => setPosDrawer(true)}
               style={{ marginLeft: "auto", border: `1px solid ${VALO_PURPLE}`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE,
                 borderRadius: 14, padding: "4px 12px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, cursor: "pointer" }}>📊 POSITIONS</button>
           </div>
           <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-            <TokenEcosystem tokens={tokens} q={ecoQ} isMobile maxH="100%" tdProps={tdProps}
-              onPick={(id) => { setSel(id); setClickMode(null); setEcoFull(false); setEcoQ(""); }}
+            <TokenEcosystem tokens={[...tokens, ...moreToks, ...mktHits]} q={ecoQ} isMobile maxH="100%" tdProps={tdProps}
+              onPick={(id, tokObj) => { setEcoFull(false); setEcoQ(""); openAnyToken(id, tokObj); }}
               onWatchAdd={(id) => { watchAdd(id, null); popPlus(); }}
               onOpenUser={(u) => setProfileUser(u)} />
           </div>
@@ -10697,10 +17473,17 @@ export default function App() {
         const botRealAll = botRuns.reduce((s, r) => s + r.exits.reduce((a, e) => a + e.pnlUsd, 0), 0);
         const tickReal = realizedPnl - botRealAll;
         const showBots = posTab !== "tickets", showTix = posTab !== "bots";
-        const unreal = (showTix ? tix.reduce((s, x) => s + x.pnl, 0) : 0) + (showBots ? runsL.reduce((s, x) => s + x.pnl, 0) : 0);
-        const real = (showTix ? tickReal : 0) + (showBots ? botRealAll : 0);
+        const drawerHolds = liveData ? chainHoldingsLive.filter((h) => !h.spam && !h.dust) : [];
+        const chainUnreal = liveData ? drawerHolds.reduce((s, h) => s + (h.pnlUsd || 0), 0) : 0;
+        const unreal = liveData ? chainUnreal + (showBots ? runsL.reduce((s, x) => s + x.pnl, 0) : 0)
+          : (showTix ? tix.reduce((s, x) => s + x.pnl, 0) : 0) + (showBots ? runsL.reduce((s, x) => s + x.pnl, 0) : 0);
+        const real = liveData ? (chainLedger.realizedSol || 0) * SOL_USD : (showTix ? tickReal : 0) + (showBots ? botRealAll : 0);
         const scoped = unreal;
-        const walletUsd = solBalance * SOL_USD + valoWallet * 0.0125;
+        // ⚡ live: the wallet figure IS the turbo wallet — SOL + visible tokens
+        const walletUsd = liveData && combinedChain
+          ? ((combinedChain.solTrading != null ? combinedChain.solTrading : combinedChain.sol) || 0) * SOL_USD
+            + visHolds(combinedChain.holdings).filter((h) => h.src !== "phantom").reduce((s, h) => s + (h.usd || 0), 0)
+          : solBalance * SOL_USD + valoWallet * 0.0125;
         const walletTxt = posUnit === "sol" ? `${(walletUsd / SOL_USD).toFixed(2)} SOL` : posUnit === "valo" ? `${fmtQty(walletUsd / 0.0125)} $VALO` : `$${walletUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
         const sellScope = () => { if (showTix) closeAllTickets(); if (showBots) runsL.forEach((x) => sellRun(x.r.id)); };
         const pctChips = (row, isBot) => (
@@ -10730,7 +17513,7 @@ export default function App() {
         return (
           <>
             <div onClick={() => setPosDrawer(false)} style={{ position: "fixed", inset: 0, zIndex: 135, background: "rgba(4,6,10,0.55)" }} />
-            <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 136, width: "min(92vw, 380px)", background: "rgba(12,15,22,0.98)",
+            <div className="valo-fixed-safe" style={{ position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 136, width: "min(92vw, 380px)", background: "rgba(12,15,22,0.98)",
               boxShadow: "-12px 0 40px rgba(0,0,0,0.6)", overflowY: "auto", padding: "max(10px, env(safe-area-inset-top)) 12px 16px",
               animation: "posSlide .28s cubic-bezier(.22,.8,.3,1)" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
@@ -10740,7 +17523,7 @@ export default function App() {
               <div onClick={() => setPosUnit((u) => (u === "usd" ? "sol" : u === "sol" ? "valo" : "usd"))}
                 title="Tap: $ → SOL → $VALO"
                 style={{ border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.02)", borderRadius: 11, padding: "9px 12px", marginBottom: 8, cursor: "pointer" }}>
-                <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.2, color: T.faint }}>WALLET · tap to flip units</div>
+                <div style={{ fontFamily: T.mono, fontSize: 7.5, letterSpacing: 1.2, color: liveData ? T.amber : T.faint }}>{liveData ? "⚡ TURBO WALLET · LIVE" : "WALLET"} · tap to flip units</div>
                 <div style={{ fontFamily: T.mono, fontSize: 19, fontWeight: 900, color: T.text }}>{walletTxt}</div>
                 <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: scoped >= 0 ? T.green : T.red }}>
                   OPEN PNL {scoped >= 0 ? "+" : "−"}${Math.abs(scoped).toFixed(2)}
@@ -10756,6 +17539,49 @@ export default function App() {
                   <button key={k} onClick={() => setPosTab(k)} style={{ ...chip(posTab === k), flex: 1, textAlign: "center", padding: "7px 0", fontSize: 9, fontWeight: 800 }}>{l}</button>
                 ))}
               </div>
+              {drawerHolds.length > 0 && posTab !== "bots" && (
+                <>
+                  <button onClick={() => { realSellAllHoldings(drawerHolds); setPosDrawer(false); }}
+                    style={{ width: "100%", boxSizing: "border-box", border: "none", borderRadius: 9, padding: "10px", margin: "8px 0",
+                      fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
+                      background: T.red, color: "#170808", cursor: "pointer" }}>
+                    ⛓ SELL ALL · {drawerHolds.filter((x) => !x.spam).length} · one approval
+                  </button>
+                  {drawerHolds.map((h) => (
+                    <div key={h.mint} style={{ display: "flex", alignItems: "center", gap: 8, background: "#0c0f16",
+                      border: `1px solid ${T.amber}33`, borderLeft: `2px solid ${T.amber}`, borderRadius: 9, padding: "9px", marginBottom: 5 }}>
+                      <div onClick={() => { openTokenByMint(h.mint); setPosDrawer(false); }} style={{ minWidth: 0, flex: 1, cursor: "pointer" }}>
+                        <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: T.text }}>
+                          ${h.sym || h.name || h.mint.slice(0, 5)} <span style={{ color: T.amber, fontSize: 8 }}>⛓</span>
+                        </div>
+                        <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>
+                          {fmtQty(h.qty)} · ${((h.livePrice || h.price || 0) * h.qty).toFixed(2)}
+                          {h.pnlUsd != null && (
+                            <b style={{ color: h.pnlUsd >= 0 ? T.green : T.red, marginLeft: 6 }}>
+                              {h.pnlUsd >= 0 ? "▲+" : "▼−"}${Math.abs(h.pnlUsd).toFixed(2)}
+                            </b>
+                          )}
+                          {h.netPnlUsd != null && Math.abs(h.netPnlUsd - (h.pnlUsd || 0)) > 0.005 && (
+                            <span title="Quoted from the real pool route — impact + fees included. This is what a sell would actually net."
+                              style={{ display: "block", fontFamily: T.mono, fontSize: 7.5, fontWeight: 800,
+                                color: h.netPnlUsd >= 0 ? T.green : T.amber, opacity: 0.9, marginTop: 1 }}>
+                              🫙 pool pays ≈ ${(h.netUsd || 0).toFixed(2)} → net {h.netPnlUsd >= 0 ? "+" : "−"}${Math.abs(h.netPnlUsd).toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <button onClick={() => burnAndReclaim(h)} title="Burn & reclaim rent"
+                        style={{ border: `1px solid ${T.border2}`, background: "transparent", color: T.faint,
+                          borderRadius: 8, padding: "7px 9px", cursor: "pointer", fontFamily: T.mono, fontSize: 11 }}>🗑</button>
+                      <button onClick={() => { realSellHolding(h); setPosDrawer(false); }}
+                        style={{ border: `1px solid ${T.red}`, background: "rgba(234,57,67,0.12)", color: T.red,
+                          borderRadius: 8, padding: "7px 13px", cursor: "pointer", fontFamily: T.mono, fontSize: 10, fontWeight: 900 }}>
+                        SELL
+                      </button>
+                    </div>
+                  ))}
+                </>
+              )}
               {(showTix ? tix.length : 0) + (showBots ? runsL.length : 0) > 0 && (
                 <button onClick={() => confirmSell("sellscope", sellScope)}
                   style={{ width: "100%", border: "none", borderRadius: 10, padding: "10px", marginBottom: 9, fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
@@ -10965,17 +17791,22 @@ export default function App() {
         </div>
       )}
       {valoStatsOpen && <ValoStatsModal onClose={() => setValoStatsOpen(false)} isMobile={isMobile}
-        valoUsd={valoUsdPrice} tvl={gTvl} burned={burned} valoWallet={valoWallet} />}
-      {burnOpen && <BurnModal valoUsd={valoUsdPrice} onClose={() => setBurnOpen(false)} isMobile={isMobile} myBurned={myBurned} siteBurned={burned} />}
-      {ranksOpen && <RanksModal onClose={() => setRanksOpen(null)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
+        valoUsd={valoUsdPrice} tvl={gTvl} burned={burned} valoWallet={valoWallet}
+        valoMint={valoMint} liveData={liveData} />}
+      {tourOn && <ValoTour isMobile={isMobile} onDone={endTour}
+        walletReady={!!(wallet && wallet.address)} turboReady={!!turboActive} />}
+      {burnOpen && <BurnModal valoUsd={valoLive && valoLive.price > 0 ? valoLive.price : valoUsdPrice}
+        valoLive={valoLive} valoMint={valoMint}
+        onClose={() => setBurnOpen(false)} isMobile={isMobile} myBurned={myBurned} siteBurned={burned} />}
+      {ranksOpen && <RanksModal onMyRank={reportMyRank} onClose={closeAllPages} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
         myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)}
         focusUser={ranksOpen.focus || null} onOpenUser={(u) => { setRanksOpen(null); setProfileUser(u); }} />}
-      {lbOpen && <LeaderboardModal onClose={() => setLbOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
+      {lbOpen && <LeaderboardModal onMyRank={reportMyRank} onClose={closeAllPages} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username}
         onOpenUser={(u) => setProfileUser(u)} />}
       {tierListOpen && <TierListModal onClose={() => setTierListOpen(false)} isMobile={isMobile}
         myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)} />}
       {myCalloutsOpen && <MyCalloutsModal onClose={() => setMyCalloutsOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username} onOpenToken={navigateToToken} />}
-      {notifOpen && <NotificationsModal onClose={() => setNotifOpen(false)} isMobile={isMobile} notifs={notifs} friendReqs={friendReqs}
+      {notifOpen && <NotificationsModal onClose={closeAllPages} isMobile={isMobile} notifs={notifs} friendReqs={friendReqs}
         onCloudReq={(n, accept) => {
           cloudFriendAnswer(n.reqId, accept);
           if (accept) setFriendsList((F) => (F.includes(n.user) ? F : [...F, n.user]));
@@ -10992,9 +17823,10 @@ export default function App() {
       {followListOpen && <FollowListModal kind={followListOpen} list={followListOpen === "followers" ? followersList : followingList}
         onClose={() => setFollowListOpen(null)} isMobile={isMobile}
         onOpenUser={(u) => { setFollowListOpen(null); setProfileUser(u); }} />}
-      {profileUser && <UserProfileModal name={profileUser} onClose={() => { setProfileUser(null); setProfileCloud(null); }} isMobile={isMobile} tokens={tokens}
+      {profileUser && <UserProfileModal name={profileUser} onClose={closeAllPages} isMobile={isMobile} tokens={tokens}
         cloudProfile={profileCloud}
         onOpenFollowList={(kind, handle) => openFollowListFor(kind, handle)}
+        onOpenByMint={openTokenByMint}
         onOpenTrade={(x) => {
           const tk = tokens.find((t3) => x.key && String(t3.pool || t3.id) === String(x.key)) ||
             tokens.find((t3) => t3.id === x.t.id) || tokens.find((t3) => t3.sym === x.t.sym);
@@ -11021,7 +17853,7 @@ export default function App() {
         incomingReq={friendReqs.includes(profileUser)}
         onAcceptReq={() => { setFriendsList((F) => (F.includes(profileUser) ? F : [...F, profileUser])); setFriendReqs((R) => R.filter((x) => x !== profileUser)); }}
         onDeclineReq={() => setFriendReqs((R) => R.filter((x) => x !== profileUser))}
-        onOpenToken={navigateToToken} solBalance={solBalance} valoWallet={valoWallet}
+        onOpenToken={navigateToToken} solBalance={dispSol} valoWallet={dispValo}
         onSendFunds={(a, unit) => {
           if (unit === "SOL") setSolBalance((b) => b - a); else setValoWallet((v) => v - a);
           setDmLogs((D) => ({ ...D, [profileUser]: [...(D[profileUser] || []), { me: true, text: `💸 sent ${a} ${unit === "SOL" ? "SOL" : "$VALO"}` }] }));
@@ -11034,13 +17866,13 @@ export default function App() {
                 realized24={realized24For(selected.sym)} />}
       {/* MOBILE AUTO-TRADER PAGE — chart + bot metrics on one screen */}
       {isMobile && mobileBotScreen && selected && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 66, background: T.bg, display: "flex", flexDirection: "column",
+        <div className="valo-fixed-safe" style={{ position: "fixed", inset: 0, zIndex: 66, background: T.bg, display: "flex", flexDirection: "column",
           userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", borderBottom: `1px solid ${T.border}` }}>
             <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 800 }}>🤖 AUTO-TRADER · <span style={{ color: accent(selected.hue) }}>${selected.sym}</span></div>
             <button onClick={() => { setMobileBotScreen(false); setEditingBotId(null); setBotDraftLevel(null); }} style={{ ...chip(false), padding: "5px 11px", fontSize: 12 }}>✕ Close</button>
           </div>
-          <ProChart candles={selected.candles} hue={selected.hue} synthetic={!selected.hasDex}
+          <ProChart candles={selected.candles} hue={selected.hue} synthetic={!selected.hasDex} createdAt={selected.createdAt || null}
             mode="candles" tfMin={tf} trades={chartTrades} traderPrefs={traderPrefs} theme={themeIdx}
             onMarkerClick={(tr) => { setMarkerInfo(tr); if (tr && tr.tx) setHighlightTx(tr.tx); }} highlightTx={highlightTx}
             price={selected.price} sym={selected.sym} isMobile height={Math.round((typeof window !== "undefined" ? window.innerHeight : 800) * 0.38)}
@@ -11055,10 +17887,11 @@ export default function App() {
               ...(botDraftLevel && String(botDraftLevel.tokenId) === String(selected.id) ? [{ level: botDraftLevel.level, side: botDraftLevel.side || "buy", draft: true, vt: !!vtLines }] : []),
             ]}
             botRuns={botRuns.filter((r) => r.status === "live" && String(r.tokenId) === String(selected.id))}
-            botSetMode={botDragSet} onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq} eyesToken={selected}
+            botSetMode={botDragSet} shiftArm={false} onBotLineDrag={dragBotLine} selectedLineId={selLineId} editLineReq={editLineReq} eyesToken={selected}
+            onCancelLine={(id) => { cancelBot(id); setSelLineId(null); }}
             onLineSelect={(id) => setSelLineId(id)}
             onBotDraft={(lvl) => setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide })}
-            onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at && !isMobile) setArmPop(at); }} />
+            onBotSet={(lvl, at) => { setBotDraftLevel({ tokenId: selected.id, level: lvl, side: botSide }); setBotLock({ level: lvl, n: Date.now(), side: botSide }); setBotDragSet(false); if (at) setArmPop({ ...(at || {}), level: lvl, side: botSide }); }} />
           {/* SKINNY PILL BAR — one line, sits right under the chart where the
               times live. drag-set · trader · visual · all bots · watchlist.
               HOLD the watchlist pill and it swaps into 📊 POSITIONS (the auto
@@ -11126,7 +17959,7 @@ export default function App() {
               editBot={pendingOrders.find((o) => o.id === editingBotId) || null}
               onRelaunch={(id, o) => relaunchBot(id, o, selected)} botLock={botLock}
               dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
-              solBalance={solBalance} valoWallet={valoWallet}
+              solBalance={dispSol} valoWallet={dispValo}
               onDraftLevel={(lvl, tid, side) => setBotDraftLevel(lvl ? { tokenId: tid != null ? tid : selected.id, level: lvl, side: side || botSide } : null)} />
             <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1.5, margin: "12px 0 7px" }}>BOT METRICS · CLOSEST TRIGGER FIRST</div>
             {pendingOrders.length === 0 && <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center", padding: 24 }}>No bots armed yet — arm buy/sell and tap the chart, or use the auto strategy.</div>}
@@ -11183,9 +18016,72 @@ export default function App() {
                   {/* trending reason */}
                   <div style={{ background: "rgba(240,185,11,0.06)", border: "1px solid rgba(240,185,11,0.3)", borderRadius: 12, padding: 14, marginBottom: 12 }}>
                     <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: T.amber, letterSpacing: 1, marginBottom: 7 }}>🔥 WHY IT'S TRENDING</div>
-                    <div style={{ fontFamily: T.sans, fontSize: 13, color: T.dim, lineHeight: 1.7 }}>{selected.trending.reason}</div>
+                    {(() => {
+                      const real = tokLinks && tokLinks.description;
+                      if (real) return (
+                        <>
+                          <div style={{ fontFamily: T.sans, fontSize: 13, color: T.dim, lineHeight: 1.7 }}>{real}</div>
+                          <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 5, letterSpacing: 1 }}>
+                            — the project's own description
+                          </div>
+                        </>
+                      );
+                      if (selected.pool) {
+                        // no published description: state the facts instead of a story
+                        const flow = (selected.greenUsd || 0) + (selected.redUsd || 0);
+                        const bp = selected.buyPressure != null ? selected.buyPressure : null;
+                        const ageH = Math.round((selected.ageMin || 0) / 60);
+                        const ageTxt = ageH < 24 ? `${ageH}h old` : `${(ageH / 24).toFixed(1)}d old`;
+                        return (
+                          <div style={{ fontFamily: T.mono, fontSize: 11.5, color: T.dim, lineHeight: 1.9 }}>
+                            <div>This token has no published description. What the chain shows:</div>
+                            <div style={{ marginTop: 6, color: T.text }}>
+                              MC <b>{fmt$(mcOf(selected))}</b> · LIQ <b>{fmt$(selected.tvl || 0)}</b> · {ageTxt}
+                            </div>
+                            <div style={{ color: T.text }}>
+                              FLOW <b>{fmt$(flow)}</b>
+                              {bp != null && <> · <span style={{ color: bp >= 50 ? T.green : T.red }}>{bp}% buys</span></>}
+                              {holdersOf(selected, null) && <> · <b>{holdersOf(selected, null)}</b> holders</>}
+                            </div>
+                            <div style={{ color: T.faint, fontSize: 10, marginTop: 5 }}>
+                              Judge it on the numbers and the dev's record, not a blurb.
+                            </div>
+                          </div>
+                        );
+                      }
+                      return <div style={{ fontFamily: T.sans, fontSize: 13, color: T.dim, lineHeight: 1.7 }}>{(selected.trending && selected.trending.reason) || ""}</div>;
+                    })()}
                   </div>
-                  {/* social tweet */}
+                  {/* ⛓ live: real facts, real links — no invented posts */}
+                  {liveData && selected.pool && (
+                    <div style={{ background: "#0c0f16", border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
+                      <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: T.amber, letterSpacing: 1, marginBottom: 7 }}>⛓ FACTS</div>
+                      <div style={{ fontFamily: T.mono, fontSize: 11, color: T.dim, lineHeight: 2 }}>
+                        MC <b style={{ color: T.text }}>{fmt$(selected.mc)}</b> · LP <b style={{ color: T.text }}>{fmt$(selected.tvl)}</b> · 24h vol <b style={{ color: T.text }}>{fmt$(selected.vol24 || 0)}</b><br />
+                        24h <b style={{ color: (selected.ch24 || 0) >= 0 ? T.green : T.red }}>{(selected.ch24 || 0) >= 0 ? "+" : ""}{(selected.ch24 || 0).toFixed(1)}%</b>
+                        · buys <b style={{ color: T.green }}>{selected.buys || 0}</b> / sells <b style={{ color: T.red }}>{selected.sells || 0}</b>
+                        {fmtAge(selected.createdAt) && <> · ⏱ <b style={{ color: T.text }}>{fmtAge(selected.createdAt)}</b></>}
+                      </div>
+                      {(() => {
+                        const so = (tokLinks && tokLinks.socials) || {};
+                        const links = [
+                          ["𝕏", legitSocial("x", so.twitter)],
+                          ["✈ TG", legitSocial("tg", so.telegram)],
+                          ["🌐 Site", legitSocial("site", (tokLinks && tokLinks.websites && tokLinks.websites[0]) || so.website)],
+                          ["💊 pump", legitSocial("pump", selected.liveMint && /pump$/i.test(selected.liveMint) ? `https://pump.fun/coin/${selected.liveMint}` : selected.socials.pump)],
+                        ].filter(([, u]) => u);
+                        return links.length ? (
+                          <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
+                            {links.map(([l, u], i2) => (
+                              <a key={i2} href={u} target="_blank" rel="noopener noreferrer"
+                                style={{ ...chip(false), textDecoration: "none", fontSize: 10, padding: "5px 11px", fontWeight: 800 }}>{l}</a>
+                            ))}
+                          </div>
+                        ) : <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, marginTop: 8 }}>no socials published for this token — chips appear here the moment they add any</div>;
+                      })()}
+                    </div>
+                  )}
+                  {!liveData && selected.trending && selected.trending.tweet && (
                   <div style={{ background: "#0c0f16", border: `1px solid ${T.border2}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                       <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: "50%", background: accent(selected.hue), color: "#0a0713", fontFamily: T.mono, fontWeight: 800, fontSize: 12 }}>{selected.sym[0]}</span>
@@ -11201,16 +18097,7 @@ export default function App() {
                       {selected.socials.x && <a href={selected.socials.x} target="_blank" rel="noopener noreferrer" style={{ color: T.blue, textDecoration: "none", marginLeft: "auto" }}>open on 𝕏 →</a>}
                     </div>
                   </div>
-                  {/* description */}
-                  <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 12, padding: 14 }}>
-                    <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 800, color: VALO_PURPLE, letterSpacing: 1, marginBottom: 7 }}>DESCRIPTION</div>
-                    <div style={{ fontFamily: T.sans, fontSize: 13, color: T.dim, lineHeight: 1.7 }}>{selected.trending.desc}</div>
-                    <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                      {[["𝕏", selected.socials.x], ["✈ TG", selected.socials.tg], ["🌐 Site", selected.socials.site], ["💊 pump", selected.socials.pump]].filter(([, u]) => u).map(([l, u], i) => (
-                        <a key={i} href={u} target="_blank" rel="noopener noreferrer" style={{ ...chip(false), textDecoration: "none", fontSize: 10, padding: "5px 9px" }}>{l}</a>
-                      ))}
-                    </div>
-                  </div>
+                  )}
                 </>
               ) : (
                 <>
@@ -11219,9 +18106,14 @@ export default function App() {
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
                         <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>CREATOR WALLET</div>
-                        <div style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 700, color: T.text }}>{selected.dev.wallet}</div>
+                        <div style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 700, color: T.text }}>
+                          {liveData ? ((tokCreator && tokCreator.short) || "⛓ resolving…") : (selected.dev && selected.dev.wallet) || "—"}
+                          {liveData && devPanel && devPanel.sol != null && <span style={{ color: T.amber, fontSize: 10, marginLeft: 8 }}>◎{devPanel.sol.toFixed(3)}</span>}
+                        </div>
                       </div>
-                      <a href={"https://solscan.io/"} target="_blank" rel="noopener noreferrer" style={{ ...chip(false), textDecoration: "none", fontSize: 10, padding: "5px 9px" }}>solscan →</a>
+                      {(!liveData || (tokCreator && tokCreator.creator)) && (
+                        <a href={tokCreator && tokCreator.creator ? `https://solscan.io/account/${tokCreator.creator}` : "https://solscan.io/"} target="_blank" rel="noopener noreferrer" style={{ ...chip(false), textDecoration: "none", fontSize: 10, padding: "5px 9px" }}>solscan →</a>
+                      )}
                     </div>
                   </div>
                   {/* launched tokens / trust */}
@@ -11229,13 +18121,25 @@ export default function App() {
                     <button onClick={() => setCreatedOpen((v) => !v)}
                       style={{ textAlign: "left", background: "#0c0f16", border: `1px solid ${createdOpen ? accent(selected.hue) : T.border2}`, borderRadius: 10, padding: "10px 12px", cursor: "pointer" }}>
                       <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>CREATED TOKENS {createdOpen ? "▲" : "▼"}</div>
-                      <div style={{ fontFamily: T.mono, fontSize: 18, fontWeight: 800, color: accent(selected.hue) }}>{selected.dev.tokensLaunched}</div>
+                      <div style={{ fontFamily: T.mono, fontSize: 18, fontWeight: 800, color: accent(selected.hue) }}>
+                        {liveData ? (devPanel && devPanel.launches ? devPanel.launches.length : "…") : selected.dev.tokensLaunched}
+                      </div>
                       <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>tap to view all</div>
                     </button>
-                    <div style={{ background: "#0c0f16", border: `1px solid ${selected.dev.rugged > 0 ? "rgba(234,57,67,0.4)" : T.border}`, borderRadius: 10, padding: "10px 12px" }}>
-                      <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>PRIOR RUGS / DEAD</div>
-                      <div style={{ fontFamily: T.mono, fontSize: 18, fontWeight: 800, color: selected.dev.rugged > 0 ? T.red : T.green }}>{selected.dev.rugged}</div>
-                    </div>
+                    {(() => {
+                      const deadN = liveData
+                        ? (devPanel && devPanel.launches
+                            ? devPanel.launches.filter((l2) => !l2.complete && (l2.mc || 0) < 3000 && l2.createdAt && Date.now() - l2.createdAt > 86400e3).length
+                            : null)
+                        : selected.dev.rugged;
+                      return (
+                        <div style={{ background: "#0c0f16", border: `1px solid ${(deadN || 0) > 0 ? "rgba(234,57,67,0.4)" : T.border}`, borderRadius: 10, padding: "10px 12px" }}
+                          title={liveData ? "Launches older than a day that never graduated and sit under $3K MC — the chain can show dead, not intent" : undefined}>
+                          <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>{liveData ? "DEAD / FADED" : "PRIOR RUGS / DEAD"}</div>
+                          <div style={{ fontFamily: T.mono, fontSize: 18, fontWeight: 800, color: (deadN || 0) > 0 ? T.red : T.green }}>{deadN == null ? "…" : deadN}</div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* created-tokens sub-section — each clickable to open its chart */}
@@ -11252,7 +18156,31 @@ export default function App() {
                           <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>MC {fmt$(mcOf(selected))}</div>
                         </span>
                       </div>
-                      {selected.dev.launches.map((l, i) => {
+                      {liveData && devPanel && devPanel.launches && devPanel.launches
+                        .filter((l2) => l2.mint !== selected.liveMint)
+                        .sort((a2, b2) => (b2.createdAt || 0) - (a2.createdAt || 0))
+                        .map((l2, i2) => {
+                          const dead2 = !l2.complete && (l2.mc || 0) < 3000 && l2.createdAt && Date.now() - l2.createdAt > 86400e3;
+                          return (
+                            <div key={"r" + i2} onClick={() => { openTokenByMint(l2.mint); setTrendOpen(false); }}
+                              style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px", borderRadius: 9, marginBottom: 5, cursor: "pointer", border: `1px solid ${T.border}`, background: "transparent", opacity: dead2 ? 0.55 : 1 }}>
+                              <TokenAvatar sym={l2.sym || "?"} hue={symbolHue(l2.sym || "?")} img={l2.img} size={22} />
+                              <span style={{ fontFamily: T.mono, fontSize: 11.5, fontWeight: 700, color: T.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {l2.sym} {l2.complete && <span style={{ color: T.green, fontSize: 8 }}>● GRADUATED</span>}{dead2 && <span style={{ color: T.red, fontSize: 8 }}>● DEAD</span>}
+                              </span>
+                              <span style={{ textAlign: "right" }}>
+                                <div style={{ fontFamily: T.mono, fontSize: 10.5, color: T.text }}>MC {fmt$(l2.mc)}</div>
+                                {fmtAge(l2.createdAt) && <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>⏱ {fmtAge(l2.createdAt)}</div>}
+                              </span>
+                              <span style={{ fontFamily: T.mono, fontSize: 9, color: T.blue, flexShrink: 0 }}>open →</span>
+                            </div>
+                          );
+                        })}
+                      {liveData && devPanel && devPanel.loading && <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, padding: 6 }}>⛓ loading their launches…</div>}
+                      {liveData && devPanel && devPanel.launches && !devPanel.launches.filter((l2) => l2.mint !== selected.liveMint).length && !devPanel.loading && (
+                        <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, padding: 6 }}>this is their only launch on record</div>
+                      )}
+                      {!liveData && selected.dev.launches.map((l, i) => {
                         const existing = tokens.find((x) => x.sym === l.sym);
                         return (
                           <div key={i} onClick={() => { if (existing) { setSel(existing.id); setClickMode(null); setTrendOpen(false); } }}
@@ -11271,29 +18199,56 @@ export default function App() {
                       })}
                     </div>
                   )}
-                  {/* creator rewards + fees */}
+                  {/* creator money — chain truth on live, sim cast in demo */}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
-                    {[
+                    {(liveData ? (() => {
+                      const mv = (devPanel && devPanel.moves) || [];
+                      const inSol = mv.filter((m2) => m2.side === "in").reduce((s2, m2) => s2 + (m2.solAmt || 0), 0);
+                      const outSol = mv.filter((m2) => m2.side === "out").reduce((s2, m2) => s2 + (m2.solAmt || 0), 0);
+                      const dot = devPanel && devPanel.loading ? "…" : null;
+                      return [
+                        ["WALLET BALANCE", dot || `◎ ${devPanel && devPanel.sol != null ? devPanel.sol.toFixed(3) : "—"}`, T.green],
+                        ["LAUNCHES", dot || String(devPanel && devPanel.launches ? devPanel.launches.length : "—"), T.blue],
+                        ["RECENT SOL IN", dot || `+${inSol.toFixed(3)} SOL`, T.green],
+                        ["RECENT SOL OUT", dot || `−${outSol.toFixed(3)} SOL`, T.amber],
+                      ];
+                    })() : [
                       ["CREATOR REWARDS", `${selected.dev.creatorRewardsSol.toFixed(1)} SOL`, T.green],
                       ["FEES · 24H", `${selected.dev.feesDay.toFixed(2)} SOL`, T.text],
                       ["FEES · 30D", `${selected.dev.feesMonth.toFixed(0)} SOL`, T.text],
                       ["FEES · 1Y", `${selected.dev.feesYear.toFixed(0)} SOL`, T.text],
-                    ].map(([k, v, c]) => (
+                    ]).map(([k, v, c]) => (
                       <div key={k} style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 12px" }}>
                         <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>{k}</div>
                         <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 800, color: c }}>{v}</div>
                       </div>
                     ))}
                   </div>
-                  {/* traceable fee chart */}
+                  {/* traceable fee chart — SIMULATION ONLY: no honest per-day
+                      creator-fee series exists on live, so live shows nothing */}
+                  {!liveData && (
                   <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 10, padding: 12, marginBottom: 12 }}>
                     <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1, marginBottom: 8 }}>FEES COLLECTED · LAST 30 DAYS</div>
                     <PerfChart series={selected.dev.feeHistory.map((v, i) => selected.dev.feeHistory.slice(0, i + 1).reduce((a, b) => a + b, 0))} mode="line" height={140} />
                   </div>
-                  {/* withdrawals */}
+                  )}
+                  {/* withdrawals — live: the wallet's real SOL movements */}
                   <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 10, padding: 12 }}>
-                    <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1, marginBottom: 8 }}>DEV WITHDRAWALS · how much & when</div>
-                    {selected.dev.withdrawals.map((w, i) => (
+                    <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1, marginBottom: 8 }}>
+                      {liveData ? "⛓ WALLET MOVEMENTS · real, recent" : "DEV WITHDRAWALS · how much & when"}
+                    </div>
+                    {liveData && devPanel && (devPanel.moves || []).map((mv, i3) => (
+                      <a key={"m" + i3} href={`https://solscan.io/tx/${mv.sig}`} target="_blank" rel="noopener noreferrer"
+                        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: T.mono, fontSize: 11, padding: "8px 0", borderBottom: `1px solid ${T.border}`, textDecoration: "none" }}>
+                        <span style={{ color: T.faint }}>{new Date(mv.t).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} <span style={{ color: T.blue, fontSize: 9 }}>🔗 solscan</span></span>
+                        <span style={{ color: mv.side === "out" ? T.amber : T.green, fontWeight: 700 }}>{mv.side === "out" ? "−" : "+"} {mv.solAmt.toFixed(3)} SOL</span>
+                      </a>
+                    ))}
+                    {liveData && devPanel && !devPanel.loading && !(devPanel.moves || []).length && (
+                      <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>no plain SOL movements in their recent history — trades show on the chart via DEV TRADES</div>
+                    )}
+                    {liveData && devPanel && devPanel.loading && <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint }}>⛓ reading the wallet…</div>}
+                    {!liveData && selected.dev.withdrawals.map((w, i) => (
                       <a key={i} href={`https://solscan.io/tx/${w.tx}`} target="_blank" rel="noopener noreferrer"
                         style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: T.mono, fontSize: 11, padding: "8px 0", borderBottom: i < selected.dev.withdrawals.length - 1 ? `1px solid ${T.border}` : "none", textDecoration: "none" }}>
                         <span style={{ color: T.faint }}>{w.when} <span style={{ color: T.blue, fontSize: 9 }}>🔗 solscan</span></span>
@@ -11426,6 +18381,31 @@ export default function App() {
               <b style={{ color: T.text }}> you pay your own SOL gas</b>, tokens land directly in your wallet.
             </div>
 
+            {/* 🏋 your weight this epoch — live from real activity */}
+            <EpochWeightCard cloudUser={cloudUser} liveData={liveData} />
+            {/* 🎯 payout wallet — rewards land wherever the user points them */}
+            <div style={{ background: "#0c0f16", border: `1px solid ${VALO_PURPLE}44`, borderRadius: 10, padding: "9px 11px", marginBottom: 12 }}>
+              <div style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: VALO_PURPLE, marginBottom: 5 }}>🎯 PAYOUT WALLET · where your $VALO lands</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input value={payoutDraft} onChange={(e) => setPayoutDraft(e.target.value)}
+                  placeholder={tradeAddr ? `default: connected wallet ${tradeAddr.slice(0, 4)}…${tradeAddr.slice(-4)}` : "paste any Solana address"}
+                  style={{ ...inp, flex: 1, padding: "8px", fontSize: 9.5 }} />
+                <button onClick={async () => {
+                    const v = payoutDraft.trim();
+                    if (v && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v)) { setPayoutMsg("that's not a valid Solana address"); return; }
+                    setPayoutWallet(v || null);
+                    setPayoutMsg(v ? "saved ✓ — epoch payouts go here" : "cleared — payouts go to your connected wallet");
+                    try {
+                      const sb2 = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
+                      if (sb2 && cloudUser) await sb2.from("profiles").update({ payout_wallet: v || null }).eq("id", cloudUser.id);
+                    } catch (e) {}
+                    setTimeout(() => setPayoutMsg(""), 2600);
+                  }}
+                  style={{ ...chip(false), padding: "8px 12px", fontSize: 9, fontWeight: 900, color: VALO_PURPLE, borderColor: `${VALO_PURPLE}55` }}>SAVE</button>
+              </div>
+              {payoutMsg && <div style={{ fontFamily: T.mono, fontSize: 8, color: payoutMsg.includes("✓") || payoutMsg.includes("cleared") ? T.green : T.red, marginTop: 5 }}>{payoutMsg}</div>}
+              {payoutWallet && !payoutMsg && <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 5 }}>→ {payoutWallet.slice(0, 6)}…{payoutWallet.slice(-6)}</div>}
+            </div>
             <button onClick={() => doClaim(false)} disabled={claimable <= 0 || claiming}
               style={{
                 width: "100%", border: "none", borderRadius: 10, padding: "14px", fontFamily: T.mono,
@@ -11501,8 +18481,10 @@ export default function App() {
               const tokOf = (id) => tokens.find((x) => x.id === id);
               const row = (t, secId) => {
                 const score = scoreToken(t); const rc = ratingColor(score);
-                const base = t.candles[Math.max(0, t.candles.length - 96)].c;
-                const ch = ((t.price - base) / base) * 100;
+                const cs4 = t.candles || [];
+                const b4 = cs4.length ? cs4[Math.max(0, cs4.length - 96)] : null;
+                const base = b4 ? b4.c : (t.price || 0);
+                const ch = base > 0 ? ((t.price - base) / base) * 100 : 0;
                 const exp = watchExp === t.id;
                 return (
                   <div key={t.id} style={{ position: "relative", overflow: "hidden", borderRadius: 8 }}
@@ -11536,7 +18518,7 @@ export default function App() {
                           <span>24H VOL <b style={{ color: T.text }}>{fmt$(t.greenUsd + t.redUsd)}</b></span>
                           <span>24H Δ <b style={{ color: ch >= 0 ? T.green : T.red }}>{pct(ch)}</b></span>
                           <span>PRICE <b style={{ color: T.text }}>${fmtP(t.price)}</b></span>
-                          <span>TOP 10 <b style={{ color: T.amber }}>{(16 + ((t.id * 7) % 26)).toFixed(1)}%</b></span>
+                          <span>TOP 10 <b style={{ color: T.amber }}>{(16 + (Math.abs(tokSeed(t) * 7) % 26)).toFixed(1)}%</b></span>
                         </div>
                         <div style={{ display: "flex", gap: 6 }}>
                           <button onClick={() => { setSel(t.id); setClickMode(null); setWatchExp(null); setDrawerOpen(false); }}
@@ -11590,8 +18572,16 @@ export default function App() {
       {/* MOBILE PORTFOLIO DRAWER — right-edge tab below chat, full PortfolioPanel */}
       {isMobile && (
         <>
-          <button onClick={() => { if (tabJustDragged.current) return; setPortfolioDrawer((v) => !v); }} aria-label="Open portfolio — drag to reposition"
-            onTouchStart={tabTouchStart("wallet", walletTabTop)}
+          <button onClick={() => { if (tabJustDragged.current) return; if (railPeekFired.current) { railPeekFired.current = false; return; } setPortfolioDrawer((v) => !v); }} aria-label="Open portfolio — drag to reposition · hold to peek Phantom"
+            data-tour="wallet"
+            onTouchStart={(e) => { tabTouchStart("wallet", walletTabTop)(e);
+              if (liveData && wallet && wallet.address) {
+                const n = e.currentTarget;
+                n._pk = setTimeout(() => { n._pk = null; railPeekFired.current = true; if (navigator.vibrate) navigator.vibrate(8); setRailPeek(true); }, 430);
+              } }}
+            onTouchMove={(e) => { const n = e.currentTarget; if (n._pk) { clearTimeout(n._pk); n._pk = null; } }}
+            onTouchEnd={(e) => { const n = e.currentTarget; if (n._pk) { clearTimeout(n._pk); n._pk = null; } setRailPeek(false); }}
+            onTouchCancel={(e) => { const n = e.currentTarget; if (n._pk) { clearTimeout(n._pk); n._pk = null; } setRailPeek(false); }}
             style={{
               position: "fixed", right: 0, top: `${walletTabTop}%`, zIndex: 52, touchAction: "none",
               background: portfolioDrawer ? "rgba(17,21,29,0.96)" : (totalEquity > 0 ? (platformPnl >= 0 ? "rgba(22,199,132,0.16)" : "rgba(234,57,67,0.16)") : "rgba(17,21,29,0.96)"),
@@ -11601,14 +18591,25 @@ export default function App() {
               writingMode: "vertical-rl", fontFamily: T.mono, fontSize: 10, letterSpacing: 1.5, fontWeight: 700,
               boxShadow: "-4px 0 18px rgba(0,0,0,0.45)",
             }}>
-            {portfolioDrawer ? "CLOSE ›" : (totalEquity > 0 ? (hideBalance ? "•••••" : `$${totalEquity.toLocaleString(undefined, { maximumFractionDigits: 0 })}`) : "‹ WALLET")}
+            {portfolioDrawer ? "CLOSE ›" : (() => {
+              if (liveData && combinedChain) {
+                if (railPeek && wallet && wallet.address) {
+                  const ph = ((combinedChain.solVault || 0) * SOL_USD) + visHolds(combinedChain.holdings).filter((h) => h.src === "phantom").reduce((s, h) => s + (h.usd || 0), 0);
+                  return hideBalance ? "👻•••" : `👻$${ph.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+                }
+                const tb = ((combinedChain.solTrading != null ? combinedChain.solTrading : combinedChain.sol) || 0) * SOL_USD
+                  + visHolds(combinedChain.holdings).filter((h) => h.src !== "phantom").reduce((s, h) => s + (h.usd || 0), 0);
+                return hideBalance ? "⚡•••" : `⚡$${tb.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+              }
+              return totalEquity > 0 ? (hideBalance ? "•••••" : `$${totalEquity.toLocaleString(undefined, { maximumFractionDigits: 0 })}`) : "‹ WALLET";
+            })()}
           </button>
 
           <div onClick={() => setPortfolioDrawer(false)}
             style={{ position: "fixed", inset: 0, zIndex: 102, background: "rgba(4,6,10,0.55)", backdropFilter: "blur(2px)",
               opacity: portfolioDrawer ? 1 : 0, pointerEvents: portfolioDrawer ? "auto" : "none", transition: "opacity .28s ease" }} />
 
-          <div style={{
+          <div className="valo-fixed-safe" style={{
             position: "fixed", top: 0, right: 0, bottom: 0, left: 0, zIndex: 103,
             width: "100vw", background: "rgba(12,15,22,0.98)",
             boxShadow: "-12px 0 40px rgba(0,0,0,0.6)",
@@ -11621,8 +18622,26 @@ export default function App() {
               <button onClick={() => setPortfolioDrawer(false)} style={{ ...chip(false), padding: "3px 9px" }}>✕</button>
             </div>
             <PortfolioPanel big
-              solBalance={solBalance} valoWallet={valoWallet} positions={positions} tokens={tokens}
-              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom}
+              solBalance={dispSol} valoWallet={dispValo} positions={positions} tokens={tokens}
+              realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={combinedChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger} chainHoldingsLive2={chainHoldingsLive}
+              turboState={turbo} onTurboCreate={turboCreate} onTurboUnlock={turboUnlock} onTurboLock={turboLock}
+              onTurboFund={turboFund} onTurboSweep={turboSweep} phantomOk={!!(wallet && wallet.address)}
+              turboSol={turboSolBal} turboAutoOn={liveAuto} onTurboToggleAuto={setLiveAuto} onCreatorSplit={doCreatorSplit} creatorAddr={(onchain && onchain.feeSplit && onchain.feeSplit.creator) || null}
+              valoMint={valoMint}
+              onRealSwap={() => {
+                if (!valoMint) return;
+                const amt2 = Math.min(Math.max(parseFloat(amount) || 0.01, 0.001), onchain.maxSol || 0.01);
+                quoteRealOrder({ id: "valo-live", sym: "VALO", name: "VALO", liveMint: valoMint, price: 0, hue: 265 }, "buy", amt2);
+              }}
+              onOpenChainFill={(f) => {
+                openTokenByMint(f.mint);
+                const px = f.px || ((f.sol * SOL_USD) / Math.max(f.qty, 1e-12));
+                setHistMarker({ t: f.at, side: f.side, p: px, price: px,
+                  amt: f.side === "buy" ? f.sol : f.qty, unit: f.side === "buy" ? "SOL" : f.sym,
+                  sym: f.sym, tx: f.sig, real: true });
+                setHighlightTx(f.sig);
+                if (typeof setPortfolioDrawer === "function") setPortfolioDrawer(false);
+              }}
               tab={portfolioTab} setTab={setPortfolioTab}
               range={perfRange} setRange={setPerfRange}
               mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
@@ -11669,7 +18688,14 @@ export default function App() {
                 </div>
               ) : null}
               heldSlot={
-                <HeldPositions positions={positions} tokens={tokens} pay={pay} onTrade={onPosTrade} solBalance={solBalance} valoWallet={valoWallet}
+                <HeldPositions liveMode={liveData} chainHoldings={chainHoldingsLive}
+                  onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings}
+                  onOpenMint={(m) => { openTokenByMint(m); setPortfolioDrawer(false); }}
+                  positions={positions} tokens={tokens} pay={pay} onTrade={onPosTrade}
+                  solBalance={liveData && combinedChain ? (combinedChain.solTrading != null ? combinedChain.solTrading : combinedChain.sol) : dispSol}
+                  valoWallet={liveData && valoMint && combinedChain
+                    ? ((visHolds(combinedChain.holdings).find((h) => h.mint === valoMint && h.src !== "phantom") || {}).qty || 0)
+                    : dispValo}
                   onOpenToken={(id) => { setSel(id); setClickMode(null); setPortfolioDrawer(false); }}
                   onSellAll={(t) => { const p = positions[t.id]; if (p && p.amt > 0) execute(t, { side: "sell", pay: p.pay, amt: p.amt, mode: "instant", tax: taxFor(p.pay), burn: splitFee(p.amt, p.pay).total, legs: [] }); }}
                   onCloseAll={() => { Object.entries(positions).forEach(([id, p]) => { const tok = tokens.find((x) => x.id === +id); if (tok && p && p.amt > 0) execute(tok, { side: "sell", pay: p.pay, amt: p.amt, mode: "instant", tax: taxFor(p.pay), burn: splitFee(p.amt, p.pay).total, legs: [] }); }); }} />
@@ -11691,7 +18717,8 @@ export default function App() {
       )}
 
       <style>{`
-        /* VALO scrollbars — dark rail, glowing purple glider */
+        /* VALO scrollbars — desktop only; phones keep native overlay bars */
+        @media (hover: hover) and (pointer: fine) {
         *{ scrollbar-width: thin; scrollbar-color: #7d5cf0 rgba(10,13,19,0.55); }
         ::-webkit-scrollbar{ width:10px; height:10px; }
         ::-webkit-scrollbar-track{ background: rgba(10,13,19,0.55); border-radius: 10px; }
@@ -11710,6 +18737,21 @@ export default function App() {
           box-shadow: 0 0 18px rgba(125,92,240,1), inset 0 0 8px rgba(255,255,255,0.45);
         }
         ::-webkit-scrollbar-thumb:horizontal{ background: linear-gradient(90deg, #a07ff2, #7d5cf0 55%, #5b93ec); }
+        }
+        @media (hover: none), (pointer: coarse) {
+          *{ scrollbar-width: none; }
+          ::-webkit-scrollbar{ width:0; height:0; background: transparent; }
+        }
+        /* 📱 nothing sits under the status bar. Fixed overlays don't inherit the
+           root inset, so they're padded here — otherwise taps near the top of a
+           modal land on the clock/wifi/battery instead of the button. */
+        @media (hover: none), (pointer: coarse) {
+          .valo-fixed-safe { padding-top: env(safe-area-inset-top, 0px) !important; }
+          .valo-sheet-safe { padding-bottom: env(safe-area-inset-bottom, 0px) !important; }
+        }
+        /* the page scroller itself stays invisible on every device — panels keep theirs */
+        html, body { scrollbar-width: none; -ms-overflow-style: none; }
+        html::-webkit-scrollbar, body::-webkit-scrollbar { width: 0; height: 0; background: transparent; }
         /* no double-tap / focus zoom surprises on touch — taps act instantly */
         input, textarea, select, button{ touch-action: manipulation; }
         @media(max-width:1150px){ .pt-grid{grid-template-columns:1fr !important;} }
@@ -11763,12 +18805,45 @@ export default function App() {
         @keyframes tierPop4 { 0%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1); } 22%{ transform: scale(1.42) rotate(-9deg); filter: brightness(1.9) saturate(1.5); } 48%{ transform: scale(1.12) rotate(7deg); filter: brightness(1.3) saturate(1.2); } 74%{ transform: scale(1.22) rotate(-3deg); filter: brightness(1.5); } 100%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1); } }
         @keyframes tierPop5 { 0%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1) hue-rotate(0); } 18%{ transform: scale(1.55) rotate(-12deg); filter: brightness(2.2) saturate(1.8) hue-rotate(18deg); } 40%{ transform: scale(1.15) rotate(9deg); filter: brightness(1.4) saturate(1.4) hue-rotate(-12deg); } 62%{ transform: scale(1.35) rotate(-5deg); filter: brightness(1.9) saturate(1.6) hue-rotate(10deg); } 82%{ transform: scale(1.08) rotate(3deg); filter: brightness(1.2); } 100%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1) hue-rotate(0); } }
         @keyframes diamond3d { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
+        @keyframes tourPulse { 0%,100% { box-shadow: 0 0 0 3px rgba(125,92,240,0.20), 0 0 26px rgba(125,92,240,0.53); } 50% { box-shadow: 0 0 0 6px rgba(125,92,240,0.30), 0 0 40px rgba(125,92,240,0.85); } }
+        @keyframes tourTap { 0% { transform: scale(0.7); opacity: 1; } 70% { transform: scale(1.5); opacity: 0.25; } 100% { transform: scale(0.7); opacity: 1; } }
+        /* 🏆 callout banner escalation — louder the higher the multiple */
+        .cb-glow { animation: cbGlow 3.4s ease-in-out infinite; }
+        @keyframes cbGlow { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.28); } }
+        .cb-pulse { animation: cbPulse 2.2s ease-in-out infinite; }
+        @keyframes cbPulse { 0%,100% { transform: scale(1); filter: brightness(1); } 50% { transform: scale(1.045); filter: brightness(1.35); } }
+        .cb-shimmer { position: relative; overflow: hidden; animation: cbPulse 1.9s ease-in-out infinite; }
+        .cb-shimmer::after { content: ""; position: absolute; inset: 0; background: linear-gradient(115deg, transparent 35%, var(--cbCol) 50%, transparent 65%); opacity: 0.22; transform: translateX(-120%); animation: cbSweep 2.6s linear infinite; }
+        @keyframes cbSweep { to { transform: translateX(120%); } }
+        .cb-flare { position: relative; overflow: hidden; animation: cbFlare 1.5s ease-in-out infinite; }
+        @keyframes cbFlare { 0%,100% { transform: scale(1) rotate(0deg); box-shadow: 0 0 0 var(--cbCol); } 25% { transform: scale(1.06) rotate(-0.6deg); } 50% { transform: scale(1.05); box-shadow: 0 0 16px var(--cbCol); } 75% { transform: scale(1.06) rotate(0.6deg); } }
+        .cb-flare::after { content: ""; position: absolute; inset: 0; background: linear-gradient(115deg, transparent 30%, var(--cbCol) 50%, transparent 70%); opacity: 0.3; transform: translateX(-120%); animation: cbSweep 1.7s linear infinite; }
+        .cb-legend { position: relative; overflow: hidden; animation: cbLegend 1.1s ease-in-out infinite; }
+        @keyframes cbLegend {
+          0%,100% { transform: scale(1) rotate(0deg); box-shadow: 0 0 10px var(--cbCol); filter: brightness(1.1) saturate(1.2); }
+          20% { transform: scale(1.09) rotate(-1.2deg); box-shadow: 0 0 26px var(--cbCol); filter: brightness(1.55) saturate(1.5); }
+          45% { transform: scale(1.04) rotate(0.8deg); }
+          70% { transform: scale(1.1) rotate(-0.7deg); box-shadow: 0 0 30px var(--cbCol); filter: brightness(1.6) saturate(1.6); }
+        }
+        .cb-legend::after { content: ""; position: absolute; inset: 0; background: linear-gradient(115deg, transparent 25%, var(--cbCol) 50%, transparent 75%); opacity: 0.42; transform: translateX(-120%); animation: cbSweep 1.15s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .lucky-charm { display: inline-block; animation: luckyCharm 2.6s ease-in-out infinite; filter: drop-shadow(0 0 4px rgba(74,222,128,0.8)); }
+        @keyframes luckyCharm {
+          0%, 100% { transform: rotate(0deg) scale(1); }
+          12% { transform: rotate(-18deg) scale(1.15); }
+          24% { transform: rotate(14deg) scale(1.12); }
+          36% { transform: rotate(-8deg) scale(1.05); }
+          48% { transform: rotate(0deg) scale(1); }
+          62% { transform: rotate(0deg) scale(1.22); filter: drop-shadow(0 0 9px rgba(74,222,128,1)); }
+          74% { transform: rotate(0deg) scale(1); }
+        }
         @keyframes diamond3dBurst { 0% { transform: rotateY(0deg) scale(1); } 55% { transform: rotateY(540deg) scale(1.22); } 100% { transform: rotateY(720deg) scale(1); } }
         @keyframes starFly1 { 0% { transform: translate(-42px, 16px) scale(0.4); opacity: 0; } 12% { opacity: 0.95; } 88% { opacity: 0.8; } 100% { transform: translate(44px, -20px) scale(1.05); opacity: 0; } }
         @keyframes starFly2 { 0% { transform: translate(38px, 22px) scale(0.5); opacity: 0; } 14% { opacity: 0.85; } 100% { transform: translate(-46px, -12px) scale(0.9); opacity: 0; } }
         @keyframes starFly3 { 0% { transform: translate(-30px, -26px) scale(0.4); opacity: 0; } 15% { opacity: 0.8; } 100% { transform: translate(36px, 30px) scale(1); opacity: 0; } }
         @keyframes twinkle1 { 0%, 86%, 100% { opacity: 0; transform: scale(0.3) rotate(0deg); } 90% { opacity: 1; transform: scale(1.2) rotate(25deg); } 95% { opacity: 0.35; transform: scale(0.7) rotate(45deg); } }
         @keyframes twinkle2 { 0%, 91%, 100% { opacity: 0; transform: scale(0.3) rotate(0deg); } 94% { opacity: 0.95; transform: scale(1.1) rotate(-20deg); } 97% { opacity: 0.3; transform: scale(0.6) rotate(-40deg); } }
+        @keyframes addrScroll{ 0%{ transform: translateX(0); } 100%{ transform: translateX(-50%); } }
         @keyframes sellPop{ 0%{ transform: scale(1); } 40%{ transform: scale(1.08); } 100%{ transform: scale(1); } }
         @keyframes apexHue{ from{ filter: drop-shadow(0 0 5px #9ceaff) hue-rotate(0deg); } to{ filter: drop-shadow(0 0 5px #9ceaff) hue-rotate(360deg); } }
         @keyframes apexRay{ from{ transform: rotate(0deg) scale(1); } 50%{ transform: rotate(180deg) scale(1.12); } to{ transform: rotate(360deg) scale(1); } }
