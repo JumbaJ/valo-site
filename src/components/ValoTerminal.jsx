@@ -13134,8 +13134,14 @@ export default function App() {
       setTokens((Ts) => {
         if (!Ts.length) return Ts;
         // bias toward high-momentum coins
-        const weighted = Ts.flatMap((t) => Array(Math.max(1, Math.round(t.momentum / 18))).fill(t));
+        const weighted = Ts.flatMap((t) => {
+          // adopted market tokens carry no .momentum — never build Array(NaN)
+          const m = Number.isFinite(t && t.momentum) ? t.momentum : 18;
+          const n = Math.max(1, Math.min(50, Math.round(m / 18) || 1));
+          return Array(n).fill(t);
+        });
         const t = weighted[Math.floor(Math.random() * weighted.length)];
+        if (!t) return Ts;
         const mcNow = mcOf(t);
         // entry MC sampled from the past — some will be deep 2x+ calls
         const mcAt = mcNow * rnd(0.18, 0.98);
