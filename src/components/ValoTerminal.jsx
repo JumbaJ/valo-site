@@ -11894,10 +11894,33 @@ export default function App() {
   const [liveData, setLiveData] = useState(() => {
     if (typeof window === "undefined") return false;
     const q = window.location.search;
-    if (/[?&](live|test)=0/.test(q) || /[?&]demo=1/.test(q)) return false;  // demo, explicitly — beats env
+    if (/[?&](live|test)=0/.test(q) || /[?&]demo=1/.test(q)) return false;  // demo, explicitly — beats everything
     if (/[?&](live|test)=1/.test(q)) return true;                            // live, explicitly
-    return window.__VALO_LIVE__ === true;  // otherwise the deployment decides (VITE_LIVE_DATA)
-  }); // 🛰 real tokens, simulated wallet — URL wins in both directions
+    // 🛰 LIVE IS THE DEFAULT: everyone opens the app on real chain data.
+    // A deployment can still force demo with VITE_LIVE_DATA="0" (→ __VALO_LIVE__ === false).
+    return window.__VALO_LIVE__ !== false;
+  }); // 🛰 real charts from the first paint — ?demo=1 or ?live=0 opts out
+  // ⛓ the REAL $VALO market row — price, LP, flow, MC, supply. Polled from the
+  // token's own pool so every header stat is chain truth, not a sim tick.
+  const [valoLive, setValoLive] = useState(null);
+  useEffect(() => {
+    if (!liveData || !valoMint) { setValoLive(null); return; }
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch(`/api/tokens?search=${encodeURIComponent(valoMint)}&t=${Math.floor(Date.now() / 15000)}`);
+        if (!r.ok) return;
+        const rows = await r.json();
+        const hit = Array.isArray(rows)
+          ? rows.find((x) => String(x.mint || "").toLowerCase() === String(valoMint).toLowerCase()) || rows[0]
+          : null;
+        if (!stop && hit && (+hit.price > 0)) setValoLive(hit);
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 15000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [liveData, valoMint]);
   useEffect(() => {
     if (!liveData) return;
     let stop = false;
@@ -12804,11 +12827,21 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [valoStatsOpen, setValoStatsOpen] = useState(false); // ◆ $VALO token stats pop-out
-  // the SITE burn keeps climbing with everyone else's trades, live
+  // 🔥 SITE BURN — real. $VALO launches with a fixed 1B supply, and SPL burns
+  // reduce total supply directly, so burned = 1B − current supply. Measured
+  // from the pool's own MC ÷ price. Demo keeps the simulated ticker.
   useEffect(() => {
+    if (liveData && valoMint) {
+      if (valoLive && valoLive.price > 0 && valoLive.mc > 0) {
+        const supplyNow = valoLive.mc / valoLive.price;
+        const gone = Math.max(0, 1e9 - supplyNow);
+        setBurned(gone);
+      }
+      return;                                  // never fake-tick a live token
+    }
     const iv = setInterval(() => setBurned((b) => b + 40 + Math.random() * 140), 2600);
     return () => clearInterval(iv);
-  }, []);
+  }, [liveData, valoMint, valoLive && valoLive.mc, valoLive && valoLive.price]);
   useEffect(() => {
     const on = () => setIsMobile(window.innerWidth < 900);
     window.addEventListener("resize", on);
@@ -15734,10 +15767,15 @@ export default function App() {
             {/* tidy stats strip */}
             <div style={{ display: "flex", gap: 0, fontFamily: T.mono, fontSize: 10, background: "rgba(255,255,255,0.02)", border: `1px solid ${T.border}`, borderRadius: 9, overflow: "hidden" }}>
               {[
-                ["PRICE", <b style={{ color: VALO_PURPLE }}>${valoUsdPrice.toFixed(4)}</b>],
-                ["TVL", <b>{fmt$(gTvl)}</b>],
-                ["NET", <b style={{ color: gNet >= 0 ? T.green : T.red }}>{gNet >= 0 ? "+" : "−"}{fmt$(Math.abs(gNet))}</b>],
-                ["24H PnL", <b style={{ color: platformPnl >= 0 ? T.green : T.red }}>{platformPnl >= 0 ? "+" : "−"}${Math.abs(platformPnl).toFixed(0)}</b>],
+                ["PRICE", <b style={{ color: VALO_PURPLE }}>{valoLive ? `$${fmtP(valoLive.price)}` : `$${valoUsdPrice.toFixed(4)}`}</b>],
+                [valoLive ? "MC" : "TVL", <b>{valoLive ? fmt$(valoLive.mc || 0) : fmt$(gTvl)}</b>],
+                ["NET", (() => {
+                  const n = valoLive ? ((valoLive.greenUsd || 0) - (valoLive.redUsd || 0)) : gNet;
+                  return <b style={{ color: n >= 0 ? T.green : T.red }}>{n >= 0 ? "+" : "−"}{fmt$(Math.abs(n))}</b>;
+                })()],
+                [valoLive ? "24H VOL" : "24H PnL", valoLive
+                  ? <b>{fmt$(valoLive.vol24 || 0)}</b>
+                  : <b style={{ color: platformPnl >= 0 ? T.green : T.red }}>{platformPnl >= 0 ? "+" : "−"}${Math.abs(platformPnl).toFixed(0)}</b>],
                 ["🔥 BURN", <b onClick={() => setBurnOpen(true)} style={{ color: "#f97316", cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(burned)}</b>],
               ].map(([k, v], i) => (
                 <div key={k} onClick={() => { if (k !== "🔥 BURN") { setSel(424242); setClickMode(null); } }}
@@ -15753,17 +15791,29 @@ export default function App() {
           <div>
             <div style={{ fontFamily: T.mono, fontSize: 9.5, color: VALO_PURPLE, letterSpacing: 1.5, fontWeight: 700 }}>
               $VALO · LIVE ON PUMP.FUN
+              {valoLive && <span style={{ marginLeft: 7, fontSize: 7.5, fontWeight: 900, color: T.green,
+                border: `1px solid ${T.green}55`, background: "rgba(22,199,132,0.12)", borderRadius: 999, padding: "1px 6px" }}>● ON CHAIN</span>}
             </div>
             <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 0.5, marginTop: 2 }}>
-              Metrics below track the $VALO token · simulated feed · not financial advice
+              {valoLive
+                ? "Live from the $VALO pool · updates every 15s · not financial advice"
+                : "Metrics below track the $VALO token · not financial advice"}
             </div>
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
             {[
-              ["PRICE", `$${valoUsdPrice.toFixed(4)}`, VALO_PURPLE, "Current $VALO price"],
-              ["TVL", fmt$(gTvl), T.text, null],
-              ["NET FLOW", `${gNet >= 0 ? "+" : "−"}${fmt$(Math.abs(gNet))}`, gNet >= 0 ? T.green : T.red, null],
-              ["24H PnL", `${platformPnl >= 0 ? "+" : "−"}$${Math.abs(platformPnl).toFixed(0)}`, platformPnl >= 0 ? T.green : T.red, "Your realized + unrealized PnL across all coins"],
+              ["PRICE", valoLive ? `$${fmtP(valoLive.price)}` : `$${valoUsdPrice.toFixed(4)}`, VALO_PURPLE,
+                valoLive ? "Live $VALO price from the pool" : "Current $VALO price"],
+              [valoLive ? "MARKET CAP" : "TVL", valoLive ? fmt$(valoLive.mc || 0) : fmt$(gTvl), T.text,
+                valoLive ? "Real $VALO market cap" : null],
+              ["LP", valoLive ? fmt$(valoLive.tvl || 0) : fmt$(gTvl), T.text, valoLive ? "Real pool liquidity" : null],
+              ["NET FLOW", (() => {
+                const n = valoLive ? ((valoLive.greenUsd || 0) - (valoLive.redUsd || 0)) : gNet;
+                return `${n >= 0 ? "+" : "−"}${fmt$(Math.abs(n))}`;
+              })(), (valoLive ? ((valoLive.greenUsd || 0) - (valoLive.redUsd || 0)) : gNet) >= 0 ? T.green : T.red,
+                valoLive ? `Real buy vs sell dollars · ${valoLive.statWin || "24h"}` : null],
+              ...(valoLive ? [["24H VOL", fmt$(valoLive.vol24 || 0), T.text, "Real 24h volume"]]
+                : [["24H PnL", `${platformPnl >= 0 ? "+" : "−"}$${Math.abs(platformPnl).toFixed(0)}`, platformPnl >= 0 ? T.green : T.red, "Your realized + unrealized PnL across all coins"]]),
             ].map(([k, v, col, tip]) => (
               <div key={k} onClick={() => { setSel(424242); setClickMode(null); }} title={(tip ? tip + " · " : "") + "Tap: open the $VALO chart"}
                 style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${T.border}`, borderRadius: 9, padding: "6px 13px", minWidth: 78, cursor: "pointer" }}>
