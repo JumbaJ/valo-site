@@ -1848,7 +1848,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   return (
     <div ref={wrapRef}
       onTouchStart={(e) => e.stopPropagation()} onTouchMove={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()}
-      data-chart="1"
+      data-chart="1" data-tour="chart"
       style={{ position: "relative", background: "#0c0f16", border: `1px solid ${clickMode ? (clickMode === "buy" ? T.green : T.red) : T.border}`, borderRadius: 10,
         overflow: isMobile ? "visible" : "hidden", marginTop: isMobile ? 15 : 0,
         transition: "border-color .2s", touchAction: "pan-y", overscrollBehavior: "contain" }}>
@@ -7624,6 +7624,142 @@ function EpochWeightCard({ cloudUser, liveData }) {
     </div>
   );
 }
+
+// ───────────────────────────────────────────────────────────────────
+// 🧭 FIRST-RUN TOUR — a guided cursor glides to each control, spotlights
+// it, and says what it does. Copy adapts to mouse vs touch. Any step whose
+// target isn't on screen is skipped, so it never points at nothing.
+// ───────────────────────────────────────────────────────────────────
+function ValoTour({ isMobile, onDone }) {
+  const STEPS = React.useMemo(() => ([
+    { sel: '[data-tour="lenses"]', title: "FIVE SCANNER LENSES",
+      pc: "Click here to switch how the board is picked: TRENDING, HOT, NEW, MOVERS, or the LUCKY PICK lottery. Each lens streams its own tokens — nothing below its launch price, nothing dead.",
+      mob: "Tap here to switch lenses: TRENDING, HOT, NEW, MOVERS, or LUCKY PICK. Pull the scanner down to deal a fresh hand." },
+    { sel: '[data-tour="search"]', title: "SEARCH ANYTHING",
+      pc: "Paste a contract address, type a ticker, or look up a trader. Every Solana pair is searchable — hit enter and the chart opens.",
+      mob: "Paste a CA, type a ticker, or find a trader. Tap a result and its chart opens full screen." },
+    { sel: '[data-tour="score"]', title: "THE SCORE EXPLAINS ITSELF",
+      pc: "That number is built from real LP depth, traders, flow balance, age and curve progress. Click it for live buy/sell pressure and vitals — the chart stays where it is.",
+      mob: "That number comes from real LP, traders, flow and age. Tap it for live pressure and vitals without leaving the scanner." },
+    { sel: '[data-tour="chart"]', title: "THE CHART",
+      pc: "Drag to pan, scroll to zoom, run the price axis to stretch it. ⛰ ALL frames the token's whole history; ◉ LIVE snaps back to the edge.",
+      mob: "Drag to pan, pinch to zoom. Hold for 2 seconds to lock the crosshair on screen — the chart freezes so you can read exact values, hold again to release." },
+    { sel: '[data-tour="wallet"]', title: "YOUR WALLET",
+      pc: "Connect Phantom, then fund the ⚡ TURBO wallet — that's the one-tap trigger. The lightning turns into a spinning diamond when single-tap trading is armed.",
+      mob: "Connect Phantom and fund ⚡ TURBO — your one-tap trigger. Hold this tab to peek your Phantom balance." },
+    { sel: '[data-tour="callout"]', title: "CALL IT",
+      pc: "Stamp your entry market cap on any token. Land 2x and it rides the site-wide banner — bigger multiples animate harder, and rank earns epoch bonuses.",
+      mob: "Stamp your entry MC on any token. Hit 2x and it rides the banner site-wide, with epoch bonuses for ranking." },
+  ]), []);
+
+  const [i, setI] = React.useState(0);
+  const [rect, setRect] = React.useState(null);
+  const [cursor, setCursor] = React.useState({ x: 0, y: 0 });
+  const [ready, setReady] = React.useState(false);
+
+  // find the first step from `start` that actually exists on screen
+  const resolve = React.useCallback((start) => {
+    for (let k = start; k < STEPS.length; k++) {
+      const el = document.querySelector(STEPS[k].sel);
+      if (el) {
+        const r = el.getBoundingClientRect();
+        if (r.width > 8 && r.height > 8 && r.top < window.innerHeight && r.bottom > 0) return { k, r };
+      }
+    }
+    return null;
+  }, [STEPS]);
+
+  React.useEffect(() => {
+    const hit = resolve(i);
+    if (!hit) { onDone(); return; }
+    if (hit.k !== i) { setI(hit.k); return; }
+    const el = document.querySelector(STEPS[hit.k].sel);
+    try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (e) {}
+    const settle = setTimeout(() => {
+      const r2 = el.getBoundingClientRect();
+      setRect({ top: r2.top, left: r2.left, width: r2.width, height: r2.height });
+      setCursor({ x: r2.left + r2.width / 2, y: r2.top + r2.height / 2 });
+      setReady(true);
+    }, 420);
+    return () => clearTimeout(settle);
+  }, [i, resolve, STEPS, onDone]);
+
+  React.useEffect(() => {
+    const onResize = () => {
+      const el = document.querySelector(STEPS[i] && STEPS[i].sel);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setRect({ top: r.top, left: r.left, width: r.width, height: r.height });
+      setCursor({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+    };
+    window.addEventListener("resize", onResize);
+    window.addEventListener("scroll", onResize, true);
+    return () => { window.removeEventListener("resize", onResize); window.removeEventListener("scroll", onResize, true); };
+  }, [i, STEPS]);
+
+  if (!rect || !ready) return null;
+  const st = STEPS[i];
+  const pad = 8;
+  const box = { top: rect.top - pad, left: rect.left - pad, width: rect.width + pad * 2, height: rect.height + pad * 2 };
+  // card goes below the target, or above when there's no room
+  const cardW = Math.min(360, window.innerWidth - 28);
+  const below = box.top + box.height + 250 < window.innerHeight;
+  const cardTop = below ? box.top + box.height + 14 : Math.max(12, box.top - 216);
+  const cardLeft = Math.max(14, Math.min(window.innerWidth - cardW - 14, box.left + box.width / 2 - cardW / 2));
+
+  return createPortal(
+    <div style={{ position: "fixed", inset: 0, zIndex: 4000, pointerEvents: "auto" }}>
+      {/* scrim with a hole punched over the target */}
+      <div onClick={() => setI(i + 1)} style={{ position: "absolute", inset: 0,
+        background: "rgba(4,6,10,0.74)", backdropFilter: "blur(1.5px)",
+        WebkitMaskImage: `radial-gradient(circle at ${box.left + box.width / 2}px ${box.top + box.height / 2}px, transparent 0, transparent ${Math.max(box.width, box.height) * 0.62}px, #000 ${Math.max(box.width, box.height) * 0.62 + 30}px)`,
+        maskImage: `radial-gradient(circle at ${box.left + box.width / 2}px ${box.top + box.height / 2}px, transparent 0, transparent ${Math.max(box.width, box.height) * 0.62}px, #000 ${Math.max(box.width, box.height) * 0.62 + 30}px)` }} />
+      {/* the ring around the highlighted control */}
+      <div style={{ position: "absolute", top: box.top, left: box.left, width: box.width, height: box.height,
+        border: `2px solid ${VALO_PURPLE}`, borderRadius: 12, boxShadow: `0 0 0 3px ${VALO_PURPLE}33, 0 0 26px ${VALO_PURPLE}88`,
+        pointerEvents: "none", transition: "all .5s cubic-bezier(.4,0,.2,1)", animation: "tourPulse 2s ease-in-out infinite" }} />
+      {/* the guide cursor / touch dot */}
+      <div style={{ position: "absolute", top: cursor.y, left: cursor.x, pointerEvents: "none",
+        transition: "all .55s cubic-bezier(.4,0,.2,1)", transform: "translate(-6px, -4px)", zIndex: 2 }}>
+        {isMobile ? (
+          <span style={{ display: "block", width: 26, height: 26, marginLeft: -13, marginTop: -13, borderRadius: "50%",
+            border: `2px solid ${VALO_PURPLE}`, background: `${VALO_PURPLE}44`, animation: "tourTap 1.5s ease-out infinite" }} />
+        ) : (
+          <svg width="26" height="30" viewBox="0 0 26 30" style={{ filter: `drop-shadow(0 2px 6px rgba(0,0,0,0.8))` }}>
+            <path d="M2 2 L2 22 L7.5 17 L11 26 L15 24.2 L11.6 15.6 L19 15.4 Z"
+              fill="#fff" stroke={VALO_PURPLE} strokeWidth="1.6" strokeLinejoin="round" />
+          </svg>
+        )}
+      </div>
+      {/* the explanation card */}
+      <div style={{ position: "absolute", top: cardTop, left: cardLeft, width: cardW,
+        background: T.panel, border: `1px solid ${VALO_PURPLE}77`, borderRadius: 14, padding: 15,
+        boxShadow: "0 24px 60px rgba(0,0,0,0.75)", transition: "all .5s cubic-bezier(.4,0,.2,1)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
+          <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: VALO_PURPLE, letterSpacing: 1.2 }}>{st.title}</span>
+          <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>{i + 1} / {STEPS.length}</span>
+        </div>
+        <div style={{ fontFamily: T.mono, fontSize: 10.5, color: T.text, lineHeight: 1.75 }}>
+          {isMobile ? st.mob : st.pc}
+        </div>
+        <div style={{ display: "flex", gap: 7, marginTop: 13, alignItems: "center" }}>
+          <button onClick={onDone} style={{ background: "transparent", border: "none", cursor: "pointer",
+            fontFamily: T.mono, fontSize: 9.5, color: T.faint }}>skip tour</button>
+          <div style={{ flex: 1 }} />
+          {i > 0 && (
+            <button onClick={() => setI(i - 1)} style={{ ...chip(false), padding: "7px 12px", fontSize: 10, cursor: "pointer" }}>back</button>
+          )}
+          <button onClick={() => (i + 1 >= STEPS.length ? onDone() : setI(i + 1))}
+            style={{ border: "none", borderRadius: 9, padding: "8px 16px", cursor: "pointer",
+              background: VALO_PURPLE, color: "#0b0e15", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900,
+              boxShadow: `0 0 16px ${VALO_PURPLE}66` }}>
+            {i + 1 >= STEPS.length ? "START TRADING" : "next →"}
+          </button>
+        </div>
+      </div>
+    </div>, document.body);
+}
+
 function TokenVitalsPop({ t, isMobile = false, onClose, style = {} }) {
   const [big, setBig] = React.useState("price");
   const buys = t.buys || 0, sells = t.sells || 0;
@@ -7733,6 +7869,7 @@ function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line",
           </div>
         </div>
         <div title={rug.rugged ? `Rugged — down ${(rug.drawdown * 100).toFixed(0)}% from peak with no recovery` : `Score ${score} — tap for live vitals`}
+          data-tour="score"
           onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setVitalsOpen((v) => (v ? null : { top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) })); }} role="button"
           style={{ position: "absolute", top: 7, right: 0, zIndex: 3, display: "flex", alignItems: "baseline", gap: 4, cursor: "pointer",
             border: `1px solid ${rc}77`, borderRight: "none", background: `${rc}14`,
@@ -8979,7 +9116,7 @@ function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, ec
         <span style={{ fontSize: 12, color: T.faint }}>🔍</span>
         <input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true); }}
           onFocus={(e) => { if (eco && isMobile && onFullEco) { e.target.blur(); onFullEco(); return; } setOpen(true); }}
-          placeholder="Search tokens, CA, or users…"
+          data-tour="search" placeholder="Search tokens, CA, or users…"
           style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: T.text, fontFamily: T.mono, fontSize: 12 }} />
         {q && <button onClick={() => { setQ(""); setOpen(false); }} style={{ background: "none", border: "none", color: T.faint, cursor: "pointer", fontSize: 12 }}>✕</button>}
         <UserSearchFly onOpenUser={(u) => { setOpen(false); onPickUser && onPickUser(u); }} />
@@ -12187,7 +12324,7 @@ export default function App() {
     ["lucky", "🍀 LUCKY PICK", "weighted lottery — hidden gems with healthy vitals"],
   ];
   const scanModeDropdown = (
-    <div style={{ position: "relative", zIndex: 6 }}>
+    <div data-tour="lenses" style={{ position: "relative", zIndex: 6 }}>
       <button onClick={() => setScanModeOpen((v) => !v)}
         title="How the scanner picks and orders tokens"
         style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6,
@@ -12908,6 +13045,17 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [valoStatsOpen, setValoStatsOpen] = useState(false); // ◆ $VALO token stats pop-out
+  // 🧭 first-run tour — shows once, then only when asked for
+  const [tourOn, setTourOn] = useState(false);
+  useEffect(() => {
+    let seen = true;
+    try { seen = localStorage.getItem("valo-tour-v1") === "done"; } catch (e) {}
+    if (!seen) { const t = setTimeout(() => setTourOn(true), 1400); return () => clearTimeout(t); }
+  }, []);
+  const endTour = useCallback(() => {
+    setTourOn(false);
+    try { localStorage.setItem("valo-tour-v1", "done"); } catch (e) {}
+  }, []);
   // ◆ tapping any $VALO stat opens the REAL token chart (by CA) once launched
   const openValoChart = useCallback(() => {
     setClickMode(null);
@@ -14917,7 +15065,7 @@ export default function App() {
                         color: showDevTrades ? accent(selected.hue) : T.dim, borderRadius: 7, padding: "4px 9px",
                         fontFamily: T.mono, fontSize: 9.5, fontWeight: 800, cursor: "pointer" }}>👨‍💻 Dev buys</button>
                     <span style={{ display: "inline-flex", alignItems: "center", height: 24, flex: "0 0 auto", overflow: "visible" }}>
-                      {calloutWidget(true, 26, true)}
+                      <span data-tour="callout">{calloutWidget(true, 26, true)}</span>
                     </span>
                   </div>
                 )}
@@ -15934,6 +16082,16 @@ export default function App() {
               {unreadCount > 0 && <span style={{ position: "absolute", top: -6, right: -6, minWidth: 16, height: 16, borderRadius: 8, background: T.red, color: "#fff", fontFamily: T.mono, fontSize: 9, fontWeight: 900, display: "grid", placeItems: "center", padding: "0 4px" }}>{unreadCount}</span>}
             </button>
             {/* WHITEPAPER */}
+            {/* 🧭 replay the tour any time */}
+            <button onClick={() => setTourOn(true)} title="Show me around VALO"
+              style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                border: `1px solid ${T.border2}`, background: "rgba(125,92,240,0.06)", borderRadius: 9, padding: "6px 12px" }}>
+              <span style={{ fontSize: 15 }}>🧭</span>
+              <span style={{ textAlign: "left", lineHeight: 1.15 }}>
+                <span style={{ display: "block", fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: VALO_PURPLE }}>TOUR</span>
+                <span style={{ display: "block", fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 0.3 }}>show me around</span>
+              </span>
+            </button>
             <button onClick={() => setWpOpen(true)} title="Read the VALO whitepaper"
               style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
                 border: `1px solid ${T.border2}`, background: "rgba(76,154,255,0.06)", borderRadius: 9, padding: "6px 12px" }}>
@@ -17413,6 +17571,7 @@ export default function App() {
       {valoStatsOpen && <ValoStatsModal onClose={() => setValoStatsOpen(false)} isMobile={isMobile}
         valoUsd={valoUsdPrice} tvl={gTvl} burned={burned} valoWallet={valoWallet}
         valoMint={valoMint} liveData={liveData} />}
+      {tourOn && <ValoTour isMobile={isMobile} onDone={endTour} />}
       {burnOpen && <BurnModal valoUsd={valoLive && valoLive.price > 0 ? valoLive.price : valoUsdPrice}
         valoLive={valoLive} valoMint={valoMint}
         onClose={() => setBurnOpen(false)} isMobile={isMobile} myBurned={myBurned} siteBurned={burned} />}
@@ -18191,6 +18350,7 @@ export default function App() {
       {isMobile && (
         <>
           <button onClick={() => { if (tabJustDragged.current) return; if (railPeekFired.current) { railPeekFired.current = false; return; } setPortfolioDrawer((v) => !v); }} aria-label="Open portfolio — drag to reposition · hold to peek Phantom"
+            data-tour="wallet"
             onTouchStart={(e) => { tabTouchStart("wallet", walletTabTop)(e);
               if (liveData && wallet && wallet.address) {
                 const n = e.currentTarget;
@@ -18422,6 +18582,8 @@ export default function App() {
         @keyframes tierPop4 { 0%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1); } 22%{ transform: scale(1.42) rotate(-9deg); filter: brightness(1.9) saturate(1.5); } 48%{ transform: scale(1.12) rotate(7deg); filter: brightness(1.3) saturate(1.2); } 74%{ transform: scale(1.22) rotate(-3deg); filter: brightness(1.5); } 100%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1); } }
         @keyframes tierPop5 { 0%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1) hue-rotate(0); } 18%{ transform: scale(1.55) rotate(-12deg); filter: brightness(2.2) saturate(1.8) hue-rotate(18deg); } 40%{ transform: scale(1.15) rotate(9deg); filter: brightness(1.4) saturate(1.4) hue-rotate(-12deg); } 62%{ transform: scale(1.35) rotate(-5deg); filter: brightness(1.9) saturate(1.6) hue-rotate(10deg); } 82%{ transform: scale(1.08) rotate(3deg); filter: brightness(1.2); } 100%{ transform: scale(1) rotate(0); filter: brightness(1) saturate(1) hue-rotate(0); } }
         @keyframes diamond3d { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
+        @keyframes tourPulse { 0%,100% { box-shadow: 0 0 0 3px rgba(125,92,240,0.20), 0 0 26px rgba(125,92,240,0.53); } 50% { box-shadow: 0 0 0 6px rgba(125,92,240,0.30), 0 0 40px rgba(125,92,240,0.85); } }
+        @keyframes tourTap { 0% { transform: scale(0.7); opacity: 1; } 70% { transform: scale(1.5); opacity: 0.25; } 100% { transform: scale(0.7); opacity: 1; } }
         /* 🏆 callout banner escalation — louder the higher the multiple */
         .cb-glow { animation: cbGlow 3.4s ease-in-out infinite; }
         @keyframes cbGlow { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.28); } }
