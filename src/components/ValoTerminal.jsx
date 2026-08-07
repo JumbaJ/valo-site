@@ -11894,7 +11894,15 @@ export default function App() {
   const [liveData, setLiveData] = useState(() => {
     if (typeof window === "undefined") return false;
     const q = window.location.search;
-    if (/[?&](live|test)=0/.test(q) || /[?&]demo=1/.test(q)) return false;  // demo, explicitly — beats everything
+    if (/[?&](live|test)=0/.test(q) || /[?&]demo=1/.test(q)) {
+      // strip the flag so a bookmarked/home-screen URL can't pin demo forever —
+      // this session honours it, the next visit starts live again
+      try {
+        const clean = window.location.pathname + q.replace(/[?&](live|test)=0|[?&]demo=1/g, "").replace(/^&/, "?");
+        window.history.replaceState({}, "", clean || window.location.pathname);
+      } catch (e) {}
+      return false;
+    }
     if (/[?&](live|test)=1/.test(q)) return true;                            // live, explicitly
     // 🛰 LIVE IS THE DEFAULT: everyone opens the app on real chain data.
     // A deployment can still force demo with VITE_LIVE_DATA="0" (→ __VALO_LIVE__ === false).
@@ -12827,6 +12835,12 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [valoStatsOpen, setValoStatsOpen] = useState(false); // ◆ $VALO token stats pop-out
+  // ◆ tapping any $VALO stat opens the REAL token chart (by CA) once launched
+  const openValoChart = useCallback(() => {
+    setClickMode(null);
+    if (liveData && valoMint) { try { openTokenByMint(valoMint); return; } catch (e) {} }
+    setSel(424242);
+  }, [liveData, valoMint]);
   // 🔥 SITE BURN — real. $VALO launches with a fixed 1B supply, and SPL burns
   // reduce total supply directly, so burned = 1B − current supply. Measured
   // from the pool's own MC ÷ price. Demo keeps the simulated ticker.
@@ -15778,7 +15792,7 @@ export default function App() {
                   : <b style={{ color: platformPnl >= 0 ? T.green : T.red }}>{platformPnl >= 0 ? "+" : "−"}${Math.abs(platformPnl).toFixed(0)}</b>],
                 ["🔥 BURN", <b onClick={() => setBurnOpen(true)} style={{ color: "#f97316", cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>{fmtQty(burned)}</b>],
               ].map(([k, v], i) => (
-                <div key={k} onClick={() => { if (k !== "🔥 BURN") { setSel(424242); setClickMode(null); } }}
+                <div key={k} onClick={() => { if (k !== "🔥 BURN") openValoChart(); }}
                   style={{ flex: 1, textAlign: "center", padding: "6px 2px", borderLeft: i ? `1px solid ${T.border}` : "none", cursor: k !== "🔥 BURN" ? "pointer" : "default" }}>
                   <div style={{ color: T.faint, fontSize: 7.5, letterSpacing: 0.8, marginBottom: 2 }}>{k}</div>
                   {v}
@@ -15815,7 +15829,7 @@ export default function App() {
               ...(valoLive ? [["24H VOL", fmt$(valoLive.vol24 || 0), T.text, "Real 24h volume"]]
                 : [["24H PnL", `${platformPnl >= 0 ? "+" : "−"}$${Math.abs(platformPnl).toFixed(0)}`, platformPnl >= 0 ? T.green : T.red, "Your realized + unrealized PnL across all coins"]]),
             ].map(([k, v, col, tip]) => (
-              <div key={k} onClick={() => { setSel(424242); setClickMode(null); }} title={(tip ? tip + " · " : "") + "Tap: open the $VALO chart"}
+              <div key={k} onClick={openValoChart} title={(tip ? tip + " · " : "") + "Tap: open the $VALO chart"}
                 style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${T.border}`, borderRadius: 9, padding: "6px 13px", minWidth: 78, cursor: "pointer" }}>
                 <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>{k}</div>
                 <div style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: col }}>{v}</div>
