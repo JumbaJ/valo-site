@@ -8899,7 +8899,7 @@ function SearchBar({ tokens, onPickToken, onPickUser, username, full = false, ec
   // 🛰 live: simulated tokens never appear. + one entry per mint (feeds overlap)
   const srcTokens = React.useMemo(() => {
     const all = [...(tokens || []), ...(mktExtra || [])];
-    const real = liveData ? all.filter((t) => t && (t.pool || (t.sym === "VALO" && valoMint))) : all;
+    const real = liveData ? all.filter((t) => t && t.pool) : all;
     const seen = new Set(); const out = [];
     for (const t of real) {
       if (!t) continue;
@@ -9347,7 +9347,9 @@ export default function App() {
     const base = NAMES.slice(0, 8).map((n) => makeToken(n));
     // ◆ the flagship — $VALO itself trades as a first-class chart token
     const v = makeToken(["VALO", "VALO Terminal", "sol"]);
-    v.id = 424242; v.price = 0.0125; v.hue = 262; v.momentum = 74; v.isNew = false;
+    // ⚠️ DEMO ONLY — the real $VALO is fetched from VALO_MINT on live and this
+    // seeded copy is filtered off every live board (no pool = not shown).
+    v.id = 424242; v.price = 0.0125; v.hue = 262; v.momentum = 74; v.isNew = false; v.demoOnly = true;
     v.candles = seedCandles(0.0125, 74); v.traders = 4820; v.tvl = 1950000;
     v.greenUsd = 240000; v.redUsd = 150000;
     return [v, ...base];
@@ -11921,27 +11923,6 @@ export default function App() {
     // A deployment can still force demo with VITE_LIVE_DATA="0" (→ __VALO_LIVE__ === false).
     return window.__VALO_LIVE__ !== false;
   }); // 🛰 real charts from the first paint — ?demo=1 or ?live=0 opts out
-  // ⛓ the REAL $VALO market row — price, LP, flow, MC, supply. Polled from the
-  // token's own pool so every header stat is chain truth, not a sim tick.
-  const [valoLive, setValoLive] = useState(null);
-  useEffect(() => {
-    if (!liveData || !valoMint) { setValoLive(null); return; }
-    let stop = false;
-    const pull = async () => {
-      try {
-        const r = await fetch(`/api/tokens?search=${encodeURIComponent(valoMint)}&t=${Math.floor(Date.now() / 15000)}`);
-        if (!r.ok) return;
-        const rows = await r.json();
-        const hit = Array.isArray(rows)
-          ? rows.find((x) => String(x.mint || "").toLowerCase() === String(valoMint).toLowerCase()) || rows[0]
-          : null;
-        if (!stop && hit && (+hit.price > 0)) setValoLive(hit);
-      } catch (e) {}
-    };
-    pull();
-    const iv = setInterval(pull, 15000);
-    return () => { stop = true; clearInterval(iv); };
-  }, [liveData, valoMint]);
   useEffect(() => {
     if (!liveData) return;
     let stop = false;
@@ -12113,6 +12094,39 @@ export default function App() {
 
   // ♾ ENDLESS SCANNER — more real tokens append as you reach the bottom
   const [moreToks, setMoreToks] = useState([]);
+  // ⛓ the REAL $VALO market row — price, LP, flow, MC, supply. Polled from the
+  // token's own pool so every header stat is chain truth, not a sim tick.
+  const [valoLive, setValoLive] = useState(null);
+  useEffect(() => {
+    if (!liveData || !valoMint) { setValoLive(null); return; }
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch(`/api/tokens?search=${encodeURIComponent(valoMint)}&t=${Math.floor(Date.now() / 15000)}`);
+        if (!r.ok) return;
+        const rows = await r.json();
+        const hit = Array.isArray(rows)
+          ? rows.find((x) => String(x.mint || "").toLowerCase() === String(valoMint).toLowerCase()) || rows[0]
+          : null;
+        if (!stop && hit && (+hit.price > 0)) {
+          setValoLive(hit);
+          // 🪙 put the REAL $VALO on the board (replacing the demo copy) so it
+          // appears in the scanner and search like every other live token
+          try {
+            const tok = adoptMarketToken(hit);
+            setMoreToks((M) => {
+              const k = String(tok.liveMint || tok.pool || "").toLowerCase();
+              const rest = M.filter((t) => String(t.liveMint || t.pool || "").toLowerCase() !== k);
+              return [tok, ...rest].slice(0, 260);
+            });
+          } catch (e) {}
+        }
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 15000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [liveData, valoMint]);
   const [scanMode, setScanMode] = useState(() => { try { const v0 = localStorage.getItem("valo-scan-mode") || "trending"; return v0 === "random" ? "lucky" : v0; } catch (e) { return "trending"; } });
   const [scanModeOpen, setScanModeOpen] = useState(false);
   const [moversSide, setMoversSide] = useState("gain");   // 📈 gainers ⇄ 📉 losers
@@ -13936,9 +13950,9 @@ export default function App() {
   // 🛰 LIVE MEANS LIVE: simulated tokens never appear on a live board — not even
   // for the second before the first market fetch lands. (This used to wait for
   // a real token to arrive, so slow connections briefly saw the sim cast.)
-  const shownLive = liveData
-    ? shownRaw.filter((t) => t && (t.pool || (t.sym === "VALO" && valoMint)))
-    : shownRaw;
+  // 🛰 LIVE MEANS LIVE: only tokens backed by a real pool. The old rule let the
+  // seeded demo $VALO through — the REAL $VALO arrives from its own mint.
+  const shownLive = liveData ? shownRaw.filter((t) => t && t.pool) : shownRaw;
   // one card per pool / mint / symbol — duplicates from different feeds collapse
   const shown = useMemo(() => {
     const byKey = new Map(); let out = [];
