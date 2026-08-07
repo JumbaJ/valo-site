@@ -72,6 +72,23 @@ const fromGecko = async (mint) => {
   };
 };
 
+// ⛓ exact circulating supply straight from the SPL mint — MC÷price carries
+// rounding error (it reported 1,000,288,007 for a 1B token), and burns are a
+// supply delta, so this number has to be exact.
+const chainSupply = async (mint) => {
+  try {
+    const rpc = process.env.HELIUS_API_KEY
+      ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`
+      : "https://api.mainnet-beta.solana.com";
+    const r = await fetch(rpc, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getTokenSupply", params: [mint] }),
+      signal: AbortSignal.timeout(6000) });
+    const j = await r.json();
+    const v = j && j.result && j.result.value;
+    return v && v.uiAmount != null ? +v.uiAmount : null;
+  } catch (e) { return null; }
+};
+
 export default async function handler(req, res) {
   const mint = String(req.query.mint || MINT() || "").trim();
   if (!mint) {
@@ -87,7 +104,10 @@ export default async function handler(req, res) {
   }
   // burns are a supply delta: pump launches a fixed 1B, SPL burns shrink it
   const GENESIS = 1e9;
+  const exact = await chainSupply(mint);
+  if (exact != null && exact > 0) { out.supply = exact; out.supplyExact = true; }
   out.burned = out.supply > 0 ? Math.max(0, GENESIS - out.supply) : 0;
+  out.burnedPct = out.burned > 0 ? +((out.burned / GENESIS) * 100).toFixed(4) : 0;
   out.genesis = GENESIS;
   out.configured = true;
   out.indexed = true;
