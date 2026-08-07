@@ -76,6 +76,28 @@ const bpsFor = (inputMint, outputMint) =>
   VALO_MINT_ADDR && (inputMint === VALO_MINT_ADDR || outputMint === VALO_MINT_ADDR) ? FEE_BPS_VALO : FEE_BPS;
 const feeViaJup = FEE_BPS > 0 && isMint(FEE_ACCT);
 
+// Jupiter takes its platform fee into a token account owned by our treasury.
+// Look it up on chain — a wallet address here is what caused 0x1789.
+const feeAtaCache = new Map();
+const feeAtaFor = async (owner, mint) => {
+  if (!owner || !mint) return null;
+  const key = owner + ":" + mint;
+  if (feeAtaCache.has(key)) return feeAtaCache.get(key);
+  try {
+    const r = await fetch(RPC(), {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getTokenAccountsByOwner",
+        params: [owner, { mint }, { encoding: "jsonParsed" }] }),
+      signal: AbortSignal.timeout(6000),
+    });
+    const j = await r.json();
+    const acc = j && j.result && Array.isArray(j.result.value) && j.result.value[0];
+    const ata = acc ? acc.pubkey : null;
+    feeAtaCache.set(key, ata);
+    return ata;
+  } catch (e) { return null; }
+};
+
 const RPC = () => (process.env.HELIUS_API_KEY
   ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`
   : "https://api.mainnet-beta.solana.com");
@@ -139,6 +161,9 @@ export default async function handler(req, res) {
         + "&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=100000&slippageBps=100");
       return res.status(200).json({ enabled: true, feeBps: FEE_BPS, feeBpsValo: FEE_BPS_VALO,
         feeVia: feeViaJup ? "jupiter" : (FEE_BPS > 0 ? "client" : "none"), jupiter: "reachable", via: host, maxSol: MAX_SOL,
+        feeAccountNote: feeViaJup
+          ? "platform fee routes to the treasury's token account for the traded mint (created on first fee)"
+          : "no platform fee configured",
         feeSplit: { burn: BURN_ADDR, epoch: EPOCH_ADDR || null, creator: (process.env.VALO_CREATOR || "").trim() || null,
           treasury: (process.env.VALO_TREASURY || "").trim() || null, deployer: (process.env.VALO_DEPLOYER || "").trim() || null } });
     } catch (e) {
@@ -212,7 +237,7 @@ export default async function handler(req, res) {
 
     const qPath = `/quote?inputMint=${inputMint}&outputMint=${outputMint}`
       + `&amount=${amountBase.toString()}&slippageBps=${slippageBps}&onlyDirectRoutes=false`
-      + (feeViaJup ? `&platformFeeBps=${FEE_BPS}` : "");
+      + (feeViaJup ? `&platformFeeBps=${bpsFor(inputMint, outputMint)}` : "");
     let quoteRes = null, curveMode = false;
     try { quoteRes = await jupGet(qPath); }
     catch (e) {
@@ -270,10 +295,13 @@ export default async function handler(req, res) {
 
     // build: return an UNSIGNED transaction. Signing happens in the wallet.
     if (!isMint(userPublicKey)) return res.status(400).json({ error: "bad user pubkey" });
+    // fee mint = whichever side of the route Jupiter charges on (the output
+    // mint for ExactIn). No ATA → no platform fee → the swap still goes through.
+    const feeAta = feeViaJup ? await feeAtaFor(FEE_ACCT, outputMint) : null;
     const { json: sj } = await jupPost("/swap", {
       quoteResponse: quote,
       userPublicKey,
-      ...(feeViaJup ? { feeAccount: FEE_ACCT } : {}),
+      ...(feeAta ? { feeAccount: feeAta } : {}),
       wrapAndUnwrapSol: true,
       dynamicComputeUnitLimit: true,
       prioritizationFeeLamports: "auto",
