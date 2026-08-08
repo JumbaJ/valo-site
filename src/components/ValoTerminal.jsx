@@ -12319,10 +12319,25 @@ export default function App() {
     (async () => {
       try {
         const r = await fetch("/api/treasury");
-        const j = await r.json();
+        const j = r.ok ? await r.json() : null;
         if (!stop && j && j.token && j.token.mint) setValoMint(j.token.mint);
         if (!stop && j && j.wallets && j.wallets.treasury && j.wallets.treasury.address) setValoTreasury(j.wallets.treasury.address);
-      } catch (e) {}
+        // 🛟 if that endpoint is missing, learn the mint from the market route
+        // instead — the whole $VALO UI depends on knowing it
+        if (!stop && !(j && j.token && j.token.mint)) {
+          try {
+            const r2 = await fetch("/api/valo");
+            const j2 = r2.ok ? await r2.json() : null;
+            if (!stop && j2 && j2.mint) setValoMint(j2.mint);
+          } catch (e2) {}
+        }
+      } catch (e) {
+        try {
+          const r2 = await fetch("/api/valo");
+          const j2 = r2.ok ? await r2.json() : null;
+          if (!stop && j2 && j2.mint) setValoMint(j2.mint);
+        } catch (e2) {}
+      }
     })();
     return () => { stop = true; };
   }, [liveData]);
