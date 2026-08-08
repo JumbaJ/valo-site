@@ -8455,7 +8455,7 @@ function WpFeeTable() {
 const PATCH_NOTES = [
   { v: "3.0.3", name: "PATCH V 3.0.3 \u2014 EXECUTION", date: "August 2026", accent: "#16C784", items: [
     "\u26d3 REAL BUYS GO THROUGH \u2014 buys were failing on almost every token that had already graduated from the pump.fun curve to a DEX. The trade was priced with the platform fee included, but the fee had nowhere to land on a token the treasury had never held, and the swap was refused. Trades are now re-priced cleanly and built \u2014 any mint, any age, including coins that migrated minutes ago",
-    "\ud83c\udfe6 FEES ARE NEVER SILENTLY SKIPPED \u2014 when the fee can't ride inside the swap it is now collected as a direct SOL transfer instead of being dropped. Same 0.6%, same burn / epoch / treasury split, either route",
+    "\ud83c\udfe6 THE FEE ENGINE IS LIVE \u2014 every buy and every sell now carries the 0.6% inside the swap itself: atomic with the trade, on-chain, the same for every wallet. It either fills and pays or does neither. Burn / epoch / treasury split unchanged, and a direct SOL transfer still covers any route the swap can't carry a fee on",
     "\ud83d\udd0d FAILURES NAME THE REAL REASON \u2014 every failure used to be reported as a routing problem, so a token with a healthy $1M pool was described as a thin new launch. Pricing failures and building failures are now told apart, and a build failure surfaces the chain's own words instead of discarding them",
     "\ud83d\udcb0 BUYS SIZE THEMSELVES TO YOUR WALLET \u2014 Solana holds ~0.002 SOL of rent per new token account plus a temporary wrapped-SOL account and fees. A buy that would eat that headroom is now clamped to what's actually spendable instead of dying in simulation, and the mobile hotbar shows the real maximum up front",
     "\ud83d\udcac PLAIN-ENGLISH CHAIN ERRORS \u2014 rent shortfalls, slippage, expired quotes and missing accounts are translated into what went wrong and what to do about it, with the raw program error still available underneath",
@@ -13622,14 +13622,21 @@ export default function App() {
         if (t.market && t.id !== selRef.current) return t;
         // LIVE DATA: this token mirrors a real pump.fun pair — each tick glides
         // the close toward the actual DexScreener price. Trading stays simulated.
-        const lv = liveDataRef.current && (
+        const lvRaw = liveDataRef.current && (
           // a card that already carries its own pool matches ONLY by that pool
           t.pool
             ? (liveBindRef.current.byTok[t.id] && liveBindRef.current.byTok[t.id].pool === t.pool
                 ? liveBindRef.current.byTok[t.id]
                 : (liveArrRef.current || []).find((x) => x.pool === t.pool) || null)
-            : (liveBindRef.current.byTok[t.id] || liveArrRef.current[ti])
+            : (t.liveMint
+                // no pool yet → identify by MINT, never by array position
+                ? ((liveArrRef.current || []).find((x) => x && x.mint === t.liveMint)
+                    || liveBindRef.current.byTok[t.id] || null)
+                : (liveBindRef.current.byTok[t.id] || liveArrRef.current[ti]))
         );
+        // a row whose mint disagrees with this card is not this card's row —
+        // dropping it here stops every branch below from renaming the token
+        const lv = (lvRaw && t.liveMint && lvRaw.mint && lvRaw.mint !== t.liveMint) ? null : lvRaw;
         if (lv) {
           const prev = t.price;
           const target = lv.price;
@@ -13645,7 +13652,7 @@ export default function App() {
             }));
             return { ...t, candles: scaled.length ? scaled : t.candles, price: target,
               supply: lv.mc > 0 && lv.price > 0 ? lv.mc / lv.price : t.supply,
-              sym: lv.sym, name: lv.name, mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
+              ...(t.isValo ? {} : { sym: lv.sym, name: lv.name }), mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
               img: lv.img || t.img, pool: lv.pool || t.pool, liveMint: lv.mint || t.liveMint,
               traders: lv.traders || t.traders, ageMin: t.ageMin + 0.04 };
           }
@@ -13658,7 +13665,7 @@ export default function App() {
               ? t.candles
               : [{ t: Date.now(), v: 0, o: target, h: target, l: target, c: target }];
             return { ...t, candles: candlesL, price: target,
-              sym: lv.sym || t.sym, name: lv.name || t.name, mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
+              ...(t.isValo ? {} : { sym: lv.sym || t.sym, name: lv.name || t.name }), mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
               img: lv.img || t.img, pool: lv.pool || t.pool, liveMint: lv.mint || t.liveMint,
               supply: lv.mc > 0 && lv.price > 0 ? lv.mc / lv.price : t.supply, ageMin: t.ageMin + 0.04 };
           }
@@ -13700,7 +13707,7 @@ export default function App() {
           const pExact = t.pool && lv.price > 0 ? lv.price : c;
           return { ...t, candles: candlesL, price: pExact, supply: supL,
             mc: supL > 0 ? pExact * supL : (lv.mc || t.mc),
-            sym: lv.sym, name: lv.name,
+            ...(t.isValo ? {} : { sym: lv.sym, name: lv.name }),
             mc: lv.mc || t.mc, tvl: lv.tvl || t.tvl,
             img: lv.img || t.img, pool: lv.pool || t.pool, liveMint: lv.mint || t.liveMint,
             traders: lv.traders || t.traders,
