@@ -43,16 +43,14 @@ async function jupPost(path, body) {
         body: JSON.stringify(body), signal: AbortSignal.timeout(9000) });
       if (r.ok) return { json: await r.json(), host };
       const bt = await r.text().catch(() => "");
-      if (r.status === 400 && looksNoRoute(bt)) {
-        const e2 = new Error(NO_ROUTE); e2.noRoute = true; throw e2;
-      }
-      errs.push(`${host} → ${r.status}${bt ? ` (${bt.slice(0, 120)})` : ""}`);
+      errs.push(`${host} → ${r.status}${bt ? ` (${bt.slice(0, 220)})` : ""}`);
     } catch (e) {
-      if (e && e.noRoute) throw e;
       errs.push(`${host} → ${String(e.message || e)}`);
     }
   }
-  throw new Error(`no Jupiter endpoint answered (${errs.join(" | ")})`);
+  const be = new Error(`the swap builder refused this trade (${errs.join(" | ")})`);
+  be.buildFail = true;
+  throw be;
 }
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
@@ -335,20 +333,37 @@ export default async function handler(req, res) {
     // fee mint = whichever side of the route Jupiter charges on (the output
     // mint for ExactIn). No ATA → no platform fee → the swap still goes through.
     const feeAta = feeViaJup ? await feeAtaFor(FEE_ACCT, outputMint) : null;
+    let buildQuote = quote;
+    let feeDropped = false;
+    if (quote && quote.platformFee && !feeAta) {
+      // priced with a fee we have no account to receive → re-price clean
+      try {
+        const rq = await jupGet(qBase);
+        if (rq && rq.json && rq.json.outAmount) { buildQuote = rq.json; feeDropped = true; }
+      } catch (e) { /* keep the original; the builder error will name the reason */ }
+    }
     const { json: sj } = await jupPost("/swap", {
-      quoteResponse: quote,
+      quoteResponse: buildQuote,
       userPublicKey,
-      ...(feeAta ? { feeAccount: feeAta } : {}),
+      ...(feeAta && buildQuote.platformFee ? { feeAccount: feeAta } : {}),
       wrapAndUnwrapSol: true,
       dynamicComputeUnitLimit: true,
       prioritizationFeeLamports: "auto",
     });
     if (!sj || !sj.swapTransaction) throw new Error("no transaction returned");
 
+    const builtSummary = feeDropped ? { ...summary,
+      outAmount: buildQuote.outAmount,
+      otherAmountThreshold: buildQuote.otherAmountThreshold,
+      feeBps: 0, feeVia: "none", feeWaived: "no treasury account for this mint yet",
+      solOut: selling ? Number(buildQuote.outAmount) / 1e9 : null,
+      solOutMin: selling ? Number(buildQuote.otherAmountThreshold) / 1e9 : null,
+    } : summary;
+
     res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
       enabled: true,
-      quote: summary,
+      quote: builtSummary,
       swapTransaction: sj.swapTransaction,      // base64, UNSIGNED
       lastValidBlockHeight: sj.lastValidBlockHeight ?? null,
       note: "unsigned — your wallet must approve this before anything happens",
@@ -358,9 +373,11 @@ export default async function handler(req, res) {
     // curve, or our own mint detection was the problem
     const msg = String(e && e.message || e);
     res.status(200).json({
-      error: msg === NO_ROUTE ? "no route found for this pair" : msg,
+      error: (e && e.buildFail) ? msg
+        : (msg === NO_ROUTE ? "no route found for this pair" : msg),
+      stage: (e && e.buildFail) ? "build" : "quote",
       diag: {
-        jupiterSaid: (e && e.jupBody) || msg.slice(0, 300),
+        jupiterSaid: (e && e.jupBody) || msg.slice(0, 400),
         inputMint: String(req.query.inputMint || SOL_MINT),
         outputMint: String(req.query.outputMint || ""),
         pumpPair: isPumpMint(String(req.query.inputMint || "")) || isPumpMint(String(req.query.outputMint || "")),
