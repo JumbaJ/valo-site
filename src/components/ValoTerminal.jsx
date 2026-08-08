@@ -17133,6 +17133,15 @@ export default function App() {
                 const outUi = (+q.outAmount || 0) / oUnit;
                 const worst = (+q.otherAmountThreshold || 0) / oUnit;
                 const impact = q.priceImpactPct;
+                // 🛑 hard stops — these aren't risky trades, they're broken quotes
+                const getsNothing = !(outUi > 0) || !(worst > 0);
+                const impactInsane = Number.isFinite(+impact) && +impact >= 25;
+                const blocked = getsNothing || impactInsane;
+                const blockWhy = getsNothing
+                  ? "This route returns essentially zero tokens for your SOL — the pool has no real liquidity behind it. Market cap can look healthy while the tradeable pool is empty."
+                  : impactInsane
+                  ? `A ${(+impact).toFixed(2)}% price impact means you'd lose almost everything you put in on the fill itself.`
+                  : null;
                 const hot = impact != null && impact > 3;
                 return (
                   <>
@@ -17169,12 +17178,26 @@ export default function App() {
                           fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>
                         ✕ CANCEL
                       </button>
-                      <button onClick={submitRealOrder}
+                      {blocked && (
+                        <div style={{ width: "100%", border: `1px solid ${T.red}`, background: "rgba(234,57,67,0.12)",
+                          borderRadius: 10, padding: "10px 12px", marginBottom: 9 }}>
+                          <div style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 900, color: T.red, marginBottom: 4 }}>
+                            🛑 VALO WON'T PLACE THIS TRADE
+                          </div>
+                          <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.text, lineHeight: 1.7 }}>{blockWhy}</div>
+                          <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, lineHeight: 1.6, marginTop: 6 }}>
+                            Nothing has been spent. If you still want in, trade it on the pool directly — but check the real liquidity first.
+                          </div>
+                        </div>
+                      )}
+                      <button disabled={blocked} onClick={() => { if (!blocked) submitRealOrder(); }}
                         style={{ flex: 1.6, border: "none", borderRadius: 11, padding: "13px 6px",
-                          background: realOrder.side === "sell" ? T.red : T.green, color: realOrder.side === "sell" ? "#170808" : "#07130d",
-                          fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, letterSpacing: 1, cursor: "pointer",
-                          boxShadow: realOrder.side === "sell" ? "0 0 18px rgba(234,57,67,0.4)" : "0 0 18px rgba(22,199,132,0.4)" }}>
-                        ✓ CONFIRM {realOrder.side === "sell" ? "SELL" : "BUY"}
+                          background: blocked ? "rgba(255,255,255,0.05)" : realOrder.side === "sell" ? T.red : T.green,
+                          color: blocked ? T.faint : realOrder.side === "sell" ? "#170808" : "#07130d",
+                          fontFamily: T.mono, fontSize: 11.5, fontWeight: 900, letterSpacing: 1,
+                          cursor: blocked ? "not-allowed" : "pointer", opacity: blocked ? 0.7 : 1,
+                          boxShadow: blocked ? "none" : realOrder.side === "sell" ? "0 0 18px rgba(234,57,67,0.4)" : "0 0 18px rgba(22,199,132,0.4)" }}>
+                        {blocked ? "🛑 BLOCKED" : <>✓ CONFIRM {realOrder.side === "sell" ? "SELL" : "BUY"}</>}
                       </button>
                     </div>
                     <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 8, lineHeight: 1.5 }}>
