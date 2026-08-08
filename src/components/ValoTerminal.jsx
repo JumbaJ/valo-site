@@ -10708,7 +10708,17 @@ export default function App() {
     try {
       const r = await fetch(`/api/swap?mode=quote&inputMint=${inputMint}&outputMint=${outputMint}${q}&slippageBps=${slipBps}`);
       const j = await r.json();
-      if (!r.ok || j.error) { setRealOrder({ stage: "error", token, side, size, label, msg: j.error || "no route" }); return; }
+      if (!r.ok || j.error) {
+        setRealOrder({ stage: "error", token, side, size, label, msg: j.error || "no route",
+          logs: j.diag ? [
+            `mode: ${j.diag.mode}`,
+            `input:  ${j.diag.inputMint}`,
+            `output: ${j.diag.outputMint}`,
+            `pump mint detected: ${j.diag.pumpPair ? "YES → curve should be used" : "NO → Jupiter only"}`,
+            `amount: ${j.diag.amount}`,
+          ] : null });
+        return;
+      }
       setRealOrder({ stage: "review", token, side, size, label, quote: j.quote, inputMint, outputMint, q, owner, fullExit });
     } catch (e) {
       setRealOrder({ stage: "error", token, side, size, label, msg: String(e.message || e),

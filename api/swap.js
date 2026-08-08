@@ -275,8 +275,8 @@ export default async function handler(req, res) {
     if (!curveMode && (!quote || !quote.outAmount)) {
       // no Jupiter path at all → let the pump.fun curve answer (it's the real
       // venue for a token that hasn't graduated yet)
-      if (isPumpMint(inputMint) || isPumpMint(outputMint)) curveMode = true;
-      else throw new Error("no route for this pair");
+      if (pumpPair) curveMode = true;
+      else throw new Error(`no route for this pair (jupiter: ${jupErr || "empty quote"})`);
     }
 
     if (curveMode) {
@@ -355,6 +355,19 @@ export default async function handler(req, res) {
       note: "unsigned — your wallet must approve this before anything happens",
     });
   } catch (e) {
-    res.status(502).json({ error: String(e.message || e) });
+    // 🔬 name the route we tried — a bare "NOROUTE" hides whether Jupiter, the
+    // curve, or our own mint detection was the problem
+    const msg = String(e && e.message || e);
+    res.status(200).json({
+      error: msg === NO_ROUTE ? "no route found for this pair" : msg,
+      diag: {
+        inputMint: String(req.query.inputMint || SOL_MINT),
+        outputMint: String(req.query.outputMint || ""),
+        pumpPair: isPumpMint(String(req.query.inputMint || "")) || isPumpMint(String(req.query.outputMint || "")),
+        curveEligible: isPumpMint(String(req.query.outputMint || "")) || isPumpMint(String(req.query.inputMint || "")),
+        mode: String(req.query.mode || "quote"),
+        amount: String(req.query.amount || ""),
+      },
+    });
   }
 }
