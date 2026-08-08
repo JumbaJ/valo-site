@@ -10904,8 +10904,11 @@ export default function App() {
     const bhx = await getBlockhash();
     const payer = new web3.PublicKey(payerPubkey);
     const tx = new web3.Transaction({ feePayer: payer, recentBlockhash: bhx });
-    if (split.burn && split.epoch) {
-      // 🔥 40% burned · 🎁 40% epoch vault · 🏦 20% treasury (remainder)
+    if (split.pool) {
+      // pooled: one transfer, split later by the distribution job
+      tx.add(web3.SystemProgram.transfer({ fromPubkey: payer, toPubkey: new web3.PublicKey(split.pool), lamports: lam }));
+    } else if (split.burn && split.epoch) {
+      // legacy per-trade split — kept for deployments without a pool wallet
       const burnLam = Math.floor(lam * 0.4);
       const epochLam = Math.floor(lam * 0.4);
       const treasLam = lam - burnLam - epochLam;          // exact remainder
@@ -10936,14 +10939,19 @@ export default function App() {
         const burnLam = Math.floor(lam * 0.4);
         const epochLam = Math.floor(lam * 0.4);
         const treasLam = lam - burnLam - epochLam;
-        tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(split.burn), lamports: burnLam }));
-        tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(split.epoch), lamports: epochLam }));
-        {
+        const pooled = !!split.pool;
+        if (pooled) {
+          tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(split.pool), lamports: lam }));
+        } else {
+          tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(split.burn), lamports: burnLam }));
+          tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(split.epoch), lamports: epochLam }));
           const treasTo = split.treasury || valoTreasury;
           if (treasTo && treasLam > 0) tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(treasTo), lamports: treasLam }));
         }
         await turboSignSend(tx);
-        sayPrivate({ type: "note", text: `⚖ site fee ${(lam / 1e9).toFixed(6)} SOL (${bps / 100}%) → 🔥 ${(burnLam / 1e9).toFixed(6)} burned · 🎁 ${(epochLam / 1e9).toFixed(6)} epoch vault · 🏦 ${(treasLam / 1e9).toFixed(6)} treasury` });
+        sayPrivate({ type: "note", text: pooled
+          ? `⚖ site fee ${(lam / 1e9).toFixed(6)} SOL (${bps / 100}%) → fee pool · splits 🔥40 / 🎁40 / 🏦20 on distribution`
+          : `⚖ site fee ${(lam / 1e9).toFixed(6)} SOL (${bps / 100}%) → 🔥 ${(burnLam / 1e9).toFixed(6)} burned · 🎁 ${(epochLam / 1e9).toFixed(6)} epoch vault · 🏦 ${(treasLam / 1e9).toFixed(6)} treasury` });
       } else if (valoTreasury) {
         tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(valoTreasury), lamports: lam }));
         await turboSignSend(tx);
@@ -17400,6 +17408,32 @@ export default function App() {
                       const sp = (onchain && onchain.feeSplit) || {};
                       const short = (a) => (a ? `${String(a).slice(0, 4)}…${String(a).slice(-4)}` : "—");
                       const bS = feeSol * 0.4, eS = feeSol * 0.4, tS = feeSol - bS - eS;
+                      if (!inSwap && sp.pool) {
+                        return (
+                          <>
+                            <div onClick={() => setFeeOpen((v) => !v)} role="button"
+                              style={{ display: "flex", justifyContent: "space-between", gap: 10, cursor: "pointer",
+                                fontFamily: T.mono, fontSize: 9.5, padding: "4px 0", borderTop: `1px solid ${T.border}` }}>
+                              <span style={{ color: T.faint }}>⚖ VALO fee ({(bps / 100).toFixed(2)}%) <span style={{ color: VALO_PURPLE }}>{feeOpen ? "▴" : "▾"}</span></span>
+                              <span style={{ color: VALO_PURPLE, fontWeight: 800 }}>−{feeSol.toFixed(6)} SOL</span>
+                            </div>
+                            {feeOpen && (
+                              <div style={{ borderTop: `1px solid ${T.border}`, padding: "7px 8px 4px", background: "rgba(125,92,240,0.05)", borderRadius: 8, marginTop: 2 }}>
+                                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, lineHeight: 1.6 }}>
+                                  Collected into the fee pool alongside every other trade, then split 🔥 40% burned · 🎁 40% epoch vault · 🏦 20% treasury. Batching keeps small trades from losing their fee to network minimums — every trade counts, whatever its size.
+                                </div>
+                                {sp.pool && (
+                                  <a href={`https://solscan.io/account/${sp.pool}`} target="_blank" rel="noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{ display: "inline-block", marginTop: 6, fontFamily: T.mono, fontSize: 7.5, color: T.dim, textDecoration: "underline dotted" }}>
+                                    watch the pool: {short(sp.pool)} ↗
+                                  </a>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        );
+                      }
                       const dest = inSwap
                         ? [["🏦 VALO treasury", feeSol, sp.treasury, "collected inside the swap, split 40/40/20 on distribution"]]
                         : [["🔥 burned forever", bS, sp.burn, "40% — removed from supply permanently"],
