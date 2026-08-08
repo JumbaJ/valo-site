@@ -304,6 +304,7 @@ export default async function handler(req, res) {
         swapTransaction: b64, quote: { inAmount: amountBase.toString(), outAmount: null, outDecimals, curve: true } });
     }
 
+    let feeSide = null;   // which mint's treasury account collected: output | input | refused
     const summary = {
       inputMint, outputMint,
       inAmount: quote.inAmount, outAmount: quote.outAmount,
@@ -314,6 +315,7 @@ export default async function handler(req, res) {
       routeLabels: (quote.routePlan || []).map((r) => r?.swapInfo?.label).filter(Boolean),
       maxSol: MAX_SOL, via: host,
       feeBps: bpsFor(inputMint, outputMint), feeVia: feeViaJup ? "jupiter" : (bpsFor(inputMint, outputMint) > 0 ? "client" : "none"),
+      feeSide,
       side: selling ? "sell" : "buy",
       outDecimals,
       // on a sell, what actually lands back in the wallet
@@ -332,7 +334,13 @@ export default async function handler(req, res) {
     if (!isMint(userPublicKey)) return res.status(400).json({ error: "bad user pubkey" });
     // fee mint = whichever side of the route Jupiter charges on (the output
     // mint for ExactIn). No ATA → no platform fee → the swap still goes through.
-    const feeAta = feeViaJup ? await feeAtaFor(FEE_ACCT, outputMint) : null;
+    let feeAta = feeViaJup ? await feeAtaFor(FEE_ACCT, outputMint) : null;
+    feeSide = feeAta ? "output" : null;
+    if (feeViaJup && !feeAta) {
+      // no account for the token → try the SOL side, which every route has
+      feeAta = await feeAtaFor(FEE_ACCT, inputMint);
+      if (feeAta) feeSide = "input";
+    }
     let buildQuote = quote;
     let feeDropped = false;
     if (quote && quote.platformFee && !feeAta) {
@@ -342,20 +350,32 @@ export default async function handler(req, res) {
         if (rq && rq.json && rq.json.outAmount) { buildQuote = rq.json; feeDropped = true; }
       } catch (e) { /* keep the original; the builder error will name the reason */ }
     }
-    const { json: sj } = await jupPost("/swap", {
-      quoteResponse: buildQuote,
+    const buildSwap = (qr, acct) => jupPost("/swap", {
+      quoteResponse: qr,
       userPublicKey,
-      ...(feeAta && buildQuote.platformFee ? { feeAccount: feeAta } : {}),
+      ...(acct && qr.platformFee ? { feeAccount: acct } : {}),
       wrapAndUnwrapSol: true,
       dynamicComputeUnitLimit: true,
       prioritizationFeeLamports: "auto",
     });
+    let sj = null;
+    try {
+      ({ json: sj } = await buildSwap(buildQuote, feeAta));
+    } catch (e1) {
+      if (!(feeAta && buildQuote.platformFee)) throw e1;
+      // the fee account was refused — take the trade without the fee rather
+      // than losing the fill. Which side was tried is reported below.
+      feeAta = null; feeSide = "refused"; feeDropped = true;
+      const rq2 = await jupGet(qBase);
+      buildQuote = (rq2 && rq2.json) || buildQuote;
+      ({ json: sj } = await buildSwap(buildQuote, null));
+    }
     if (!sj || !sj.swapTransaction) throw new Error("no transaction returned");
 
     const builtSummary = feeDropped ? { ...summary,
       outAmount: buildQuote.outAmount,
       otherAmountThreshold: buildQuote.otherAmountThreshold,
-      feeBps: bpsFor(inputMint, outputMint), feeVia: "client",
+      feeBps: bpsFor(inputMint, outputMint), feeVia: "client", feeSide,
       feeNote: "no treasury token account for this mint — collected as a SOL transfer instead",
       solOut: selling ? Number(buildQuote.outAmount) / 1e9 : null,
       solOutMin: selling ? Number(buildQuote.otherAmountThreshold) / 1e9 : null,
@@ -364,7 +384,7 @@ export default async function handler(req, res) {
     res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
       enabled: true,
-      quote: builtSummary,
+      quote: { ...builtSummary, feeSide },
       swapTransaction: sj.swapTransaction,      // base64, UNSIGNED
       lastValidBlockHeight: sj.lastValidBlockHeight ?? null,
       note: "unsigned — your wallet must approve this before anything happens",
