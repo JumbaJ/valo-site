@@ -13974,12 +13974,24 @@ export default function App() {
   }, [walletChain, walletVault, chainHoldingsLive]);
 
   selRef.current = sel;
-  const selPoolRef = useRef(null);
-  useEffect(() => { if (selected) selPoolRef.current = selected.pool || null; }, [selected && selected.id, selected && selected.pool]);
+  const selPoolRef = useRef({ id: null, pool: null });
   useEffect(() => {
-    if (sel == null || selected) return;                 // healthy
-    const pool = selPoolRef.current;
-    const again = pool ? tokens.find((t) => String(t.pool || "") === String(pool)) : null;
+    if (selected) selPoolRef.current = { id: selected.id, pool: selected.pool || null };
+  }, [selected && selected.id, selected && selected.pool]);
+  const selGraceRef = useRef(0);
+  useEffect(() => {
+    if (sel == null || selected) { selGraceRef.current = 0; return; }   // healthy
+    // ◆ the pinned $VALO card can lag a tick behind the tap — never bounce off it
+    if (sel === 424242) return;
+    const remembered = selPoolRef.current || {};
+    // only recover when the pool we remember actually belongs to THIS id
+    if (remembered.id !== sel || !remembered.pool) {
+      // give a freshly-selected card a moment to mount before giving up
+      if (selGraceRef.current < 3) { selGraceRef.current += 1; return; }
+      setSel(null); setClickMode(null);
+      return;
+    }
+    const again = tokens.find((t) => String(t.pool || "") === String(remembered.pool));
     if (again) setSel(again.id);                          // same token, new object
     else { setSel(null); setClickMode(null); }            // truly gone → back to the board
     // eslint-disable-next-line react-hooks/exhaustive-deps
