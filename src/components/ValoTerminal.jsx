@@ -11117,6 +11117,8 @@ export default function App() {
           } catch (e) {}
         }
         if (landed && !landed.ok) return { ok: false, sig, err: `reverted on-chain — funds did not move. ${landed.err || ""}` };
+        if (!landed) return { ok: false, sig, dropped: true,
+          err: "the network never confirmed this — it was dropped, not filled. Nothing left your wallet. Try again, usually with a slightly larger size or higher slippage." };
         const q2 = j.quote || {};
         const oDec = Number.isInteger(q2.outDecimals) ? q2.outDecimals : 6;
         const prevHoldQty2 = (() => { try { const hh0 = chainHoldingOf(token); return (hh0 && hh0.qty) || 0; } catch (e) { return 0; } })();
@@ -11372,6 +11374,7 @@ export default function App() {
             if (cj.confirmed) { landed = { ok: true }; break; } } catch (e) {}
         }
         if (landed && !landed.ok) throw new Error(`reverted on-chain (${landed.err || ""})`);
+        if (!landed) throw new Error("the network never confirmed this — dropped, not filled. Nothing was charged.");
         const q2 = b.quote || {};
         const sol = (+q2.outAmount || 0) / 1e9 || h.qty * ((h.price || 0) / SOL_USD);
         recordRealFill({ at: Date.now(), side: "sell", mint: h.mint, sym: h.sym || h.mint.slice(0, 5), qty: h.qty, sol, est: !q2.outAmount, sig, px: h.price || 0 });
@@ -11482,6 +11485,12 @@ export default function App() {
         return;
       }
 
+      if (!landed) {
+        // 45s with no confirmation: the network dropped it. Not a fill.
+        setRealOrder({ ...o, stage: "error", sig, dropped: true,
+          msg: "the network never confirmed this — it was dropped, not filled. Nothing left your wallet, and nothing was charged. Try again; if it keeps happening, raise slippage or trade a slightly larger size." });
+        return;
+      }
       setRealOrder({ ...o, stage: "done", sig, confirmed: !!(landed && landed.ok) });
       const prevHoldQty = (() => { try { const hh0 = chainHoldingOf(o.token); return (hh0 && hh0.qty) || 0; } catch (e) { return 0; } })();
       // ⚡ INSTANT position: a confirmed buy drops the holding into the wallet
@@ -11548,7 +11557,7 @@ export default function App() {
               qty: sellQty, sol: (+q2.outAmount || 0) / 1e9 || estSellSol, est: !q2.outAmount, sig }
           : { at: Date.now(), side: "buy", mint: o.token.liveMint, sym: o.token.sym,
               qty: (+q2.outAmount || 0) / Math.pow(10, oDec), sol: +o.size || 0, sig };
-        if (fill.mint && fill.qty > 0 && fill.sol > 0) recordRealFill({ ...fill, px: (fill.sol * SOL_USD) / fill.qty });
+        if (landed && landed.ok && fill.mint && fill.qty > 0 && fill.sol > 0) recordRealFill({ ...fill, px: (fill.sol * SOL_USD) / fill.qty });
       } catch (e) {}
       pushNotif({ type: "system", user: null, tokenId: o.token.id,
         text: landed
