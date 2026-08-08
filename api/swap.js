@@ -336,11 +336,9 @@ export default async function handler(req, res) {
     // mint for ExactIn). No ATA → no platform fee → the swap still goes through.
     let feeAta = feeViaJup ? await feeAtaFor(FEE_ACCT, outputMint) : null;
     feeSide = feeAta ? "output" : null;
-    if (feeViaJup && !feeAta) {
-      // no account for the token → try the SOL side, which every route has
-      feeAta = await feeAtaFor(FEE_ACCT, inputMint);
-      if (feeAta) feeSide = "input";
-    }
+    // Do NOT fall back to the input-side account: Jupiter builds it and then
+    // rejects it on chain with 0x177e. Sells already have SOL as the output.
+
     let buildQuote = quote;
     let feeDropped = false;
     if (quote && quote.platformFee && !feeAta) {
