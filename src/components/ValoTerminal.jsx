@@ -4866,7 +4866,7 @@ function UserProfileModal({ name, onClose, isMobile, tokens = [], isFollowing, o
     </>
   );
 }
-function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], onOpenToken, onOpenUser, onAccept, onDecline, onCloudReq, notifSetting, setNotifSetting }) {
+function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], onOpenToken, onOpenUser, onAccept, onDecline, onCloudReq, notifSetting, setNotifSetting, onClearAll }) {
   const [whyOpen, setWhyOpen] = useState(null);   // 🤖 which bot-skip explanation is expanded
   const [tab, setTab] = useState("all"); // all | callout | follower | friend
   const shown = notifs.filter((n) => tab === "all" || n.type === tab || (tab === "friend" && n.type === "friendreq"));
@@ -4876,7 +4876,16 @@ function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], o
     <div className="valo-fixed-safe" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 107, background: "rgba(4,6,10,0.78)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: isMobile ? 8 : 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, maxHeight: "84vh", display: "flex", flexDirection: "column", background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 14, overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: `1px solid ${T.border}` }}>
-          <div style={{ fontWeight: 800, fontSize: 14 }}>🔔 Notifications</div>
+          <div style={{ fontWeight: 800, fontSize: 14, display: "flex", alignItems: "center", gap: 9 }}>
+            🔔 Notifications
+            {notifs.length > 0 && onClearAll && (
+              <button onClick={() => onClearAll()} title="Delete every notification, here and in the cloud"
+                style={{ border: `1px solid ${T.border2}`, background: "transparent", color: T.faint,
+                  borderRadius: 7, padding: "4px 9px", fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, cursor: "pointer" }}>
+                🧹 CLEAR ALL
+              </button>
+            )}
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {/* website setting — callout pushes on/off (also gates mobile push · API: push service) */}
             <button onClick={() => setNotifSetting(!notifSetting)} title="Callout notifications from people you follow"
@@ -11818,7 +11827,25 @@ export default function App() {
         const { data } = await sb.from("notifications").select("*")
           .eq("user_id", uid).order("ts", { ascending: false }).limit(120);
         if (stop || !data) return;
-        const restored = data.map((r) => ({
+        // 🧹 anything authored by a simulated handle is residue from the old
+        // generator — drop it here and delete it from the table
+        const simHandles = new Set(CALLERS.map((c) => String(c).toLowerCase()));
+        const genRe = new RegExp(`^(${HANDLE_A.join("|")})(${HANDLE_B.join("|")})\\d{0,3}$`, "i");
+        const isFake = (r) => {
+          const h = String(r.from_handle || "").replace(/^@/, "").toLowerCase();
+          if (h && (simHandles.has(h) || genRe.test(h))) return true;   // synthetic author
+          const b = String(r.body || "");
+          if (/called out \$\$/.test(b)) return true;                    // the "$$VALO" artifact
+          // a body naming a synthetic handle, even if from_handle wasn't stored
+          const m = b.match(/@([A-Za-z0-9_]+)/);
+          if (m) { const h2 = m[1].toLowerCase(); if (simHandles.has(h2) || genRe.test(h2)) return true; }
+          return false;
+        };
+        const junk = data.filter(isFake);
+        if (junk.length) {
+          try { await sb.from("notifications").delete().in("id", junk.map((r) => r.id)); } catch (e) {}
+        }
+        const restored = data.filter((r) => !isFake(r)).map((r) => ({
           id: "n" + r.id, dbId: r.id, ts: new Date(r.ts).getTime(), read: !!r.read,
           type: r.kind, text: r.body, user: r.from_handle || null,
           tokenId: r.token_key != null && !isNaN(+r.token_key) ? +r.token_key : null,
@@ -17868,6 +17895,10 @@ export default function App() {
         myBest={Object.values(myMcCallouts).reduce((m, c) => Math.max(m, c.peak || 0), 0)} />}
       {myCalloutsOpen && <MyCalloutsModal onClose={() => setMyCalloutsOpen(false)} isMobile={isMobile} myCallouts={myMcCallouts} tokens={tokens} username={username} onOpenToken={navigateToToken} />}
       {notifOpen && <NotificationsModal onClose={closeAllPages} isMobile={isMobile} notifs={notifs} friendReqs={friendReqs}
+        onClearAll={async () => {
+          setNotifs([]); setFriendReqs([]);
+          try { if (sb && cloudUser) await sb.from("notifications").delete().eq("user_id", cloudUser.id); } catch (e) {}
+        }}
         onCloudReq={(n, accept) => {
           cloudFriendAnswer(n.reqId, accept);
           if (accept) setFriendsList((F) => (F.includes(n.user) ? F : [...F, n.user]));
