@@ -58,6 +58,11 @@ const SOL_MINT = "So11111111111111111111111111111111111111112";
 // Deliberately tiny by default: the first live orders should be ones you would
 // not mind losing entirely.
 const MAX_SOL = Math.max(0.001, parseFloat(process.env.VALO_MAX_ORDER_SOL || "0.05"));
+// Ceiling on the priority bid. ~0.0005 SOL buys inclusion during normal
+// contention; only what's needed is actually spent. Raise with
+// VALO_PRIORITY_MAX_LAMPORTS if fills start dropping during heavy congestion.
+const PRIORITY_MAX_LAMPORTS = Math.max(1000,
+  parseInt(process.env.VALO_PRIORITY_MAX_LAMPORTS || "500000", 10) || 500000);
 const ENABLED = String(process.env.VALO_ONCHAIN || "").trim() === "1";
 
 const isMint = (m) => /^[A-Za-z0-9]{32,50}$/.test(String(m || ""));
@@ -354,7 +359,13 @@ export default async function handler(req, res) {
       ...(acct && qr.platformFee ? { feeAccount: acct } : {}),
       wrapAndUnwrapSol: true,
       dynamicComputeUnitLimit: true,
-      prioritizationFeeLamports: "auto",
+      prioritizationFeeLamports: {
+        priorityLevelWithMaxLamports: {
+          maxLamports: PRIORITY_MAX_LAMPORTS,   // ceiling, not a flat charge
+          priorityLevel: "high",
+          global: false,                        // price against THIS route's accounts
+        },
+      },
     });
     let sj = null;
     try {
