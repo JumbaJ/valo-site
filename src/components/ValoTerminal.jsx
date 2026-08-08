@@ -10720,6 +10720,7 @@ export default function App() {
       if (!r.ok || j.error) {
         setRealOrder({ stage: "error", token, side, size, label, msg: j.error || "no route",
           logs: j.diag ? [
+            `jupiter said: ${j.diag.jupiterSaid || "(nothing)"}`,
             `mode: ${j.diag.mode}`,
             `input:  ${j.diag.inputMint}`,
             `output: ${j.diag.outputMint}`,

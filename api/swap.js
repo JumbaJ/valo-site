@@ -15,7 +15,7 @@ const jupHeaders = () => (JUP_KEY ? { accept: "application/json", "x-api-key": J
 
 // try each host until one answers; carry the errors so failures are legible
 const NO_ROUTE = "NOROUTE";
-const looksNoRoute = (t) => /route|ROUTE_NOT_FOUND|COULD_NOT_FIND|not tradable|TOKEN_NOT_TRADABLE|NOT_SUPPORTED/i.test(String(t || ""));
+const looksNoRoute = (t) => /ROUTE_NOT_FOUND|COULD_NOT_FIND_ANY_ROUTE|no routes? found|not tradable|TOKEN_NOT_TRADABLE|NOT_SUPPORTED/i.test(String(t || ""));
 async function jupGet(path) {
   const errs = [];
   for (const host of JUP_HOSTS) {
@@ -24,9 +24,9 @@ async function jupGet(path) {
       if (r.ok) return { json: await r.json(), host };
       const body = await r.text().catch(() => "");
       if (r.status === 400 && looksNoRoute(body)) {
-        const e2 = new Error(NO_ROUTE); e2.noRoute = true; throw e2;   // definitive — stop asking
+        const e2 = new Error(NO_ROUTE); e2.noRoute = true; e2.jupBody = body.slice(0, 300); throw e2;
       }
-      errs.push(`${host} → ${r.status}${body ? ` (${body.slice(0, 120)})` : ""}`);
+      errs.push(`${host} → ${r.status}${body ? ` (${body.slice(0, 200)})` : ""}`);
     } catch (e) {
       if (e && e.noRoute) throw e;
       errs.push(`${host} → ${String(e.message || e)}`);
@@ -361,6 +361,7 @@ export default async function handler(req, res) {
     res.status(200).json({
       error: msg === NO_ROUTE ? "no route found for this pair" : msg,
       diag: {
+        jupiterSaid: (e && e.jupBody) || msg.slice(0, 300),
         inputMint: String(req.query.inputMint || SOL_MINT),
         outputMint: String(req.query.outputMint || ""),
         pumpPair: isPumpMint(String(req.query.inputMint || "")) || isPumpMint(String(req.query.outputMint || "")),
