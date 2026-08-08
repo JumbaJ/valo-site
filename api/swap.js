@@ -162,6 +162,7 @@ export default async function handler(req, res) {
         + "&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=100000&slippageBps=100");
       return res.status(200).json({ enabled: true, feeBps: FEE_BPS, feeBpsValo: FEE_BPS_VALO,
         feeVia: feeViaJup ? "jupiter" : (FEE_BPS > 0 ? "client" : "none"), jupiter: "reachable", via: host, maxSol: MAX_SOL,
+        curve: "pump.fun bonding curve used automatically for pre-graduation pump mints",
         feeAccountNote: feeViaJup
           ? "platform fee routes to the treasury's token account for the traded mint (created on first fee)"
           : "no platform fee configured",
@@ -219,34 +220,55 @@ export default async function handler(req, res) {
       } else {
         amount2 = Number(amountBase) / 1e9;               // SOL
       }
-      const r2 = await fetch("https://pumpportal.fun/api/trade-local", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          publicKey: userPublicKey, action: selling2 ? "sell" : "buy", mint: mint2,
-          amount: amount2, denominatedInSol: selling2 ? "false" : "true",
-          slippage: Math.max(1, Math.round(slippageBps / 100)), priorityFee: 0.00008, pool: "auto",
-        }),
-      });
-      if (!r2.ok) {
-        const bt = await r2.text().catch(() => "");
-        throw new Error(`no Jupiter route, and the pump.fun curve refused it too (${r2.status}${bt ? `: ${bt.slice(0, 140)}` : ""})`);
+      const body2 = {
+        publicKey: userPublicKey, action: selling2 ? "sell" : "buy", mint: mint2,
+        amount: amount2, denominatedInSol: selling2 ? "false" : "true",
+        slippage: Math.max(1, Math.round(slippageBps / 100)), priorityFee: 0.00008, pool: "auto",
+      };
+      // providers that can build a pump.fun curve transaction, in order
+      const CURVE_HOSTS = [
+        "https://pumpportal.fun/api/trade-local",
+        "https://api.pumpportal.fun/api/trade-local",
+      ];
+      const notes = [];
+      for (const host2 of CURVE_HOSTS) {
+        try {
+          const r2 = await fetch(host2, {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify(body2), signal: AbortSignal.timeout(9000),
+          });
+          if (!r2.ok) {
+            const bt = await r2.text().catch(() => "");
+            notes.push(`${host2.replace(/^https:\/\//, "")} → ${r2.status}${bt ? `: ${bt.slice(0, 120)}` : ""}`);
+            continue;
+          }
+          const buf = Buffer.from(await r2.arrayBuffer());
+          if (!buf.length) { notes.push(`${host2.replace(/^https:\/\//, "")} → empty transaction`); continue; }
+          return buf.toString("base64");
+        } catch (e3) {
+          notes.push(`${host2.replace(/^https:\/\//, "")} → ${String(e3 && e3.message || e3).slice(0, 90)}`);
+        }
       }
-      const buf = Buffer.from(await r2.arrayBuffer());
-      if (!buf.length) throw new Error("pump.fun curve returned an empty transaction");
-      return buf.toString("base64");
+      throw new Error(`the pump.fun curve wouldn't build this trade (${notes.join(" | ")})`);
     };
 
     const qBase = `/quote?inputMint=${inputMint}&outputMint=${outputMint}`
       + `&amount=${amountBase.toString()}&slippageBps=${slippageBps}&onlyDirectRoutes=false`;
     const feeQ = feeViaJup ? `&platformFeeBps=${bpsFor(inputMint, outputMint)}` : "";
-    let quoteRes = null, curveMode = false;
+    let quoteRes = null, curveMode = false, jupErr = null;
+    const pumpPair = isPumpMint(inputMint) || isPumpMint(outputMint);
     try { quoteRes = await jupGet(qBase + feeQ); }
     catch (e) {
-      if (!(e && e.noRoute)) throw e;
-      // retry WITHOUT the platform fee — thin pools often have a route that
-      // simply can't carry a fee leg. A tradeable token beats a fee.
-      if (feeQ) { try { quoteRes = await jupGet(qBase); } catch (e2) { if (!(e2 && e2.noRoute)) throw e2; } }
-      if (!quoteRes) curveMode = true;   // pre-migration pump coin — the curve is the venue
+      jupErr = String(e && e.message || e);
+      // a fee leg is often what kills a thin route — retry clean before giving up
+      if (feeQ) { try { quoteRes = await jupGet(qBase); } catch (e2) { jupErr = String(e2 && e2.message || e2); } }
+      if (!quoteRes) {
+        // any pump mint → the bonding curve IS the market. Not a fallback so
+        // much as the correct venue before graduation.
+        if (pumpPair) curveMode = true;
+        else if (e && e.noRoute) curveMode = false;
+        else throw e;
+      }
     }
     const quote = quoteRes ? quoteRes.json : null;
     const host = quoteRes ? quoteRes.host : "pump.fun-curve";
@@ -272,7 +294,14 @@ export default async function handler(req, res) {
         }});
       }
       if (!isMint(userPublicKey)) return res.status(400).json({ error: "bad user pubkey" });
-      const b64 = await pumpLocal();
+      let b64;
+      try { b64 = await pumpLocal(); }
+      catch (ce) {
+        // surface the CURVE's own reason — reporting the old Jupiter NOROUTE
+        // here sent everyone chasing the wrong problem
+        return res.status(200).json({ enabled: true, error: String(ce && ce.message || ce),
+          venue: "pump.fun-curve", jupiter: jupErr || null });
+      }
       res.setHeader("Cache-Control", "no-store");
       return res.status(200).json({ enabled: true, curve: true, via: "pump.fun-curve",
         swapTransaction: b64, quote: { inAmount: amountBase.toString(), outAmount: null, outDecimals, curve: true } });
