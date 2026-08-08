@@ -10842,6 +10842,30 @@ export default function App() {
       pushNotif({ type: "system", text: `👑 creator fees split: 🔥 ${(burnLam / 1e9).toFixed(4)} burned · 🎁 ${(vaultLam / 1e9).toFixed(4)} → epoch vault · kept ${((lam - burnLam - vaultLam) / 1e9).toFixed(4)} · ${signature.slice(0, 8)}…` });
     } catch (e) { pushNotif({ type: "system", text: `👑 split failed: ${String(e.message || e).slice(0, 80)}` }); }
   };
+  // 🧾 build (but do NOT send) the site-fee transfer for any payer. Returning
+  // the tx unsent is what lets Phantom approve it alongside the swap in ONE
+  // prompt, and lets us drop it if the trade never lands.
+  const buildFeeTx = async (notionalSol, feeMeta, payerPubkey) => {
+    const bps = (feeMeta && feeMeta.feeBps) || (onchain && onchain.feeBps) || 0;
+    const via = (feeMeta && feeMeta.feeVia) || (onchain && onchain.feeVia) || "none";
+    if (!(bps > 0) || via === "jupiter") return null;   // already taken in-swap
+    const lam = Math.floor((+notionalSol || 0) * 1e9 * (bps / 10000));
+    if (lam < 2000) return null;                        // dust isn't worth a tx fee
+    const split = (onchain && onchain.feeSplit) || {};
+    const web3 = await loadWeb3();
+    const bhx = await getBlockhash();
+    const payer = new web3.PublicKey(payerPubkey);
+    const tx = new web3.Transaction({ feePayer: payer, recentBlockhash: bhx });
+    if (split.burn && split.epoch) {
+      const half = Math.floor(lam / 2);
+      tx.add(web3.SystemProgram.transfer({ fromPubkey: payer, toPubkey: new web3.PublicKey(split.burn), lamports: half }));
+      tx.add(web3.SystemProgram.transfer({ fromPubkey: payer, toPubkey: new web3.PublicKey(split.epoch), lamports: lam - half }));
+    } else if (valoTreasury) {
+      tx.add(web3.SystemProgram.transfer({ fromPubkey: payer, toPubkey: new web3.PublicKey(valoTreasury), lamports: lam }));
+    } else return null;
+    return { tx, lam, bps, split };
+  };
+
   const payTurboFee = async (notionalSol, feeMeta) => {
     try {
       if (!turboActive) return;
@@ -11021,8 +11045,30 @@ export default function App() {
         const raw = Uint8Array.from(atob(j.swapTransaction), (c) => c.charCodeAt(0));
         const tx = web3.VersionedTransaction.deserialize(raw);
         let sig = null;
+        let feeSigned = null;                                 // signed, held until the swap confirms
         if (turboActive) {
           sig = await turboSignSend(tx);                      // ⚡ zero prompts
+        } else if (ph && ph.signAllTransactions) {
+          // one approval covering the swap AND the site fee
+          const qf0 = j.quote || j;
+          const feeNotional = selling
+            ? ((+((j.quote || {}).outAmount) || 0) / 1e9)
+            : Math.min(size, onchain.maxSol || size);
+          let feePack = null;
+          try { feePack = await buildFeeTx(feeNotional, qf0, tradeAddr); } catch (e) { feePack = null; }
+          if (feePack) {
+            const signedPair = await ph.signAllTransactions([tx, feePack.tx]);
+            const b64s = btoa(String.fromCharCode(...signedPair[0].serialize()));
+            const send0 = await fetch("/api/sendtx", { method: "POST", headers: { "content-type": "application/json" },
+              body: JSON.stringify({ signed: b64s }) });
+            const sj0 = await send0.json();
+            if (!sj0.ok) return { ok: false, err: sj0.error || "network rejected it", errorName: sj0.errorName || null, logs: sj0.logs || null, program: sj0.program || null };
+            sig = sj0.signature;
+            feeSigned = { b64: btoa(String.fromCharCode(...signedPair[1].serialize())), lam: feePack.lam, bps: feePack.bps, split: feePack.split };
+          } else {
+            const out = await ph.signAndSendTransaction(tx);
+            sig = out && (out.signature || out);
+          }
         } else if (ph && ph.signAndSendTransaction) {
           const out = await ph.signAndSendTransaction(tx);   // silent if the user enabled auto-confirm
           sig = out && (out.signature || out);
@@ -11056,6 +11102,22 @@ export default function App() {
         const sol = selling ? ((+q2.outAmount || 0) / 1e9 || size * ((token.price || 0) / SOL_USD)) : Math.min(size, onchain.maxSol || size);
         try { if (qty > 0 && sol > 0) recordRealFill({ at: Date.now(), side, mint: token.liveMint, sym: token.sym, qty, sol, sig, px: (sol * SOL_USD) / qty }); } catch (e) {}
         try { if (landed && landed.ok && sol > 0) payTurboFee(sol, j.quote || j); } catch (e) {}
+        // the fee the user already approved — sent only now that the fill is real
+        try {
+          if (feeSigned && landed && landed.ok) {
+            fetch("/api/sendtx", { method: "POST", headers: { "content-type": "application/json" },
+              body: JSON.stringify({ signed: feeSigned.b64 }) })
+              .then((rr) => rr.json())
+              .then((jj) => {
+                if (!jj || !jj.ok) return;
+                const half = Math.floor(feeSigned.lam / 2);
+                sayPrivate(feeSigned.split && feeSigned.split.burn && feeSigned.split.epoch
+                  ? { type: "note", text: `⚖ site fee ${(feeSigned.lam / 1e9).toFixed(6)} SOL (${feeSigned.bps / 100}%) → 🔥 ${(half / 1e9).toFixed(6)} burned · 🎁 ${((feeSigned.lam - half) / 1e9).toFixed(6)} epoch vault` }
+                  : { type: "note", text: `🏦 site fee ${(feeSigned.lam / 1e9).toFixed(6)} SOL → VALO treasury (${feeSigned.bps / 100}%)` });
+              })
+              .catch(() => {});
+          }
+        } catch (e) {}
         // 🧾 after-sell truth: mark-to-market said one thing; the pool paid
         // another. When impact+fees moved the result, spell it out.
         if (selling && landed && landed.ok) {
