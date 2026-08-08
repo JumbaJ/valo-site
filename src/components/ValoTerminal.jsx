@@ -467,7 +467,8 @@ function saneMc(x) {
   return mc;
 }
 function adoptMarketToken(x) {
-  const sym = String(x.sym || "???").toUpperCase().slice(0, 12);
+  // strip any leading $ — the UI adds its own, and "$$VALO" looked broken
+  const sym = String(x.sym || "???").replace(/^\$+/, "").toUpperCase().slice(0, 12) || "???";
   const buys = +x.buys24 || +x.buys || 0, sells = +x.sells24 || +x.sells || 0;
   const flow = Math.max(1, buys + sells);
   const green = +x.greenUsd || 0, red = +x.redUsd || 0;
@@ -5692,7 +5693,7 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
               {sellBtn(() => onSellPos(t))}
             </div>
           ))}
-          {tickets.length + runsLive.length + pend.length === 0 && (
+          {tickets.length + runsLive.length + pend.length + (liveMode ? visHolds(chainHoldings || []).length : 0) === 0 && (
             liveMode ? (
               <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center", padding: 12 }}>
                 No on-chain positions — buy any token and it lives here until fully sold.
@@ -13868,7 +13869,31 @@ export default function App() {
       owner: tradeAddr, src: (turbo && tradeAddr === turbo.pubkey) ? "turbo" : "phantom" }));
     const vHolds = ((walletVault && walletVault.holdings) || []).map((h) => ({ ...h,
       owner: vaultAddr, src: "phantom" }));
-    const holds = [...tHolds, ...vHolds].filter((h) => !recentlyClosed.has(h.mint));
+    const merged = [...tHolds, ...vHolds].filter((h) => !recentlyClosed.has(h.mint));
+    const seenAcct = new Map();
+    for (const h of merged) {
+      // the token account is the true identity of a position; fall back to
+      // mint+owner when a provider doesn't return the account
+      const key = String(h.account || `${h.mint}:${h.owner}`).toLowerCase();
+      const prev = seenAcct.get(key);
+      if (!prev) { seenAcct.set(key, h); continue; }
+      // same account twice → keep the richer row, prefer the turbo attribution
+      seenAcct.set(key, {
+        ...prev, ...h,
+        qty: Math.max(prev.qty || 0, h.qty || 0),
+        usd: Math.max(prev.usd || 0, h.usd || 0),
+        src: prev.src === "turbo" || h.src === "turbo" ? "turbo" : prev.src,
+      });
+    }
+    // and never show the same MINT twice for the same owner
+    const byMintOwner = new Map();
+    for (const h of seenAcct.values()) {
+      const k2 = `${String(h.mint).toLowerCase()}:${String(h.owner || "").toLowerCase()}`;
+      const p2 = byMintOwner.get(k2);
+      if (!p2) { byMintOwner.set(k2, h); continue; }
+      byMintOwner.set(k2, { ...p2, qty: (p2.qty || 0) + (h.qty || 0), usd: (p2.usd || 0) + (h.usd || 0) });
+    }
+    const holds = [...byMintOwner.values()];
     return holds.map((h) => {
       const card = (tokens || []).find((t) => t.liveMint === h.mint);
       const price = (card && card.price > 0) ? card.price : (h.price || 0);

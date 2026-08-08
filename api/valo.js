@@ -26,7 +26,7 @@ const fromDexScreener = async (mint) => {
   const price = +p.priceUsd || 0;
   const mc = +p.marketCap || +p.fdv || 0;
   return {
-    mint, pool: p.pairAddress || null, sym: (p.baseToken && p.baseToken.symbol) || "VALO",
+    mint, pool: p.pairAddress || null, sym: String((p.baseToken && p.baseToken.symbol) || "VALO").replace(/^\$+/, ""),
     name: (p.baseToken && p.baseToken.name) || "VALO",
     price, mc,
     tvl: +(p.liquidity && p.liquidity.usd) || 0,
