@@ -9720,6 +9720,8 @@ function StickySearch({ top, children }) {
 }
 
 
+const VALO_MINT_FALLBACK = "8sGztc2R1sMY4WiXSU1vuJqZGtzHXaA832AcifF9pump";
+
 export default function App() {
   const [tokens, setTokens] = useState(() => {
     // ⛓ LIVE: the board starts EMPTY and fills from chain. No demo cast ever
@@ -12400,10 +12402,11 @@ export default function App() {
     if (!liveData) return;
     let stop = false;
     (async () => {
+      let resolved = false;   // did any route actually give us the mint?
       try {
         const r = await fetch("/api/treasury");
         const j = r.ok ? await r.json() : null;
-        if (!stop && j && j.token && j.token.mint) setValoMint(j.token.mint);
+        if (!stop && j && j.token && j.token.mint) { setValoMint(j.token.mint); resolved = true; }
         if (!stop && j && j.wallets && j.wallets.treasury && j.wallets.treasury.address) setValoTreasury(j.wallets.treasury.address);
         // 🛟 if that endpoint is missing, learn the mint from the market route
         // instead — the whole $VALO UI depends on knowing it
@@ -12411,16 +12414,30 @@ export default function App() {
           try {
             const r2 = await fetch("/api/valo");
             const j2 = r2.ok ? await r2.json() : null;
-            if (!stop && j2 && j2.mint) setValoMint(j2.mint);
+            if (!stop && j2 && j2.mint) { setValoMint(j2.mint); resolved = true; }
           } catch (e2) {}
         }
       } catch (e) {
         try {
           const r2 = await fetch("/api/valo");
           const j2 = r2.ok ? await r2.json() : null;
-          if (!stop && j2 && j2.mint) setValoMint(j2.mint);
+          if (!stop && j2 && j2.mint) { setValoMint(j2.mint); resolved = true; }
         } catch (e2) {}
       }
+      if (resolved) return;   // got it first time — no retries, no extra calls
+      // both routes missed → keep trying, then fall back to the known CA
+      for (let a = 0; a < 3 && !stop; a++) {
+        await new Promise((res) => setTimeout(res, 2500 * (a + 1)));
+        if (stop) return;
+        let got = null;
+        try {
+          const r3 = await fetch(`/api/valo?t=${Date.now()}`);
+          const j3 = r3.ok ? await r3.json() : null;
+          got = (j3 && j3.mint) || null;
+        } catch (e3) {}
+        if (got) { if (!stop) setValoMint(got); return; }
+      }
+      if (!stop) setValoMint((m) => m || VALO_MINT_FALLBACK);
     })();
     return () => { stop = true; };
   }, [liveData]);
@@ -13411,8 +13428,23 @@ export default function App() {
   }, [valoMint, valoLive]);
   const openValoChart = useCallback(() => {
     setClickMode(null);
+    // guarantee the card exists before pointing at it — otherwise sel 424242
+    // references nothing and the recovery guard leaves it stranded forever
+    const mint = valoMint || VALO_MINT_FALLBACK;
+    setTokens((Ts) => {
+      if (Ts.some((t) => t && t.id === 424242)) return Ts;
+      return [...Ts, {
+        id: 424242, sym: "VALO", name: "VALO Terminal", liveMint: mint, ca: mint,
+        pool: null, hue: 262, isValo: true, price: 0, mc: 0, tvl: 0, vol24: 0,
+        buys: 0, sells: 0, greenUsd: 0, redUsd: 0, ch: 0, ch24: 0, statWin: "24h",
+        traders: 0, momentum: 50, buyPressure: 50, ageMin: 1, candles: [],
+        socials: {}, dev: { wallet: "", trades: [], launches: [], withdrawals: [], feeHistory: [],
+          tokensLaunched: 0, rugged: 0, creatorRewardsSol: 0, feesDay: 0, feesMonth: 0, feesYear: 0 },
+        trending: { reason: "$VALO — the terminal's own token, live on pump.fun.", tweet: null, desc: "" },
+      }];
+    });
     setSel(424242);            // ◆ always OUR token — the card is pinned to the CA
-  }, []);
+  }, [valoMint]);
   // 🔥 SITE BURN — real. $VALO launches with a fixed 1B supply, and SPL burns
   // reduce total supply directly, so burned = 1B − current supply. Measured
   // from the pool's own MC ÷ price. Demo keeps the simulated ticker.
@@ -14079,8 +14111,24 @@ export default function App() {
   const selGraceRef = useRef(0);
   useEffect(() => {
     if (sel == null || selected) { selGraceRef.current = 0; return; }   // healthy
-    // ◆ the pinned $VALO card can lag a tick behind the tap — never bounce off it
-    if (sel === 424242) return;
+    // ◆ the pinned $VALO card can lag a tick behind the tap — never bounce off
+    // it. But never sit blank either: if the card is genuinely missing, put it
+    // back rather than leaving the selection pointing at nothing.
+    if (sel === 424242) {
+      if (selGraceRef.current < 3) { selGraceRef.current += 1; return; }
+      const mint = valoMint || VALO_MINT_FALLBACK;
+      setTokens((Ts) => (Ts.some((t) => t && t.id === 424242) ? Ts : [...Ts, {
+        id: 424242, sym: "VALO", name: "VALO Terminal", liveMint: mint, ca: mint,
+        pool: null, hue: 262, isValo: true, price: 0, mc: 0, tvl: 0, vol24: 0,
+        buys: 0, sells: 0, greenUsd: 0, redUsd: 0, ch: 0, ch24: 0, statWin: "24h",
+        traders: 0, momentum: 50, buyPressure: 50, ageMin: 1, candles: [],
+        socials: {}, dev: { wallet: "", trades: [], launches: [], withdrawals: [], feeHistory: [],
+          tokensLaunched: 0, rugged: 0, creatorRewardsSol: 0, feesDay: 0, feesMonth: 0, feesYear: 0 },
+        trending: { reason: "$VALO — the terminal's own token, live on pump.fun.", tweet: null, desc: "" },
+      }]));
+      selGraceRef.current = 0;
+      return;
+    }
     const remembered = selPoolRef.current || {};
     // only recover when the pool we remember actually belongs to THIS id
     if (remembered.id !== sel || !remembered.pool) {
