@@ -7634,6 +7634,10 @@ const humanSwapError = (raw) => {
     return "The quote expired before it landed. Try again — it should go straight through.";
   if (/0x1786|TooLittleSolReceived|TooMuchSolRequired/i.test(m))
     return "The pool price moved mid-trade. Raise slippage a little and retry.";
+  if (/^NOROUTE$|no route for this pair|no route/i.test(m))
+    return "No trading route right now. Very new pump.fun tokens route through the bonding curve, which can drop out for a moment when liquidity is thin — wait a few seconds and try again, or trade a smaller size.";
+  if (/curve refused it too/i.test(m))
+    return "Neither Jupiter nor the pump.fun curve would take this trade — usually a token mid-migration or with almost no liquidity. Try again shortly.";
   if (/AccountNotFound|could not find account/i.test(m))
     return "Token account missing — the first buy of a token creates one. Retry once.";
   if (/simulation failed/i.test(m) && !/0x/.test(m))

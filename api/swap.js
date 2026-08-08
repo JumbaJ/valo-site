@@ -64,6 +64,7 @@ const MAX_SOL = Math.max(0.001, parseFloat(process.env.VALO_MAX_ORDER_SOL || "0.
 const ENABLED = String(process.env.VALO_ONCHAIN || "").trim() === "1";
 
 const isMint = (m) => /^[A-Za-z0-9]{32,50}$/.test(String(m || ""));
+const isPumpMint = (m) => /pump$/i.test(String(m || ""));
 const FEE_BPS = Math.max(0, Math.min(500, parseInt(process.env.VALO_FEE_BPS || "60", 10) || 0));        // SOL routes: 0.6%
 const FEE_BPS_VALO = Math.max(0, Math.min(500, parseInt(process.env.VALO_FEE_BPS_VALO || "30", 10) || 0)); // $VALO routes: 0.3%
 // treasury is the default fee destination — VALO_FEE_ACCOUNT only overrides it
@@ -235,18 +236,26 @@ export default async function handler(req, res) {
       return buf.toString("base64");
     };
 
-    const qPath = `/quote?inputMint=${inputMint}&outputMint=${outputMint}`
-      + `&amount=${amountBase.toString()}&slippageBps=${slippageBps}&onlyDirectRoutes=false`
-      + (feeViaJup ? `&platformFeeBps=${bpsFor(inputMint, outputMint)}` : "");
+    const qBase = `/quote?inputMint=${inputMint}&outputMint=${outputMint}`
+      + `&amount=${amountBase.toString()}&slippageBps=${slippageBps}&onlyDirectRoutes=false`;
+    const feeQ = feeViaJup ? `&platformFeeBps=${bpsFor(inputMint, outputMint)}` : "";
     let quoteRes = null, curveMode = false;
-    try { quoteRes = await jupGet(qPath); }
+    try { quoteRes = await jupGet(qBase + feeQ); }
     catch (e) {
       if (!(e && e.noRoute)) throw e;
-      curveMode = true;   // pre-migration pump coin — the curve is the venue
+      // retry WITHOUT the platform fee — thin pools often have a route that
+      // simply can't carry a fee leg. A tradeable token beats a fee.
+      if (feeQ) { try { quoteRes = await jupGet(qBase); } catch (e2) { if (!(e2 && e2.noRoute)) throw e2; } }
+      if (!quoteRes) curveMode = true;   // pre-migration pump coin — the curve is the venue
     }
     const quote = quoteRes ? quoteRes.json : null;
     const host = quoteRes ? quoteRes.host : "pump.fun-curve";
-    if (!curveMode && (!quote || !quote.outAmount)) throw new Error("no route for this pair");
+    if (!curveMode && (!quote || !quote.outAmount)) {
+      // no Jupiter path at all → let the pump.fun curve answer (it's the real
+      // venue for a token that hasn't graduated yet)
+      if (isPumpMint(inputMint) || isPumpMint(outputMint)) curveMode = true;
+      else throw new Error("no route for this pair");
+    }
 
     if (curveMode) {
       // honest curve summary: pump.fun's curve prices at execution, so there's
