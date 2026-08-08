@@ -26,7 +26,7 @@ export default async function handler(req, res) {
     if (!/^[A-Za-z0-9]{80,100}$/.test(sig)) return res.status(400).json({ error: "bad signature" });
     try {
       const r = await fetch(RPC(), {
-        method: "POST", headers: { "content-type": "application/json" },
+        method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(15000),
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getSignatureStatuses",
           params: [[sig], { searchTransactionHistory: true }] }),
       });
@@ -52,7 +52,8 @@ export default async function handler(req, res) {
     const signed = String(body.signed || "");
     if (!signed) return res.status(400).json({ error: "no signed transaction" });
     const r = await fetch(RPC(), {
-      method: "POST", headers: { "content-type": "application/json" },
+      method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(15000),
       body: JSON.stringify({
         jsonrpc: "2.0", id: 1, method: "sendTransaction",
         params: [signed, { encoding: "base64", maxRetries: 3, skipPreflight: false }],

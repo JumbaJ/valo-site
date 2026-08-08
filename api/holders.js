@@ -6,7 +6,7 @@ const PUMP = "https://frontend-api.pump.fun/coins";
 
 async function pumpStats(mint) {
   try {
-    const r = await fetch(`${PUMP}/${mint}`, { headers: { accept: "application/json" } });
+    const r = await fetch(`${PUMP}/${mint}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(9000) });
     if (!r.ok) return null;
     const j = await r.json();
     if (!j || typeof j !== "object") return null;
@@ -31,7 +31,7 @@ async function heliusHolders(mint) {
       const body = { jsonrpc: "2.0", id: "h", method: "getTokenAccounts",
         params: { mint, limit: 1000, ...(cursor ? { cursor } : {}) } };
       const r = await fetch(`https://mainnet.helius-rpc.com/?api-key=${key}`, {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(9000) });
       const j = await r.json();
       const accts = (j && j.result && j.result.token_accounts) || [];
       holders += accts.filter((a) => +a.amount > 0).length;

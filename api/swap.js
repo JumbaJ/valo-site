@@ -20,7 +20,7 @@ async function jupGet(path) {
   const errs = [];
   for (const host of JUP_HOSTS) {
     try {
-      const r = await fetch(`${host}${path}`, { headers: jupHeaders() });
+      const r = await fetch(`${host}${path}`, { headers: jupHeaders(), signal: AbortSignal.timeout(9000) });
       if (r.ok) return { json: await r.json(), host };
       const body = await r.text().catch(() => "");
       if (r.status === 400 && looksNoRoute(body)) {
@@ -40,8 +40,7 @@ async function jupPost(path, body) {
     try {
       const r = await fetch(`${host}${path}`, {
         method: "POST", headers: { ...jupHeaders(), "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
+        body: JSON.stringify(body), signal: AbortSignal.timeout(9000) });
       if (r.ok) return { json: await r.json(), host };
       const bt = await r.text().catch(() => "");
       if (r.status === 400 && looksNoRoute(bt)) {

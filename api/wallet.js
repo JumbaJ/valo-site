@@ -10,8 +10,7 @@ const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 async function rpc(method, params) {
   const r = await fetch(RPC(), {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(9000) });
   if (!r.ok) throw new Error(`rpc ${r.status}`);
   const j = await r.json();
   if (j.error) throw new Error(j.error.message || "rpc error");
@@ -22,7 +21,7 @@ async function priceMap(mints) {
   const out = {};
   for (let i = 0; i < mints.length; i += 25) {
     try {
-      const r = await fetch(`${DS}/${mints.slice(i, i + 25).join(",")}`, { headers: { accept: "application/json" } });
+      const r = await fetch(`${DS}/${mints.slice(i, i + 25).join(",")}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(9000) });
       if (!r.ok) continue;
       const j = await r.json();
       for (const p of j.pairs || []) {

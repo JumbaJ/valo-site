@@ -13,7 +13,7 @@ export default async function handler(req, res) {
   try {
     // pull the wallet's recent enhanced transactions, filtered to SWAPs
     const url = `https://api.helius.xyz/v0/addresses/${wallet}/transactions?api-key=${key}&limit=100`;
-    const r = await fetch(url);
+    const r = await fetch(url, { signal: AbortSignal.timeout(9000) });
     if (!r.ok) throw new Error(`helius ${r.status}`);
     const txs = await r.json();
     const SOLM = "So11111111111111111111111111111111111111112";

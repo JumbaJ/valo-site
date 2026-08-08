@@ -19,10 +19,15 @@ export default async function handler(req, res) {
   // those pools. Keeps watchlists and adopted cards live without full feeds.
   const pools = String(req.query.pools || "").trim();
   try {
-    const r = await fetch(pools
+    const search = String(req.query.search || "").trim();
+    const url = pools
       ? `${GT}/networks/solana/pools/multi/${encodeURIComponent(pools.split(",").slice(0, 30).join(","))}?include=base_token`
-      : FEEDS[feed](page), {
+      : search
+      ? `${GT}/search/pools?query=${encodeURIComponent(search)}&network=solana&include=base_token&page=1`
+      : FEEDS[feed](page);
+    const r = await fetch(url, {
       headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(8000),      // never hang the function
     });
     if (!r.ok) throw new Error(`GT ${r.status}`);
     const j = await r.json();
@@ -91,6 +96,8 @@ export default async function handler(req, res) {
     res.setHeader("Cache-Control", pools ? "s-maxage=10, stale-while-revalidate=30" : feed === "new" ? "s-maxage=8, stale-while-revalidate=20" : "s-maxage=15, stale-while-revalidate=45");
     res.status(200).json(out);
   } catch (e) {
-    res.status(502).json({ error: String(e.message || e) });
+    res.setHeader("x-valo-error", String(e.message || e).slice(0, 120));
+    res.setHeader("Cache-Control", "s-maxage=5");
+    res.status(200).json([]);
   }
 }
