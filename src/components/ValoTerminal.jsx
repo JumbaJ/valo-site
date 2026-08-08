@@ -7680,7 +7680,14 @@ const tokMetrics = (t) => {
   const isPump = !!(t.liveMint && /pump$/i.test(t.liveMint || ""));
   const curvePct = isPump ? Math.min(100, ((t.mc || 0) / 69000) * 100) : 100;
   const turnover = (t.mc || 0) > 0 ? (t.vol24 || 0) / t.mc : 0;
-  return { winMin, tx, txRate: tx / winMin, flow, buyRatio, accel, rateNow, ageMs, isPump, curvePct, turnover };
+  // 📊 extra signals derived from what feeds really return, so lenses can be
+  // strict about MEANING without demanding fields that are usually absent
+  const ageMin = ageMs === Infinity ? Infinity : ageMs / 60000;
+  const txPerMinLife = ageMin > 0 && ageMin < 1e6 ? tx / Math.min(ageMin, winMin) : tx / winMin;
+  const hasTraders = Number.isFinite(t.traders) && t.traders > 0;
+  const volPerMin = (t.vol24 || 0) / 1440;
+  return { winMin, tx, txRate: tx / winMin, txPerMinLife, flow, buyRatio, accel, rateNow, volPerMin,
+    ageMs, ageMin, isPump, curvePct, turnover, hasTraders };
 };
 // 🍀 weighted lottery order — health-biased randomness for hidden gems
 const luckyOrder = (list, seed, onlyElig = false) => {
@@ -14441,7 +14448,7 @@ export default function App() {
     const movingRank = (arr) => [...arr].sort((a, b) =>
       (Math.abs(b.ch || 0) + tokMetrics(b).txRate * 2) - (Math.abs(a.ch || 0) + tokMetrics(a).txRate * 2));
     const withBackfill = (matches) => {
-      if (matches.length >= 6) return matches;
+      if (matches.length >= 12) return matches;   // was 6 — a 2-card board looked broken
       const restMv = movingRank(out.filter((t) => !matches.includes(t) && ((Math.abs(t.ch || 0) > 0.3) || tokMetrics(t).tx > 0)));
       const res = [...matches, ...restMv];
       // on live, "show the board rather than a void" must never mean sim tokens —
@@ -14464,21 +14471,36 @@ export default function App() {
     if (scanMode === "new") {
       // 🍼 1–15min old · ≥5 baseline tx (deployed AND trading) · curve <15% =
       // ground floor. Strictly newest first.
+      // young AND actually trading. tx counts are 24h totals, so a 10-minute-old
+      // token's "5 trades" is a real signal — the old rule compared it against
+      // a per-minute rate and rejected nearly everything.
       const fresh = out.filter((t) => {
         const m = tokMetrics(t);
-        return (m.ageMs <= 15 * 60e3 && m.tx >= 5 && (!m.isPump || m.curvePct < 15)) || t.id === sel;
+        if (t.id === sel) return true;
+        const young = m.ageMin <= 90;                 // ≤90min, not 15
+        const alive = m.tx >= 2 || (t.vol24 || 0) > 200 || Math.abs(t.ch || 0) > 1;
+        const early = !m.isPump || m.curvePct < 60;   // still on the curve
+        return young && alive && early;
       });
       return withBackfill(fresh.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
     }
     if (scanMode === "hot") {
       // 💪 nearing graduation (curve 60–95%) · real velocity (>50 tx / 5min
       // pace) · turnover rising · ≥80 unique traders
+      // heat = money actually moving relative to size, plus a real tape.
+      // (The old rule wanted 10 tx/min and 80 unique traders — the feeds give
+      // 24h totals and usually no trader count, so it matched almost nothing.)
       const hot = out.filter((t) => {
         const m = tokMetrics(t);
-        const curveOk = !m.isPump || (m.curvePct >= 60 && m.curvePct <= 95);
-        return (curveOk && m.txRate >= 10 && (m.turnover > 0.4 || m.accel > 1.4) && (t.traders || 0) >= 80) || t.id === sel;
+        if (t.id === sel) return true;
+        const busy = m.tx >= 12 || m.txPerMinLife >= 0.25 || (t.vol24 || 0) >= 2000;
+        const churning = m.turnover >= 0.15 || m.accel >= 1.2;
+        const crowded = !m.hasTraders || t.traders >= 25;   // only judge it when we know it
+        const curveOk = !m.isPump || m.curvePct >= 25;      // has climbed off the floor
+        return busy && churning && crowded && curveOk;
       });
-      return withBackfill(hot.sort((a, b) => tokMetrics(b).txRate - tokMetrics(a).txRate));
+      const heat = (t) => { const m = tokMetrics(t); return m.turnover * 2 + m.txPerMinLife * 3 + Math.min(3, m.accel); };
+      return withBackfill(hot.sort((a, b) => heat(b) - heat(a)));
     }
     if (scanMode === "movers") {
       // 📈 price velocity over the rolling short window · ≥$2K liquidity so
