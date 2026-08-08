@@ -74,6 +74,11 @@ const FEE_ACCT = (process.env.VALO_FEE_ACCOUNT || process.env.VALO_TREASURY || "
 const VALO_MINT_ADDR = (process.env.VALO_MINT || "").trim();
 const BURN_ADDR = (process.env.VALO_BURN || "1nc1nerator11111111111111111111111111111111").trim();
 const EPOCH_ADDR = (process.env.VALO_EPOCH || "").trim();
+// Fees pool here first. Splitting per-trade sends dust below the rent-exempt
+// minimum (a 0.01 SOL buy owes 0.000024 to burn — the transfer fails and takes
+// the whole fee with it) and pays three network fees to move fractions of a
+// cent. One transfer in, batched 40/40/20 out.
+const POOL_ADDR = (process.env.VALO_FEE_POOL || "").trim();
 // per-route fee: any leg in $VALO gets the reduced rate
 const bpsFor = (inputMint, outputMint) =>
   VALO_MINT_ADDR && (inputMint === VALO_MINT_ADDR || outputMint === VALO_MINT_ADDR) ? FEE_BPS_VALO : FEE_BPS;
@@ -168,7 +173,7 @@ export default async function handler(req, res) {
         feeAccountNote: feeViaJup
           ? "platform fee routes to the treasury's token account for the traded mint (created on first fee)"
           : "no platform fee configured",
-        feeSplit: { burn: BURN_ADDR, epoch: EPOCH_ADDR || null, creator: (process.env.VALO_CREATOR || "").trim() || null,
+        feeSplit: { pool: POOL_ADDR || null, burn: BURN_ADDR, epoch: EPOCH_ADDR || null, creator: (process.env.VALO_CREATOR || "").trim() || null,
           treasury: (process.env.VALO_TREASURY || "").trim() || null, deployer: (process.env.VALO_DEPLOYER || "").trim() || null } });
     } catch (e) {
       return res.status(200).json({ enabled: true, jupiter: "unreachable", error: String(e.message || e), maxSol: MAX_SOL });
