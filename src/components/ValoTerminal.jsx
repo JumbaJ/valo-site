@@ -10586,6 +10586,42 @@ export default function App() {
   });
   const realFillsRef = useRef([]);
   useEffect(() => { realFillsRef.current = realFills; }, [realFills]);
+
+  // 🧹 one-shot history repair — see note above
+  const prunedRef = useRef(false);
+  useEffect(() => {
+    if (prunedRef.current) return;
+    prunedRef.current = true;
+    let stop = false;
+    (async () => {
+      const now = Date.now();
+      const all = realFillsRef.current || [];
+      // a fill still settling isn't a phantom — leave anything under 3 minutes
+      const check = all.filter((f) => f && f.sig && f.at
+        && (now - f.at) > 180000 && (now - f.at) < 172800000).slice(-20);
+      if (!check.length) return;
+      const ghosts = [];
+      for (const f of check) {
+        if (stop) return;
+        try {
+          const r = await fetch(`/api/sendtx?sig=${f.sig}`);
+          if (!r.ok) continue;                    // can't tell → keep it
+          const j = await r.json();
+          if (j && j.found === false) ghosts.push(f.sig);
+        } catch (e) { /* network wobble → keep it */ }
+        await new Promise((res) => setTimeout(res, 120));
+      }
+      if (stop || !ghosts.length) return;
+      setRealFills((F) => {
+        const kept = F.filter((f) => !(f && f.sig && ghosts.includes(f.sig)));
+        if (kept.length === F.length) return F;
+        try { localStorage.setItem("valo-real-fills-v1", JSON.stringify(kept)); } catch (e) {}
+        try { console.info(`[valo] removed ${F.length - kept.length} trade(s) the chain never confirmed`); } catch (e) {}
+        return kept;
+      });
+    })();
+    return () => { stop = true; };
+  }, []);
   // 📜 WHITEPAPER epoch bonuses: rank per duration board → +0.50…+0.10 each,
   // stacking across boards, capped +4.0. Stored as (1 + Σbonus) on the row.
   const lbRanksRef = useRef({});             // { period: rank }
