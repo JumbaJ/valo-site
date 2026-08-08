@@ -355,7 +355,8 @@ export default async function handler(req, res) {
     const builtSummary = feeDropped ? { ...summary,
       outAmount: buildQuote.outAmount,
       otherAmountThreshold: buildQuote.otherAmountThreshold,
-      feeBps: 0, feeVia: "none", feeWaived: "no treasury account for this mint yet",
+      feeBps: bpsFor(inputMint, outputMint), feeVia: "client",
+      feeNote: "no treasury token account for this mint — collected as a SOL transfer instead",
       solOut: selling ? Number(buildQuote.outAmount) / 1e9 : null,
       solOutMin: selling ? Number(buildQuote.otherAmountThreshold) / 1e9 : null,
     } : summary;
