@@ -14,8 +14,8 @@ import { createPortal } from "react-dom";
    • Callout badges per coin: gray → light green → bright green,
      10+ callouts earns a golden border
    • Pan / zoom / crosshair charts, floating market flow, burn tax
-     0.3% $VALO · 0.6% SOL — each split 50% burn pool / 50% airdrop vault
-   • Rolling hourly Merkle epochs: vault half is distributed by holder weight
+     0.3% $VALO · 0.6% SOL — split 40% burn / 40% airdrop vault / 20% treasury
+   • Rolling hourly Merkle epochs: the vault is distributed by holder weight
      + trading volume; unclaimed epochs stack until claimed
    Wire real feeds at // API: markers.
    ================================================================ */
@@ -78,7 +78,7 @@ const cardGrad = (h) =>
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 
-// ---- fee schedule: 50% burn pool / 50% airdrop vault ----
+// ---- fee schedule: 40% burn pool / 40% airdrop vault / 20% treasury ----
 const TAX = { SOL: 0.6, VALO: 0.3 };            // % per transaction
 const taxFor = (pay) => (pay === "SOL" ? TAX.SOL : TAX.VALO);
 // 🧪 BACKEND TEST HARNESS — when enabled (LIVE DATA toggle or ?test=1), every
@@ -188,7 +188,8 @@ const feeSafe = (raw, pay) => {
 };
 const splitFee = (amt, pay) => {
   const total = amt * (taxFor(pay) / 100);
-  return { total, burn: total / 2, vault: total / 2 };
+  // 🔥 40% burn · 🎁 40% epoch vault · 🏦 20% treasury (infrastructure)
+  return { total, burn: total * 0.4, vault: total * 0.4, treasury: total * 0.2 };
 };
 const EPOCH_MS = 60 * 60 * 1000;                 // rolling hourly distribution
 // live SOL/USD — refreshed from /api/solprice, so every $ figure is honest.
@@ -2478,7 +2479,7 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
       )}
 
       <div style={{ width: wide ? "100%" : undefined, fontFamily: T.mono, fontSize: wide ? 8 : 9, color: T.faint, marginTop: wide ? 2 : 9, lineHeight: 1.5, borderTop: wide ? "none" : `1px solid ${T.border}`, paddingTop: wide ? 0 : 8 }}>
-        <div>🔥 {fee.burn.toFixed(5)} → burn pool · 🎁 {fee.vault.toFixed(5)} → airdrop vault ({pay === "SOL" ? "0.6%" : "0.3%"} fee)</div>
+        <div>🔥 {fee.burn.toFixed(5)} → burn pool · 🎁 {fee.vault.toFixed(5)} → airdrop vault · 🏦 {(fee.treasury || 0).toFixed(5)} → treasury ({pay === "SOL" ? "0.6%" : "0.3%"} fee)</div>
       </div>
     </div>
   );
@@ -8328,18 +8329,23 @@ const WP_SECTIONS = [
     { t: "p", x: "Two independent streams fund the VALO programs, kept strictly separate so airdrop funding is never conflated with creator revenue." },
     { t: "table" },
     { t: "h", x: "Site trading fees" },
-    { t: "p", x: "0.3% on $VALO-settled trades, 0.6% on SOL-settled trades. Each fee splits 50% to the burn pool, 50% to the airdrop vault, collected by an on-chain Anchor router that emits a fee event." },
+    { t: "p", x: "0.3% on $VALO-settled trades, 0.6% on SOL-settled trades. Every fee splits three ways: 40% to the burn pool, 40% to the hourly airdrop vault, and 20% to the treasury. 80% of all revenue therefore returns to the community." },
+    { t: "p", x: "Where the fee is taken depends on the route. Where the swap itself can carry it, the fee is charged inside the trade — atomic with the fill, impossible to skip. Where it cannot, the fee is a direct transfer approved alongside the trade and sent only once the fill confirms. Either way the rate and the split are identical, and every destination wallet is listed below with a live balance." },
+    { t: "h", x: "What the treasury funds" },
+    { t: "p", x: "The 20% treasury share pays for what keeps the terminal alive: hosting, the real-time market data feeds, the streaming server, RPC access, and continued development. These are real recurring costs, and a trading terminal that cannot pay its data providers stops being a trading terminal." },
+    { t: "b", x: "The treasury wallet is published with a live balance and a Solscan link — every movement is publicly auditable." },
+    { t: "b", x: "It is the smallest of the three shares. Burn and airdrop together take four times as much." },
     { t: "h", x: "Creator fees" },
     { t: "p", x: "Claimed hourly and split 25% to the creator/team, 25% to a market buyback of $VALO that is immediately burned, and 50% into the hourly epoch wallet." },
   ]},
   { id: "burn", icon: "🔥", n: "4", title: "Burn Program", accent: "#F97316", body: [
-    { t: "p", x: "Two sources feed the burn: the burn-pool half of every site fee, and the 25% creator-fee slice used to buy $VALO on the open market. Both are burned on-chain, permanently cutting supply." },
+    { t: "p", x: "Two sources feed the burn: the 40% burn share of every site fee, and the 25% creator-fee slice used to buy $VALO on the open market. Both are burned on-chain, permanently cutting supply." },
     { t: "b", x: "Burns are on-chain SPL burns and publicly verifiable." },
     { t: "b", x: "Cumulative burn is shown live in the header — total or your own." },
     { t: "b", x: "The buyback is a real market purchase, adding buy pressure before burning." },
   ]},
   { id: "airdrop", icon: "🎁", n: "5", title: "Hourly Airdrop Epochs", accent: "#7D5CF0", body: [
-    { t: "p", x: "An epoch is one hour of platform life, and it is the heartbeat of VALO's economics. All hour long, the airdrop vault fills: half of every single trading fee on the site flows in, trade by trade, in real time — you can watch it grow in the claim panel. Then, on the hour, the entire vault is distributed to the community and the clock starts again. Nothing is held back for later, nothing is discretionary: the payout fires every hour, forever, funded purely by real trading activity." },
+    { t: "p", x: "An epoch is one hour of platform life, and it is the heartbeat of VALO's economics. All hour long, the airdrop vault fills: 40% of every single trading fee on the site flows in, trade by trade, in real time — you can watch it grow in the claim panel. Then, on the hour, the entire vault is distributed to the community and the clock starts again. Nothing is held back for later, nothing is discretionary: the payout fires every hour, forever, funded purely by real trading activity." },
     { t: "h", x: "The hourly cycle, step by step" },
     { t: "b", x: "1 · ACCRUE — for 60 minutes, every buy and sell on the site deposits 50% of its fee into the epoch vault. Bigger trading hours mean bigger vaults." },
     { t: "b", x: "2 · SNAPSHOT — at the top of the hour, the indexer freezes two numbers per wallet: your time-weighted $VALO balance across the hour (so a last-second buy can't game a full hour's weight) and your traded volume within the epoch." },
@@ -8395,7 +8401,7 @@ const WP_SECTIONS = [
     { t: "p", x: "VALO is not a terminal with a community bolted on — the community IS the product. Nearly every feature in this build exists because someone asked for it, and that is the permanent development model: the people trading here decide what gets built next." },
     { t: "h", x: "What we (the team) are doing for the community" },
     { t: "b", x: "Building in public: features ship from community requests, and the changelog is the conversation. If enough of you want it, it gets built." },
-    { t: "b", x: "Funding the community from real revenue: the airdrop vault — half of every site fee — goes back to holders every hour, forever. The community is paid before the team is." },
+    { t: "b", x: "Funding the community from real revenue: 80% of every site fee goes straight back to the community — 40% burned from supply, 40% paid out to traders every hour, forever. The remaining 20% funds the treasury that keeps the terminal running. The community is paid before the team is." },
     { t: "b", x: "Running community trading competitions with vault-funded prize pools: best PnL, best callout, best new-token spot." },
     { t: "b", x: "Spotlighting the community's best: top callers ride the callout banner site-wide, the tier ladder (from JEET all the way to DIAMOND APEX) gives every trader a rank worth grinding for — and top-100 leaderboard spots pay a real, stacking bonus on every hourly epoch (see the Airdrop section)." },
     { t: "b", x: "Staying reachable: the team trades on the same terminal, in the same chat rooms, with the same wallet rules as everyone else." },
@@ -8435,8 +8441,8 @@ const WP_SECTIONS = [
 
 function WpFeeTable() {
   const rows = [
-    ["Site · $VALO", "0.3%", "50% burn · 50% vault"],
-    ["Site · SOL", "0.6%", "50% burn · 50% vault"],
+    ["Site · $VALO", "0.3%", "40% burn · 40% vault · 20% treasury"],
+    ["Site · SOL", "0.6%", "40% burn · 40% vault · 20% treasury"],
     ["Creator · team", "25%", "Split by share"],
     ["Creator · burn", "25%", "Buyback → burn"],
     ["Creator · epoch", "50%", "Hourly wallet"],
@@ -10649,6 +10655,7 @@ export default function App() {
     return { byMint, realizedSol };
   }, [realFills]);
   const [realOrder, setRealOrder] = useState(null);   // the order awaiting confirmation
+  const [feeOpen, setFeeOpen] = useState(false);      // ⚖ fee breakdown drawer in the review card
   const onchainRef = useRef(onchain);
   useEffect(() => { onchainRef.current = onchain; }, [onchain]);
   useEffect(() => {
@@ -10862,9 +10869,14 @@ export default function App() {
     const payer = new web3.PublicKey(payerPubkey);
     const tx = new web3.Transaction({ feePayer: payer, recentBlockhash: bhx });
     if (split.burn && split.epoch) {
-      const half = Math.floor(lam / 2);
-      tx.add(web3.SystemProgram.transfer({ fromPubkey: payer, toPubkey: new web3.PublicKey(split.burn), lamports: half }));
-      tx.add(web3.SystemProgram.transfer({ fromPubkey: payer, toPubkey: new web3.PublicKey(split.epoch), lamports: lam - half }));
+      // 🔥 40% burned · 🎁 40% epoch vault · 🏦 20% treasury (remainder)
+      const burnLam = Math.floor(lam * 0.4);
+      const epochLam = Math.floor(lam * 0.4);
+      const treasLam = lam - burnLam - epochLam;          // exact remainder
+      tx.add(web3.SystemProgram.transfer({ fromPubkey: payer, toPubkey: new web3.PublicKey(split.burn), lamports: burnLam }));
+      tx.add(web3.SystemProgram.transfer({ fromPubkey: payer, toPubkey: new web3.PublicKey(split.epoch), lamports: epochLam }));
+      const treasTo = split.treasury || valoTreasury;
+      if (treasTo && treasLam > 0) tx.add(web3.SystemProgram.transfer({ fromPubkey: payer, toPubkey: new web3.PublicKey(treasTo), lamports: treasLam }));
     } else if (valoTreasury) {
       tx.add(web3.SystemProgram.transfer({ fromPubkey: payer, toPubkey: new web3.PublicKey(valoTreasury), lamports: lam }));
     } else return null;
@@ -10884,12 +10896,18 @@ export default function App() {
       const bhx = await getBlockhash();
       const tx = new web3.Transaction({ feePayer: new web3.PublicKey(turbo.pubkey), recentBlockhash: bhx });
       if (split.burn && split.epoch) {
-        // 🔥 50% burned forever · 🎁 50% to the epoch vault — one tx, two legs
-        const half = Math.floor(lam / 2);
-        tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(split.burn), lamports: half }));
-        tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(split.epoch), lamports: lam - half }));
+        // 🔥 40% burned · 🎁 40% epoch vault · 🏦 20% treasury — one tx, three legs
+        const burnLam = Math.floor(lam * 0.4);
+        const epochLam = Math.floor(lam * 0.4);
+        const treasLam = lam - burnLam - epochLam;
+        tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(split.burn), lamports: burnLam }));
+        tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(split.epoch), lamports: epochLam }));
+        {
+          const treasTo = split.treasury || valoTreasury;
+          if (treasTo && treasLam > 0) tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(treasTo), lamports: treasLam }));
+        }
         await turboSignSend(tx);
-        sayPrivate({ type: "note", text: `⚖ site fee ${(lam / 1e9).toFixed(6)} SOL (${bps / 100}%) → 🔥 ${(half / 1e9).toFixed(6)} burned · 🎁 ${((lam - half) / 1e9).toFixed(6)} epoch vault` });
+        sayPrivate({ type: "note", text: `⚖ site fee ${(lam / 1e9).toFixed(6)} SOL (${bps / 100}%) → 🔥 ${(burnLam / 1e9).toFixed(6)} burned · 🎁 ${(epochLam / 1e9).toFixed(6)} epoch vault · 🏦 ${(treasLam / 1e9).toFixed(6)} treasury` });
       } else if (valoTreasury) {
         tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(turbo.pubkey), toPubkey: new web3.PublicKey(valoTreasury), lamports: lam }));
         await turboSignSend(tx);
@@ -11115,9 +11133,10 @@ export default function App() {
               .then((rr) => rr.json())
               .then((jj) => {
                 if (!jj || !jj.ok) return;
-                const half = Math.floor(feeSigned.lam / 2);
+                const bL = Math.floor(feeSigned.lam * 0.4), eL = Math.floor(feeSigned.lam * 0.4);
+                const tL = feeSigned.lam - bL - eL;
                 sayPrivate(feeSigned.split && feeSigned.split.burn && feeSigned.split.epoch
-                  ? { type: "note", text: `⚖ site fee ${(feeSigned.lam / 1e9).toFixed(6)} SOL (${feeSigned.bps / 100}%) → 🔥 ${(half / 1e9).toFixed(6)} burned · 🎁 ${((feeSigned.lam - half) / 1e9).toFixed(6)} epoch vault` }
+                  ? { type: "note", text: `⚖ site fee ${(feeSigned.lam / 1e9).toFixed(6)} SOL (${feeSigned.bps / 100}%) → 🔥 ${(bL / 1e9).toFixed(6)} burned · 🎁 ${(eL / 1e9).toFixed(6)} epoch vault · 🏦 ${(tL / 1e9).toFixed(6)} treasury` }
                   : { type: "note", text: `🏦 site fee ${(feeSigned.lam / 1e9).toFixed(6)} SOL → VALO treasury (${feeSigned.bps / 100}%)` });
               })
               .catch(() => {});
@@ -14219,7 +14238,7 @@ export default function App() {
     const fee = splitFee(o.amt, o.pay);
     setBurned((b) => b + fee.burn);        // burn pool only
     setMyBurned((b) => b + fee.burn);
-    setVaultTotal((v) => v + fee.vault);   // airdrop vault half
+    setVaultTotal((v) => v + fee.vault);   // airdrop vault — 40% of the fee
     setMyEpochVol((v) => v + o.amt);       // your volume this epoch
     setPoolVol((v) => v + o.amt);
     const unit = o.pay === "SOL" ? "SOL" : "$VALO";
@@ -17324,6 +17343,67 @@ export default function App() {
                           <span style={{ color: c, fontWeight: 800, textAlign: "right" }}>{v}</span>
                         </div>
                       ))}
+                    {(() => {
+                      // notional = the SOL side of the trade, whichever way it runs
+                      const bps = +q.feeBps || 0;
+                      const notional = realOrder.side === "sell"
+                        ? (+q.outAmount || 0) / 1e9
+                        : (+q.inAmount || 0) / 1e9;
+                      const feeSol = notional * (bps / 10000);
+                      if (!(bps > 0) || !(feeSol > 0)) return null;
+                      const inSwap = q.feeVia === "jupiter";
+                      const sp = (onchain && onchain.feeSplit) || {};
+                      const short = (a) => (a ? `${String(a).slice(0, 4)}…${String(a).slice(-4)}` : "—");
+                      const bS = feeSol * 0.4, eS = feeSol * 0.4, tS = feeSol - bS - eS;
+                      const dest = inSwap
+                        ? [["🏦 VALO treasury", feeSol, sp.treasury, "collected inside the swap, split 40/40/20 on distribution"]]
+                        : [["🔥 burned forever", bS, sp.burn, "40% — removed from supply permanently"],
+                           ["🎁 epoch vault", eS, sp.epoch, "40% — paid out to traders each hour"],
+                           ["🏦 treasury", tS, sp.treasury, "20% — development and operations"]];
+                      return (
+                        <>
+                          <div onClick={() => setFeeOpen((v) => !v)} role="button"
+                            title="Tap to see exactly where this fee goes"
+                            style={{ display: "flex", justifyContent: "space-between", gap: 10, cursor: "pointer",
+                              fontFamily: T.mono, fontSize: 9.5, padding: "4px 0", borderTop: `1px solid ${T.border}` }}>
+                            <span style={{ color: T.faint }}>
+                              ⚖ VALO fee ({(bps / 100).toFixed(2)}%) <span style={{ color: VALO_PURPLE }}>{feeOpen ? "▴" : "▾"}</span>
+                            </span>
+                            <span style={{ color: VALO_PURPLE, fontWeight: 800, textAlign: "right" }}>
+                              −{feeSol.toFixed(6)} SOL
+                            </span>
+                          </div>
+                          {feeOpen && (
+                            <div style={{ borderTop: `1px solid ${T.border}`, padding: "7px 0 2px",
+                              background: "rgba(125,92,240,0.05)", borderRadius: 8, marginTop: 2 }}>
+                              <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, padding: "0 8px 6px", lineHeight: 1.6 }}>
+                                {inSwap
+                                  ? "Taken inside the swap itself — atomic with your trade, nothing extra to sign."
+                                  : "Sent as a separate transfer approved alongside your trade. If the trade doesn't land, it isn't charged."}
+                              </div>
+                              {dest.map(([label, amt, addr, why]) => (
+                                <div key={label} style={{ padding: "4px 8px" }}>
+                                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8,
+                                    fontFamily: T.mono, fontSize: 9, fontWeight: 800, color: T.text }}>
+                                    <span>{label}</span>
+                                    <span style={{ color: VALO_PURPLE }}>{amt.toFixed(6)} SOL</span>
+                                  </div>
+                                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8,
+                                    fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 1 }}>
+                                    <span>{why}</span>
+                                    {addr
+                                      ? <a href={`https://solscan.io/account/${addr}`} target="_blank" rel="noreferrer"
+                                          onClick={(e) => e.stopPropagation()}
+                                          style={{ color: T.dim, textDecoration: "underline dotted" }}>{short(addr)} ↗</a>
+                                      : <span>—</span>}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                     {hot && (
                       <div style={{ marginTop: 8, padding: "7px 9px", borderRadius: 8,
                         border: `1px solid ${T.red}66`, background: "rgba(234,57,67,0.1)",
