@@ -310,6 +310,11 @@ export default async function handler(req, res) {
     }
 
     let feeSide = null;   // which mint's treasury account collected: output | input | refused
+    // does a treasury account for the fee mint actually exist? (output mint for
+    // ExactIn — the input side is rejected on chain, see 0x177e)
+    const quoteFeeAta = feeViaJup ? await feeAtaFor(FEE_ACCT, outputMint) : null;
+    const feeViaReal = !feeViaJup ? (FEE_BPS > 0 ? "client" : "none")
+      : (quoteFeeAta ? "jupiter" : "client");
     const summary = {
       inputMint, outputMint,
       inAmount: quote.inAmount, outAmount: quote.outAmount,
@@ -319,7 +324,7 @@ export default async function handler(req, res) {
       routeHops: (quote.routePlan || []).length,
       routeLabels: (quote.routePlan || []).map((r) => r?.swapInfo?.label).filter(Boolean),
       maxSol: MAX_SOL, via: host,
-      feeBps: bpsFor(inputMint, outputMint), feeVia: feeViaJup ? "jupiter" : (bpsFor(inputMint, outputMint) > 0 ? "client" : "none"),
+      feeBps: bpsFor(inputMint, outputMint), feeVia: feeViaReal,
       feeSide,
       side: selling ? "sell" : "buy",
       outDecimals,
@@ -339,7 +344,7 @@ export default async function handler(req, res) {
     if (!isMint(userPublicKey)) return res.status(400).json({ error: "bad user pubkey" });
     // fee mint = whichever side of the route Jupiter charges on (the output
     // mint for ExactIn). No ATA → no platform fee → the swap still goes through.
-    let feeAta = feeViaJup ? await feeAtaFor(FEE_ACCT, outputMint) : null;
+    let feeAta = quoteFeeAta;
     feeSide = feeAta ? "output" : null;
     // Do NOT fall back to the input-side account: Jupiter builds it and then
     // rejects it on chain with 0x177e. Sells already have SOL as the output.
