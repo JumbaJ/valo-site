@@ -594,10 +594,13 @@ function scoreToken(t) {
     sc += (!m.isPump || m.curvePct >= 100) ? 10 : m.curvePct >= 60 ? 6 : 2;  // graduation distance
     return Math.max(1, Math.min(99, Math.round(sc)));
   }
-  const g = t.greenUsd / (t.greenUsd + t.redUsd);
-  const liq = Math.min(100, (t.liq / t.tvl) * 180);
-  const age = Math.min(100, t.ageMin / 14);
-  return Math.round(t.momentum * 0.25 + t.buyPressure * 0.25 + g * 100 * 0.25 + liq * 0.15 + age * 0.1);
+  const flow = (+t.greenUsd || 0) + (+t.redUsd || 0);
+  const g = flow > 0 ? (+t.greenUsd || 0) / flow : 0.5;
+  const tvl0 = +t.tvl || 0;
+  const liq = tvl0 > 0 ? Math.min(100, ((+t.liq || 0) / tvl0) * 180) : 0;
+  const age = Math.min(100, (+t.ageMin || 0) / 14);
+  const sc = (+t.momentum || 0) * 0.25 + (+t.buyPressure || 0) * 0.25 + g * 100 * 0.25 + liq * 0.15 + age * 0.1;
+  return Number.isFinite(sc) ? Math.max(1, Math.min(99, Math.round(sc))) : 1;
 }
 const rating = (s) => (s >= 66 ? "SAFE" : s >= 40 ? "CAUTION" : "RISKY");
 // rugState(t) → { rugged, dying, drawdown, recovery }
@@ -13416,7 +13419,11 @@ export default function App() {
       const base = (() => { try { return adoptMarketToken(valoLive); } catch (e) { return null; } })();
       if (!base) return Ts;
       const card = { ...base, id: 424242, sym: "VALO", name: "VALO Terminal",
-        liveMint: valoMint, ca: valoMint, hue: 262, isValo: true };
+        liveMint: valoMint, ca: valoMint, hue: 262, isValo: true,
+        // the pool is what the candle loader keys on — take it from the market
+        // row whatever field name it arrived under, never leave it undefined
+        pool: base.pool || valoLive.pool || valoLive.pairAddress || null,
+        tvl: base.tvl || valoLive.tvl || 0, mc: base.mc || valoLive.mc || 0 };
       const i = Ts.findIndex((t) => t && t.id === 424242);
       if (i < 0) return [...Ts, card];
       // preserve candles the chart already streamed for it
