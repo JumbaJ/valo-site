@@ -8453,6 +8453,15 @@ function WpFeeTable() {
 }
 
 const PATCH_NOTES = [
+  { v: "3.0.3", name: "PATCH V 3.0.3 \u2014 EXECUTION", date: "August 2026", accent: "#16C784", items: [
+    "\u26d3 REAL BUYS GO THROUGH \u2014 buys were failing on almost every token that had already graduated from the pump.fun curve to a DEX. The trade was priced with the platform fee included, but the fee had nowhere to land on a token the treasury had never held, and the swap was refused. Trades are now re-priced cleanly and built \u2014 any mint, any age, including coins that migrated minutes ago",
+    "\ud83c\udfe6 FEES ARE NEVER SILENTLY SKIPPED \u2014 when the fee can't ride inside the swap it is now collected as a direct SOL transfer instead of being dropped. Same 0.6%, same burn / epoch / treasury split, either route",
+    "\ud83d\udd0d FAILURES NAME THE REAL REASON \u2014 every failure used to be reported as a routing problem, so a token with a healthy $1M pool was described as a thin new launch. Pricing failures and building failures are now told apart, and a build failure surfaces the chain's own words instead of discarding them",
+    "\ud83d\udcb0 BUYS SIZE THEMSELVES TO YOUR WALLET \u2014 Solana holds ~0.002 SOL of rent per new token account plus a temporary wrapped-SOL account and fees. A buy that would eat that headroom is now clamped to what's actually spendable instead of dying in simulation, and the mobile hotbar shows the real maximum up front",
+    "\ud83d\udcac PLAIN-ENGLISH CHAIN ERRORS \u2014 rent shortfalls, slippage, expired quotes and missing accounts are translated into what went wrong and what to do about it, with the raw program error still available underneath",
+    "\ud83e\uddfe EXIT EVERYTHING IN ONE APPROVAL \u2014 SELL ALL builds every position's exit together and asks the wallet once. A position that can't be built is skipped with a note naming it, and the rest still go through",
+    "\ud83d\udcd2 POSITIONS READ THE WALLET THAT TRADED \u2014 balances and holdings follow the wallet the fill actually came from, so turbo buys show up where you'd expect instead of vanishing from the positions tab",
+  ]},
   { v: "3.0.2", name: "PATCH V 3.0.2 — $VALO IS LIVE", date: "August 2026", accent: "#7D5CF0", items: [
     "◆ $VALO LAUNCHED ON PUMP.FUN — the token is live and the whole terminal is wired to it. Header price, market cap, LP, net flow, 24h volume and the burn tracker all read the real pool every 10 seconds through a dedicated market endpoint. Tap any stat to open the real $VALO chart by CA",
     "🔥 BURN TRACKER IS CHAIN-TRUTH — burns are measured as genesis supply minus real current supply (SPL burns shrink supply directly), so the number matches what anyone can verify on Solscan. The old simulated counter — and a sine wave that faked price movement — are gone",
