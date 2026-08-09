@@ -10561,7 +10561,7 @@ export default function App() {
   const [pnlSeed] = useState(() => Math.random() * 1000); // deterministic perf curve
   const [pullX, setPullX] = useState(0);   // px chart extends left over the scanner
   const [pullR, setPullR] = useState(0);   // px the grid extends right (ticket+wallet slide right, keep their size)
-  const [walletCollapsed, setWalletCollapsed] = useState(false); // PC: fold wallet into a side rail
+  const [walletCollapsed, setWalletCollapsed] = useState(UI_NEXT); // PC: fold wallet into a side rail (UI_NEXT: starts closed, opens inside the rail)
   const [scanCollapsed, setScanCollapsed] = useState(false);     // PC: fold the scanner into a slim rail beside the watchlist
   const gridRef = useRef(null);
   // sticky header height — the search bar docks right under the callout banner
@@ -17011,7 +17011,9 @@ export default function App() {
             )}
           </>
         ) : (
-        <div className="pt-grid" ref={gridRef} style={{ display: "grid", gridTemplateColumns: `${scanCollapsed ? 40 : 300}px minmax(320px,1fr) ${(layoutPro ? 330 : 304) + Math.round(chartInsetR * 0.5)}px ${walletCollapsed ? 40 : 322 + Math.round(chartInsetR * 0.5)}px`, gap: 14, alignItems: "start",
+        <div className="pt-grid" ref={gridRef} style={{ display: "grid", gridTemplateColumns: UI_NEXT
+            ? `${scanCollapsed ? 40 : 300}px minmax(320px,1fr) ${360 + Math.round(chartInsetR * 0.5)}px`
+            : `${scanCollapsed ? 40 : 300}px minmax(320px,1fr) ${(layoutPro ? 330 : 304) + Math.round(chartInsetR * 0.5)}px ${walletCollapsed ? 40 : 322 + Math.round(chartInsetR * 0.5)}px`, gap: 14, alignItems: "start",
           width: `calc(100%/1.13 + ${Math.round(pullR / 1.13)}px)`, "--stkTop": `${Math.round((headerH + 8) / 1.13)}px`, zoom: 1.13 }}>
           {/* scanner — slides left as the chart is pulled over, stays same width */}
           {scanCollapsed ? (
@@ -17200,6 +17202,21 @@ export default function App() {
                   <span style={{ fontSize: 11, color: T.faint }}>{walletCollapsed ? "▸" : "▾"}</span>
                 </span>
               </button>
+              {!walletCollapsed && (
+                <div style={{ borderBottom: `1px solid ${T.border2}`, padding: 8, maxHeight: "58vh", overflowY: "auto" }}>
+                  <PortfolioPanel big
+                    solBalance={dispSol} valoWallet={dispValo} positions={positions} tokens={tokens}
+                    realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={wallet && wallet.address}
+                    turboState={turbo} onTurboCreate={turboCreate} onTurboUnlock={turboUnlock} onTurboLock={turboLock}
+                    onTurboFund={turboFund} onTurboSweep={turboSweep} phantomOk={!!(wallet && wallet.address)}
+                    turboSol={turboSolBal} turboAutoOn={liveAuto} onTurboToggleAuto={setLiveAuto} onCreatorSplit={doCreatorSplit}
+                    valoMint={valoMint}
+                    hideBalance={hideBalance} setHideBalance={setHideBalance}
+                    liveMode={liveData} chainFills={chainFills} chainLedger={chainLedger}
+                    onOpenToken={(id) => { setSel(id); setClickMode(null); }}
+                  />
+                </div>
+              )}
               <div style={{ display: "flex", borderBottom: `1px solid ${T.border2}` }}>
                 {[
                   ["trades", "⚡ TRADES"],
@@ -17324,6 +17341,7 @@ export default function App() {
           </div>
           )}
 
+          {!UI_NEXT && (<>
           {/* portfolio — its own column to the right of trade options.
               Collapses into a slim vertical rail to free width for the chart. */}
           {walletCollapsed ? (
@@ -17391,6 +17409,7 @@ export default function App() {
             />
           </div>
           )}
+          </>)}
         </div>
         )}
       </div>
