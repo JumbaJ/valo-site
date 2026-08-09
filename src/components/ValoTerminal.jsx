@@ -17171,6 +17171,25 @@ export default function App() {
           <div style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start", maxHeight: "calc((100vh - 24px) / 1.13 - var(--stkTop))", overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
             {UI_NEXT ? (
             <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, overflow: "hidden" }}>
+              <button onClick={() => setWalletCollapsed((v) => !v)}
+                title={walletCollapsed ? "Open your wallet" : "Close your wallet"}
+                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                  border: "none", borderBottom: `1px solid ${T.border2}`,
+                  background: walletCollapsed ? "rgba(255,255,255,0.02)" : "rgba(125,92,240,0.10)",
+                  padding: "10px 13px", cursor: "pointer", fontFamily: T.mono }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 10, fontWeight: 900, letterSpacing: 1.2, color: walletCollapsed ? T.dim : VALO_PURPLE }}>
+                  💼 WALLET
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 900, color: walletCollapsed ? T.text : VALO_PURPLE }}>
+                    {hideBalance ? "••••••" : `$${(walletUsd || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+                  </span>
+                  <span onClick={(e) => { e.stopPropagation(); setHideBalance((v) => !v); }}
+                    title={hideBalance ? "Show balance" : "Hide balance"}
+                    style={{ fontSize: 11, opacity: 0.75 }}>{hideBalance ? "🙈" : "👁"}</span>
+                  <span style={{ fontSize: 11, color: T.faint }}>{walletCollapsed ? "▸" : "▾"}</span>
+                </span>
+              </button>
               <div style={{ display: "flex", borderBottom: `1px solid ${T.border2}` }}>
                 {[
                   ["trades", "⚡ TRADES"],
@@ -18153,7 +18172,7 @@ export default function App() {
         const walletUsd = liveData && combinedChain
           ? ((combinedChain.solTrading != null ? combinedChain.solTrading : combinedChain.sol) || 0) * SOL_USD
             + visHolds(combinedChain.holdings).filter((h) => h.src !== "phantom").reduce((s, h) => s + (h.usd || 0), 0)
-          : solBalance * SOL_USD + valoWallet * 0.0125;
+          : solBalance * SOL_USD + valoWallet * (valoLive && +valoLive.price > 0 ? +valoLive.price : 0);
         const walletTxt = posUnit === "sol" ? `${(walletUsd / SOL_USD).toFixed(2)} SOL` : posUnit === "valo" ? `${fmtQty(walletUsd / 0.0125)} $VALO` : `$${walletUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
         const sellScope = () => { if (showTix) closeAllTickets(); if (showBots) runsL.forEach((x) => sellRun(x.r.id)); };
         const pctChips = (row, isBot) => (
