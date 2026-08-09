@@ -2568,7 +2568,7 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
   return (
     <div style={{ marginTop: 10 }}>
       <button onClick={() => setOpen((v) => !v)}
-        style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", border: `1px solid ${T.border2}`, borderRadius: 9, padding: "9px 12px", background: "rgba(255,255,255,0.02)", cursor: "pointer", fontFamily: T.mono, fontSize: 11, fontWeight: 700, color: T.text }}>
+        style={{ display: UI_NEXT ? "none" : "flex", width: "100%", alignItems: "center", justifyContent: "space-between", border: `1px solid ${T.border2}`, borderRadius: 9, padding: "9px 12px", background: "rgba(255,255,255,0.02)", cursor: "pointer", fontFamily: T.mono, fontSize: 11, fontWeight: 700, color: T.text }}>
         <span>{open ? "▾" : "▸"} {UI_NEXT ? "ASSETS" : "MY OPEN POSITIONS"} · {held.length}</span>
         {liveMode ? (
           <span style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
@@ -6700,6 +6700,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   const [chainOpen, setChainOpen] = useState(false);   // real wallet holdings, expanded
   const [walletView, setWalletView] = useState("turbo"); // headline flips turbo ⇄ phantom
   const [turboPop, setTurboPop] = useState(false);       // ⚡ turbo overlay off the Wallet tab
+  const [walletSeg, setWalletSeg] = useState("assets");  // 🧱 UI_NEXT: assets ⇄ activity ⇄ null(folded)
   const totalPnl = realizedPnl + unrealizedPnl;
   const totalEquity = walletUsd + Math.max(0, liveValue) + (extraEquity || 0); // + live bots & escrowed arms
   const [swapAmt, setSwapAmt] = useState("1");
@@ -6888,13 +6889,18 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           <b style={{ color: T.text, fontSize: 12 }}>{followingCount}</b> Following
         </span>
       </div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 12, position: "relative" }}>
+      <div style={UI_NEXT
+        ? { display: "flex", gap: 0, marginBottom: 0, position: "relative" }
+        : { display: "flex", gap: 6, marginBottom: 12, position: "relative" }}>
         {/* 💼 Wallet + ⚡ turbo segment: green = armed & ready, red = disarmed */}
         <span style={{ flex: 1, display: "flex" }}>
           <button onClick={() => setTab("wallet")}
             style={{ ...chip(tab === "wallet"), flex: 1, textAlign: "center", padding: "7px", fontSize: 11,
+              ...(UI_NEXT ? { borderRadius: "10px 10px 0 0", borderBottom: "none",
+                background: tab === "wallet" ? "linear-gradient(180deg, rgba(125,92,240,0.20), rgba(125,92,240,0.06))" : "rgba(255,255,255,0.02)",
+                borderColor: tab === "wallet" ? `${VALO_PURPLE}44` : T.border } : {}),
               borderTopRightRadius: liveMode && turboState ? 0 : undefined, borderBottomRightRadius: liveMode && turboState ? 0 : undefined }}>💼 Wallet</button>
-          {liveMode && (
+          {liveMode && !UI_NEXT && (
             <button data-tour="turbo" onClick={() => setTurboPop((v) => !v)}
               title={!turboState ? "Set up your ⚡ TURBO wallet"
                 : turboState.unlocked && turboAutoOn ? "◆ single-tap trading ARMED — bots + one-tap buys/sells fire instantly"
@@ -6922,7 +6928,10 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           )}
         </span>
         <button onClick={() => setTab("performance")}
-          style={{ ...chip(tab === "performance"), flex: 1, textAlign: "center", padding: "7px", fontSize: 11 }}>📈 Performance</button>
+          style={{ ...chip(tab === "performance"), flex: 1, textAlign: "center", padding: "7px", fontSize: 11,
+            ...(UI_NEXT ? { borderRadius: "10px 10px 0 0", borderBottom: "none", marginLeft: 6,
+              background: tab === "performance" ? "linear-gradient(180deg, rgba(125,92,240,0.20), rgba(125,92,240,0.06))" : "rgba(255,255,255,0.02)",
+              borderColor: tab === "performance" ? `${VALO_PURPLE}44` : T.border } : {}) }}>📈 Performance</button>
         {/* ⚡ TURBO popover — floats OVER the wallet, pushes nothing */}
         {liveMode && turboPop && (
           <>
@@ -6945,15 +6954,27 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
         <>
           {/* total equity + pnl + privacy eye — under UI_NEXT this IS the wallet card */}
           <div style={UI_NEXT
-            ? { textAlign: "center", marginBottom: 12, position: "relative", padding: "16px 12px 14px",
-                borderRadius: 14, border: `1px solid ${VALO_PURPLE}44`,
+            ? { textAlign: "center", marginBottom: 0, position: "relative", padding: "16px 12px 14px",
+                borderRadius: 0, border: `1px solid ${VALO_PURPLE}44`,
                 background: "linear-gradient(160deg, rgba(125,92,240,0.20), rgba(20,17,38,0.9) 55%, rgba(13,15,22,0.95))",
                 boxShadow: "0 6px 22px rgba(125,92,240,0.16)" }
             : { textAlign: "center", marginBottom: 12, position: "relative" }}>
             <button onClick={() => setHideBalance && setHideBalance((v) => !v)} title="Hide/show balances"
-              style={{ position: "absolute", right: 0, top: 0, ...chip(false), padding: "3px 8px", fontSize: 11 }}>
+              style={{ position: "absolute", right: UI_NEXT ? 8 : 0, top: UI_NEXT ? 8 : 0, ...chip(false), padding: "3px 8px", fontSize: 11 }}>
               {hideBalance ? "🙈" : "👁"}
             </button>
+            {UI_NEXT && liveMode && (
+              <button data-tour="turbo" onClick={() => setTurboPop((v) => !v)}
+                title={!turboState ? "Set up your ⚡ TURBO wallet" : turboState.unlocked ? "Turbo controls" : "Unlock turbo"}
+                style={{ position: "absolute", left: 8, top: 8, padding: "3px 9px", fontFamily: T.mono, fontSize: 9,
+                  fontWeight: 900, letterSpacing: 0.8, cursor: "pointer", borderRadius: 7,
+                  border: `1px solid ${turboState && turboState.unlocked ? (turboAutoOn ? VALO_PURPLE : T.green) : T.border2}`,
+                  background: turboState && turboState.unlocked ? (turboAutoOn ? "rgba(125,92,240,0.16)" : "rgba(22,199,132,0.10)") : "rgba(255,255,255,0.03)",
+                  color: turboState && turboState.unlocked ? (turboAutoOn ? VALO_PURPLE : T.green) : T.faint,
+                  boxShadow: turboState && turboState.unlocked && turboAutoOn ? `0 0 10px ${VALO_PURPLE}55` : "none" }}>
+                {turboState && turboState.unlocked ? (turboAutoOn ? "◆ ARMED" : "⚡ READY") : "🔒 ARM"}{turboPop ? " ▴" : ""}
+              </button>
+            )}
             <div style={{ userSelect: "none" }}>
               <div onClick={() => chainOn && turboState && setWalletView((v) => (v === "turbo" ? "phantom" : "turbo"))}
                 title={chainOn && turboState ? "Tap to flip between your TURBO and PHANTOM wallet values" : undefined}
@@ -7003,6 +7024,20 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                   {walletChain && walletChain.dual && (
                     <div style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 700, color: T.faint }}>
                       {mask(`⚡ ${((walletChain.solTrading) || 0).toFixed(4)} ◎ turbo · 👻 ${((walletChain.solVault) || 0).toFixed(4)} ◎ phantom`)}
+                      {UI_NEXT && (() => {
+                        const addr = (turboState && (turboState.address || turboState.pub)) || (typeof walletConnected === "string" ? walletConnected : "");
+                        if (!addr) return null;
+                        return (
+                          <div onClick={(e) => { e.stopPropagation();
+                              try { navigator.clipboard.writeText(addr); e.currentTarget.textContent = "copied ✓"; } catch (e2) {} }}
+                            title="Tap to copy the wallet address"
+                            style={{ marginTop: 6, display: "inline-block", padding: "2px 9px", borderRadius: 999,
+                              border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.04)",
+                              fontFamily: T.mono, fontSize: 8.5, color: T.dim, cursor: "pointer" }}>
+                            {addr.slice(0, 4)}…{addr.slice(-4)} ⧉
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </>
@@ -7024,6 +7059,25 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               )}
             </div>
           </div>
+          {UI_NEXT && (() => {
+            const holds = visHolds(chainHoldings || []);
+            const aUsd = holds.reduce((a2, h2) => a2 + (h2.usd || 0), 0);
+            const segBtn = (k, label) => (
+              <button onClick={() => setWalletSeg((v) => (v === k ? null : k))}
+                style={{ flex: 1, padding: "8px 6px", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 0.8,
+                  cursor: "pointer", border: "none", borderBottom: `2px solid ${walletSeg === k ? VALO_PURPLE : "transparent"}`,
+                  background: walletSeg === k ? "rgba(125,92,240,0.10)" : "transparent",
+                  color: walletSeg === k ? T.text : T.faint }}>{label}</button>
+            );
+            return (
+              <div style={{ display: "flex", border: `1px solid ${VALO_PURPLE}33`, borderTop: "none",
+                borderRadius: walletSeg ? 0 : "0 0 12px 12px", overflow: "hidden", marginBottom: walletSeg ? 0 : 10 }}>
+                {segBtn("assets", `▾ ASSETS · ${holds.length} · ${hideBalance ? "•••" : "$" + aUsd.toFixed(2)}`)}
+                <span style={{ width: 1, background: `${VALO_PURPLE}33` }} />
+                {segBtn("activity", "⛓ ACTIVITY")}
+              </div>
+            );
+          })()}
           {/* balance breakdown — folded into ASSETS under UI_NEXT */}
           <div style={{ display: UI_NEXT ? "none" : "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
             <div style={{ background: "#0c0f16", border: `1px solid ${chainOn ? `${T.amber}55` : T.border}`, borderRadius: 9, padding: "8px 10px" }}>
@@ -7128,7 +7182,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           </div>
           )}
       {botsSlot}
-      {heldSlot}
+      {(!UI_NEXT || walletSeg === "assets") && heldSlot}
           {/* deposit / withdraw — PAPER machinery, demo only. The swap box below
               lives in BOTH modes: on live it buys real $VALO. */}
           {!liveMode && (<>
@@ -7294,7 +7348,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               </div>
             </div>
           )}
-          {liveMode && (
+          {liveMode && (!UI_NEXT || walletSeg === "activity") && (
             <div style={{ marginTop: 10 }}>
               <div style={{ fontFamily: T.mono, fontSize: 9, color: T.amber, letterSpacing: 1, marginBottom: 7 }}>
                 ⛓ ACTIVITY <span style={{ fontSize: 7.5, color: T.faint }}>· your real orders through VALO</span>
