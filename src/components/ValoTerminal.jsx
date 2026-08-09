@@ -16814,7 +16814,7 @@ export default function App() {
                 : "Metrics below track the $VALO token · not financial advice"}
             </div>
           </div>
-          <div style={UI_NEXT ? { display: "flex", gap: 6, alignItems: "flex-start", flexWrap: "wrap", marginTop: -12, justifyContent: "flex-end", paddingRight: 330 } : { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
+          <div style={UI_NEXT ? { display: "flex", gap: 0, alignItems: "stretch", flexWrap: "nowrap", marginTop: -12, marginRight: 330, marginLeft: "auto", width: "fit-content", height: 30, boxSizing: "border-box", border: "1px solid " + T.border2, borderTop: "none", borderRadius: "0 0 11px 11px", background: "rgba(255,255,255,0.035)", overflow: "hidden" } : { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
             {[
               ["PRICE", valoLive ? `$${fmtP(valoLive.price)}` : "—", VALO_PURPLE,
                 valoLive ? "Live $VALO price from the pool" : "Current $VALO price"],
@@ -16830,22 +16830,22 @@ export default function App() {
                 : [["24H PnL", `${platformPnl >= 0 ? "+" : "−"}$${Math.abs(platformPnl).toFixed(0)}`, platformPnl >= 0 ? T.green : T.red, "Your realized + unrealized PnL across all coins"]]),
             ].map(([k, v, col, tip]) => (
               <div key={k} onClick={openValoChart} title={(tip ? tip + " · " : "") + "Tap: open the $VALO chart"}
-                style={UI_NEXT ? { display: "flex", alignItems: "baseline", gap: 6, height: 26, boxSizing: "border-box", background: "rgba(255,255,255,0.03)", border: "1px solid " + T.border2, borderTop: "none", borderRadius: 0, padding: "0 9px", cursor: "pointer", borderLeft: "none", borderRight: "1px solid " + T.border2, borderBottom: "none" } : { background: "rgba(255,255,255,0.02)", border: "1px solid " + T.border, borderRadius: 9, padding: "6px 13px", minWidth: 78, cursor: "pointer" }}>
+                style={UI_NEXT ? { display: "flex", alignItems: "baseline", gap: 6, height: 26, boxSizing: "border-box", background: "rgba(255,255,255,0.03)", border: "1px solid " + T.border2, borderTop: "none", borderRadius: 0, padding: "0 11px", cursor: "pointer", border: "none", borderRight: "1px solid " + T.border2, background: "transparent", height: "100%" } : { background: "rgba(255,255,255,0.02)", border: "1px solid " + T.border, borderRadius: 9, padding: "6px 13px", minWidth: 78, cursor: "pointer" }}>
                 <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 1 } : { fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>{k}</div>
                 <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: col } : { fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: col }}>{v}</div>
               </div>
             ))}
             <div onClick={() => setBurnOpen(true)} title="Burn tracker — your burn, site burn, circulating supply, live"
-              style={{ ...(UI_NEXT ? { display: "flex", alignItems: "center", gap: 7, height: 26, boxSizing: "border-box", borderTop: "none", borderRadius: "0 0 9px 9px", padding: "0 10px" } : {}), cursor: "pointer", userSelect: "none", background: "rgba(249,115,22,0.10)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 9, padding: "6px 13px" }}>
-              <div className="burn-swap" style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>
+              style={{ ...(UI_NEXT ? { display: "flex", alignItems: "center", gap: 7, height: "100%", boxSizing: "border-box", border: "none", borderRight: "1px solid " + T.border2, borderRadius: 0, padding: "0 11px", background: "transparent" } : {}), cursor: "pointer", userSelect: "none", background: "rgba(249,115,22,0.10)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 9, padding: "6px 13px" }}>
+              <div className="burn-swap" style={UI_NEXT ? { fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 1, marginRight: 6 } : { fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>
                 🔥 {burnMine ? "YOUR" : "TOTAL"} $VALO BURNED
               </div>
-              <div style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: "#f97316" }}>{(burnMine ? myBurned : burned).toFixed(4)}</div>
+              <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: "#f97316" } : { fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: "#f97316" }}>{(burnMine ? myBurned : burned).toFixed(4)}</div>
             </div>
 
             {/* NOTIFICATIONS */}
             <button onClick={() => { setNotifOpen(true); markNotifsRead(); }} title="Notifications — followed callouts, followers, friend requests"
-              style={{ ...(UI_NEXT ? { height: 26, boxSizing: "border-box", borderTop: "none", borderRadius: "0 0 9px 9px", padding: "0 10px" } : {}), position: "relative", display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
+              style={{ ...(UI_NEXT ? { height: "100%", boxSizing: "border-box", border: "none", borderRight: "1px solid " + T.border2, borderRadius: 0, padding: "0 11px", background: "transparent" } : {}), position: "relative", display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
                 border: `1px solid ${T.border2}`, background: "rgba(125,92,240,0.06)", borderRadius: 9, padding: "6px 12px" }}>
               <span style={{ fontSize: 15 }}>🔔</span>
               <span style={UI_NEXT ? { textAlign: "left", lineHeight: 1, display: "flex", alignItems: "baseline", gap: 6 } : { textAlign: "left", lineHeight: 1.15 }}>
