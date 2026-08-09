@@ -2520,7 +2520,7 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
   const [rowMode, setRowMode] = useState({}); // { [tokenId]: "buy" } — toggle flips the bar
   const [confirmSel, setConfirmSel] = useState(null); // { tid, side, pct } — two-tap safety
   const confTO = useRef(null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(UI_NEXT);   // the new wallet leads with its assets
   // ⛓ LIVE: your real open positions — turbo wallet AND anything already sitting
   // in Phantom. Not paper. Sorted biggest first.
   const chainRows = (liveMode && Array.isArray(chainHoldings))
@@ -2569,7 +2569,7 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
     <div style={{ marginTop: 10 }}>
       <button onClick={() => setOpen((v) => !v)}
         style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", border: `1px solid ${T.border2}`, borderRadius: 9, padding: "9px 12px", background: "rgba(255,255,255,0.02)", cursor: "pointer", fontFamily: T.mono, fontSize: 11, fontWeight: 700, color: T.text }}>
-        <span>{open ? "▾" : "▸"} MY OPEN POSITIONS · {held.length}</span>
+        <span>{open ? "▾" : "▸"} {UI_NEXT ? "ASSETS" : "MY OPEN POSITIONS"} · {held.length}</span>
         {liveMode ? (
           <span style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
             <span style={{ color: T.text }}>{fmt$(totalUsdLive)}</span>
@@ -6943,8 +6943,13 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
 
       {tab === "wallet" ? (
         <>
-          {/* total equity + pnl + privacy eye */}
-          <div style={{ textAlign: "center", marginBottom: 12, position: "relative" }}>
+          {/* total equity + pnl + privacy eye — under UI_NEXT this IS the wallet card */}
+          <div style={UI_NEXT
+            ? { textAlign: "center", marginBottom: 12, position: "relative", padding: "16px 12px 14px",
+                borderRadius: 14, border: `1px solid ${VALO_PURPLE}44`,
+                background: "linear-gradient(160deg, rgba(125,92,240,0.20), rgba(20,17,38,0.9) 55%, rgba(13,15,22,0.95))",
+                boxShadow: "0 6px 22px rgba(125,92,240,0.16)" }
+            : { textAlign: "center", marginBottom: 12, position: "relative" }}>
             <button onClick={() => setHideBalance && setHideBalance((v) => !v)} title="Hide/show balances"
               style={{ position: "absolute", right: 0, top: 0, ...chip(false), padding: "3px 8px", fontSize: 11 }}>
               {hideBalance ? "🙈" : "👁"}
@@ -7019,8 +7024,8 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               )}
             </div>
           </div>
-          {/* balance breakdown */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+          {/* balance breakdown — folded into ASSETS under UI_NEXT */}
+          <div style={{ display: UI_NEXT ? "none" : "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
             <div style={{ background: "#0c0f16", border: `1px solid ${chainOn ? `${T.amber}55` : T.border}`, borderRadius: 9, padding: "8px 10px" }}>
               <div style={{ fontFamily: T.mono, fontSize: 8.5, color: (chainOn || liveMode) ? T.amber : T.faint }}>{(chainOn || liveMode) ? "⛓ SOL" : "SOL BALANCE"}</div>
               <div style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 700 }}>{mask(chainOn ? chSol.toFixed(3) : liveMode ? "—" : solBalance.toFixed(2))}</div>
@@ -7045,7 +7050,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               </div>
             )}
           </div>
-          {chainOn ? (
+          {chainOn && !UI_NEXT ? (
             <div style={{ background: "#0c0f16", border: `1px solid ${T.amber}44`, borderRadius: 9, padding: "8px 10px", marginBottom: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 10.5 }}>
                 <span style={{ color: T.amber }}>⛓ POSITIONS · {chCount}</span>
@@ -7203,7 +7208,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               </div>
               {valoMint ? (
                 <>
-                  <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.dim, lineHeight: 1.6, marginBottom: 8 }}>
+                  <div style={{ display: UI_NEXT ? "none" : undefined,  fontFamily: T.mono, fontSize: 8.5, color: T.dim, lineHeight: 1.6, marginBottom: 8 }}>
                     Buys real $VALO on-chain with SOL from your connected wallet — same review &amp; confirm as any live order.
                   </div>
                   <button onClick={() => onRealSwap && onRealSwap()}
