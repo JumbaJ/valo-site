@@ -1,5 +1,8 @@
 {
   "crons": [
     { "path": "/api/epoch-payout", "schedule": "5 * * * *" }
-  ]
+  ],
+  "functions": {
+    "api/epoch-payout.js": { "maxDuration": 60 }
+  }
 }

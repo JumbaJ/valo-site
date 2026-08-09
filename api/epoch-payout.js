@@ -207,14 +207,28 @@ export default async function handler(req, res) {
           const raw = buildTx({ payer: signer.publicKey, instructions: ixs, recentBlockhash: blockhash, signer });
           return rpc("sendTransaction", [raw, { encoding: "base64", maxRetries: 3, skipPreflight: false }]);
         };
-        let sig;
-        try { sig = await sendOnce(); }
-        catch (e) {
-          // a hash the sender won't accept is transient — one fresh fetch, one resend
-          if (String(e && e.message || e).includes("Blockhash not found")) sig = await sendOnce();
-          else throw e;
+        // a signature from sendTransaction is a promise to TRY, not a receipt.
+        // Only the chain's own confirmation makes a payout real.
+        const confirmSig = async (sg) => {
+          for (let i = 0; i < 8; i++) {
+            await new Promise((r) => setTimeout(r, 2000));
+            const st = await rpc("getSignatureStatuses", [[sg], { searchTransactionHistory: true }]);
+            const v = st && st.value && st.value[0];
+            if (v && (v.confirmationStatus === "confirmed" || v.confirmationStatus === "finalized")) {
+              if (v.err) throw new Error("tx landed but failed on chain: " + JSON.stringify(v.err).slice(0, 120));
+              return true;
+            }
+          }
+          return false;
+        };
+        let sig = await sendOnce();
+        let landed = await confirmSig(sig);
+        if (!landed) {
+          // the chain never saw it — one fresh blockhash, one more attempt
+          sig = await sendOnce();
+          landed = await confirmSig(sig);
         }
-        sig = await Promise.resolve(sig);
+        if (!landed) throw new Error(`tx never confirmed after 2 attempts (last sig ${String(sig).slice(0, 12)}…) — NOT recorded as sent`);
         for (const p of included) results.push({ ...p, status: "sent", sig, solscan: `https://solscan.io/tx/${sig}` });
       } catch (e) {
         for (const p of included) results.push({ ...p, status: "failed", error: String(e.message || e).slice(0, 180) });
