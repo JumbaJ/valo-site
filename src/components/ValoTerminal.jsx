@@ -14915,7 +14915,10 @@ export default function App() {
     return () => clearInterval(iv);
   }, [liveData, solBalance, valoWallet, realizedPnl, unrealizedAll, pendingOrders, botRuns]);
   const platformPnl = realizedPnl + unrealizedAll;
-  const valoUsdPrice = 0.0125; // API: live $VALO price
+  // live $VALO price — valoLive comes from /api/valo. The old hardcoded 0.0125
+  // was a placeholder that survived launch and inflated every $VALO figure by
+  // ~4000x (1,951 $VALO reading as $24.39 instead of $0.006).
+  const valoUsdPrice = valoLive && +valoLive.price > 0 ? +valoLive.price : 0;
   const walletUsd = solBalance * SOL_USD + valoWallet * valoUsdPrice;
   const liveValueUsd = Object.entries(positions).reduce((a, [id, p]) => {
     const t = tokens.find((x) => x.id === +id); if (!t || !p) return a;
@@ -16636,7 +16639,7 @@ export default function App() {
             {/* tidy stats strip */}
             <div style={{ display: "flex", gap: 0, fontFamily: T.mono, fontSize: 10, background: "rgba(255,255,255,0.02)", border: `1px solid ${T.border}`, borderRadius: 9, overflow: "hidden" }}>
               {[
-                ["PRICE", <b style={{ color: VALO_PURPLE }}>{valoLive ? `$${fmtP(valoLive.price)}` : `$${valoUsdPrice.toFixed(4)}`}</b>],
+                ["PRICE", <b style={{ color: VALO_PURPLE }}>{valoLive ? `$${fmtP(valoLive.price)}` : "—"}</b>],
                 [valoLive ? "MC" : "TVL", <b>{valoLive ? fmt$(valoLive.mc || 0) : fmt$(gTvl)}</b>],
                 ["NET", (() => {
                   const n = valoLive ? ((valoLive.greenUsd || 0) - (valoLive.redUsd || 0)) : gNet;
@@ -16671,7 +16674,7 @@ export default function App() {
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
             {[
-              ["PRICE", valoLive ? `$${fmtP(valoLive.price)}` : `$${valoUsdPrice.toFixed(4)}`, VALO_PURPLE,
+              ["PRICE", valoLive ? `$${fmtP(valoLive.price)}` : "—", VALO_PURPLE,
                 valoLive ? "Live $VALO price from the pool" : "Current $VALO price"],
               [valoLive ? "MARKET CAP" : "TVL", valoLive ? fmt$(valoLive.mc || 0) : fmt$(gTvl), T.text,
                 valoLive ? "Real $VALO market cap" : null],
