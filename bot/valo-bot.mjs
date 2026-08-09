@@ -216,6 +216,8 @@ const commands = {
     ].join("\n");
   },
 };
+commands.chatid = async () => "This chat's id is below. Put it in `CHAT_ID` so the bot can post epoch alerts here.";
+
 commands.start = commands.help;
 commands.chart = commands.price;
 commands.contract = commands.ca;
@@ -240,6 +242,68 @@ const WELCOME = (name) => [
 // ── polling loop ────────────────────────────────────────────────────────────
 const cooldown = new Map();
 let offset = 0;
+
+// ── epoch announcer ─────────────────────────────────────────────────────────
+const CHAT_ID = (process.env.CHAT_ID || "").trim();
+const seen = { epoch: null, warned: null, pool: 0, participants: 0 };
+
+const announce = async () => {
+  if (!CHAT_ID) return;
+  const e = await get("/api/epoch");
+  if (!e || !e.epoch) return;
+
+  // the hour rolled over — report what the epoch that just closed held
+  if (seen.epoch && e.epoch !== seen.epoch) {
+    const had = seen.participants;
+    await send(CHAT_ID, had
+      ? [
+          "*⏱ EPOCH CLOSED*",
+          rows([
+            ["Pool", n(seen.pool) + " $VALO"],
+            ["Traders", String(had)],
+          ], 10),
+          "_Payouts are landing in wallets now — no claiming needed._",
+          "",
+          "*A new hour is open.* Trade to earn a slice of the next one.",
+          links(),
+        ].join("\n")
+      : [
+          "*⏱ NEW EPOCH OPEN*",
+          rows([["Pool", n(e.pool) + " $VALO"], ["Ends in", "60 min"]], 10),
+          "_Last hour went unclaimed — nobody traded. This one is wide open._",
+          links(),
+        ].join("\n"));
+    seen.warned = null;
+  }
+
+  // final call, once per epoch
+  if (e.minsLeft != null && e.minsLeft <= 10 && seen.warned !== e.epoch) {
+    seen.warned = e.epoch;
+    await send(CHAT_ID, [
+      `*⏳ ${e.minsLeft} MINUTES LEFT*`,
+      rows([
+        ["Pool", n(e.pool) + " $VALO"],
+        ["Traders", String(e.participants ?? 0)],
+      ], 10),
+      (e.participants
+        ? "_Every trade this hour adds weight. Fewer traders means a bigger slice each._"
+        : "_Nobody has traded yet — whoever trades takes the whole pool._"),
+      links(),
+    ].join("\n"));
+  }
+
+  seen.epoch = e.epoch;
+  seen.pool = e.pool || 0;
+  seen.participants = e.participants || 0;
+};
+
+if (CHAT_ID) {
+  console.log("epoch announcer on for chat", CHAT_ID);
+  announce();
+  setInterval(() => { announce().catch((e) => console.error("announce:", e.message)); }, 60000);
+} else {
+  console.log("epoch announcer off — set CHAT_ID to enable (run /chatid in the group)");
+}
 console.log("VALO bot up — polling for updates");
 
 const handle = async (u) => {
@@ -298,7 +362,8 @@ const handle = async (u) => {
   cooldown.set(key, now);
   if (cooldown.size > 5000) cooldown.clear();
 
-  const reply = await fn(arg);
+  let reply = await fn(arg);
+  if (cmd === "chatid") reply += `\n\n\`${chat}\``;
   await send(chat, reply, { reply_to_message_id: msg.message_id });
 };
 
