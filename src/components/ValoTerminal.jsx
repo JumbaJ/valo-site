@@ -17245,6 +17245,7 @@ export default function App() {
               setScanScrolled(el.scrollTop > 180);
               if (el.scrollHeight - el.scrollTop - el.clientHeight < 380) { setScanVisN((v) => Math.min(v + 80, 1200)); loadMoreTokens(); } }}
             style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start", zIndex: 5,
+            marginTop: UI_NEXT ? 26 : 0,   // clearance from the logo — the header pull-up put them in the same pixels
             transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s", display: "grid", gap: 10,
             maxHeight: "calc((100vh - 30px) / 1.13 - var(--stkTop))", overflowY: "auto", padding: "2px 10px 2px 2px" }}>
             <button onClick={() => { flashTop(); const el = scannerRef.current; if (el) el.scrollTo({ top: 0, behavior: "smooth" }); }}
