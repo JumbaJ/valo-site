@@ -9817,6 +9817,7 @@ export default function App() {
   const [createdOpen, setCreatedOpen] = useState(false);     // dev "created tokens" sub-section
   const [tf, setTf] = useState(15);
   const [tfMoreOpen, setTfMoreOpen] = useState(false);   // 🧪 UI_NEXT: reveal the rarely-used durations
+  const [linksOpen, setLinksOpen] = useState(null);      // 🧪 UI_NEXT: token links popover (by token id)
   const tokensRef = useRef([]); tokensRef.current = tokens;
   const selRef = useRef(null); // live mirror for effects that must not re-run on every tick
   const [alerts, setAlerts] = useState([]);     // MARKET ALERTS — rising/falling coins only
@@ -15624,8 +15625,64 @@ export default function App() {
                       {caCopied === selected.id ? "✓ copied" : <>📋 CA <span style={{ color: T.faint }}>{(selected.liveMint || selected.ca).slice(0, 4)}…{(selected.liveMint || selected.ca).slice(-4)}</span></>}
                     </button>
                     )}
+                    {/* 🧪 UI_NEXT — the same eight destinations, behind one button */}
+                    {UI_NEXT && (() => {
+                      const L = [];
+                      if (tokLinks && tokLinks.links) L.push(
+                        ["💊", "pump.fun", tokLinks.links.pumpfun, "#16c784"],
+                        ["📈", "DexScreener", tokLinks.links.dexscreener, "#4c9aff"],
+                        ["🔎", "Solscan", tokLinks.links.solscan, "#a98fff"],
+                        ["🪐", "Jupiter", tokLinks.links.jupiter, "#f0b90b"],
+                      );
+                      if (tokLinks) L.push(
+                        ["𝕏", "X", legitSocial("x", tokLinks.socials && tokLinks.socials.twitter), "#e6e9ef"],
+                        ["✈", "Telegram", legitSocial("tg", tokLinks.socials && tokLinks.socials.telegram), "#4c9aff"],
+                        ["🎮", "Discord", legitSocial("dc", tokLinks.socials && tokLinks.socials.discord), "#8b9cff"],
+                        ["🌐", "Website", legitSocial("site", tokLinks.websites && tokLinks.websites[0]), "#a98fff"],
+                      );
+                      if (!tokLinks && !liveData) L.push(
+                        ["𝕏", "X", selected.socials.x, "#e6e9ef"],
+                        ["✈", "Telegram", selected.socials.tg, "#4c9aff"],
+                        ["🌐", "Website", selected.socials.site, "#a98fff"],
+                        ["💊", "pump.fun", selected.socials.pump, "#16c784"],
+                      );
+                      const links = L.filter(([, , u]) => u);
+                      if (!links.length) return null;
+                      const open = linksOpen === selected.id;
+                      return (
+                        <div style={{ position: "relative" }}>
+                          <button onClick={() => setLinksOpen(open ? null : selected.id)}
+                            title="Links for this token"
+                            style={{ display: "flex", alignItems: "center", gap: 4, height: 26, borderRadius: 7,
+                              border: `1px solid ${open ? T.blue : T.border2}`, background: open ? "rgba(76,154,255,0.12)" : "rgba(255,255,255,0.03)",
+                              color: open ? T.blue : T.dim, fontFamily: T.mono, fontSize: 9.5, fontWeight: 700, padding: "0 8px", cursor: "pointer" }}>
+                            🔗 <span>{links.length}</span>
+                          </button>
+                          {open && (
+                            <>
+                              <div onClick={() => setLinksOpen(null)}
+                                style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                              <div style={{ position: "absolute", top: 30, left: 0, zIndex: 41, minWidth: 168,
+                                background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 10,
+                                boxShadow: "0 10px 30px rgba(0,0,0,0.5)", padding: 5 }}>
+                                {links.map(([ic, label, url, col], i) => (
+                                  <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+                                    onClick={() => setLinksOpen(null)}
+                                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 9px",
+                                      borderRadius: 7, textDecoration: "none", color: T.text, fontFamily: T.mono, fontSize: 10.5 }}>
+                                    <span style={{ color: col, width: 14, textAlign: "center" }}>{ic}</span>
+                                    <span>{label}</span>
+                                    <span style={{ marginLeft: "auto", color: T.faint, fontSize: 9 }}>↗</span>
+                                  </a>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {/* real destinations for live tokens — the actual coin page */}
-                    {tokLinks && tokLinks.links && [
+                    {!UI_NEXT && tokLinks && tokLinks.links && [
                       ["💊", tokLinks.links.pumpfun, "#16c784", "Open on pump.fun"],
                       ["📈", tokLinks.links.dexscreener, "#4c9aff", "Open on DexScreener"],
                       ["🔎", tokLinks.links.solscan, "#a98fff", "Open on Solscan"],
@@ -15636,7 +15693,7 @@ export default function App() {
                           borderRadius: 7, border: `1px solid ${col}55`, background: `${col}14`, color: col,
                           fontSize: 12, textDecoration: "none", padding: "0 5px" }}>{ic}</a>
                     ))}
-                    {tokLinks && [
+                    {!UI_NEXT && tokLinks && [
                       ["𝕏", legitSocial("x", tokLinks.socials && tokLinks.socials.twitter), "#e6e9ef", "Their official X"],
                       ["✈", legitSocial("tg", tokLinks.socials && tokLinks.socials.telegram), "#4c9aff", "Their official Telegram"],
                       ["🎮", legitSocial("dc", tokLinks.socials && tokLinks.socials.discord), "#8b9cff", "Their official Discord"],
@@ -15647,7 +15704,7 @@ export default function App() {
                           borderRadius: 7, border: `1px solid ${col}55`, background: `${col}14`, color: col,
                           fontSize: 11.5, textDecoration: "none", padding: "0 5px" }}>{ic}</a>
                     ))}
-                    {!tokLinks && !liveData && [["𝕏", selected.socials.x, "#e6e9ef"], ["✈", selected.socials.tg, "#4c9aff"], ["🌐", selected.socials.site, "#a98fff"], ["💊", selected.socials.pump, "#16c784"]].filter(([, url]) => url).map(([ic, url, col], i) => (
+                    {!UI_NEXT && !tokLinks && !liveData && [["𝕏", selected.socials.x, "#e6e9ef"], ["✈", selected.socials.tg, "#4c9aff"], ["🌐", selected.socials.site, "#a98fff"], ["💊", selected.socials.pump, "#16c784"]].filter(([, url]) => url).map(([ic, url, col], i) => (
                       <a key={i} href={url} target="_blank" rel="noopener noreferrer" title="Open social"
                         style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 7, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)", color: col, fontSize: 12, textDecoration: "none", cursor: "pointer" }}>{ic}</a>
                     ))}
