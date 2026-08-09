@@ -9818,6 +9818,7 @@ export default function App() {
   const [tf, setTf] = useState(15);
   const [tfMoreOpen, setTfMoreOpen] = useState(false);   // 🧪 UI_NEXT: reveal the rarely-used durations
   const [linksOpen, setLinksOpen] = useState(null);      // 🧪 UI_NEXT: token links popover (by token id)
+  const [flowDetail, setFlowDetail] = useState(false);   // 🧪 UI_NEXT: momentum + pressure under the flow bar
   const tokensRef = useRef([]); tokensRef.current = tokens;
   const selRef = useRef(null); // live mirror for effects that must not re-run on every tick
   const [alerts, setAlerts] = useState([]);     // MARKET ALERTS — rising/falling coins only
@@ -15778,6 +15779,7 @@ export default function App() {
                   : layoutPro
                   ? { display: "none" } /* pro layout: the skinny strip below replaces this block */
                   : { maxHeight: pcCrunch > 0.92 ? 0 : Math.round((1 - pcCrunch) * 160), opacity: 1 - pcCrunch, overflow: "hidden", marginBottom: pcCrunch > 0.92 ? 0 : undefined, pointerEvents: pcCrunch > 0.85 ? "none" : "auto", transition: pcPullRef.current ? "none" : "max-height .2s ease, opacity .2s ease, margin-bottom .2s ease" }}>
+                {!UI_NEXT && (
                 <div style={{ display: "flex", gap: 12, marginBottom: 10, flexWrap: "wrap", fontFamily: T.mono, fontSize: 10.5 }}>
                   <span style={{ color: T.faint }}>MOM <b style={{ color: accent(selected.hue) }}>{Math.round(selected.momentum)}</b></span>
                   <span style={{ color: T.faint }}>B/S <b style={{ color: selected.buyPressure >= 50 ? T.green : T.red }}>{Math.round(selected.buyPressure)}</b></span>
@@ -15787,11 +15789,42 @@ export default function App() {
                     <span style={{ color: T.faint }}>NET <b style={{ color: net >= 0 ? T.green : T.red }}>{net >= 0 ? "+" : "−"}{fmt$(Math.abs(net))}</b></span>
                   ); })()}
                 </div>
+                )}
                 {/* buys vs sells for the selected timeframe — side by side */}
                 {(() => {
                   const { buys, sells } = buysSellsFor(selected, tf, 90);
                   const tot = buys + sells || 1;
                   const bpct = (buys / tot) * 100;
+                  const net = selected.greenUsd - selected.redUsd;
+                  // 🧪 UI_NEXT — the numbers ARE the bar, so put them on it. Three
+                  // rows collapse to two, and MOM / B/S move behind a tap because
+                  // they restate what the bar already shows.
+                  if (UI_NEXT) return (
+                    <div style={{ marginBottom: 10 }}>
+                      <div onClick={() => setFlowDetail((v) => !v)} role="button"
+                        title="tap for momentum and pressure"
+                        style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                          fontFamily: T.mono, fontSize: 10.5, marginBottom: 5, cursor: "pointer" }}>
+                        <span style={{ color: T.green, fontWeight: 700 }}>▲ {fmt$(selected.greenUsd)}<span style={{ color: T.faint, fontWeight: 400 }}> · {buys}</span></span>
+                        <span style={{ color: net >= 0 ? T.green : T.red, fontWeight: 800 }}>
+                          {net >= 0 ? "+" : "−"}{fmt$(Math.abs(net))}
+                          <span style={{ color: T.faint, fontWeight: 400, fontSize: 9 }}> net</span>
+                        </span>
+                        <span style={{ color: T.red, fontWeight: 700 }}><span style={{ color: T.faint, fontWeight: 400 }}>{sells} · </span>{fmt$(selected.redUsd)} ▼</span>
+                      </div>
+                      <div style={{ display: "flex", height: 6, borderRadius: 4, overflow: "hidden", background: "#1a1f2a" }}>
+                        <div style={{ width: `${bpct}%`, background: T.green }} />
+                        <div style={{ width: `${100 - bpct}%`, background: T.red }} />
+                      </div>
+                      {flowDetail && (
+                        <div style={{ display: "flex", gap: 14, marginTop: 6, fontFamily: T.mono, fontSize: 9.5 }}>
+                          <span style={{ color: T.faint }}>MOM <b style={{ color: accent(selected.hue) }}>{Math.round(selected.momentum)}</b></span>
+                          <span style={{ color: T.faint }}>B/S <b style={{ color: selected.buyPressure >= 50 ? T.green : T.red }}>{Math.round(selected.buyPressure)}</b></span>
+                          <span style={{ color: T.faint, marginLeft: "auto" }}>last {TIMEFRAMES.find((f) => f.m === tf)?.k || tf + "m"} × window</span>
+                        </div>
+                      )}
+                    </div>
+                  );
                   return (
                     <div style={{ marginBottom: 10 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", fontFamily: T.mono, fontSize: 10.5, marginBottom: 4 }}>
