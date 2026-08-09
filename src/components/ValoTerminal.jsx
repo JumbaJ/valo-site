@@ -279,6 +279,23 @@ function aggregate(candles, tfMin) {
   if (cur) out.push(cur);
   return stitch(out);
 }
+// 🧪 NEXT-UI PREVIEW — visual work ships behind this until it earns its place.
+//   valotrading.app/?ui=next  → opt in (remembered)
+//   valotrading.app/?ui=off   → back to the live layout
+// Nothing gated by UI_NEXT changes what a trade does; it is presentation only.
+const UI_NEXT = (() => {
+  try {
+    const q = window.location.search || "";
+    if (/[?&]ui=next/.test(q)) { localStorage.setItem("valo-ui-next", "1"); return true; }
+    if (/[?&]ui=off/.test(q)) { localStorage.removeItem("valo-ui-next"); return false; }
+    return localStorage.getItem("valo-ui-next") === "1";
+  } catch (e) { return false; }
+})();
+
+// Nine durations is more than anyone switches between. The five people use
+// stay visible; the rest live behind "···" so nothing is lost.
+const TIMEFRAMES_PRIMARY = new Set([1, 5, 15, 60, 1440]);
+
 const TIMEFRAMES = [
   { k: "1m", m: 1 }, { k: "5m", m: 5 }, { k: "15m", m: 15 }, { k: "30m", m: 30 },
   { k: "1H", m: 60 }, { k: "3H", m: 180 }, { k: "5H", m: 300 }, { k: "10H", m: 600 }, { k: "1D", m: 1440 },
@@ -9799,6 +9816,7 @@ export default function App() {
   const [showDevTrades, setShowDevTrades] = useState(false); // overlay dev buys/sells on chart
   const [createdOpen, setCreatedOpen] = useState(false);     // dev "created tokens" sub-section
   const [tf, setTf] = useState(15);
+  const [tfMoreOpen, setTfMoreOpen] = useState(false);   // 🧪 UI_NEXT: reveal the rarely-used durations
   const tokensRef = useRef([]); tokensRef.current = tokens;
   const selRef = useRef(null); // live mirror for effects that must not re-run on every tick
   const [alerts, setAlerts] = useState([]);     // MARKET ALERTS — rising/falling coins only
@@ -15754,10 +15772,23 @@ export default function App() {
                   );
                 })()}
                 {/* durations — always visible above the chart */}
-                <div style={{ display: "flex", gap: 4, marginBottom: isMobile ? 0 : 10, flexWrap: "wrap" }}>
-                  {TIMEFRAMES.map((f) => (
+                <div style={{ display: "flex", gap: 4, marginBottom: isMobile ? 0 : 10, flexWrap: "wrap", alignItems: "center" }}>
+                  {(UI_NEXT
+                    ? TIMEFRAMES.filter((f) => TIMEFRAMES_PRIMARY.has(f.m) || tf === f.m || tfMoreOpen)
+                    : TIMEFRAMES
+                  ).map((f) => (
                     <button key={f.k} onClick={() => setTf(f.m)} style={{ ...chip(tf === f.m), padding: "3px 8px" }}>{f.k}</button>
                   ))}
+                  {UI_NEXT && !tfMoreOpen && (
+                    <button onClick={() => setTfMoreOpen(true)}
+                      title="more timeframes"
+                      style={{ ...chip(false), padding: "3px 8px", opacity: 0.6 }}>···</button>
+                  )}
+                  {UI_NEXT && tfMoreOpen && (
+                    <button onClick={() => setTfMoreOpen(false)}
+                      title="fewer timeframes"
+                      style={{ ...chip(false), padding: "3px 8px", opacity: 0.6 }}>‹</button>
+                  )}
                 </div>
 
                 {/* pinned traders — their markers ride along on every chart */}
