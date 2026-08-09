@@ -5783,7 +5783,7 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
 }
 
 // ⚡ TURBO WALLET — the popup-free trading key, entirely on this device.
-function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phantomOk, turboSol = 0, autoOn = false, onToggleAuto = null, phantomSol = 0, valoMint = null }) {
+function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phantomOk, turboSol = 0, autoOn = false, onToggleAuto = null, phantomSol = 0, valoMint = null, onDismiss = null }) {
   const [autoConfirm, setAutoConfirm] = useState(false);   // two-tap arm
   const [sweepConfirm, setSweepConfirm] = useState(false); // two-tap sweep
   const [depositCcy, setDepositCcy] = useState("SOL");     // SOL | VALO (post-launch)
@@ -5815,7 +5815,7 @@ function TurboPanel({ turbo, onCreate, onUnlock, onLock, onFund, onSweep, phanto
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
         <span style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 0.8, color: active ? T.green : T.amber }}>
           {active && (
-            <button onClick={() => setCollapsed((c) => !c)} title={collapsed ? "Expand turbo controls" : "Collapse — keep trading, hide controls"}
+            <button onClick={() => (onDismiss ? onDismiss() : setCollapsed((c) => !c))} title={onDismiss ? "Close turbo controls" : collapsed ? "Expand turbo controls" : "Collapse — keep trading, hide controls"}
               style={{ border: `1px solid ${T.green}55`, background: "rgba(22,199,132,0.08)", color: T.green, borderRadius: 6,
                 width: 18, height: 18, display: "grid", placeItems: "center", cursor: "pointer", fontSize: 9, fontWeight: 900, padding: 0 }}>
               {collapsed ? "▾" : "▴"}
@@ -6944,7 +6944,8 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                 onLock={onTurboLock} onFund={onTurboFund} onSweep={onTurboSweep}
                 phantomOk={!!(wallet && wallet.address)} turboSol={turboSol}
                 autoOn={turboAutoOn} onToggleAuto={onTurboToggleAuto}
-                phantomSol={(walletChain && walletChain.solVault) || 0} valoMint={valoMint} />
+                phantomSol={(walletChain && walletChain.solVault) || 0} valoMint={valoMint}
+                onDismiss={() => setTurboPop(false)} />
             </div>
           </>
         )}
