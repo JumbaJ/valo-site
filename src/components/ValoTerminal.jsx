@@ -12873,11 +12873,10 @@ export default function App() {
     const FEEDS = { new: ["new"], hot: ["trending", "top"], movers: ["top", "trending"], lucky: ["new", "trending"], trending: ["trending"] };
     const feeds = FEEDS[scanMode] || ["trending"];
     let stop = false;
-    const pageRef = { n: 0 };   // ♾ walk the feed's pages instead of re-reading page 1
     const pull = async () => {
       try {
-        pageRef.n = (pageRef.n % 5) + 1;
-        const rs = await Promise.allSettled(feeds.map((f) => fetch(`/api/tokens?feed=${f}&page=${pageRef.n}&t=${Math.floor(Date.now() / 8000)}`)));
+        // freshness only — depth is loadMoreTokens' job, triggered by scroll
+        const rs = await Promise.allSettled(feeds.map((f) => fetch(`/api/tokens?feed=${f}&page=1&t=${Math.floor(Date.now() / 8000)}`)));
         const rows = [];
         for (const rr of rs) if (rr.status === "fulfilled" && rr.value.ok) {
           try { const a = await rr.value.json(); if (Array.isArray(a)) rows.push(...a); } catch (e) {}
@@ -12892,7 +12891,10 @@ export default function App() {
           const seen = new Set([...(tokensRef.current || []), ...M].map(idk));
           const add = []; const sN = new Set();
           for (const t of fresh) { const k = idk(t); if (!k || seen.has(k) || sN.has(k)) continue; sN.add(k); add.push(t); }
-          return add.length ? [...add, ...M].slice(0, 260) : M;
+          // 1200, not 260: the endless scroll APPENDS deep pages, and this
+          // refresh must never evict them — that eviction was the "list resets
+          // under me" bug. The cap is a memory bound, not a view size.
+          return add.length ? [...add, ...M].slice(0, 1200) : M;
         });
       } catch (e) {}
     };
@@ -12980,6 +12982,8 @@ export default function App() {
 
   const [pageScrolled, setPageScrolled] = useState(false);
   const [scanScrolled, setScanScrolled] = useState(false);  // PC scanner column
+  const [scanVisN, setScanVisN] = useState(80);             // ♾ render window — data endless, DOM bounded
+  useEffect(() => { setScanVisN(80); }, [scanMode]);        // a new lens starts at the top
   const [topFlash, setTopFlash] = useState(false);          // ▲ pressed → purple
   const flashTop = () => { setTopFlash(true); setTimeout(() => setTopFlash(false), 420); };
   useEffect(() => {
@@ -12993,7 +12997,7 @@ export default function App() {
     if (!isMobile) return;
     const onScroll = () => {
       const left = document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
-      if (left < 520) loadMoreTokens();
+      if (left < 520) { setScanVisN((v) => Math.min(v + 80, 1200)); loadMoreTokens(); }
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
@@ -17173,7 +17177,7 @@ export default function App() {
                   <div style={{ fontSize: 8.5, opacity: 0.8 }}>real markets only · nothing simulated</div>
                 </div>
               )}
-              {shown.map((t) => (
+              {shown.slice(0, scanVisN).map((t) => (
                 compactList
                   ? <div key={t.id} data-mslot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 10, transition: "opacity .12s, transform .12s" }} {...tdProps(t)}><TokenRow t={t} active={sel === t.id} calloutCount={calloutCountFor(t.id)} tf={tf}
                       onOpen={() => { if (sel === t.id) { holdScroll(); setSel(null); setClickMode(null); } else openAnyToken(t.id); }}
@@ -17225,7 +17229,7 @@ export default function App() {
             onWheel={(e) => { e.stopPropagation(); scanPullWheel(e); }}
             onScroll={(e) => { const el = e.currentTarget;
               setScanScrolled(el.scrollTop > 180);
-              if (el.scrollHeight - el.scrollTop - el.clientHeight < 380) loadMoreTokens(); }}
+              if (el.scrollHeight - el.scrollTop - el.clientHeight < 380) { setScanVisN((v) => Math.min(v + 80, 1200)); loadMoreTokens(); } }}
             style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start", zIndex: 5,
             transform: `translateX(${-pullX}px)`, transition: resizeRef.current ? "none" : "transform .2s", display: "grid", gap: 10,
             maxHeight: "calc((100vh - 30px) / 1.13 - var(--stkTop))", overflowY: "auto", padding: "2px 10px 2px 2px" }}>
@@ -17254,7 +17258,7 @@ export default function App() {
                 <div style={{ fontSize: 8.5, opacity: 0.8 }}>real markets only · nothing simulated</div>
               </div>
             )}
-            {shown.map((t) => (
+            {shown.slice(0, scanVisN).map((t) => (
               <div key={t.id} data-slot={t.id} className={mDrag && mDrag.id === t.id ? "valo-drag-src" : dragOverId === t.id && mDrag ? "valo-drag-over" : ""} style={{ position: "relative", opacity: 1, outline: mDrag && mDrag.id === t.id ? `2px solid ${VALO_PURPLE}` : "none", outlineOffset: 2, borderRadius: 12, transition: "opacity .12s, transform .12s" }} {...tdProps(t)} onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => { e.preventDefault(); const id = dragIdOf(e); if (id == null || id === t.id) return;
                   const base = (scanOrder || shown.map((x) => x.id));
