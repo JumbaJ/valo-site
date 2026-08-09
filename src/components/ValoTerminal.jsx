@@ -3622,10 +3622,7 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0, valoUsd = 
   const TOTAL = 1e9; // genesis supply
   // ⛓ real price + real circulating supply from the token's own pool
   const px = valoLive && valoLive.price > 0 ? valoLive.price : valoUsd;
-  const realCirc = valoLive && valoLive.price > 0 && valoLive.mc > 0 ? valoLive.mc / valoLive.price : 0;
-  const circ = realCirc > 0 ? realCirc : Math.max(0, TOTAL - siteBurned);
-  const burnedReal = realCirc > 0 ? Math.max(0, TOTAL - realCirc) : siteBurned;
-  const pct = (burnedReal / TOTAL) * 100;
+  const derivedCirc = valoLive && valoLive.price > 0 && valoLive.mc > 0 ? valoLive.mc / valoLive.price : 0;
   // ⛓ pending buyback — fees collected and waiting to be spent on $VALO
   const [chain, setChain] = useState(null);
   useEffect(() => {
@@ -3643,6 +3640,12 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0, valoUsd = 
     return () => { stop = true; clearInterval(t); };
   }, []);
   const pendingSol = chain && Number.isFinite(+chain.pendingSol) ? +chain.pendingSol : 0;
+  // getTokenSupply is the truth. mc/price is a fallback, and a stale market row
+  // makes it read zero — which is exactly how real burns showed as none.
+  const chainSupply = chain && Number.isFinite(+chain.supply) && +chain.supply > 0 ? +chain.supply : 0;
+  const circ = chainSupply > 0 ? chainSupply : (derivedCirc > 0 ? derivedCirc : Math.max(0, TOTAL - siteBurned));
+  const burnedReal = Math.max(0, TOTAL - circ);
+  const pct = (burnedReal / TOTAL) * 100;
   const pendingUsd = pendingSol * (chain && chain.solUsd ? chain.solUsd : 0);
   const row = (label, val, sub, col) => (
     <div style={{ border: `1px solid ${col}44`, background: `${col}0d`, borderRadius: 11, padding: "11px 13px", marginBottom: 8 }}>
@@ -3662,7 +3665,7 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0, valoUsd = 
         <div style={{ padding: "11px 12px 13px" }}>
           {row("YOUR TOTAL BURNED", `${myBurned.toFixed(4)} $VALO`, "the burn slice of every fee you've ever paid", "#f97316")}
           {row("SITE TOTAL BURN", `${fmtQty(burnedReal)} $VALO`,
-            realCirc > 0 ? "genesis supply minus what's left on chain — permanent" : "every trader's burn pool + hourly buyback burns, on-chain forever", T.red)}
+            chainSupply > 0 ? "genesis supply minus what's left on chain — permanent" : "every trader's burn share + buyback burns, on-chain forever", T.red)}
           {row("CIRCULATING SUPPLY", `${fmtQty(circ)} $VALO`, `of ${fmtQty(TOTAL)} genesis — shrinking with every trade`, T.green)}
           {chain && chain.dedicated && (
             <div style={{ border: "1px solid #f9731644", background: "#f973160d", borderRadius: 11, padding: "11px 13px", marginBottom: 8 }}>
@@ -18854,7 +18857,7 @@ export default function App() {
             )}
 
             <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, lineHeight: 1.7, background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 8, padding: 10, marginBottom: 12 }}>
-              Every trade splits its fee <b style={{ color: T.text }}>50% → burn pool</b>, <b style={{ color: T.text }}>50% → airdrop vault</b>.
+              Every trade splits its fee <b style={{ color: T.text }}>40% → burn</b>, <b style={{ color: T.text }}>40% → airdrop vault</b>, <b style={{ color: T.text }}>20% → treasury</b>.
               Every hour the indexer snapshots holder balances and period volume, computes each wallet's share,
               and publishes a new Merkle root on-chain. Claiming fetches your proof and submits the tx —
               <b style={{ color: T.text }}> you pay your own SOL gas</b>, tokens land directly in your wallet.

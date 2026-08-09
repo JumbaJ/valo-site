@@ -19,6 +19,16 @@
 import {
   Connection, Keypair, PublicKey, VersionedTransaction, Transaction, sendAndConfirmTransaction,
 } from "@solana/web3.js";
+
+// which token program owns this mint? Token-2022 and legacy SPL derive
+// DIFFERENT associated accounts, so guessing puts the burn at an address that
+// does not exist. Read it from the chain.
+async function tokenProgramFor(conn, mint) {
+  const info = await conn.getAccountInfo(mint);
+  if (!info) throw new Error("mint not found on chain");
+  return info.owner;
+}
+
 import {
   getAssociatedTokenAddressSync, getAccount, createBurnInstruction, TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
@@ -114,14 +124,23 @@ await conn.confirmTransaction(buySig, "confirmed");
 console.log("  bought: https://solscan.io/tx/" + buySig);
 
 const mint = new PublicKey(VALO_MINT);
-const ata = getAssociatedTokenAddressSync(mint, burner.publicKey, true, TOKEN_PROGRAM_ID);
-const acct = await getAccount(conn, ata);
+const TOKEN_PROG = await tokenProgramFor(conn, mint);
+const ata = getAssociatedTokenAddressSync(mint, burner.publicKey, true, TOKEN_PROG);
+// a token account created by the swap can lag the confirmation that made it
+let acct = null;
+for (let i = 0; i < 8; i++) {
+  try { acct = await getAccount(conn, ata, undefined, TOKEN_PROG); break; }
+  catch (e) {
+    if (i === 7) { console.error("  token account not visible yet — run scripts/finish-burn.mjs in a minute to complete the burn"); process.exit(1); }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
 const qty = acct.amount;
 if (qty <= 0n) { console.error("  nothing to burn — the buy produced no tokens"); process.exit(1); }
 
 console.log(`\nburning ${(Number(qty) / 1e6).toLocaleString()} $VALO…`);
 const burnTx = new Transaction().add(
-  createBurnInstruction(ata, mint, burner.publicKey, qty, [], TOKEN_PROGRAM_ID)
+  createBurnInstruction(ata, mint, burner.publicKey, qty, [], TOKEN_PROG)
 );
 const burnSig = await sendAndConfirmTransaction(conn, burnTx, [burner], { commitment: "confirmed" });
 console.log("  burned: https://solscan.io/tx/" + burnSig);
