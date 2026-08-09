@@ -117,10 +117,12 @@ export default async function handler(req, res) {
     }
 
     // 3. payout wallets
+    // epoch_activity.user_id holds the user's HANDLE, and profiles has no
+    // `wallet` column — join by handle, read payout_wallet only.
     const ids = weights.map((x) => `"${x.user}"`).join(",");
-    const profs = (await sb(`profiles?id=in.(${ids})&select=id,payout_wallet,wallet`)) || [];
+    const profs = (await sb(`profiles?handle=in.(${ids})&select=handle,payout_wallet`)) || [];
     const walletOf = {};
-    for (const p of profs) walletOf[p.id] = p.payout_wallet || p.wallet || null;
+    for (const p of profs) walletOf[p.handle] = p.payout_wallet || null;
 
     // 4. mint + vault balance
     const mintAcc = await rpc("getAccountInfo", [MINT, { encoding: "jsonParsed" }]);
