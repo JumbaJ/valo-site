@@ -9819,6 +9819,7 @@ export default function App() {
   const [tfMoreOpen, setTfMoreOpen] = useState(false);   // 🧪 UI_NEXT: reveal the rarely-used durations
   const [linksOpen, setLinksOpen] = useState(null);      // 🧪 UI_NEXT: token links popover (by token id)
   const [flowDetail, setFlowDetail] = useState(false);   // 🧪 UI_NEXT: momentum + pressure under the flow bar
+  const [railTab, setRailTab] = useState("trades");      // 🧪 UI_NEXT: trades | positions | chat in one panel
   const tokensRef = useRef([]); tokensRef.current = tokens;
   const selRef = useRef(null); // live mirror for effects that must not re-run on every tick
   const [alerts, setAlerts] = useState([]);     // MARKET ALERTS — rising/falling coins only
@@ -17168,6 +17169,34 @@ export default function App() {
               column for the LIVE TRADES + CHAT rail, both collapsible */}
           {layoutPro ? (
           <div style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start", maxHeight: "calc((100vh - 24px) / 1.13 - var(--stkTop))", overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
+            {UI_NEXT ? (
+            <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, overflow: "hidden" }}>
+              <div style={{ display: "flex", borderBottom: `1px solid ${T.border2}` }}>
+                {[
+                  ["trades", "⚡ TRADES"],
+                  ["positions", "📊 POSITIONS"],
+                  ["chat", "💬 CHAT"],
+                ].map(([k, label]) => (
+                  <button key={k} onClick={() => setRailTab(k)}
+                    style={{ flex: 1, border: "none", borderBottom: `2px solid ${railTab === k ? T.blue : "transparent"}`,
+                      background: railTab === k ? "rgba(76,154,255,0.07)" : "transparent",
+                      color: railTab === k ? T.text : T.faint, padding: "9px 4px", cursor: "pointer",
+                      fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 0.8 }}>{label}</button>
+                ))}
+              </div>
+              <div style={{ padding: 8 }}>
+                {railTab === "trades" && selected && (
+                  <LiveTrades token={selected} isMobile={false} traderPrefs={traderPrefs} onPickTrader={pickTraderRow} />
+                )}
+                {railTab === "positions" && selected && (
+                  <MyPositionsHub liveMode={liveData} chainHoldings={chainHoldingsLive} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} onBurn={burnAndReclaim} tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
+                    onOpenToken={(id) => { setSel(id); setClickMode(null); }} onSellPos={sellPos} onCloseTickets={closeAllTickets}
+                    onSellRun={sellRun} onSellAllBots={sellAllRuns} onCancelBot={cancelBot} />
+                )}
+                {railTab === "chat" && chatBlock}
+              </div>
+            </div>
+            ) : (<>
             <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, overflow: "hidden" }}>
               <button onClick={() => setLtMin((v) => !v)}
                 style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", border: "none", background: "rgba(255,255,255,0.02)", padding: "10px 13px", cursor: "pointer", fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, color: T.dim }}>
@@ -17180,7 +17209,7 @@ export default function App() {
                 </div>
               )}
             </div>
-            {selected && (
+            {!UI_NEXT && selected && (
               <div style={{ marginTop: -10 }}>
                 <MyPositionsHub liveMode={liveData} chainHoldings={chainHoldingsLive} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} onBurn={burnAndReclaim} tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
                   onOpenToken={(id) => { setSel(id); setClickMode(null); }} onSellPos={sellPos} onCloseTickets={closeAllTickets}
@@ -17194,6 +17223,7 @@ export default function App() {
               </button>
               {!chatMin && <div style={{ padding: 8 }}>{chatBlock}</div>}
             </div>
+            </>)}
           </div>
           ) : (
           <div style={{ position: "sticky", top: "var(--stkTop)", alignSelf: "start", maxHeight: "calc((100vh - 24px) / 1.13 - var(--stkTop))", overflowY: "auto" }}>
