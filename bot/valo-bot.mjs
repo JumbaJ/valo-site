@@ -39,6 +39,8 @@ const get = async (path) => {
 };
 
 const n = (v, d = 0) => (v == null || !Number.isFinite(+v) ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: d }));
+// fixed-width rows inside a ``` block — the only way Telegram aligns columns
+const rows = (pairs, pad = 9) => "```\n" + pairs.map(([k, v]) => String(k).toUpperCase().padEnd(pad) + v).join("\n") + "\n```";
 const usd = (v) => (v == null || !Number.isFinite(+v) ? "—" : "$" + (+v).toLocaleString(undefined, { maximumFractionDigits: +v < 0.01 ? 8 : 2 }));
 
 // ── commands ────────────────────────────────────────────────────────────────
@@ -47,13 +49,15 @@ const commands = {
     const v = await get("/api/valo");
     if (!v || !v.price) return "Couldn't reach the price feed. Try again in a moment.";
     return [
-      "*$VALO*",
-      `price   ${usd(v.price)}`,
-      `mcap    ${usd(v.mc)}`,
-      `liq     ${usd(v.tvl)}`,
-      `24h vol ${usd(v.vol24)}`,
-      "",
-      `[chart](${SITE}) · \`${CA}\``,
+      "*$VALO — LIVE PRICE*",
+      rows([
+        ["Price", usd(v.price)],
+        ["Mkt cap", usd(v.mc)],
+        ["Liquidity", usd(v.tvl)],
+        ["24h vol", usd(v.vol24)],
+      ], 11),
+      `\`${CA}\``,
+      `[Open the terminal →](${SITE})`,
     ].join("\n");
   },
 
@@ -63,17 +67,19 @@ const commands = {
     const genesis = b.genesis || 1e9;
     const supply = b.supply || genesis;
     const burned = b.burnedTokens || 0;
-    const lines = [
-      "*🔥 BURN TRACKER*",
-      `burned    ${n(burned)} $VALO`,
-      `supply    ${n(supply)} of ${n(genesis)}`,
-      `that's    ${(b.burnedPct || 0).toFixed(4)}% gone forever`,
+    const pairs = [
+      ["Burned", n(burned) + " $VALO"],
+      ["Supply", n(supply)],
+      ["Genesis", n(genesis)],
+      ["Removed", (b.burnedPct || 0).toFixed(4) + "%"],
     ];
-    if (b.dedicated && b.pendingSol > 0) {
-      lines.push("", `pending buyback: ${(+b.pendingSol).toFixed(4)} SOL waiting to buy $VALO and burn it`);
-    }
-    lines.push("", "Burns are permanent — supply only goes down.");
-    return lines.join("\n");
+    if (b.dedicated && b.pendingSol > 0) pairs.push(["Pending", (+b.pendingSol).toFixed(4) + " SOL"]);
+    return [
+      "*🔥 BURN TRACKER*",
+      rows(pairs, 10),
+      "_Burns are permanent. Supply only goes down._",
+      `[Verify on chain →](${SITE})`,
+    ].join("\n");
   },
 
   async epoch() {
@@ -81,12 +87,16 @@ const commands = {
     if (!e) return "Couldn't reach the epoch feed. Try again in a moment.";
     const lines = [
       "*🎁 THIS EPOCH*",
-      `pool         ${n(e.pool)} $VALO`,
-      `participants ${e.participants ?? 0}`,
-      `ends in      ${e.minsLeft ?? "—"} min`,
+      rows([
+        ["Pool", n(e.pool) + " $VALO"],
+        ["Traders", String(e.participants ?? 0)],
+        ["Ends in", (e.minsLeft ?? "—") + " min"],
+      ], 10),
     ];
-    if (!e.participants) lines.push("", "Nobody has traded this hour yet — the pool is unclaimed.");
-    lines.push("", `Trade on ${SITE} to earn a slice. Every real fill adds weight.`);
+    lines.push(e.participants
+      ? "_Every real fill adds weight. Payouts land automatically._"
+      : "_Nobody has traded this hour yet — the pool is unclaimed._");
+    lines.push(`[Trade now →](${SITE})`);
     return lines.join("\n");
   },
 
@@ -155,13 +165,19 @@ const commands = {
 
   async stats() {
     const [v, b, e] = await Promise.all([get("/api/valo"), get("/api/burn"), get("/api/epoch")]);
-    const lines = ["*VALO — live*", ""];
-    if (v && v.price) lines.push(`price   ${usd(v.price)}   mcap ${usd(v.mc)}   liq ${usd(v.tvl)}`);
-    if (b) lines.push(`burned  ${n(b.burnedTokens)} $VALO (${(b.burnedPct || 0).toFixed(4)}%)`);
-    if (b) lines.push(`supply  ${n(b.supply)}`);
-    if (e) lines.push(`epoch   ${n(e.pool)} $VALO · ${e.participants ?? 0} in · ${e.minsLeft ?? "—"}m left`);
-    lines.push("", `Trade → ${SITE}`);
-    return lines.join("\n");
+    const pairs = [];
+    if (v && v.price) {
+      pairs.push(["Price", usd(v.price)], ["Mkt cap", usd(v.mc)]);
+      if (v.tvl) pairs.push(["Liquidity", usd(v.tvl)]);
+    }
+    if (b) pairs.push(["Burned", n(b.burnedTokens) + " $VALO"], ["Supply", n(b.supply)]);
+    if (e) pairs.push(["Epoch pool", n(e.pool) + " $VALO"], ["Traders", String(e.participants ?? 0)]);
+    return [
+      "*VALO TERMINAL — LIVE*",
+      rows(pairs, 12),
+      `\`${CA}\``,
+      `[Open the terminal →](${SITE})`,
+    ].join("\n");
   },
 
   async ca() {
