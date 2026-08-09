@@ -392,8 +392,15 @@ function makeToken([sym, name, chain], isNew = false) {
 }
 const mcOf = (t) => t.price * t.supply;
 // pay units → dollars. Every P/L figure must pass through this.
-const payUsd = (amt, pay) => (+amt || 0) * (pay === "SOL" ? SOL_USD : 0.0125);
-const posTokenQty = (t, p) => ((p.pay === "SOL" ? p.amt * SOL_USD : p.amt * 0.0125) / (p.entry || t.price)); // token units held
+// 💲 live $VALO price in USD, refreshed from /api/valo. Starts at 0 and is
+// ALWAYS read through valoUnit() so a pre-load zero can never divide.
+let VALO_USD = 0;
+const setValoUsd = (v) => { if (Number.isFinite(+v) && +v > 0) VALO_USD = +v; };
+const valoUnit = () => (VALO_USD > 0 ? VALO_USD : 0);
+const valoUnitSafe = () => (VALO_USD > 0 ? VALO_USD : 1e-9);   // for division only
+
+const payUsd = (amt, pay) => (+amt || 0) * (pay === "SOL" ? SOL_USD : valoUnit());
+const posTokenQty = (t, p) => ((p.pay === "SOL" ? p.amt * SOL_USD : p.amt * valoUnit()) / (p.entry || t.price)); // token units held
 const fmtQty = (n) => (n >= 1e9 ? (n / 1e9).toFixed(2) + "B" : n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : n.toFixed(0));
 
 // callout badge: 0 = gray → light green → bright green; 10+ = gold border
@@ -1073,7 +1080,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
         if (r.entry < lo || r.entry > hi) return;
         const ry = y(r.entry);
         const pct = (price / r.entry - 1) * 100;
-        const usd = (r.remaining * (price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : 0.0125);
+        const usd = (r.remaining * (price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : valoUnit());
         const up = pct >= 0, col = up ? T.green : T.red;
         ctx.setLineDash([1, 3]); ctx.strokeStyle = col; ctx.globalAlpha = 0.55;
         ctx.beginPath(); ctx.moveTo(0, ry); ctx.lineTo(plotW, ry); ctx.stroke();
@@ -1977,7 +1984,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
         const entry = position.entry;
         const pnlPct = ((price - entry) / entry) * 100;
         // EXACT same math as every Live P/L display: settlement units → USD
-        const pnlMoney = (position.amt * (price / entry) - position.amt) * ((position.pay || "SOL") === "SOL" ? SOL_USD : 0.0125);
+        const pnlMoney = (position.amt * (price / entry) - position.amt) * ((position.pay || "SOL") === "SOL" ? SOL_USD : valoUnit());
         const col = pnlPct > 0.001 ? T.green : pnlPct < -0.001 ? T.red : T.dim;
         const top = Math.max(14, Math.min(height - 46, lastPxRef.current.y - 22));
         // hug the LATEST candle: sit just right of it, clamped inside the plot,
@@ -2351,12 +2358,12 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
               {pay === "SOL" ? "SOL" : "$VALO"}
             </b>
           )}
-          ≈ ${(amt * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD
+          ≈ ${(amt * (pay === "SOL" ? SOL_USD : valoUnit())).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD
         </span>
       </div>
       {!compactArm && (() => {
         const bal = pay === "SOL" ? solBalance : valoWallet;
-        const unit$ = pay === "SOL" ? SOL_USD : 0.0125;
+        const unit$ = pay === "SOL" ? SOL_USD : valoUnit();
         return (
           <>
             {!wide && (armEdit ? armEditRow() : (
@@ -2464,7 +2471,7 @@ function TradePanel({ token, onExecute, amount, pay, setPay, onDraftLevel, editB
               style={{ border: "none", background: "transparent", color: T.faint, cursor: "pointer",
                 fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
           </div>
-          {(() => { const m = parseFloat(l.mult) || 0, al = Number(l.alloc || 0); const est = amt * (al / 100) * (m - 1) * (pay === "SOL" ? SOL_USD : 0.0125);
+          {(() => { const m = parseFloat(l.mult) || 0, al = Number(l.alloc || 0); const est = amt * (al / 100) * (m - 1) * (pay === "SOL" ? SOL_USD : valoUnit());
             return m > 1 && al > 0 ? (
               <div style={{ fontFamily: T.mono, fontSize: 7, color: T.green, opacity: 0.85, marginTop: 1,
                 textAlign: "right", paddingRight: 23 }}>≈ +${est.toFixed(0)}</div>
@@ -2666,7 +2673,7 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
                   const buyMode = rowMode[h.t.id] === "buy";
                   const payU = h.p.pay || pay;
                   const bal = payU === "SOL" ? solBalance : valoWallet;
-                  const unit$ = payU === "SOL" ? SOL_USD : 0.0125;
+                  const unit$ = payU === "SOL" ? SOL_USD : valoUnit();
                   const fmtUsd = (u) => (u >= 1000 ? "$" + (u / 1000).toFixed(1) + "K" : "$" + u.toFixed(u < 10 ? 2 : 0));
                   // two-tap safety: first tap shows ✓ + the exact $ at stake; second tap executes
                   const pctBtn = (pct, side) => {
@@ -2777,14 +2784,14 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
               <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>avg ${fmtP(position.entry)} → ${fmtP(token.price)}</div>
               {/* manual money only — bots keep their own book */}
               <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 3, lineHeight: 1.5 }}>
-                BUY-IN ${((position.amt || 0) * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                BUY-IN ${((position.amt || 0) * (pay === "SOL" ? SOL_USD : valoUnit())).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 <span style={{ color: (realized24 || 0) >= 0 ? T.green : T.red }}> · REALIZED 24H {(realized24 || 0) >= 0 ? "+" : "−"}${Math.abs(realized24 || 0).toFixed(2)}</span>
               </div>
               {/* your whole book on this token: ticket money vs bot money */}
               {(() => {
                 const bots = (botRuns || []).filter((r) => r.status === "live" && String(r.tokenId) === String(token.id));
                 const botPnl = bots.reduce((s, r) => {
-                  const q = (r.amt || 0) * (r.pay === "SOL" ? SOL_USD : 0.0125) / (r.entry || token.price || 1);
+                  const q = (r.amt || 0) * (r.pay === "SOL" ? SOL_USD : valoUnit()) / (r.entry || token.price || 1);
                   return s + q * (token.price - (r.entry || token.price));
                 }, 0);
                 const total = livePnlUsd + botPnl;
@@ -2830,7 +2837,7 @@ function DesktopTradePanel({ token, onExecute, clickMode, setClickMode, amount, 
       <input value={amount} onChange={(e) => { setAmount(e.target.value); setPctSel && setPctSel(null); }} style={{ ...inp, width: "100%", marginBottom: 6 }} />
       {(() => {
         const balP = pay === "SOL" ? solBalance : valoBalance;
-        const unitP = pay === "SOL" ? SOL_USD : 0.0125;
+        const unitP = pay === "SOL" ? SOL_USD : valoUnit();
         return (
           <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 900, color: T.blue,
             background: "rgba(76,154,255,0.10)", border: `1px solid ${T.blue}55`, borderRadius: 8,
@@ -3635,7 +3642,7 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
 }
 
 // 🔥 burn stats — everything the burn buttons track, moving live with trades
-function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0, valoUsd = 0.0125, valoLive = null, valoMint = null }) {
+function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0, valoUsd = 0, valoLive = null, valoMint = null }) {
   const TOTAL = 1e9; // genesis supply
   // ⛓ real price + real circulating supply from the token's own pool
   const px = valoLive && valoLive.price > 0 ? valoLive.price : valoUsd;
@@ -3753,7 +3760,7 @@ function RanksModal({ onClose, isMobile, myCallouts = {}, tokens = [], myBest = 
 // ◆ $VALO TOKEN STATS — pop-out page: live price/TVL/flow/PnL/supply with a
 // duration-aware chart; every stat re-times to the selected window. Pre-mainnet
 // this runs as a faithful demonstration feed.
-function ValoStatsModal({ onClose, isMobile, valoUsd = 0.0125, tvl = 0, burned = 0, valoWallet = 0, valoMint = null, liveData = false }) {
+function ValoStatsModal({ onClose, isMobile, valoUsd = 0, tvl = 0, burned = 0, valoWallet = 0, valoMint = null, liveData = false }) {
   const DURS = ["1H", "4H", "1D", "7D", "30D", "ALL"];
   const VOL = { "1H": 0.004, "4H": 0.007, "1D": 0.012, "7D": 0.028, "30D": 0.055, "ALL": 0.10 };
   const [dur, setDur] = useState("1D");
@@ -5184,7 +5191,7 @@ function BotHubModal({ view, setView, orders = [], tokens = [], selectedId, onSa
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
               <div style={{ flex: 1 }}>
                 <F label={`AMOUNT (${editing.pay})`} k="amt" ph="1.0" />
-                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, marginTop: 3 }}>≈ ${(((parseFloat(draft.amt) || 0) * (editing.pay === "SOL" ? SOL_USD : 0.0125))).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD</div>
+                <div style={{ fontFamily: T.mono, fontSize: 8, color: T.faint, marginTop: 3 }}>≈ ${(((parseFloat(draft.amt) || 0) * (editing.pay === "SOL" ? SOL_USD : valoUnit()))).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD</div>
               </div>
               <F label="STOP LOSS ($ · optional)" k="stopLoss" ph="none" />
             </div>
@@ -5343,7 +5350,7 @@ function AutoTraderPanel({ wide = false, solBalance = 0, valoWallet = 0, positio
               </div>
             ); })}
             {running.map((r) => { const t = tkOf(r.tokenId); if (!t) return null;
-              const pnl = (r.remaining * (t.price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : 0.0125);
+              const pnl = (r.remaining * (t.price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : valoUnit());
               const up = pnl >= 0;
               return (
                 <div key={r.id} style={{ ...barBase(t.hue), border: `1px solid ${up ? "rgba(22,199,132,0.45)" : "rgba(234,57,67,0.45)"}` }}
@@ -5495,7 +5502,7 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
               {pay === "SOL" ? "SOL" : "$VALO"}
             </b>
           )}
-          ≈ ${(amt * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+          ≈ ${(amt * (pay === "SOL" ? SOL_USD : valoUnit())).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
       </div>
       <div style={{ display: "flex", gap: 4, marginBottom: 5, alignItems: "center" }}>
         <button onClick={() => setVtPctMode((m) => !m)}
@@ -5520,7 +5527,7 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
       </div>
       {!compactArm && (() => {
         const bal = pay === "SOL" ? solBalance : valoWallet;
-        const unit$ = pay === "SOL" ? SOL_USD : 0.0125;
+        const unit$ = pay === "SOL" ? SOL_USD : valoUnit();
         return (
           <>
             <div onClick={() => setAmount && setAmount(String(feeSafe(bal, pay)))}
@@ -5613,7 +5620,7 @@ function VisualTrading({ token, amount, setAmount, pay, setPay, botLock, onStage
       ))}
       {wide && (() => {
         const held2 = position && position.amt > 0 ? position.amt : 0;
-        const pnl2 = held2 ? (held2 * (token.price / position.entry) - held2) * ((position.pay || "SOL") === "SOL" ? SOL_USD : 0.0125) : 0;
+        const pnl2 = held2 ? (held2 * (token.price / position.entry) - held2) * ((position.pay || "SOL") === "SOL" ? SOL_USD : valoUnit()) : 0;
         const pc2 = held2 ? ((token.price - position.entry) / position.entry) * 100 : 0;
         const g2 = pnl2 >= 0;
         return (
@@ -5643,7 +5650,7 @@ function MyPositionsHub({ tokens = [], positions = {}, botRuns = [], pendingOrde
   const [open, setOpen] = useState(true);
   const [tab, setTab] = useState("both"); // bots | both | tickets
   const [showSpam, setShowSpam] = useState(false);
-  const unit$ = (p) => (p === "SOL" ? SOL_USD : 0.0125);
+  const unit$ = (p) => (p === "SOL" ? SOL_USD : valoUnit());
   const tickets = Object.entries(positions).map(([id, p]) => {
     const t = tokens.find((x) => String(x.id) === String(id));
     if (!t || !(p.amt > 0)) return null;
@@ -6078,7 +6085,7 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
   const [poSellPcts, setPoSellPcts] = useState([10, 25, 50, 75]);
   const amt = parseFloat(amount) || 0;
   const bal = pay === "SOL" ? solBalance : valoBalance;
-  const unit$ = pay === "SOL" ? SOL_USD : 0.0125;
+  const unit$ = pay === "SOL" ? SOL_USD : valoUnit();
   // live site → the on-chain holding of THIS token drives P/L; demo → paper
   const chainHold = (liveMode && token) ? (chainHoldings || []).find((h) => h.mint === token.liveMint && !h.spam && !h.dust) : null;
   const held = chainHold ? chainHold.qty
@@ -6086,7 +6093,7 @@ function ProOrderBar({ token, amount, setAmount, pay, setPay, solBalance = 0, va
   const livePct = chainHold ? (chainHold.pnlPct != null ? chainHold.pnlPct : 0)
     : (position && position.amt > 0 ? ((token.price / (position.entry || token.price)) - 1) * 100 : 0);
   const livePnlUsd = chainHold ? (chainHold.pnlUsd || 0)
-    : (position && position.amt > 0 ? (position.amt * (token.price / (position.entry || token.price)) - position.amt) * (position.pay === "SOL" ? SOL_USD : 0.0125) : 0);
+    : (position && position.amt > 0 ? (position.amt * (token.price / (position.entry || token.price)) - position.amt) * (position.pay === "SOL" ? SOL_USD : valoUnit()) : 0);
   const gain = livePnlUsd >= 0;
   const chainAvgEntry = chainHold && chainHold.avgCostUsd ? chainHold.avgCostUsd : null;
   const fire = (side, a) => onExecute({ side, pay: side === "sell" ? (position && position.pay) || pay : pay, amt: a, mode: "instant", tax: taxFor(pay), burn: splitFee(a, pay).total, legs: [] });
@@ -6243,10 +6250,10 @@ function AllBotsPanel({ tokens = [], pendingOrders = [], botRuns = [], curTokenI
   const runsLive = (view === "inactive" ? [] : runsLiveAll.filter((r) => inView(r.tokenId)));
   const runsSold = (view === "live" ? [] : runsSoldAll.filter((r) => inView(r.tokenId)));
   const pend = (view === "inactive" ? [] : pendAll.filter((o) => inView(o.tokenId)));
-  const livePnl = runsLiveAll.reduce((s, r) => { const t = tkOf(r.tokenId); return t ? s + (r.remaining * (t.price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : 0.0125) : s; }, 0);
+  const livePnl = runsLiveAll.reduce((s, r) => { const t = tkOf(r.tokenId); return t ? s + (r.remaining * (t.price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : valoUnit()) : s; }, 0);
   const realPnl = runsSoldAll.reduce((s, r) => s + r.exits.reduce((a, e) => a + e.pnlUsd, 0), 0);
   const total = livePnl + realPnl, up = total >= 0;
-  const usd = (amt, payU) => amt * (payU === "SOL" ? SOL_USD : 0.0125);
+  const usd = (amt, payU) => amt * (payU === "SOL" ? SOL_USD : valoUnit());
   // bots-only capital: filled buy-ins + armed capital still waiting
   const buyInFilled = botRuns.reduce((s, r) => s + usd(r.amt, r.pay), 0);
   const buyInArmed = pend.filter((o) => o.side === "buy").reduce((s, o) => s + usd(o.amt, o.pay), 0);
@@ -6287,7 +6294,7 @@ function AllBotsPanel({ tokens = [], pendingOrders = [], botRuns = [], curTokenI
         <div style={{ fontFamily: T.mono, fontSize: 9.5, color: T.faint, textAlign: "center", padding: 16 }}>No bots yet — arm one in the trader.</div>
       )}
       {runsLive.map((r) => { const t = tkOf(r.tokenId); if (!t) return null;
-        const pnl = (r.remaining * (t.price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : 0.0125); const g = pnl >= 0;
+        const pnl = (r.remaining * (t.price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : valoUnit()); const g = pnl >= 0;
         return (
           <div key={r.id} style={bar(t.hue, { border: `1px solid ${g ? "rgba(22,199,132,0.45)" : "rgba(234,57,67,0.45)"}` })}>
             <span style={{ fontSize: 8.5, fontWeight: 900, color: g ? T.green : T.red }}>LIVE</span>
@@ -6619,7 +6626,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   pendingOrders = [], onEditBot, onCancelBot, botTokens = [], botHistory = [], onOpenBotRun,
   botsSlot = null,
   onPosTrade,
-  epochLastHour = 0, epochTotalEarned = 0, valoUsdForEpoch = 0.0125, onOpenClaim,
+  epochLastHour = 0, epochTotalEarned = 0, valoUsdForEpoch = 0, onOpenClaim,
   liveMode = false, chainFills = [], chainLedger = { byMint: {}, realizedSol: 0 }, onOpenChainFill = null,
   valoMint = null, onRealSwap = null, chainHoldingsLive2 = null,
   turboState = null, onTurboCreate = null, onTurboUnlock = null, onTurboLock = null,
@@ -6680,7 +6687,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
     const tm = setTimeout(() => setBalFlash(0), 750);
     return () => clearTimeout(tm);
   }, [solBalance, valoWallet]);
-  const valoUsd = 0.0125; // API: live $VALO price
+  const valoUsd = 0; // API: live $VALO price
   const liveValue = Object.entries(positions).reduce((a, [id, p]) => {
     const t = tokens.find((x) => x.id === +id); if (!t || !p) return a;
     // TRUE USD: settlement units converted at their own rate — no unit mixing
@@ -9639,8 +9646,8 @@ function MarkerReceipt({ info, isMobile, onClose, onHighlight, traderPrefs = {},
               <div style={{ maxHeight: 130, overflowY: "auto" }}>
                 {trades.length === 0 && <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, padding: "6px 0" }}>No trades recorded on this token yet.</div>}
                 {trades.map((x, k) => {
-                  const usd = (x.amt || 0) * (x.unit === "SOL" ? SOL_USD : 0.0125);
-                  const pUsd = x.pnlMoney != null ? x.pnlMoney * (x.unit === "SOL" ? SOL_USD : 0.0125) : null;
+                  const usd = (x.amt || 0) * (x.unit === "SOL" ? SOL_USD : valoUnit());
+                  const pUsd = x.pnlMoney != null ? x.pnlMoney * (x.unit === "SOL" ? SOL_USD : valoUnit()) : null;
                   const buy = x.side === "buy";
                   return (
                     <div key={k} style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: T.mono, borderBottom: `1px solid ${T.border}`, padding: "4px 1px" }}>
@@ -9946,7 +9953,7 @@ export default function App() {
     const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return;
     const proceeds = r.remaining * (t.price / r.entry);
     if (r.pay === "SOL") setSolBalance((b) => b + proceeds); else setValoWallet((v) => v + proceeds);
-    const pnlUsd = (proceeds - r.remaining) * (r.pay === "SOL" ? SOL_USD : 0.0125);
+    const pnlUsd = (proceeds - r.remaining) * (r.pay === "SOL" ? SOL_USD : valoUnit());
     setRealizedPnl((r2) => r2 + pnlUsd); // manual bot sell-outs land in realized too
     TestLog.push("bot_exit", { pnlUsd: +pnlUsd.toFixed(4), manual: true });
     setBotRuns((R) => R.map((x) => x.id === runId ? { ...x, exits: [...x.exits, { ts: Date.now(), price: t.price, amt: x.remaining, pnlUsd, trail: null, kind: "MANUAL" }], remaining: 0, status: "sold" } : x));
@@ -9973,7 +9980,7 @@ export default function App() {
     const part = +(r.remaining * (pctN / 100)).toFixed(6); if (!(part > 0)) return;
     const proceeds = part * (t.price / r.entry);
     if (r.pay === "SOL") setSolBalance((b) => b + proceeds); else setValoWallet((v) => v + proceeds);
-    const pnlUsd = (proceeds - part) * (r.pay === "SOL" ? SOL_USD : 0.0125);
+    const pnlUsd = (proceeds - part) * (r.pay === "SOL" ? SOL_USD : valoUnit());
     setRealizedPnl((r2) => r2 + pnlUsd);
     TestLog.push("bot_exit", { pnlUsd: +pnlUsd.toFixed(4), manual: true, pct: pctN });
     setBotRuns((R) => R.map((x) => x.id === runId ? { ...x, exits: [...x.exits, { ts: Date.now(), price: t.price, amt: part, pnlUsd, trail: null, kind: "MANUAL" }], remaining: +(x.remaining - part).toFixed(6) } : x));
@@ -11912,7 +11919,7 @@ export default function App() {
           if (!(+r.qty > 0)) return null;
           // qty column = pay-unit amount spent (SOL or $VALO) → convert to
           // token quantity at the entry price so $ values read true
-          const usdIn = +r.qty * (r.pay_unit === "VALO" ? 0.0125 : SOL_USD);
+          const usdIn = +r.qty * (r.pay_unit === "VALO" ? valoUnit() : SOL_USD);
           const t = tokensRef.current.find((x) => String(x.pool || x.id) === String(r.token_key));
           const entry = +r.entry_price || (t ? t.price : 0) || 1e-9;
           const tokQty = usdIn / entry;
@@ -11927,8 +11934,8 @@ export default function App() {
         const activity = (act || []).map((r) => {
           const t2 = tokensRef.current.find((x) => String(x.pool || x.id) === String(r.token_key)) ||
             { id: r.token_key, sym: r.sym || "?", hue: symbolHue(r.sym || "?"), img: null, price: +r.price || 0 };
-          const usd = r.val_usd != null ? +r.val_usd : (+r.amt || 0) * (r.unit === "VALO" ? 0.0125 : SOL_USD);
-          const pnlUsd = r.pnl_money != null ? +r.pnl_money * (r.unit === "VALO" ? 0.0125 : SOL_USD) : null;
+          const usd = r.val_usd != null ? +r.val_usd : (+r.amt || 0) * (r.unit === "VALO" ? valoUnit() : SOL_USD);
+          const pnlUsd = r.pnl_money != null ? +r.pnl_money * (r.unit === "VALO" ? valoUnit() : SOL_USD) : null;
           return { t: t2, isBuy: r.side === "buy", sol: usd / SOL_USD, valUsd: usd, pnlUsd, key: String(r.token_key), ts: new Date(r.ts).getTime(),
             tokQty: r.tok_qty != null ? +r.tok_qty : null, priceAt: +r.price || t2.price || 0 };
         });
@@ -14408,7 +14415,7 @@ export default function App() {
     }
     // portfolio activity feed — one bar per trade, with full token accounting:
     // how many tokens moved, their $ value, and (on sells) what's still held
-    const txValUsd = unit === "SOL" ? o.amt * SOL_USD : o.amt * 0.0125;
+    const txValUsd = unit === "SOL" ? o.amt * SOL_USD : o.amt * valoUnit();
     const txTokQty = txValUsd / (t.price || 1);
     const posBefore = positions[t.id];
     const heldQty = posBefore && posBefore.amt > 0 ? posTokenQty(t, posBefore) : 0;
@@ -14701,7 +14708,7 @@ export default function App() {
         }
         const proceeds = portion * (t.price / r.entry);
         if (r.pay === "SOL") setSolBalance((b) => b + proceeds); else setValoWallet((v) => v + proceeds);
-        const pnlUsd = (proceeds - portion) * (r.pay === "SOL" ? SOL_USD : 0.0125);
+        const pnlUsd = (proceeds - portion) * (r.pay === "SOL" ? SOL_USD : valoUnit());
         setRealizedPnl((r2) => r2 + pnlUsd); // bot exits count in your realized, always
         TestLog.push("bot_exit", { pnlUsd: +pnlUsd.toFixed(4) });
         const remaining = +(r.remaining - portion).toFixed(6);
@@ -14910,7 +14917,7 @@ export default function App() {
   const botUnrealized = botRuns.reduce((a, r) => {
     if (r.status !== "live") return a;
     const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return a;
-    return a + (r.remaining * (t.price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : 0.0125);
+    return a + (r.remaining * (t.price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : valoUnit());
   }, 0);
   const unrealizedAll = unrealizedPnl + botUnrealized; // every open exposure, one number
   // money that's committed but not idle: live bot positions at current value
@@ -14918,12 +14925,12 @@ export default function App() {
   const strategyEquityUsd = botRuns.reduce((a, r) => {
     if (r.status !== "live") return a;
     const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return a;
-    return a + r.remaining * (t.price / r.entry) * (r.pay === "SOL" ? SOL_USD : 0.0125);
-  }, 0) + pendingOrders.reduce((a, o) => (o.side === "buy" && !o.runId ? a + o.amt * (o.pay === "SOL" ? SOL_USD : 0.0125) : a), 0);
+    return a + r.remaining * (t.price / r.entry) * (r.pay === "SOL" ? SOL_USD : valoUnit());
+  }, 0) + pendingOrders.reduce((a, o) => (o.side === "buy" && !o.runId ? a + o.amt * (o.pay === "SOL" ? SOL_USD : valoUnit()) : a), 0);
   useEffect(() => {
     if (!(liveData || TestLog.on)) return;
     const iv = setInterval(() => {
-      const pendEsc = pendingOrders.reduce((a, o) => (o.side === "buy" && !o.runId ? a + o.amt * (o.pay === "SOL" ? SOL_USD : 0.0125) : a), 0);
+      const pendEsc = pendingOrders.reduce((a, o) => (o.side === "buy" && !o.runId ? a + o.amt * (o.pay === "SOL" ? SOL_USD : valoUnit()) : a), 0);
       if (solBalance < -1e-6 || valoWallet < -1e-6) TestLog.push("violation", { kind: "negative_balance", sol: solBalance, valo: valoWallet });
       TestLog.push("snapshot", {
         sol: +solBalance.toFixed(4), valo: Math.round(valoWallet),
@@ -14940,6 +14947,9 @@ export default function App() {
   // was a placeholder that survived launch and inflated every $VALO figure by
   // ~4000x (1,951 $VALO reading as $24.39 instead of $0.006).
   const valoUsdPrice = valoLive && +valoLive.price > 0 ? +valoLive.price : 0;
+  // module-scope helpers (payUsd, posTokenQty, …) cannot read React state, so
+  // push the live price into VALO_USD whenever it changes
+  useEffect(() => { setValoUsd(valoUsdPrice); }, [valoUsdPrice]);
   const walletUsd = solBalance * SOL_USD + valoWallet * valoUsdPrice;
   const liveValueUsd = Object.entries(positions).reduce((a, [id, p]) => {
     const t = tokens.find((x) => x.id === +id); if (!t || !p) return a;
@@ -16260,7 +16270,7 @@ export default function App() {
               transition: "background .15s, border-color .15s, box-shadow .15s" }}>
             {v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}</button>;
         })()],
-        ["TOTAL", <b style={{ color: T.text }}>${((sbLive ? sbSol * SOL_USD + (walletChain ? visHolds(walletChain.holdings).reduce((s3, h3) => s3 + (h3.usd || 0), 0) : 0) : solBalance * SOL_USD + valoWallet * 0.0125) + (sbLive ? 0 : strategyEquityUsd)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b>],
+        ["TOTAL", <b style={{ color: T.text }}>${((sbLive ? sbSol * SOL_USD + (walletChain ? visHolds(walletChain.holdings).reduce((s3, h3) => s3 + (h3.usd || 0), 0) : 0) : solBalance * SOL_USD + valoWallet * valoUnit()) + (sbLive ? 0 : strategyEquityUsd)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b>],
       ]; })().map(([k, v], i) => (
         <div key={i} data-wtotal={k === "TOTAL" ? "1" : undefined} style={{ flex: 1, textAlign: "center", padding: "6px 2px", borderLeft: i ? `1px solid ${T.border}` : "none", minWidth: 0 }}>
           <div style={{ color: T.faint, fontSize: 6.5, letterSpacing: 0.8, marginBottom: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k}</div>
@@ -16276,8 +16286,8 @@ export default function App() {
     const held = pos?.amt || 0;
     const pnlPct = pos ? ((selected.price - pos.entry) / pos.entry) * 100 : 0;
     const posPay = (pos && pos.pay) || "SOL";
-    const heldSol = posPay === "SOL" ? held : (held * 0.0125) / SOL_USD; // held value expressed in SOL
-    const livePnlUsd = pos ? (held * (selected.price / pos.entry) - held) * (posPay === "SOL" ? SOL_USD : 0.0125) : 0;
+    const heldSol = posPay === "SOL" ? held : (held * valoUnit()) / SOL_USD; // held value expressed in SOL
+    const livePnlUsd = pos ? (held * (selected.price / pos.entry) - held) * (posPay === "SOL" ? SOL_USD : valoUnit()) : 0;
     const liveMult = pos ? selected.price / pos.entry : 0;
     const gain = livePnlUsd >= 0;
     const sellCol = !pos ? T.red : pnlPct > 0.05 ? T.green : pnlPct < -0.05 ? T.red : "#4a5266";
@@ -16337,7 +16347,7 @@ export default function App() {
             <div style={{ fontFamily: T.mono, fontSize: 17, fontWeight: 900, color: gain ? T.green : T.red }}>{gain ? "+" : "−"}${Math.abs(livePnlUsd).toFixed(2)}</div>
             <div style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: T.text, opacity: 0.9 }}>{fmtQty(posTokenQty(selected, pos))} tokens</div>
             <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.dim, lineHeight: 1.5 }}>
-              BUY-IN ${((pos.amt || 0) * (pay === "SOL" ? SOL_USD : 0.0125)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              BUY-IN ${((pos.amt || 0) * (pay === "SOL" ? SOL_USD : valoUnit())).toLocaleString(undefined, { maximumFractionDigits: 0 })}
               <span style={{ color: realized24For(selected.sym) >= 0 ? T.green : T.red }}> · R24H {realized24For(selected.sym) >= 0 ? "+" : "−"}${Math.abs(realized24For(selected.sym)).toFixed(2)}</span>
               <span style={{ color: gain ? T.green : T.red }}> · UNRLZ {gain ? "+" : "−"}${Math.abs(livePnlUsd).toFixed(2)}</span>
             </div>
@@ -17373,9 +17383,9 @@ export default function App() {
               onSwap={(amt, dir) => {
                 if (!(amt > 0)) return;
                 if (dir === "valo2sol") {
-                  const need = amt; if (need <= valoWallet) { setValoWallet((v) => v - need); setSolBalance((b) => b + (need * 0.0125) / SOL_USD); }
+                  const need = amt; if (need <= valoWallet) { setValoWallet((v) => v - need); setSolBalance((b) => b + (need * valoUnit()) / SOL_USD); }
                 } else {
-                  if (amt <= solBalance) { setSolBalance((b) => b - amt); setValoWallet((v) => v + (amt * SOL_USD) / 0.0125); }
+                  if (amt <= solBalance) { setSolBalance((b) => b - amt); setValoWallet((v) => v + (amt * SOL_USD) / valoUnitSafe()); }
                 }
               }}
             />
@@ -17913,7 +17923,7 @@ export default function App() {
             animation: "coPop .18s ease", textAlign: "left", lineHeight: 1.25 }}>
           {(() => {
             const amtN = parseFloat(amount) || 0;
-            const unitUsd = pay === "SOL" ? SOL_USD : 0.0125;
+            const unitUsd = pay === "SOL" ? SOL_USD : valoUnit();
             const inUsd = amtN * unitUsd;
             const lvl = armPop.level || (selected && selected.price) || 0;
             const entry = (selected && positions[selected.id] && positions[selected.id].entry)
@@ -18134,7 +18144,7 @@ export default function App() {
             border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)", fontFamily: T.mono, flexShrink: 0 }}>
             <span style={{ fontSize: 8, color: liveData ? T.amber : T.faint }}>{liveData ? "⚡" : "💼"} <b style={{ color: T.text, fontSize: 10.5 }}>${(liveData && combinedChain
               ? ((combinedChain.solTrading != null ? combinedChain.solTrading : combinedChain.sol) || 0) * SOL_USD + visHolds(combinedChain.holdings).filter((h) => h.src !== "phantom").reduce((s2, h) => s2 + (h.usd || 0), 0)
-              : solBalance * SOL_USD + valoWallet * 0.0125).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b></span>
+              : solBalance * SOL_USD + valoWallet * valoUnit()).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b></span>
             <span style={{ fontSize: 8, color: T.faint }}>🤖 <b style={{ color: botUnrealized >= 0 ? T.green : T.red, fontSize: 10.5 }}>{botUnrealized >= 0 ? "+" : "−"}${Math.abs(botUnrealized).toFixed(2)}</b></span>
             <button onClick={() => setPosDrawer(true)}
               style={{ marginLeft: "auto", border: `1px solid ${VALO_PURPLE}`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE,
@@ -18149,7 +18159,7 @@ export default function App() {
         </div>
       )}
       {posDrawer && (() => {
-        const unit$ = (pu) => (pu === "SOL" ? SOL_USD : 0.0125);
+        const unit$ = (pu) => (pu === "SOL" ? SOL_USD : valoUnit());
         const tix = Object.entries(positions).map(([id, p0]) => {
           const t = tokens.find((x) => String(x.id) === String(id));
           if (!t || !(p0.amt > 0)) return null;
@@ -18173,7 +18183,7 @@ export default function App() {
           ? ((combinedChain.solTrading != null ? combinedChain.solTrading : combinedChain.sol) || 0) * SOL_USD
             + visHolds(combinedChain.holdings).filter((h) => h.src !== "phantom").reduce((s, h) => s + (h.usd || 0), 0)
           : solBalance * SOL_USD + valoWallet * (valoLive && +valoLive.price > 0 ? +valoLive.price : 0);
-        const walletTxt = posUnit === "sol" ? `${(walletUsd / SOL_USD).toFixed(2)} SOL` : posUnit === "valo" ? `${fmtQty(walletUsd / 0.0125)} $VALO` : `$${walletUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+        const walletTxt = posUnit === "sol" ? `${(walletUsd / SOL_USD).toFixed(2)} SOL` : posUnit === "valo" ? `${fmtQty(walletUsd / valoUnitSafe())} $VALO` : `$${walletUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
         const sellScope = () => { if (showTix) closeAllTickets(); if (showBots) runsL.forEach((x) => sellRun(x.r.id)); };
         const pctChips = (row, isBot) => (
           <div style={{ display: "flex", gap: 4, marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
@@ -19372,7 +19382,7 @@ export default function App() {
                   })}
                   {botRuns.filter((r) => r.status === "live").map((r) => {
                     const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return null;
-                    const pnl = (r.remaining * (t.price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : 0.0125);
+                    const pnl = (r.remaining * (t.price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : valoUnit());
                     const up = pnl >= 0;
                     return (
                       <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 9px", borderRadius: 9, marginBottom: 4, border: `1px solid ${up ? "rgba(22,199,132,0.45)" : "rgba(234,57,67,0.45)"}`, background: "rgba(255,255,255,0.02)", fontFamily: T.mono }}>
@@ -19406,9 +19416,9 @@ export default function App() {
               onSwap={(amt, dir) => {
                 if (!(amt > 0)) return;
                 if (dir === "valo2sol") {
-                  const need = amt; if (need <= valoWallet) { setValoWallet((v) => v - need); setSolBalance((b) => b + (need * 0.0125) / SOL_USD); }
+                  const need = amt; if (need <= valoWallet) { setValoWallet((v) => v - need); setSolBalance((b) => b + (need * valoUnit()) / SOL_USD); }
                 } else {
-                  if (amt <= solBalance) { setSolBalance((b) => b - amt); setValoWallet((v) => v + (amt * SOL_USD) / 0.0125); }
+                  if (amt <= solBalance) { setSolBalance((b) => b - amt); setValoWallet((v) => v + (amt * SOL_USD) / valoUnitSafe()); }
                 }
               }}
             />
