@@ -17201,6 +17201,13 @@ export default function App() {
                   padding: "10px 13px", cursor: "pointer", fontFamily: T.mono }}>
                 <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 10, fontWeight: 900, letterSpacing: 1.2, color: walletCollapsed ? T.dim : VALO_PURPLE }}>
                   💼 WALLET
+                  <span title={turboActive ? "Turbo armed — trades sign instantly, no wallet prompt" : "Turbo off — every trade asks your wallet to approve"}
+                    style={{ display: "flex", alignItems: "center", gap: 3, padding: "1px 6px", borderRadius: 5,
+                      border: `1px solid ${turboActive ? T.amber + "66" : T.border}`,
+                      background: turboActive ? "rgba(240,185,11,0.12)" : "transparent",
+                      color: turboActive ? T.amber : T.faint, fontSize: 8.5, fontWeight: 800, letterSpacing: 0.6 }}>
+                    {turboActive ? "⚡ ARMED" : "🔒 OFF"}
+                  </span>
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
                   <span style={{ fontSize: 12.5, fontWeight: 900, color: walletCollapsed ? T.text : VALO_PURPLE }}>
