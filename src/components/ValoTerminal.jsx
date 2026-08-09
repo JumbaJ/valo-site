@@ -10139,7 +10139,15 @@ export default function App() {
   useEffect(() => { setPctSel(null); }, [sel, pay]);
   // ---- MY MC CALLOUTS — "📣 CALLOUT" on the chart stamps the current market
   // cap; the ring then tracks your best multiplier since. Peak only ratchets UP.
-  const [myMcCallouts, setMyMcCallouts] = useState({}); // { [tokenId]: { mcAt, peak } }
+  const [myMcCallouts, setMyMcCallouts] = useState(() => {
+    // persisted: these drive the leaderboard bonus on every epoch snapshot,
+    // so dropping them on reload quietly costs the user rewards
+    try { return JSON.parse(localStorage.getItem("valo-callouts-v1") || "{}") || {}; }
+    catch (e) { return {}; }
+  }); // { [tokenId]: { mcAt, peak } }
+  useEffect(() => {
+    try { localStorage.setItem("valo-callouts-v1", JSON.stringify(myMcCallouts)); } catch (e) {}
+  }, [myMcCallouts]);
   const [tierPop, setTierPop] = useState(null);        // { fx } — new-tier celebration
   const lastTierRef = useRef({});
   useEffect(() => {
@@ -10497,7 +10505,22 @@ export default function App() {
   const [cardMini, setCardMini] = useState("line"); // card mini-chart: line ⇄ bars
   const [compactList, setCompactList] = useState(false); // mobile: collapse cards into rows
   // ---- airdrop / merkle epoch state ----
-  const [vaultTotal, setVaultTotal] = useState(0);        // this epoch's vault (all users)
+  const [vaultTotal, setVaultTotal] = useState(0);        // legacy session counter (paper trades)
+  const [epochLive, setEpochLive] = useState(null);       // ⛓ the real epoch, from chain
+  useEffect(() => {
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch("/api/epoch");
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop) setEpochLive(j);
+      } catch (e) { /* the panel falls back to local numbers */ }
+    };
+    pull();
+    const t = setInterval(pull, 30000);
+    return () => { stop = true; clearInterval(t); };
+  }, []);
   const [myEpochVol, setMyEpochVol] = useState(0);        // your traded volume this epoch
   const [poolVol, setPoolVol] = useState(1);              // all users' volume this epoch
   const [myHoldings, setMyHoldings] = useState(() => rnd(180000, 900000)); // $VALO held
@@ -16393,7 +16416,12 @@ export default function App() {
     return { total: hits.reduce((s, h) => s + h.b, 0), hits };
   }, [myMcCallouts]);
   const stackNow = loyaltyMult + calloutBonus.total; // every snapshot pays loyalty + stacked board bonuses
-  const accruingNow = vaultTotal * weightNow * stackNow;
+  // the pool the chain will actually pay this hour, in $VALO — falls back to
+  // the local counter only when the endpoint is unreachable
+  const livePool = epochLive && Number.isFinite(+epochLive.pool) ? +epochLive.pool : null;
+  const accruingNow = livePool != null
+    ? livePool * weightNow * stackNow
+    : vaultTotal * weightNow * stackNow;
   const claimable = pendingEpochs.reduce((a, e) => a + e.amount, 0);
 
   const doClaim = (auto = false) => {
@@ -18835,13 +18863,20 @@ export default function App() {
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
               {[
-                ["ACCRUING THIS EPOCH", `${accruingNow.toFixed(4)} $VALO`, `≈ $${(accruingNow * valoUsdPrice).toFixed(2)}`, T.text],
+                ["ACCRUING THIS EPOCH",
+                  `${accruingNow.toLocaleString(undefined, { maximumFractionDigits: accruingNow >= 1 ? 2 : 4 })} $VALO`,
+                  `≈ $${(accruingNow * valoUsdPrice).toFixed(2)}`, T.text],
                 ["NEXT SNAPSHOT", fmtDur(msToEpoch), "on the hour", T.blue],
                 ["HOLDER WEIGHT", `${(holdPctNow * 100).toFixed(3)}%`, "of pool", T.text],
                 ["VOLUME WEIGHT", `${(volPctNow * 100).toFixed(3)}%`, "of pool", T.text],
                 ["LOYALTY STACK", `×${loyaltyMult.toFixed(1)}`, `${loyaltyDays}d held`, T.amber],
                 ["CALLOUT BONUS", `+${calloutBonus.total.toFixed(2)}×`, calloutBonus.hits.length ? `${calloutBonus.hits.length} boards` : "top-100 any board", VALO_PURPLE],
-                ["VAULT THIS EPOCH", `${vaultTotal.toFixed(3)} SOL`, `≈ $${(vaultTotal * SOL_USD).toFixed(0)}`, T.green],
+                ["VAULT THIS EPOCH",
+                  livePool != null ? `${livePool.toLocaleString(undefined, { maximumFractionDigits: 0 })} $VALO` : `${vaultTotal.toFixed(3)} SOL`,
+                  livePool != null
+                    ? `${epochLive && epochLive.participants ? epochLive.participants : 0} in · ${epochLive && epochLive.minsLeft != null ? epochLive.minsLeft : "—"}m left`
+                    : `≈ $${(vaultTotal * SOL_USD).toFixed(0)}`,
+                  T.green],
               ].map(([k, v, sub, c]) => (
                 <div key={k} style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 8, padding: "8px 10px" }}>
                   <div style={{ fontSize: 8, letterSpacing: 1.1, color: T.faint, fontFamily: T.mono }}>{k}</div>
