@@ -199,11 +199,22 @@ export default async function handler(req, res) {
       }
       if (!ixs.length) continue;
       try {
-        const bh = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
-        const blockhash = bh && bh.value && bh.value.blockhash;
-        if (!blockhash) throw new Error("no blockhash");
-        const raw = buildTx({ payer: signer.publicKey, instructions: ixs, recentBlockhash: blockhash, signer });
-        const sig = await rpc("sendTransaction", [raw, { encoding: "base64", maxRetries: 3, skipPreflight: false }]);
+        const bh = await rpc("getLatestBlockhash", [{ commitment: "finalized" }]);
+        const sendOnce = async () => {
+          const bh2 = await rpc("getLatestBlockhash", [{ commitment: "finalized" }]);
+          const blockhash = bh2 && bh2.value && bh2.value.blockhash;
+          if (!blockhash) throw new Error("no blockhash");
+          const raw = buildTx({ payer: signer.publicKey, instructions: ixs, recentBlockhash: blockhash, signer });
+          return rpc("sendTransaction", [raw, { encoding: "base64", maxRetries: 3, skipPreflight: false }]);
+        };
+        let sig;
+        try { sig = await sendOnce(); }
+        catch (e) {
+          // a hash the sender won't accept is transient — one fresh fetch, one resend
+          if (String(e && e.message || e).includes("Blockhash not found")) sig = await sendOnce();
+          else throw e;
+        }
+        sig = await Promise.resolve(sig);
         for (const p of included) results.push({ ...p, status: "sent", sig, solscan: `https://solscan.io/tx/${sig}` });
       } catch (e) {
         for (const p of included) results.push({ ...p, status: "failed", error: String(e.message || e).slice(0, 180) });
