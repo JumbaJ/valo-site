@@ -512,7 +512,7 @@ function adoptMarketToken(x) {
     traders: +x.traders || flow, tvl, greenUsd: green, redUsd: red,
     momentum, buyPressure,
     liq: tvl, vol24: (+x.vol24 || green + red),   // real reserve + real 24h volume
-    ageMin, hue: symbolHue(sym), img: x.img || null, ch24: ch,
+    ageMin, hue: symbolHue(sym), img: x.img || null, ch24: ch, ch: +x.ch || ch,
     candles: [], price, supply: price > 0 && mc > 0 ? mc / price : 1e9,
     ca: x.mint || x.id,
     socials: (x.mint && /pump$/i.test(x.mint)) ? { pump: `https://pump.fun/coin/${x.mint}` } : {},
@@ -9227,13 +9227,20 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
     return { winMin, tx, txRate: tx / winMin, volRate: (t.vol24 || 0) / 1440 };
   };
   if (flags.hot) list = list.filter((t) => {
-    // 💪 curve 60–95% · velocity · 80+ traders (matches the scanner lens)
+    // 💪 matches the scanner's HOT for real feed data — the old rule here
+    // (txRate ≥ 10/min · traders ≥ 80 · curve 60–95) was an empty set
     const m = tokMetrics(t);
-    const curveOk = !m.isPump || (m.curvePct >= 60 && m.curvePct <= 95);
-    return curveOk && m.txRate >= 10 && (m.turnover > 0.4 || m.accel > 1.4) && (t.traders || 0) >= 80;
+    const busy = m.tx >= 12 || m.txPerMinLife >= 0.25 || (t.vol24 || 0) >= 2000;
+    const churning = m.turnover >= 0.15 || m.accel >= 1.2;
+    const crowded = !m.hasTraders || t.traders >= 25 || m.txPerMinLife >= 0.5;
+    const curveOk = !m.isPump || m.curvePct >= 25;
+    return busy && churning && crowded && curveOk;
   });
   // 📈 MOVERS (took over the old TOP TRADERS chip): velocity + $2K LP floor
-  if (flags.top) list = list.filter((t) => (t.tvl || 0) >= 2000 && Math.abs(t.ch || 0) > 1);
+  if (flags.top) list = list.filter((t) => {
+    const lpOk = (t.tvl || 0) >= 2000 || (tokMetrics(t).isPump && (t.mc || 0) >= 6000);   // curve tokens report tvl 0
+    return lpOk && Math.abs(t.ch ?? t.ch24 ?? 0) > 1;
+  });
   if (flags.fresh) list = list.filter((t) => t.isNew || t.ageMin < 90);
   if (flags.safe) list = list.filter((t) => scoreToken(t) >= 62);
   if (flags.risky) list = list.filter((t) => scoreToken(t) < 50);
@@ -14896,8 +14903,12 @@ export default function App() {
     if (scanMode === "movers") {
       // 📈 price velocity over the rolling short window · ≥$2K liquidity so
       // dust trades can't fake a spike · gainers ⇄ losers toggle
-      const mv = out.filter((t) => ((t.tvl || 0) >= 2000 && Math.abs(t.ch || 0) > 1
-        && (moversSide === "lose" ? (t.ch || 0) < 0 : (t.ch || 0) > 0)) || t.id === sel);
+      const mv = out.filter((t) => {
+        if (t.id === sel) return true;
+        const c = t.ch ?? t.ch24 ?? 0;
+        const lpOk = (t.tvl || 0) >= 2000 || (tokMetrics(t).isPump && (t.mc || 0) >= 6000);
+        return lpOk && Math.abs(c) > 1 && (moversSide === "lose" ? c < 0 : c > 0);
+      });
       return withBackfill(mv.sort((a, b) => Math.abs(b.ch || 0) - Math.abs(a.ch || 0) || heat2(b) - heat2(a)));
     }
     // 🔥 trending: volume acceleration (now ≥3× the day's pace) + net buy
