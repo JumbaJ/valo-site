@@ -6933,11 +6933,12 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               background: tab === "performance" ? "linear-gradient(180deg, rgba(125,92,240,0.20), rgba(125,92,240,0.06))" : "rgba(255,255,255,0.02)",
               borderColor: tab === "performance" ? `${VALO_PURPLE}44` : T.border } : {}) }}>📈 Performance</button>
         {/* ⚡ TURBO popover — floats OVER the wallet, pushes nothing */}
-        {liveMode && turboPop && (
+        {liveMode && turboPop && typeof document !== "undefined" && createPortal(
           <>
-            <div onClick={() => setTurboPop(false)} style={{ position: "fixed", inset: 0, zIndex: 44 }} />
-            <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 45,
-              maxHeight: "62vh", overflowY: "auto", borderRadius: 12,
+            <div onClick={() => setTurboPop(false)} style={{ position: "fixed", inset: 0, zIndex: 344, background: "rgba(5,7,12,0.55)", backdropFilter: "blur(2px)" }} />
+            <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: "max(12px, env(safe-area-inset-bottom))",
+              width: "min(440px, calc(100vw - 20px))", zIndex: 345,
+              maxHeight: "78vh", overflowY: "auto", borderRadius: 14,
               boxShadow: "0 18px 50px rgba(0,0,0,0.7)", border: `1px solid ${turboState && turboState.unlocked && turboAutoOn ? VALO_PURPLE : turboState && turboState.unlocked ? T.green : T.red}55`,
               background: T.panel }}>
               <TurboPanel turbo={turboState} onCreate={onTurboCreate} onUnlock={onTurboUnlock}
@@ -6947,7 +6948,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                 phantomSol={(walletChain && walletChain.solVault) || 0} valoMint={valoMint}
                 onDismiss={() => setTurboPop(false)} />
             </div>
-          </>
+          </>, document.body
         )}
       </div>
 
