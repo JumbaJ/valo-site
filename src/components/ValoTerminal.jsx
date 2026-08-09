@@ -16803,12 +16803,12 @@ export default function App() {
         ) : (
         <div style={{ maxWidth: 1830, margin: "0 auto", padding: "12px 16px", paddingLeft: wallOpen ? 470 : 180, transition: "padding-left .28s", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 14 }}>
           <div>
-            <div style={{ fontFamily: T.mono, fontSize: 9.5, color: VALO_PURPLE, letterSpacing: 1.5, fontWeight: 700 }}>
+            <div style={{ display: UI_NEXT ? "none" : undefined, fontFamily: T.mono, fontSize: 9.5, color: VALO_PURPLE, letterSpacing: 1.5, fontWeight: 700 }}>
               $VALO · LIVE ON PUMP.FUN
               {valoLive && <span style={{ marginLeft: 7, fontSize: 7.5, fontWeight: 900, color: T.green,
                 border: `1px solid ${T.green}55`, background: "rgba(22,199,132,0.12)", borderRadius: 999, padding: "1px 6px" }}>● ON CHAIN</span>}
             </div>
-            <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 0.5, marginTop: 2 }}>
+            <div style={{ display: UI_NEXT ? "none" : undefined, fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 0.5, marginTop: 2 }}>
               {valoLive
                 ? "Live from the $VALO pool · updates every 15s · not financial advice"
                 : "Metrics below track the $VALO token · not financial advice"}
@@ -17210,9 +17210,18 @@ export default function App() {
                   </span>
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 900, color: walletCollapsed ? T.text : VALO_PURPLE }}>
-                    {hideBalance ? "••••••" : `$${(walletUsd || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
-                  </span>
+                  {(() => {
+                    // turbo only — the wallet that actually fills orders
+                    const turboUsd = liveData && combinedChain
+                      ? ((combinedChain.solTrading != null ? combinedChain.solTrading : combinedChain.sol) || 0) * SOL_USD
+                        + visHolds(combinedChain.holdings).filter((h) => h.src !== "phantom").reduce((s3, h3) => s3 + (h3.usd || 0), 0)
+                      : 0;
+                    return (
+                      <span style={{ fontSize: 12.5, fontWeight: 900, color: walletCollapsed ? T.text : VALO_PURPLE }}>
+                        {hideBalance ? "••••••" : `$${turboUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+                      </span>
+                    );
+                  })()}
                   <span onClick={(e) => { e.stopPropagation(); setHideBalance((v) => !v); }}
                     title={hideBalance ? "Show balance" : "Hide balance"}
                     style={{ fontSize: 11, opacity: 0.75 }}>{hideBalance ? "🙈" : "👁"}</span>
