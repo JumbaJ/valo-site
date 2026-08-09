@@ -7025,7 +7025,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                     <div style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 700, color: T.faint }}>
                       {mask(`⚡ ${((walletChain.solTrading) || 0).toFixed(4)} ◎ turbo · 👻 ${((walletChain.solVault) || 0).toFixed(4)} ◎ phantom`)}
                       {UI_NEXT && (() => {
-                        const addr = (turboState && (turboState.address || turboState.pub)) || (typeof walletConnected === "string" ? walletConnected : "");
+                        const addr = (turboState && (turboState.address || turboState.pub)) || ((wallet && wallet.address) || "");
                         if (!addr) return null;
                         return (
                           <div onClick={(e) => { e.stopPropagation();
@@ -7060,7 +7060,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
             </div>
           </div>
           {UI_NEXT && (() => {
-            const holds = visHolds(chainHoldings || []);
+            const holds = visHolds((walletChain && walletChain.holdings) || []);
             const aUsd = holds.reduce((a2, h2) => a2 + (h2.usd || 0), 0);
             const segBtn = (k, label) => (
               <button onClick={() => setWalletSeg((v) => (v === k ? null : k))}
