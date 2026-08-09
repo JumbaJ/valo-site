@@ -15612,6 +15612,16 @@ export default function App() {
                         </div>
                       );
                     })()}
+                    {UI_NEXT && !isMobile && (
+                      <div style={{ display: "flex", gap: 3, alignItems: "center", marginLeft: 8 }}>
+                        {(tfMoreOpen ? TIMEFRAMES : TIMEFRAMES.filter((f) => TIMEFRAMES_PRIMARY.has(f.m) || tf === f.m)).map((f) => (
+                          <button key={f.k} onClick={() => setTf(f.m)}
+                            style={{ ...chip(tf === f.m), padding: "2px 7px", fontSize: 9.5 }}>{f.k}</button>
+                        ))}
+                        <button onClick={() => setTfMoreOpen((v) => !v)} title={tfMoreOpen ? "fewer" : "more timeframes"}
+                          style={{ ...chip(false), padding: "2px 6px", fontSize: 9.5, opacity: 0.55 }}>{tfMoreOpen ? "‹" : "···"}</button>
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: "flex", gap: 5, alignItems: "center",
                     flexWrap: isMobile ? "nowrap" : "wrap",
@@ -15873,7 +15883,7 @@ export default function App() {
                   );
                 })()}
                 {/* durations — always visible above the chart */}
-                <div style={{ display: "flex", gap: 4, marginBottom: isMobile ? 0 : 10, flexWrap: "wrap", alignItems: "center" }}>
+                <div style={{ display: UI_NEXT && !isMobile ? "none" : "flex", gap: 4, marginBottom: isMobile ? 0 : 10, flexWrap: "wrap", alignItems: "center" }}>
                   {(UI_NEXT
                     ? TIMEFRAMES.filter((f) => TIMEFRAMES_PRIMARY.has(f.m) || tf === f.m || tfMoreOpen)
                     : TIMEFRAMES
