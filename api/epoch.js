@@ -1,6 +1,6 @@
 // 🎁 VALO EPOCH — the hourly release, weighted by real activity.
-// weight = 1 (showing up) + volume component (real SOL traded this hour,
-//          0.5×, capped at +3) × callout multiplier (from profile, capped 2×)
+// weight = (holderWeight + volSol) × (1 + Σ leaderboard bonuses, capped +4.0)
+// — see weightOf below; this comment previously described an older formula
 // share  = weight / Σ weights  → payout = share × pool
 //
 // GET  → status: epoch id, pool balances, total weights, caller's projected
@@ -12,6 +12,22 @@
 const RPC = () => (process.env.HELIUS_API_KEY
   ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`
   : "https://api.mainnet-beta.solana.com");
+
+// The vault pays $VALO, so the pool the panel advertises must be $VALO. It was
+// reporting the vault's SOL balance — a different asset entirely, which also
+// made every projected share wrong.
+const tokenBalance = async (owner, mint) => {
+  if (!owner || !mint) return null;
+  try {
+    const r = await fetch(RPC(), { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getTokenAccountsByOwner",
+        params: [owner, { mint }, { encoding: "jsonParsed" }] }), signal: AbortSignal.timeout(6000) });
+    const j = await r.json();
+    const hit = j && j.result && Array.isArray(j.result.value) && j.result.value[0];
+    if (!hit) return 0;
+    return +hit.account.data.parsed.info.tokenAmount.uiAmount || 0;
+  } catch (e) { return null; }
+};
 
 const solBalance = async (addr) => {
   try {
@@ -51,7 +67,14 @@ export default async function handler(req, res) {
   const weights = (rows || []).map((x) => ({ user: x.user_id, volSol: +x.vol_sol || 0, w: weightOf(+x.vol_sol, +x.callout_mult) })).filter((x) => x.w > 0);
   const totalW = weights.reduce((a, x) => a + x.w, 0);
 
-  const pool = EPOCH_W ? await solBalance(EPOCH_W) : null;
+  const MINT = (process.env.VALO_MINT || "").trim();
+  const poolSol = EPOCH_W ? await solBalance(EPOCH_W) : null;      // gas, not the prize
+  const vaultTokens = EPOCH_W && MINT ? await tokenBalance(EPOCH_W, MINT) : null;
+  // epoch-payout sends min(cap, balance) — advertise the same number, or the
+  // panel promises more than a run can pay
+  const capTokens = Math.max(0, parseFloat(process.env.VALO_EPOCH_MAX_TOKENS || "0") || 0);
+  const pool = vaultTokens == null ? null
+    : (capTokens > 0 ? Math.min(capTokens, vaultTokens) : vaultTokens);
 
   if (req.method === "POST") {
     if ((req.headers["x-cron-key"] || "") !== (process.env.VALO_CRON_KEY || "") || !process.env.VALO_CRON_KEY)
@@ -70,9 +93,10 @@ export default async function handler(req, res) {
     const payouts = weights.map((x) => ({
       user: x.user, wallet: wallets[x.user] || null, weight: +x.w.toFixed(3),
       share: totalW > 0 ? +(x.w / totalW).toFixed(4) : 0,
-      solEquivalent: pool != null && totalW > 0 ? +((x.w / totalW) * pool).toFixed(6) : null,
+      amount: pool != null && totalW > 0 ? +((x.w / totalW) * pool).toFixed(6) : null,
     }));
-    return res.status(200).json({ epoch, executed: false, mode: canSend ? "ready" : "dry-run (set VALO_MINT + VALO_EPOCH_SECRET to arm)", pool, totalWeight: +totalW.toFixed(3), payouts });
+    return res.status(200).json({ epoch, executed: false, mode: canSend ? "ready" : "dry-run (set VALO_MINT + VALO_EPOCH_SECRET to arm)",
+      pool, poolUnit: "VALO", vaultTokens, capTokens: capTokens || null, poolSol, totalWeight: +totalW.toFixed(3), payouts });
   }
 
   // GET status (+ per-user projection)
@@ -80,8 +104,13 @@ export default async function handler(req, res) {
   const mine = user ? weights.find((x) => x.user === user) : null;
   res.setHeader("Cache-Control", "s-maxage=20, stale-while-revalidate=60");
   return res.status(200).json({
-    epoch, minsLeft, pool, participants: weights.length, totalWeight: +totalW.toFixed(3),
+    epoch, minsLeft, pool, poolUnit: "VALO", vaultTokens, capTokens: capTokens || null,
+    poolSol, participants: weights.length, totalWeight: +totalW.toFixed(3),
     configured: !!EPOCH_W,
-    you: mine ? { volSol: +mine.volSol.toFixed(4), weight: +mine.w.toFixed(3), share: totalW > 0 ? +(mine.w / totalW).toFixed(4) : 0 } : null,
+    // the vault pays rent for recipients who don't hold $VALO yet (~0.002 each)
+    gasOk: poolSol == null ? null : poolSol >= 0.01,
+    you: mine ? { volSol: +mine.volSol.toFixed(4), weight: +mine.w.toFixed(3),
+      share: totalW > 0 ? +(mine.w / totalW).toFixed(4) : 0,
+      amount: pool != null && totalW > 0 ? +((mine.w / totalW) * pool).toFixed(4) : null } : null,
   });
 }
