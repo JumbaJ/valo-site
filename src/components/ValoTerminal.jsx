@@ -16703,6 +16703,166 @@ export default function App() {
           </div>
   );
 
+  // ═════════ <RailPanel/> — wallet bar · trades | positions | chat tabs (UI_NEXT rail) ═════════
+  const renderRailPanel = () => (
+            <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, overflow: "hidden" }}>
+              <button onClick={() => setWalletCollapsed((v) => !v)}
+                title={walletCollapsed ? "Open your wallet" : "Close your wallet"}
+                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                  border: "none", borderBottom: `1px solid ${T.border2}`,
+                  background: walletCollapsed ? "rgba(255,255,255,0.02)" : "rgba(125,92,240,0.10)",
+                  padding: "10px 13px", cursor: "pointer", fontFamily: T.mono }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 10, fontWeight: 900, letterSpacing: 1.2, color: walletCollapsed ? T.dim : VALO_PURPLE }}>
+                  💼 WALLET
+                  <span title={turboActive ? "Turbo armed — trades sign instantly, no wallet prompt" : "Turbo off — every trade asks your wallet to approve"}
+                    style={{ display: "flex", alignItems: "center", gap: 3, padding: "1px 6px", borderRadius: 5,
+                      border: `1px solid ${turboActive ? T.amber + "66" : T.border}`,
+                      background: turboActive ? "rgba(240,185,11,0.12)" : "transparent",
+                      color: turboActive ? T.amber : T.faint, fontSize: 8.5, fontWeight: 800, letterSpacing: 0.6 }}>
+                    {turboActive ? "⚡ ARMED" : "🔒 OFF"}
+                  </span>
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                  {(() => {
+                    // turbo only — the wallet that actually fills orders
+                    const turboUsd = liveData && combinedChain
+                      ? ((combinedChain.solTrading != null ? combinedChain.solTrading : combinedChain.sol) || 0) * SOL_USD
+                        + visHolds(combinedChain.holdings).filter((h) => h.src !== "phantom").reduce((s3, h3) => s3 + (h3.usd || 0), 0)
+                      : 0;
+                    return (
+                      <span style={{ fontSize: 12.5, fontWeight: 900, color: walletCollapsed ? T.text : VALO_PURPLE }}>
+                        {hideBalance ? "••••••" : `$${turboUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+                      </span>
+                    );
+                  })()}
+                  <span onClick={(e) => { e.stopPropagation(); setHideBalance((v) => !v); }}
+                    title={hideBalance ? "Show balance" : "Hide balance"}
+                    style={{ fontSize: 11, opacity: 0.75 }}>{hideBalance ? "🙈" : "👁"}</span>
+                  <span style={{ fontSize: 11, color: T.faint }}>{walletCollapsed ? "▸" : "▾"}</span>
+                </span>
+              </button>
+              {!walletCollapsed && (
+                <div style={{ borderBottom: `1px solid ${T.border2}`, padding: 8, maxHeight: "58vh", overflowY: "auto" }}>
+                  <PortfolioPanel big
+                    solBalance={dispSol} valoWallet={dispValo} positions={positions} tokens={tokens}
+                    realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={combinedChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger} chainHoldingsLive2={chainHoldingsLive}
+                    turboState={turbo} onTurboCreate={turboCreate} onTurboUnlock={turboUnlock} onTurboLock={turboLock}
+                    onTurboFund={turboFund} onTurboSweep={turboSweep} phantomOk={!!(wallet && wallet.address)}
+                    turboSol={turboSolBal} turboAutoOn={liveAuto} onTurboToggleAuto={setLiveAuto} onCreatorSplit={doCreatorSplit} creatorAddr={(onchain && onchain.feeSplit && onchain.feeSplit.creator) || null}
+                    valoMint={valoMint}
+                    onRealSwap={() => {
+                      if (!valoMint) return;
+                      const amt2 = Math.min(Math.max(parseFloat(amount) || 0.01, 0.001), onchain.maxSol || 0.01);
+                      quoteRealOrder({ id: "valo-live", sym: "VALO", name: "VALO", liveMint: valoMint, price: 0, hue: 265 }, "buy", amt2);
+                    }}
+                    onOpenChainFill={(f) => {
+                      openTokenByMint(f.mint);
+                      const px = f.px || ((f.sol * SOL_USD) / Math.max(f.qty, 1e-12));
+                      setHistMarker({ t: f.at, side: f.side, p: px, price: px,
+                        amt: f.side === "buy" ? f.sol : f.qty, unit: f.side === "buy" ? "SOL" : f.sym,
+                        sym: f.sym, tx: f.sig, real: true });
+                      setHighlightTx(f.sig);
+                      if (typeof setPortfolioDrawer === "function") setPortfolioDrawer(false);
+                    }}
+                    tab={portfolioTab} setTab={setPortfolioTab}
+                    range={perfRange} setRange={setPerfRange}
+                    mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
+                    hideBalance={hideBalance} setHideBalance={setHideBalance}
+                    activity={myActivity} onOpenToken={(sym, act) => { const tk = tokens.find((x) => x.sym === sym); if (tk) { setSel(tk.id); setClickMode(null); if (typeof setPortfolioDrawer === 'function') setPortfolioDrawer(false); if (act) { setHistMarker({ t: act.t, side: act.side, p: act.price, price: act.price, amt: act.amt, unit: act.unit, mc: mcOf(tk), pnlPct: act.pnlPct, pnlMoney: act.pnlMoney, sym: act.sym, tx: act.tx }); setHighlightTx(act.tx); } } }}
+                    username={username} setUsername={(v) => { takenNames.current.add(v.toLowerCase()); setUsername(v); }} isNameTaken={(v) => takenNames.current.has(v.toLowerCase())} checkHandle={checkHandle}
+                    myCallouts={myMcCallouts} onOpenMyCallouts={() => setMyCalloutsOpen(true)}
+                    followersCount={followersList.length} followingCount={followingList.length} onOpenFollowList={(k) => setFollowListOpen(k)}
+                    nameChangedAt={nameChangedAt} setNameChangedAt={setNameChangedAt}
+                    pendingOrders={pendingOrders} onEditBot={(id) => setBotHub({ mode: "edit", id })} onCancelBot={cancelBot} onPosTrade={onPosTrade}
+                    botHistory={botRuns.filter((r) => r.status === "sold")} onOpenBotRun={(id) => setBotRunOpen(id)}
+                    epochLastHour={epochLastHour} epochTotalEarned={epochTotalEarned} valoUsdForEpoch={valoUsdPrice} onOpenClaim={() => { setClaimOpen(true); if (typeof setPortfolioDrawer === 'function') setPortfolioDrawer(false); }}
+                    botsSlot={isMobile && (pendingOrders.length + botRuns.filter((r) => r.status === "live").length) > 0 ? (
+                      <div style={{ marginTop: 10 }}>
+                        <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1, marginBottom: 7 }}>🤖 AUTO-TRADING BOTS</div>
+                        {pendingOrders.filter((o) => !o.runId).map((o) => {
+                          const t = tokens.find((x) => String(x.id) === String(o.tokenId)); if (!t) return null;
+                          return (
+                            <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 9px", borderRadius: 9, marginBottom: 4, border: `1px solid ${accent(t.hue)}44`, background: "rgba(255,255,255,0.02)", fontFamily: T.mono }}>
+                              <span style={{ fontSize: 10 }}>⏳</span>
+                              <span style={{ fontSize: 10.5, fontWeight: 800, color: accent(t.hue) }}>${t.sym}</span>
+                              <span style={{ fontSize: 9, color: T.text }}>{o.amt} {o.pay} @ ${fmtP(o.level)}</span>
+                              <button onClick={() => { setSel(t.id); setClickMode(null); setEditingBotId(o.id); setMobileBotScreen(true); setPortfolioDrawer(false); }}
+                                style={{ ...chip(false), padding: "4px 9px", fontSize: 9, fontWeight: 800, marginLeft: "auto" }}>Edit</button>
+                              <button onClick={() => cancelBot(o.id)} style={{ ...chip(false), padding: "4px 8px", fontSize: 9, fontWeight: 800, color: T.red, borderColor: `${T.red}44` }}>✕</button>
+                            </div>
+                          );
+                        })}
+                        {botRuns.filter((r) => r.status === "live").map((r) => {
+                          const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return null;
+                          const pnl = (r.remaining * (t.price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : valoUnit());
+                          const up = pnl >= 0;
+                          return (
+                            <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 9px", borderRadius: 9, marginBottom: 4, border: `1px solid ${up ? "rgba(22,199,132,0.45)" : "rgba(234,57,67,0.45)"}`, background: "rgba(255,255,255,0.02)", fontFamily: T.mono }}>
+                              <span style={{ fontSize: 8.5, fontWeight: 900, color: up ? T.green : T.red }}>LIVE</span>
+                              <span style={{ fontSize: 10.5, fontWeight: 800, color: accent(t.hue) }}>${t.sym}</span>
+                              <span style={{ fontSize: 10, fontWeight: 900, color: up ? T.green : T.red }}>{up ? "+" : "−"}${Math.abs(pnl).toFixed(2)}</span>
+                              <button onClick={() => { setSel(t.id); setClickMode(null); setMobileBotScreen(true); setPortfolioDrawer(false); }}
+                                style={{ ...chip(false), padding: "4px 9px", fontSize: 9, fontWeight: 800, marginLeft: "auto" }}>View</button>
+                              <button onClick={() => sellRun(r.id)} style={{ border: "none", borderRadius: 7, padding: "4px 10px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, background: T.red, color: "#170808", cursor: "pointer" }}>SELL NOW</button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    heldSlot={
+                      <HeldPositions liveMode={liveData} chainHoldings={chainHoldingsLive}
+                        onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings}
+                        onOpenMint={(m) => { openTokenByMint(m); setPortfolioDrawer(false); }}
+                        positions={positions} tokens={tokens} pay={pay} onTrade={onPosTrade}
+                        solBalance={liveData && combinedChain ? (combinedChain.solTrading != null ? combinedChain.solTrading : combinedChain.sol) : dispSol}
+                        valoWallet={liveData && valoMint && combinedChain
+                          ? ((visHolds(combinedChain.holdings).find((h) => h.mint === valoMint && h.src !== "phantom") || {}).qty || 0)
+                          : dispValo}
+                        onOpenToken={(id) => { setSel(id); setClickMode(null); setPortfolioDrawer(false); }}
+                        onSellAll={(t) => { const p = positions[t.id]; if (p && p.amt > 0) execute(t, { side: "sell", pay: p.pay, amt: p.amt, mode: "instant", tax: taxFor(p.pay), burn: splitFee(p.amt, p.pay).total, legs: [] }); }}
+                        onCloseAll={() => { Object.entries(positions).forEach(([id, p]) => { const tok = tokens.find((x) => x.id === +id); if (tok && p && p.amt > 0) execute(tok, { side: "sell", pay: p.pay, amt: p.amt, mode: "instant", tax: taxFor(p.pay), burn: splitFee(p.amt, p.pay).total, legs: [] }); }); }} />
+                    }
+                    maxDeposit={externalSol} maxWithdraw={solBalance}
+                    onDeposit={(amt) => { const a = Math.min(Math.max(0, amt), externalSol); if (a > 0) { setExternalSol((e) => e - a); setSolBalance((b) => b + a); } }}
+                    onWithdraw={(amt) => { const a = Math.min(Math.max(0, amt), solBalance); if (a > 0) { setSolBalance((b) => b - a); setExternalSol((e) => e + a); } }}
+                    onSwap={(amt, dir) => {
+                      if (!(amt > 0)) return;
+                      if (dir === "valo2sol") {
+                        const need = amt; if (need <= valoWallet) { setValoWallet((v) => v - need); setSolBalance((b) => b + (need * valoUnit()) / SOL_USD); }
+                      } else {
+                        if (amt <= solBalance) { setSolBalance((b) => b - amt); setValoWallet((v) => v + (amt * SOL_USD) / valoUnitSafe()); }
+                      }
+                    }}
+                  />
+                </div>
+              )}
+              <div style={{ display: "flex", borderBottom: `1px solid ${T.border2}` }}>
+                {[
+                  ["trades", "⚡ TRADES"],
+                  ["positions", "📊 POSITIONS"],
+                  ["chat", "💬 CHAT"],
+                ].map(([k, label]) => (
+                  <button key={k} onClick={() => setRailTab(k)}
+                    style={{ flex: 1, border: "none", borderBottom: `2px solid ${railTab === k ? T.blue : "transparent"}`,
+                      background: railTab === k ? "rgba(76,154,255,0.07)" : "transparent",
+                      color: railTab === k ? T.text : T.faint, padding: "9px 4px", cursor: "pointer",
+                      fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 0.8 }}>{label}</button>
+                ))}
+              </div>
+              <div style={{ padding: 8 }}>
+                {railTab === "trades" && selected && (
+                  <LiveTrades token={selected} isMobile={false} traderPrefs={traderPrefs} onPickTrader={pickTraderRow} />
+                )}
+                {railTab === "positions" && selected && (
+                  <MyPositionsHub liveMode={liveData} chainHoldings={chainHoldingsLive} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} onBurn={burnAndReclaim} tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
+                    onOpenToken={(id) => { setSel(id); setClickMode(null); }} onSellPos={sellPos} onCloseTickets={closeAllTickets}
+                    onSellRun={sellRun} onSellAllBots={sellAllRuns} onCancelBot={cancelBot} />
+                )}
+                {railTab === "chat" && chatBlock}
+              </div>
+            </div>
+  );
+
   return (
     <div style={{
       minHeight: "100vh", color: T.text, fontFamily: T.sans,
@@ -16944,166 +17104,6 @@ export default function App() {
                   const lvl = c.mult >= 50 ? 5 : c.mult >= 20 ? 4 : c.mult >= 10 ? 3 : c.mult >= 5 ? 2 : 1;
                   const col = tier.color;
                   const cls = ["", "cb-glow", "cb-pulse", "cb-shimmer", "cb-flare", "cb-legend"][lvl];
-  // ═════════ <RailPanel/> — wallet bar · trades | positions | chat tabs (UI_NEXT rail) ═════════
-  const renderRailPanel = () => (
-            <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, overflow: "hidden" }}>
-              <button onClick={() => setWalletCollapsed((v) => !v)}
-                title={walletCollapsed ? "Open your wallet" : "Close your wallet"}
-                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
-                  border: "none", borderBottom: `1px solid ${T.border2}`,
-                  background: walletCollapsed ? "rgba(255,255,255,0.02)" : "rgba(125,92,240,0.10)",
-                  padding: "10px 13px", cursor: "pointer", fontFamily: T.mono }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 10, fontWeight: 900, letterSpacing: 1.2, color: walletCollapsed ? T.dim : VALO_PURPLE }}>
-                  💼 WALLET
-                  <span title={turboActive ? "Turbo armed — trades sign instantly, no wallet prompt" : "Turbo off — every trade asks your wallet to approve"}
-                    style={{ display: "flex", alignItems: "center", gap: 3, padding: "1px 6px", borderRadius: 5,
-                      border: `1px solid ${turboActive ? T.amber + "66" : T.border}`,
-                      background: turboActive ? "rgba(240,185,11,0.12)" : "transparent",
-                      color: turboActive ? T.amber : T.faint, fontSize: 8.5, fontWeight: 800, letterSpacing: 0.6 }}>
-                    {turboActive ? "⚡ ARMED" : "🔒 OFF"}
-                  </span>
-                </span>
-                <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                  {(() => {
-                    // turbo only — the wallet that actually fills orders
-                    const turboUsd = liveData && combinedChain
-                      ? ((combinedChain.solTrading != null ? combinedChain.solTrading : combinedChain.sol) || 0) * SOL_USD
-                        + visHolds(combinedChain.holdings).filter((h) => h.src !== "phantom").reduce((s3, h3) => s3 + (h3.usd || 0), 0)
-                      : 0;
-                    return (
-                      <span style={{ fontSize: 12.5, fontWeight: 900, color: walletCollapsed ? T.text : VALO_PURPLE }}>
-                        {hideBalance ? "••••••" : `$${turboUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
-                      </span>
-                    );
-                  })()}
-                  <span onClick={(e) => { e.stopPropagation(); setHideBalance((v) => !v); }}
-                    title={hideBalance ? "Show balance" : "Hide balance"}
-                    style={{ fontSize: 11, opacity: 0.75 }}>{hideBalance ? "🙈" : "👁"}</span>
-                  <span style={{ fontSize: 11, color: T.faint }}>{walletCollapsed ? "▸" : "▾"}</span>
-                </span>
-              </button>
-              {!walletCollapsed && (
-                <div style={{ borderBottom: `1px solid ${T.border2}`, padding: 8, maxHeight: "58vh", overflowY: "auto" }}>
-                  <PortfolioPanel big
-                    solBalance={dispSol} valoWallet={dispValo} positions={positions} tokens={tokens}
-                    realizedPnl={realizedPnl} unrealizedPnl={unrealizedAll} extraEquity={strategyEquityUsd} walletConnected={walletConnected} onConnectWallet={connectPhantom} isMobile={isMobile} onOpenActivity={() => setActAllOpen(true)} wallet={wallet} walletChain={combinedChain} onDisconnectWallet={disconnectWallet} onOpenByMintChain={openTokenByMint} liveMode={liveData} chainFills={realFills} chainLedger={chainLedger} chainHoldingsLive2={chainHoldingsLive}
-                    turboState={turbo} onTurboCreate={turboCreate} onTurboUnlock={turboUnlock} onTurboLock={turboLock}
-                    onTurboFund={turboFund} onTurboSweep={turboSweep} phantomOk={!!(wallet && wallet.address)}
-                    turboSol={turboSolBal} turboAutoOn={liveAuto} onTurboToggleAuto={setLiveAuto} onCreatorSplit={doCreatorSplit} creatorAddr={(onchain && onchain.feeSplit && onchain.feeSplit.creator) || null}
-                    valoMint={valoMint}
-                    onRealSwap={() => {
-                      if (!valoMint) return;
-                      const amt2 = Math.min(Math.max(parseFloat(amount) || 0.01, 0.001), onchain.maxSol || 0.01);
-                      quoteRealOrder({ id: "valo-live", sym: "VALO", name: "VALO", liveMint: valoMint, price: 0, hue: 265 }, "buy", amt2);
-                    }}
-                    onOpenChainFill={(f) => {
-                      openTokenByMint(f.mint);
-                      const px = f.px || ((f.sol * SOL_USD) / Math.max(f.qty, 1e-12));
-                      setHistMarker({ t: f.at, side: f.side, p: px, price: px,
-                        amt: f.side === "buy" ? f.sol : f.qty, unit: f.side === "buy" ? "SOL" : f.sym,
-                        sym: f.sym, tx: f.sig, real: true });
-                      setHighlightTx(f.sig);
-                      if (typeof setPortfolioDrawer === "function") setPortfolioDrawer(false);
-                    }}
-                    tab={portfolioTab} setTab={setPortfolioTab}
-                    range={perfRange} setRange={setPerfRange}
-                    mode={perfMode} setMode={setPerfMode} seed={pnlSeed}
-                    hideBalance={hideBalance} setHideBalance={setHideBalance}
-                    activity={myActivity} onOpenToken={(sym, act) => { const tk = tokens.find((x) => x.sym === sym); if (tk) { setSel(tk.id); setClickMode(null); if (typeof setPortfolioDrawer === 'function') setPortfolioDrawer(false); if (act) { setHistMarker({ t: act.t, side: act.side, p: act.price, price: act.price, amt: act.amt, unit: act.unit, mc: mcOf(tk), pnlPct: act.pnlPct, pnlMoney: act.pnlMoney, sym: act.sym, tx: act.tx }); setHighlightTx(act.tx); } } }}
-                    username={username} setUsername={(v) => { takenNames.current.add(v.toLowerCase()); setUsername(v); }} isNameTaken={(v) => takenNames.current.has(v.toLowerCase())} checkHandle={checkHandle}
-                    myCallouts={myMcCallouts} onOpenMyCallouts={() => setMyCalloutsOpen(true)}
-                    followersCount={followersList.length} followingCount={followingList.length} onOpenFollowList={(k) => setFollowListOpen(k)}
-                    nameChangedAt={nameChangedAt} setNameChangedAt={setNameChangedAt}
-                    pendingOrders={pendingOrders} onEditBot={(id) => setBotHub({ mode: "edit", id })} onCancelBot={cancelBot} onPosTrade={onPosTrade}
-                    botHistory={botRuns.filter((r) => r.status === "sold")} onOpenBotRun={(id) => setBotRunOpen(id)}
-                    epochLastHour={epochLastHour} epochTotalEarned={epochTotalEarned} valoUsdForEpoch={valoUsdPrice} onOpenClaim={() => { setClaimOpen(true); if (typeof setPortfolioDrawer === 'function') setPortfolioDrawer(false); }}
-                    botsSlot={isMobile && (pendingOrders.length + botRuns.filter((r) => r.status === "live").length) > 0 ? (
-                      <div style={{ marginTop: 10 }}>
-                        <div style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1, marginBottom: 7 }}>🤖 AUTO-TRADING BOTS</div>
-                        {pendingOrders.filter((o) => !o.runId).map((o) => {
-                          const t = tokens.find((x) => String(x.id) === String(o.tokenId)); if (!t) return null;
-                          return (
-                            <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 9px", borderRadius: 9, marginBottom: 4, border: `1px solid ${accent(t.hue)}44`, background: "rgba(255,255,255,0.02)", fontFamily: T.mono }}>
-                              <span style={{ fontSize: 10 }}>⏳</span>
-                              <span style={{ fontSize: 10.5, fontWeight: 800, color: accent(t.hue) }}>${t.sym}</span>
-                              <span style={{ fontSize: 9, color: T.text }}>{o.amt} {o.pay} @ ${fmtP(o.level)}</span>
-                              <button onClick={() => { setSel(t.id); setClickMode(null); setEditingBotId(o.id); setMobileBotScreen(true); setPortfolioDrawer(false); }}
-                                style={{ ...chip(false), padding: "4px 9px", fontSize: 9, fontWeight: 800, marginLeft: "auto" }}>Edit</button>
-                              <button onClick={() => cancelBot(o.id)} style={{ ...chip(false), padding: "4px 8px", fontSize: 9, fontWeight: 800, color: T.red, borderColor: `${T.red}44` }}>✕</button>
-                            </div>
-                          );
-                        })}
-                        {botRuns.filter((r) => r.status === "live").map((r) => {
-                          const t = tokens.find((x) => String(x.id) === String(r.tokenId)); if (!t) return null;
-                          const pnl = (r.remaining * (t.price / r.entry) - r.remaining) * (r.pay === "SOL" ? SOL_USD : valoUnit());
-                          const up = pnl >= 0;
-                          return (
-                            <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 9px", borderRadius: 9, marginBottom: 4, border: `1px solid ${up ? "rgba(22,199,132,0.45)" : "rgba(234,57,67,0.45)"}`, background: "rgba(255,255,255,0.02)", fontFamily: T.mono }}>
-                              <span style={{ fontSize: 8.5, fontWeight: 900, color: up ? T.green : T.red }}>LIVE</span>
-                              <span style={{ fontSize: 10.5, fontWeight: 800, color: accent(t.hue) }}>${t.sym}</span>
-                              <span style={{ fontSize: 10, fontWeight: 900, color: up ? T.green : T.red }}>{up ? "+" : "−"}${Math.abs(pnl).toFixed(2)}</span>
-                              <button onClick={() => { setSel(t.id); setClickMode(null); setMobileBotScreen(true); setPortfolioDrawer(false); }}
-                                style={{ ...chip(false), padding: "4px 9px", fontSize: 9, fontWeight: 800, marginLeft: "auto" }}>View</button>
-                              <button onClick={() => sellRun(r.id)} style={{ border: "none", borderRadius: 7, padding: "4px 10px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, background: T.red, color: "#170808", cursor: "pointer" }}>SELL NOW</button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                    heldSlot={
-                      <HeldPositions liveMode={liveData} chainHoldings={chainHoldingsLive}
-                        onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings}
-                        onOpenMint={(m) => { openTokenByMint(m); setPortfolioDrawer(false); }}
-                        positions={positions} tokens={tokens} pay={pay} onTrade={onPosTrade}
-                        solBalance={liveData && combinedChain ? (combinedChain.solTrading != null ? combinedChain.solTrading : combinedChain.sol) : dispSol}
-                        valoWallet={liveData && valoMint && combinedChain
-                          ? ((visHolds(combinedChain.holdings).find((h) => h.mint === valoMint && h.src !== "phantom") || {}).qty || 0)
-                          : dispValo}
-                        onOpenToken={(id) => { setSel(id); setClickMode(null); setPortfolioDrawer(false); }}
-                        onSellAll={(t) => { const p = positions[t.id]; if (p && p.amt > 0) execute(t, { side: "sell", pay: p.pay, amt: p.amt, mode: "instant", tax: taxFor(p.pay), burn: splitFee(p.amt, p.pay).total, legs: [] }); }}
-                        onCloseAll={() => { Object.entries(positions).forEach(([id, p]) => { const tok = tokens.find((x) => x.id === +id); if (tok && p && p.amt > 0) execute(tok, { side: "sell", pay: p.pay, amt: p.amt, mode: "instant", tax: taxFor(p.pay), burn: splitFee(p.amt, p.pay).total, legs: [] }); }); }} />
-                    }
-                    maxDeposit={externalSol} maxWithdraw={solBalance}
-                    onDeposit={(amt) => { const a = Math.min(Math.max(0, amt), externalSol); if (a > 0) { setExternalSol((e) => e - a); setSolBalance((b) => b + a); } }}
-                    onWithdraw={(amt) => { const a = Math.min(Math.max(0, amt), solBalance); if (a > 0) { setSolBalance((b) => b - a); setExternalSol((e) => e + a); } }}
-                    onSwap={(amt, dir) => {
-                      if (!(amt > 0)) return;
-                      if (dir === "valo2sol") {
-                        const need = amt; if (need <= valoWallet) { setValoWallet((v) => v - need); setSolBalance((b) => b + (need * valoUnit()) / SOL_USD); }
-                      } else {
-                        if (amt <= solBalance) { setSolBalance((b) => b - amt); setValoWallet((v) => v + (amt * SOL_USD) / valoUnitSafe()); }
-                      }
-                    }}
-                  />
-                </div>
-              )}
-              <div style={{ display: "flex", borderBottom: `1px solid ${T.border2}` }}>
-                {[
-                  ["trades", "⚡ TRADES"],
-                  ["positions", "📊 POSITIONS"],
-                  ["chat", "💬 CHAT"],
-                ].map(([k, label]) => (
-                  <button key={k} onClick={() => setRailTab(k)}
-                    style={{ flex: 1, border: "none", borderBottom: `2px solid ${railTab === k ? T.blue : "transparent"}`,
-                      background: railTab === k ? "rgba(76,154,255,0.07)" : "transparent",
-                      color: railTab === k ? T.text : T.faint, padding: "9px 4px", cursor: "pointer",
-                      fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 0.8 }}>{label}</button>
-                ))}
-              </div>
-              <div style={{ padding: 8 }}>
-                {railTab === "trades" && selected && (
-                  <LiveTrades token={selected} isMobile={false} traderPrefs={traderPrefs} onPickTrader={pickTraderRow} />
-                )}
-                {railTab === "positions" && selected && (
-                  <MyPositionsHub liveMode={liveData} chainHoldings={chainHoldingsLive} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} onBurn={burnAndReclaim} tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
-                    onOpenToken={(id) => { setSel(id); setClickMode(null); }} onSellPos={sellPos} onCloseTickets={closeAllTickets}
-                    onSellRun={sellRun} onSellAllBots={sellAllRuns} onCancelBot={cancelBot} />
-                )}
-                {railTab === "chat" && chatBlock}
-              </div>
-            </div>
-  );
-
                   return (
                     <button key={`${dup}-${c.id}`} onClick={() => { setSel(c.t.id); setClickMode(null); }}
                       className={cls}
