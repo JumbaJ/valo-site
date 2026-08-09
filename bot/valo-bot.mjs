@@ -297,8 +297,65 @@ const announce = async () => {
   seen.participants = e.participants || 0;
 };
 
+// ── buy alerts ──────────────────────────────────────────────────────────────
+const MIN_BUY_USD = parseFloat(process.env.MIN_BUY_USD || "10");
+const posted = new Set();
+let valoPool = null;
+let primed = false;   // never dump the backlog on startup
+
+const buyLine = (usd) => {
+  const n2 = Math.min(28, Math.max(1, Math.round(usd / Math.max(5, MIN_BUY_USD / 2))));
+  return "🟢".repeat(n2);
+};
+
+const watchBuys = async () => {
+  if (!CHAT_ID) return;
+  if (!valoPool) {
+    const v = await get("/api/valo");
+    valoPool = (v && v.pool) || null;
+    if (!valoPool) return;
+  }
+  const trades = await get(`/api/trades?pool=${valoPool}`);
+  const list = Array.isArray(trades) ? trades : (trades && trades.trades) || [];
+  if (!list.length) return;
+
+  // first pass just records what already happened
+  if (!primed) {
+    for (const t of list) if (t && t.tx) posted.add(t.tx);
+    primed = true;
+    console.log(`buy watcher primed on ${list.length} existing trades`);
+    return;
+  }
+
+  const fresh = list
+    .filter((t) => t && t.isBuy && t.tx && !posted.has(t.tx) && (+t.usd || 0) >= MIN_BUY_USD)
+    .sort((a, b) => a.at - b.at)
+    .slice(-3);                       // a burst posts at most three lines
+
+  for (const t of list) if (t && t.tx) posted.add(t.tx);
+  if (posted.size > 3000) posted.clear();
+
+  for (const t of fresh) {
+    const who = t.trader ? `${String(t.trader).slice(0, 4)}…${String(t.trader).slice(-4)}` : "someone";
+    await send(CHAT_ID, [
+      "*🟢 $VALO BUY*",
+      buyLine(+t.usd),
+      rows([
+        ["Size", usd(+t.usd)],
+        ["Price", usd(+t.price)],
+        ["Buyer", who],
+      ], 8),
+      t.tx ? `[Transaction ↗](https://solscan.io/tx/${t.tx})` : "",
+      links(),
+    ].filter(Boolean).join("\n"));
+  }
+};
+
 if (CHAT_ID) {
   console.log("epoch announcer on for chat", CHAT_ID);
+  console.log(`buy alerts on — minimum ${MIN_BUY_USD} USD`);
+  watchBuys();
+  setInterval(() => { watchBuys().catch((e) => console.error("buys:", e.message)); }, 25000);
   announce();
   setInterval(() => { announce().catch((e) => console.error("announce:", e.message)); }, 60000);
 } else {
