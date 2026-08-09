@@ -90,6 +90,80 @@ const commands = {
     return lines.join("\n");
   },
 
+  async verify(arg) {
+    const given = (arg || "").trim();
+    if (!given) return `*Verify a contract address*\n\nSend \`/verify <address>\` and I'll tell you if it's the real $VALO.\n\nThe only real one:\n\`${CA}\``;
+    if (given === CA) return `✅ *That is the real $VALO contract.*\n\n\`${CA}\``;
+    if (given.toLowerCase() === CA.toLowerCase()) {
+      return `⚠️ *Close, but the capitalisation differs.* Solana addresses are case-sensitive — this is a classic lookalike.\n\nThe real one:\n\`${CA}\``;
+    }
+    return [
+      "🚨 *That is NOT the $VALO contract.*",
+      "",
+      "Whoever sent it to you is trying to take your money. Don't buy it, and report them.",
+      "",
+      "The only real $VALO:",
+      `\`${CA}\``,
+    ].join("\n");
+  },
+
+  async fees() {
+    return [
+      "*How the fee works*",
+      "",
+      "0.6% per trade — 0.3% on $VALO pairs.",
+      "",
+      "🔥 40% burned — supply drops, permanently",
+      "🎁 40% to the hourly reward pool for traders",
+      "🏦 20% treasury — hosting, data feeds, development",
+      "",
+      "80% of every fee goes back to the community.",
+      "",
+      "Where it's taken depends on the route: sometimes inside the swap itself, sometimes as a separate transfer. Same rate either way, and the review card shows you the exact SOL before you confirm.",
+    ].join("\n");
+  },
+
+  async rewards() {
+    const e = await get("/api/epoch");
+    const lines = [
+      "*How rewards work*",
+      "",
+      "Every hour is an epoch. Trade during it and you earn a slice of that hour's pool.",
+      "",
+      "Your weight = (your $VALO held + SOL you traded) × your leaderboard bonus.",
+      "Your share = your weight ÷ everyone's weight.",
+      "",
+      "Payouts land in your wallet automatically — no claiming, no gas from you.",
+    ];
+    if (e && e.pool != null) lines.push("", `This hour: *${n(e.pool)} $VALO* · ${e.participants ?? 0} in · ${e.minsLeft ?? "—"} min left`);
+    return lines.join("\n");
+  },
+
+  async safety() {
+    return [
+      "*Staying safe*",
+      "",
+      "• Admins will *never* DM you first",
+      "• Nobody will ever ask for your seed phrase or private key — not support, not admins, not anyone",
+      "• Always check a contract with `/verify <address>` before buying",
+      "• The only official site is valotrading.app",
+      "• We will never ask you to \"validate\", \"sync\" or \"connect for verification\"",
+      "",
+      "If someone DMs you claiming to be from VALO: screenshot it, report it here, and block them.",
+    ].join("\n");
+  },
+
+  async stats() {
+    const [v, b, e] = await Promise.all([get("/api/valo"), get("/api/burn"), get("/api/epoch")]);
+    const lines = ["*VALO — live*", ""];
+    if (v && v.price) lines.push(`price   ${usd(v.price)}   mcap ${usd(v.mc)}   liq ${usd(v.tvl)}`);
+    if (b) lines.push(`burned  ${n(b.burnedTokens)} $VALO (${(b.burnedPct || 0).toFixed(4)}%)`);
+    if (b) lines.push(`supply  ${n(b.supply)}`);
+    if (e) lines.push(`epoch   ${n(e.pool)} $VALO · ${e.participants ?? 0} in · ${e.minsLeft ?? "—"}m left`);
+    lines.push("", `Trade → ${SITE}`);
+    return lines.join("\n");
+  },
+
   async ca() {
     return `*$VALO contract*\n\`${CA}\`\n\nAlways verify against ${SITE} — never trust a CA from a DM.`;
   },
@@ -98,10 +172,15 @@ const commands = {
     return [
       "*VALO Terminal*",
       "",
+      "/stats — everything at once",
       "/price — live price, mcap, liquidity",
       "/burn — how much $VALO is gone forever",
       "/epoch — this hour's reward pool",
       "/ca — the contract address",
+      "/verify <address> — is this the real $VALO?",
+      "/fees — how the 0.6% is split",
+      "/rewards — how hourly payouts work",
+      "/safety — how not to get scammed",
       "",
       `Trade → ${SITE}`,
       "",
@@ -129,6 +208,7 @@ const WELCOME = (name) => [
 ].join("\n");
 
 // ── polling loop ────────────────────────────────────────────────────────────
+const cooldown = new Map();
 let offset = 0;
 console.log("VALO bot up — polling for updates");
 
@@ -149,12 +229,46 @@ const handle = async (u) => {
   }
 
   const text = (msg.text || "").trim();
+
+  // someone pasted a pump.fun-style mint that is not ours
+  if (!text.startsWith("/")) {
+    const hits = text.match(/[1-9A-HJ-NP-Za-km-z]{32,44}pump/g) || [];
+    const foreign = hits.filter((h) => h !== CA);
+    if (foreign.length && !(msg.from && msg.from.is_bot)) {
+      const who2 = (msg.from && msg.from.id) || 0;
+      const k2 = `warn:${chat}:${who2}`;
+      if (Date.now() - (cooldown.get(k2) || 0) > 60000) {
+        cooldown.set(k2, Date.now());
+        await send(chat, [
+          "⚠️ *That is not the $VALO contract.*",
+          "",
+          "If someone told you it was, they are trying to take your money.",
+          "",
+          "The only real one:",
+          `\`${CA}\``,
+          "",
+          "Check any address with `/verify <address>`.",
+        ].join("\n"), { reply_to_message_id: msg.message_id });
+      }
+    }
+    return;
+  }
   if (!text.startsWith("/")) return;
   // strip the @botname suffix Telegram adds in groups
   const cmd = text.slice(1).split(/[\s@]/)[0].toLowerCase();
+  const arg = text.slice(1).replace(/^\S+\s*/, "").trim();
   const fn = commands[cmd];
-  if (!fn) return;
-  const reply = await fn();
+  if (!fn) return;                       // silence on unknown — Rose owns some
+
+  // a bot that answers every repeat instantly IS the spam
+  const who = (msg.from && msg.from.id) || 0;
+  const key = `${chat}:${who}`;
+  const now = Date.now();
+  if (now - (cooldown.get(key) || 0) < 4000) return;
+  cooldown.set(key, now);
+  if (cooldown.size > 5000) cooldown.clear();
+
+  const reply = await fn(arg);
   await send(chat, reply, { reply_to_message_id: msg.message_id });
 };
 
