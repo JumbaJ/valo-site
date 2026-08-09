@@ -40,6 +40,9 @@ const get = async (path) => {
 
 const n = (v, d = 0) => (v == null || !Number.isFinite(+v) ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: d }));
 // fixed-width rows inside a ``` block — the only way Telegram aligns columns
+const PUMP = `https://pump.fun/coin/${CA}`;
+const DEX = `https://dexscreener.com/solana/${CA}`;
+const links = () => `[Trade on VALO →](${SITE}) · [pump.fun](${PUMP}) · [chart](${DEX})`;
 const rows = (pairs, pad = 9) => "```\n" + pairs.map(([k, v]) => String(k).toUpperCase().padEnd(pad) + v).join("\n") + "\n```";
 const usd = (v) => (v == null || !Number.isFinite(+v) ? "—" : "$" + (+v).toLocaleString(undefined, { maximumFractionDigits: +v < 0.01 ? 8 : 2 }));
 
@@ -57,7 +60,7 @@ const commands = {
         ["24h vol", usd(v.vol24)],
       ], 11),
       `\`${CA}\``,
-      `[Open the terminal →](${SITE})`,
+      links(),
     ].join("\n");
   },
 
@@ -78,7 +81,7 @@ const commands = {
       "*🔥 BURN TRACKER*",
       rows(pairs, 10),
       "_Burns are permanent. Supply only goes down._",
-      `[Verify on chain →](${SITE})`,
+      links(),
     ].join("\n");
   },
 
@@ -96,7 +99,7 @@ const commands = {
     lines.push(e.participants
       ? "_Every real fill adds weight. Payouts land automatically._"
       : "_Nobody has traded this hour yet — the pool is unclaimed._");
-    lines.push(`[Trade now →](${SITE})`);
+    lines.push(links());
     return lines.join("\n");
   },
 
@@ -176,7 +179,7 @@ const commands = {
       "*VALO TERMINAL — LIVE*",
       rows(pairs, 12),
       `\`${CA}\``,
-      `[Open the terminal →](${SITE})`,
+      links(),
     ].join("\n");
   },
 
