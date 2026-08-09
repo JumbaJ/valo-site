@@ -6701,6 +6701,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
   const [walletView, setWalletView] = useState("turbo"); // headline flips turbo ⇄ phantom
   const [turboPop, setTurboPop] = useState(false);       // ⚡ turbo overlay off the Wallet tab
   const [walletSeg, setWalletSeg] = useState("assets");  // 🧱 UI_NEXT: assets ⇄ activity ⇄ null(folded)
+  const [plDetail, setPlDetail] = useState(false);       // 🧾 UI_NEXT: open vs realized, on tap
   const totalPnl = realizedPnl + unrealizedPnl;
   const totalEquity = walletUsd + Math.max(0, liveValue) + (extraEquity || 0); // + live bots & escrowed arms
   const [swapAmt, setSwapAmt] = useState("1");
@@ -7015,9 +7016,11 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                     const totalPnl = unreal + realized;
                     const up = totalPnl >= 0;
                     return (
-                      <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 900, color: up ? T.green : T.red, margin: "2px 0" }}>
+                      <div onClick={() => UI_NEXT && setPlDetail((v) => !v)}
+                        title={UI_NEXT ? "Tap: open vs realized" : undefined}
+                        style={{ cursor: UI_NEXT ? "pointer" : undefined, fontFamily: T.mono, fontSize: 12, fontWeight: 900, color: up ? T.green : T.red, margin: "2px 0" }}>
                         {mask(`${up ? "▲ +" : "▼ −"}$${Math.abs(totalPnl).toFixed(2)} all-time P/L`)}
-                        <span style={{ fontSize: 8, fontWeight: 700, color: T.dim, marginLeft: 6 }}>
+                        <span style={{ fontSize: 8, fontWeight: 700, color: T.dim, marginLeft: 6, display: UI_NEXT && !plDetail ? "none" : undefined }}>
                           {mask(`${unreal >= 0 ? "+" : "−"}$${Math.abs(unreal).toFixed(2)} open · ${realized >= 0 ? "+" : "−"}$${Math.abs(realized).toFixed(2)} realized`)}
                         </span>
                       </div>
@@ -7030,18 +7033,25 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                   </div>
                   {walletChain && walletChain.dual && (
                     <div style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 700, color: T.faint }}>
-                      {mask(`⚡ ${((walletChain.solTrading) || 0).toFixed(4)} ◎ turbo · 👻 ${((walletChain.solVault) || 0).toFixed(4)} ◎ phantom`)}
+                      {!UI_NEXT && mask(`⚡ ${((walletChain.solTrading) || 0).toFixed(4)} ◎ turbo · 👻 ${((walletChain.solVault) || 0).toFixed(4)} ◎ phantom`)}
                       {UI_NEXT && (() => {
-                        const addr = (turboState && (turboState.address || turboState.pub)) || ((wallet && wallet.address) || "");
-                        if (!addr) return null;
+                        const chips = [
+                          ["⚡", (turboState && turboState.pubkey) || "", T.amber],
+                          ["👻", (wallet && wallet.address) || "", "#AB9FF2"],
+                        ].filter(([, a]) => a);
+                        if (!chips.length) return null;
                         return (
-                          <div onClick={(e) => { e.stopPropagation();
-                              try { navigator.clipboard.writeText(addr); e.currentTarget.textContent = "copied ✓"; } catch (e2) {} }}
-                            title="Tap to copy the wallet address"
-                            style={{ marginTop: 6, display: "inline-block", padding: "2px 9px", borderRadius: 999,
-                              border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.04)",
-                              fontFamily: T.mono, fontSize: 8.5, color: T.dim, cursor: "pointer" }}>
-                            {addr.slice(0, 4)}…{addr.slice(-4)} ⧉
+                          <div style={{ display: "flex", gap: 6, justifyContent: "center", marginTop: 7 }}>
+                            {chips.map(([ic, addr, col]) => (
+                              <div key={ic} onClick={(e) => { e.stopPropagation();
+                                  try { navigator.clipboard.writeText(addr); e.currentTarget.textContent = "copied ✓"; } catch (e2) {} }}
+                                title="Tap to copy"
+                                style={{ padding: "2px 9px", borderRadius: 999, border: `1px solid ${col}44`,
+                                  background: "rgba(255,255,255,0.04)", fontFamily: T.mono, fontSize: 8.5,
+                                  color: col, cursor: "pointer" }}>
+                                {ic} {addr.slice(0, 4)}…{addr.slice(-4)} ⧉
+                              </div>
+                            ))}
                           </div>
                         );
                       })()}
