@@ -16814,8 +16814,8 @@ export default function App() {
                 : "Metrics below track the $VALO token · not financial advice"}
             </div>
           </div>
-          <div style={UI_NEXT ? { display: "flex", gap: 0, alignItems: "stretch", flexWrap: "nowrap", marginTop: -14, marginRight: 330, marginLeft: "auto", width: "fit-content", height: 28, boxSizing: "border-box", border: "1px solid rgba(125,92,240,0.38)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "linear-gradient(180deg, rgba(20,17,38,0.98), rgba(13,15,22,0.98))", boxShadow: "0 4px 18px rgba(0,0,0,0.45)", overflow: "hidden" } : { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
-            <div style={UI_NEXT ? { display: "flex", alignItems: "stretch", height: "100%", background: "linear-gradient(180deg, rgba(125,92,240,0.22), rgba(125,92,240,0.06))" } : { display: "contents" }}>
+          <div style={UI_NEXT ? { display: "flex", gap: 0, alignItems: "stretch", flexWrap: "nowrap", marginTop: -14, marginRight: 330, marginLeft: "auto", width: "fit-content", height: 40, boxSizing: "border-box", border: "1px solid rgba(125,92,240,0.38)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "linear-gradient(180deg, rgba(20,17,38,0.98), rgba(13,15,22,0.98))", boxShadow: "0 4px 18px rgba(0,0,0,0.45)", overflow: "hidden" } : { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
+            <div style={UI_NEXT ? { display: "flex", alignItems: "stretch", height: "100%", background: "linear-gradient(110deg, rgba(125,92,240,0.14) 25%, rgba(168,140,255,0.34) 50%, rgba(125,92,240,0.14) 75%), linear-gradient(180deg, rgba(125,92,240,0.20), rgba(125,92,240,0.05))", backgroundSize: "300% 100%, 100% 100%", animation: "valoSheen 7s ease-in-out infinite" } : { display: "contents" }}>
               {UI_NEXT && (<span style={{ display: "flex", alignItems: "center", padding: "0 10px 0 12px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 1.2, color: VALO_PURPLE, borderRight: "1px solid rgba(125,92,240,0.30)" }}>$VALO</span>)}
             {[
               ["PRICE", valoLive ? `$${fmtP(valoLive.price)}` : "—", VALO_PURPLE,
@@ -16832,16 +16832,16 @@ export default function App() {
                 : [["24H PnL", `${platformPnl >= 0 ? "+" : "−"}$${Math.abs(platformPnl).toFixed(0)}`, platformPnl >= 0 ? T.green : T.red, "Your realized + unrealized PnL across all coins"]]),
             ].map(([k, v, col, tip]) => (
               <div key={k} onClick={openValoChart} title={(tip ? tip + " · " : "") + "Tap: open the $VALO chart"}
-                style={UI_NEXT ? { display: "flex", alignItems: "baseline", gap: 6, height: 26, boxSizing: "border-box", background: "rgba(255,255,255,0.03)", border: "1px solid " + T.border2, borderTop: "none", borderRadius: 0, padding: "0 11px", cursor: "pointer", border: "none", borderRight: "1px solid " + T.border2, background: "transparent", height: "100%" } : { background: "rgba(255,255,255,0.02)", border: "1px solid " + T.border, borderRadius: 9, padding: "6px 13px", minWidth: 78, cursor: "pointer" }}>
-                <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 1 } : { fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>{k}</div>
-                <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: col } : { fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: col }}>{v}</div>
+                style={UI_NEXT ? { display: "flex", flexDirection: "column", justifyContent: "center", gap: 1, height: "100%", boxSizing: "border-box", borderRadius: 0, padding: "0 13px", cursor: "pointer", border: "none", borderRight: "1px solid rgba(125,92,240,0.22)", background: "transparent" } : { background: "rgba(255,255,255,0.02)", border: "1px solid " + T.border, borderRadius: 9, padding: "6px 13px", minWidth: 78, cursor: "pointer" }}>
+                <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 7.5, color: "rgba(190,175,255,0.75)", letterSpacing: 1.4, fontWeight: 800 } : { fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>{k}</div>
+                <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 14.5, fontWeight: 900, color: col, lineHeight: 1 } : { fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: col }}>{v}</div>
               </div>
             ))}
             </div>
             <div onClick={() => setBurnOpen(true)} title="Burn tracker — your burn, site burn, circulating supply, live"
-              style={{ ...(UI_NEXT ? { display: "flex", alignItems: "center", gap: 7, height: "100%", boxSizing: "border-box", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)" } : {}), cursor: "pointer", userSelect: "none", background: "rgba(249,115,22,0.10)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 9, padding: "6px 13px", ...(UI_NEXT ? { height: "100%", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)", boxShadow: "none" } : {}) }}>
+              style={{ ...(UI_NEXT ? { display: "flex", alignItems: "center", gap: 7, height: "100%", boxSizing: "border-box", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)" } : {}), cursor: "pointer", userSelect: "none", background: "rgba(249,115,22,0.10)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 9, padding: "6px 13px", ...(UI_NEXT ? { height: "100%", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)", animation: "emberGlow 2.8s ease-in-out infinite" } : {}) }}>
               <div className="burn-swap" style={UI_NEXT ? { fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 1, marginRight: 6 } : { fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>
-                🔥 {burnMine ? "YOUR" : "TOTAL"} $VALO BURNED
+                <span style={UI_NEXT ? { display: "inline-block", animation: "flameFlick 1.6s ease-in-out infinite", marginRight: 3 } : {}}>🔥</span> {burnMine ? "YOUR" : "TOTAL"} $VALO BURNED
               </div>
               <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: "#f97316" } : { fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: "#f97316" }}>{UI_NEXT ? Math.round(burnMine ? myBurned : burned).toLocaleString() : (burnMine ? myBurned : burned).toFixed(4)}</div>
             </div>
@@ -19598,6 +19598,9 @@ export default function App() {
         /* sticky dies inside any overflow:hidden ancestor — keep the page chain clean */
         html, body, #root { overflow-x: clip; }
         .goldb{ animation: goldPulse 2.6s ease-in-out infinite; }
+        @keyframes valoSheen{ 0%{ background-position: -180% 0; } 55%{ background-position: 180% 0; } 100%{ background-position: 180% 0; } }
+        @keyframes emberGlow{ 0%,100%{ box-shadow: inset 0 0 12px rgba(249,115,22,0.12); } 50%{ box-shadow: inset 0 0 22px rgba(249,115,22,0.34); } }
+        @keyframes flameFlick{ 0%,100%{ transform: scale(1) rotate(-2deg); } 30%{ transform: scale(1.12) rotate(2deg); } 60%{ transform: scale(0.96) rotate(-1deg); } }
         @keyframes goldPulse{
           0%,100% { box-shadow: 0 0 8px rgba(240,185,11,0.2); }
           50%     { box-shadow: 0 0 15px rgba(240,185,11,0.42); }
