@@ -181,7 +181,16 @@ const commands = {
   },
 
   async ca() {
-    return `*$VALO contract*\n\`${CA}\`\n\nAlways verify against ${SITE} — never trust a CA from a DM.`;
+    return [
+      "*$VALO — CONTRACT ADDRESS*",
+      "",
+      `\`${CA}\``,
+      "",
+      `[pump.fun](https://pump.fun/coin/${CA}) · [DexScreener](https://dexscreener.com/solana/${CA}) · [Solscan](https://solscan.io/token/${CA})`,
+      `[Trade on VALO →](${SITE})`,
+      "",
+      "_This is the only real one. Check any address you're sent with_ `/verify <address>` _— never trust a contract from a DM._",
+    ].join("\n");
   },
 
   async help() {
@@ -213,7 +222,9 @@ const WELCOME = (name) => [
   "",
   "Live Solana trading — real on-chain fills, real charts, not a dashboard.",
   "",
-  `*$VALO CA:* \`${CA}\``,
+  "*$VALO CA*",
+  `\`${CA}\``,
+  `[pump.fun](https://pump.fun/coin/${CA}) · [chart](https://dexscreener.com/solana/${CA})`,
   "",
   "Every trade pays 0.6%, split three ways:",
   "🔥 40% burned · 🎁 40% hourly rewards · 🏦 20% treasury",
