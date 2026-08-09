@@ -16814,7 +16814,7 @@ export default function App() {
                 : "Metrics below track the $VALO token · not financial advice"}
             </div>
           </div>
-          <div style={{ display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
+          <div style={UI_NEXT ? { display: "flex", gap: 6, alignItems: "flex-start", flexWrap: "wrap", marginTop: -12 } : { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
             {[
               ["PRICE", valoLive ? `$${fmtP(valoLive.price)}` : "—", VALO_PURPLE,
                 valoLive ? "Live $VALO price from the pool" : "Current $VALO price"],
@@ -16830,9 +16830,9 @@ export default function App() {
                 : [["24H PnL", `${platformPnl >= 0 ? "+" : "−"}$${Math.abs(platformPnl).toFixed(0)}`, platformPnl >= 0 ? T.green : T.red, "Your realized + unrealized PnL across all coins"]]),
             ].map(([k, v, col, tip]) => (
               <div key={k} onClick={openValoChart} title={(tip ? tip + " · " : "") + "Tap: open the $VALO chart"}
-                style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${T.border}`, borderRadius: 9, padding: "6px 13px", minWidth: 78, cursor: "pointer" }}>
-                <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>{k}</div>
-                <div style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: col }}>{v}</div>
+                style={UI_NEXT ? { display: "flex", alignItems: "baseline", gap: 6, height: 26, boxSizing: "border-box", background: "rgba(255,255,255,0.03)", border: "1px solid " + T.border2, borderTop: "none", borderRadius: "0 0 9px 9px", padding: "0 10px", cursor: "pointer" } : { background: "rgba(255,255,255,0.02)", border: "1px solid " + T.border, borderRadius: 9, padding: "6px 13px", minWidth: 78, cursor: "pointer" }}>
+                <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 1 } : { fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>{k}</div>
+                <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: col } : { fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: col }}>{v}</div>
               </div>
             ))}
             <div onClick={() => setBurnOpen(true)} title="Burn tracker — your burn, site burn, circulating supply, live"
