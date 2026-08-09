@@ -12873,9 +12873,11 @@ export default function App() {
     const FEEDS = { new: ["new"], hot: ["trending", "top"], movers: ["top", "trending"], lucky: ["new", "trending"], trending: ["trending"] };
     const feeds = FEEDS[scanMode] || ["trending"];
     let stop = false;
+    const pageRef = { n: 0 };   // ♾ walk the feed's pages instead of re-reading page 1
     const pull = async () => {
       try {
-        const rs = await Promise.allSettled(feeds.map((f) => fetch(`/api/tokens?feed=${f}&t=${Math.floor(Date.now() / 8000)}`)));
+        pageRef.n = (pageRef.n % 5) + 1;
+        const rs = await Promise.allSettled(feeds.map((f) => fetch(`/api/tokens?feed=${f}&page=${pageRef.n}&t=${Math.floor(Date.now() / 8000)}`)));
         const rows = [];
         for (const rr of rs) if (rr.status === "fulfilled" && rr.value.ok) {
           try { const a = await rr.value.json(); if (Array.isArray(a)) rows.push(...a); } catch (e) {}
@@ -14820,7 +14822,10 @@ export default function App() {
       const keepIds = new Set([sel, ...Object.keys(positions || {}).map(Number)]);
       const keep = (t) => keepIds.has(t.id) || (t.liveMint && chainLedger.byMint[t.liveMint] && chainLedger.byMint[t.liveMint].qty > 0);
       // 🚫 below-launch pump tokens never ride any lens (held/selected excepted)
-      out = out.filter((t) => !belowLaunch(t) || keep(t));
+      // "below launch" is a verdict about a token that HAD a life and lost it —
+      // a 5-minute-old at launch mc is at the starting line, not under it
+      const newborn = (t) => t.createdAt && Date.now() - t.createdAt < 90 * 60e3;
+      out = out.filter((t) => !belowLaunch(t) || keep(t) || newborn(t));
       if (scanMode !== "new") {
         out = out.filter((t) => !(t.createdAt && Date.now() - t.createdAt < 12 * 60e3) || keep(t));
       }
@@ -14877,7 +14882,7 @@ export default function App() {
         if (t.id === sel) return true;
         const busy = m.tx >= 12 || m.txPerMinLife >= 0.25 || (t.vol24 || 0) >= 2000;
         const churning = m.turnover >= 0.15 || m.accel >= 1.2;
-        const crowded = !m.hasTraders || t.traders >= 25;   // only judge it when we know it
+        const crowded = !m.hasTraders || t.traders >= 25 || m.txPerMinLife >= 0.5;   // pace is a crowd
         const curveOk = !m.isPump || m.curvePct >= 25;      // has climbed off the floor
         return busy && churning && crowded && curveOk;
       });
@@ -19251,12 +19256,20 @@ export default function App() {
                     const v = payoutDraft.trim();
                     if (v && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v)) { setPayoutMsg("that's not a valid Solana address"); return; }
                     setPayoutWallet(v || null);
-                    setPayoutMsg(v ? "saved ✓ — epoch payouts go here" : "cleared — payouts go to your connected wallet");
-                    try {
-                      const sb2 = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
-                      if (sb2 && cloudUser) await sb2.from("profiles").update({ payout_wallet: v || null }).eq("id", cloudUser.id);
-                    } catch (e) {}
-                    setTimeout(() => setPayoutMsg(""), 2600);
+                    const sb2 = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
+                    if (sb2 && cloudUser) {
+                      // upsert: a user with no profiles row yet must get one, and the
+                      // result must be READ — update() reports errors by return value,
+                      // which is how the old code showed "saved" while saving nothing.
+                      const { error } = await sb2.from("profiles")
+                        .upsert({ id: cloudUser.id, payout_wallet: v || null }, { onConflict: "id" });
+                      if (error) setPayoutMsg(`cloud save failed: ${error.message}`);
+                      else setPayoutMsg(v ? "saved ✓ — epoch payouts go here" : "cleared — payouts go to your connected wallet");
+                    } else {
+                      // honesty over comfort: payouts read the cloud, not this device
+                      setPayoutMsg("saved on this device only — sign in to receive payouts");
+                    }
+                    setTimeout(() => setPayoutMsg(""), 4200);
                   }}
                   style={{ ...chip(false), padding: "8px 12px", fontSize: 9, fontWeight: 900, color: VALO_PURPLE, borderColor: `${VALO_PURPLE}55` }}>SAVE</button>
               </div>
