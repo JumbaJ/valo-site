@@ -16814,8 +16814,8 @@ export default function App() {
                 : "Metrics below track the $VALO token · not financial advice"}
             </div>
           </div>
-          <div style={UI_NEXT ? { display: "flex", gap: 0, alignItems: "stretch", flexWrap: "nowrap", marginTop: -12, marginRight: 330, marginLeft: "auto", width: "fit-content", height: 30, boxSizing: "border-box", border: "1px solid " + T.border2, borderTop: "none", borderRadius: "0 0 11px 11px", background: "rgba(255,255,255,0.035)", overflow: "hidden" } : { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
-            <div style={UI_NEXT ? { display: "flex", alignItems: "stretch", height: 30, boxSizing: "border-box", border: "1px solid " + VALO_PURPLE + "66", borderTop: "none", borderRadius: "0 0 10px 10px", background: "linear-gradient(180deg, rgba(125,92,240,0.20), rgba(125,92,240,0.07))", boxShadow: "0 3px 14px rgba(125,92,240,0.28)", overflow: "hidden" } : { display: "contents" }}>
+          <div style={UI_NEXT ? { display: "flex", gap: 0, alignItems: "stretch", flexWrap: "nowrap", marginTop: -14, marginRight: 330, marginLeft: "auto", width: "fit-content", height: 32, boxSizing: "border-box", border: "1px solid rgba(125,92,240,0.38)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "linear-gradient(180deg, rgba(20,17,38,0.98), rgba(13,15,22,0.98))", boxShadow: "0 4px 18px rgba(0,0,0,0.45)", overflow: "hidden" } : { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
+            <div style={UI_NEXT ? { display: "flex", alignItems: "stretch", height: "100%", background: "linear-gradient(180deg, rgba(125,92,240,0.22), rgba(125,92,240,0.06))" } : { display: "contents" }}>
               {UI_NEXT && (<span style={{ display: "flex", alignItems: "center", padding: "0 10px 0 12px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 1.2, color: VALO_PURPLE, borderRight: "1px solid rgba(125,92,240,0.30)" }}>$VALO</span>)}
             {[
               ["PRICE", valoLive ? `$${fmtP(valoLive.price)}` : "—", VALO_PURPLE,
@@ -16839,7 +16839,7 @@ export default function App() {
             ))}
             </div>
             <div onClick={() => setBurnOpen(true)} title="Burn tracker — your burn, site burn, circulating supply, live"
-              style={{ ...(UI_NEXT ? { display: "flex", alignItems: "center", gap: 7, height: "100%", boxSizing: "border-box", border: "none", borderRight: "1px solid " + T.border2, borderRadius: 0, padding: "0 11px", background: "transparent" } : {}), cursor: "pointer", userSelect: "none", background: "rgba(249,115,22,0.10)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 9, padding: "6px 13px" }}>
+              style={{ ...(UI_NEXT ? { display: "flex", alignItems: "center", gap: 7, height: "100%", boxSizing: "border-box", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)" } : {}), cursor: "pointer", userSelect: "none", background: "rgba(249,115,22,0.10)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 9, padding: "6px 13px" }}>
               <div className="burn-swap" style={UI_NEXT ? { fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 1, marginRight: 6 } : { fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>
                 🔥 {burnMine ? "YOUR" : "TOTAL"} $VALO BURNED
               </div>
@@ -16848,7 +16848,7 @@ export default function App() {
 
             {/* NOTIFICATIONS */}
             <button onClick={() => { setNotifOpen(true); markNotifsRead(); }} title="Notifications — followed callouts, followers, friend requests"
-              style={{ ...(UI_NEXT ? { height: "100%", boxSizing: "border-box", border: "none", borderRight: "1px solid " + T.border2, borderRadius: 0, padding: "0 11px", background: "transparent" } : {}), position: "relative", display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
+              style={{ ...(UI_NEXT ? { height: "100%", boxSizing: "border-box", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "transparent" } : {}), position: "relative", display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
                 border: `1px solid ${T.border2}`, background: "rgba(125,92,240,0.06)", borderRadius: 9, padding: "6px 12px" }}>
               <span style={{ fontSize: 15 }}>🔔</span>
               <span style={UI_NEXT ? { textAlign: "left", lineHeight: 1, display: "flex", alignItems: "baseline", gap: 6 } : { textAlign: "left", lineHeight: 1.15 }}>
