@@ -16609,9 +16609,9 @@ export default function App() {
     <div style={{
       minHeight: "100vh", color: T.text, fontFamily: T.sans,
       background: `
-        radial-gradient(1100px 500px at 12% -8%, rgba(96,78,204,0.055), transparent 60%),
-        radial-gradient(900px 460px at 88% 4%, rgba(46,112,204,0.045), transparent 60%),
-        radial-gradient(1200px 700px at 50% 110%, rgba(22,199,132,0.03), transparent 65%),
+        ${UI_NEXT ? "" : "radial-gradient(1100px 500px at 12% -8%, rgba(96,78,204,0.055), transparent 60%),"}
+        ${UI_NEXT ? "" : "radial-gradient(900px 460px at 88% 4%, rgba(46,112,204,0.045), transparent 60%),"}
+        ${UI_NEXT ? "" : "radial-gradient(1200px 700px at 50% 110%, rgba(22,199,132,0.03), transparent 65%),"}
         linear-gradient(180deg, #0b0e15 0%, ${T.bg} 34%, #090c12 100%)
       `,
       backgroundAttachment: "fixed",
@@ -16815,6 +16815,8 @@ export default function App() {
             </div>
           </div>
           <div style={UI_NEXT ? { display: "flex", gap: 0, alignItems: "stretch", flexWrap: "nowrap", marginTop: -12, marginRight: 330, marginLeft: "auto", width: "fit-content", height: 30, boxSizing: "border-box", border: "1px solid " + T.border2, borderTop: "none", borderRadius: "0 0 11px 11px", background: "rgba(255,255,255,0.035)", overflow: "hidden" } : { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
+            <div style={UI_NEXT ? { display: "flex", alignItems: "stretch", height: 30, boxSizing: "border-box", border: "1px solid " + VALO_PURPLE + "66", borderTop: "none", borderRadius: "0 0 10px 10px", background: "linear-gradient(180deg, rgba(125,92,240,0.20), rgba(125,92,240,0.07))", boxShadow: "0 3px 14px rgba(125,92,240,0.28)", overflow: "hidden" } : { display: "contents" }}>
+              {UI_NEXT && (<span style={{ display: "flex", alignItems: "center", padding: "0 10px 0 12px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 1.2, color: VALO_PURPLE, borderRight: "1px solid rgba(125,92,240,0.30)" }}>$VALO</span>)}
             {[
               ["PRICE", valoLive ? `$${fmtP(valoLive.price)}` : "—", VALO_PURPLE,
                 valoLive ? "Live $VALO price from the pool" : "Current $VALO price"],
@@ -16835,6 +16837,7 @@ export default function App() {
                 <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: col } : { fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: col }}>{v}</div>
               </div>
             ))}
+            </div>
             <div onClick={() => setBurnOpen(true)} title="Burn tracker — your burn, site burn, circulating supply, live"
               style={{ ...(UI_NEXT ? { display: "flex", alignItems: "center", gap: 7, height: "100%", boxSizing: "border-box", border: "none", borderRight: "1px solid " + T.border2, borderRadius: 0, padding: "0 11px", background: "transparent" } : {}), cursor: "pointer", userSelect: "none", background: "rgba(249,115,22,0.10)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 9, padding: "6px 13px" }}>
               <div className="burn-swap" style={UI_NEXT ? { fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 1, marginRight: 6 } : { fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>
