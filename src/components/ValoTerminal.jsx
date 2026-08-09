@@ -509,6 +509,9 @@ function adoptMarketToken(x) {
     pool: x.id, liveMint: x.mint || null, market: true,
     sym, name: x.name || sym, chain: "pump",
     isNew: ageMin < 60, hasDex: true, createdAt: x.createdAt || null,
+    // the tape itself — computed above, and previously DROPPED here, which
+    // zeroed tokMetrics.tx for every market token and starved HOT + backfill
+    buys, sells, statWin: x.statWin || "24h",
     traders: +x.traders || flow, tvl, greenUsd: green, redUsd: red,
     momentum, buyPressure,
     liq: tvl, vol24: (+x.vol24 || green + red),   // real reserve + real 24h volume
