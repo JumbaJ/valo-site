@@ -3626,6 +3626,24 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0, valoUsd = 
   const circ = realCirc > 0 ? realCirc : Math.max(0, TOTAL - siteBurned);
   const burnedReal = realCirc > 0 ? Math.max(0, TOTAL - realCirc) : siteBurned;
   const pct = (burnedReal / TOTAL) * 100;
+  // ⛓ pending buyback — fees collected and waiting to be spent on $VALO
+  const [chain, setChain] = useState(null);
+  useEffect(() => {
+    let stop = false;
+    const pull = async () => {
+      try {
+        const r = await fetch("/api/burn");
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop) setChain(j);
+      } catch (e) { /* the panel still works without it */ }
+    };
+    pull();
+    const t = setInterval(pull, 30000);
+    return () => { stop = true; clearInterval(t); };
+  }, []);
+  const pendingSol = chain && Number.isFinite(+chain.pendingSol) ? +chain.pendingSol : 0;
+  const pendingUsd = pendingSol * (chain && chain.solUsd ? chain.solUsd : 0);
   const row = (label, val, sub, col) => (
     <div style={{ border: `1px solid ${col}44`, background: `${col}0d`, borderRadius: 11, padding: "11px 13px", marginBottom: 8 }}>
       <div style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.5, color: T.faint, marginBottom: 4 }}>{label}</div>
@@ -3646,6 +3664,21 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0, valoUsd = 
           {row("SITE TOTAL BURN", `${fmtQty(burnedReal)} $VALO`,
             realCirc > 0 ? "genesis supply minus what's left on chain — permanent" : "every trader's burn pool + hourly buyback burns, on-chain forever", T.red)}
           {row("CIRCULATING SUPPLY", `${fmtQty(circ)} $VALO`, `of ${fmtQty(TOTAL)} genesis — shrinking with every trade`, T.green)}
+          {chain && chain.dedicated && (
+            <div style={{ border: "1px solid #f9731644", background: "#f973160d", borderRadius: 11, padding: "11px 13px", marginBottom: 8 }}>
+              <div style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.5, color: T.faint, marginBottom: 4 }}>PENDING BUYBACK</div>
+              <div style={{ fontFamily: T.mono, fontSize: 20, fontWeight: 900, color: "#f97316" }}>{pendingSol.toFixed(4)} SOL</div>
+              <div style={{ fontFamily: T.mono, fontSize: 8, color: T.dim, marginTop: 3 }}>
+                collected from fees, waiting to buy $VALO and burn it
+              </div>
+              {chain.burnWallet && (
+                <a href={`https://solscan.io/account/${chain.burnWallet}`} target="_blank" rel="noreferrer"
+                  style={{ display: "inline-block", marginTop: 6, fontFamily: T.mono, fontSize: 7.5, color: T.dim, textDecoration: "underline dotted" }}>
+                  audit the burn wallet ↗
+                </a>
+              )}
+            </div>
+          )}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, border: `1.5px solid ${VALO_PURPLE}66`, background: "rgba(125,92,240,0.10)", borderRadius: 10, padding: "8px 11px", marginTop: 7, boxShadow: `0 0 12px ${VALO_PURPLE}33` }}>
             <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1.2, color: VALO_PURPLE, fontWeight: 900 }}>◆ $VALO PRICE {valoLive && valoLive.price > 0 ? "· ⛓ ON CHAIN" : ""}</span>
             <span style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 900, color: VALO_PURPLE }}>${fmtP(px)}</span>
@@ -3657,7 +3690,7 @@ function BurnModal({ onClose, isMobile, myBurned = 0, siteBurned = 0, valoUsd = 
             <div style={{ width: `${Math.max(0.4, Math.min(100, pct))}%`, height: "100%", background: "linear-gradient(90deg,#f97316,#ea3943)", transition: "width .4s ease" }} />
           </div>
           <div style={{ fontFamily: T.mono, fontSize: 7.5, color: T.faint, marginTop: 8, lineHeight: 1.6 }}>
-            Numbers move in real time — every buy, sell, and bot fill on the site feeds the burn, and the hourly creator-fee buyback torches its slice on top. Burns are permanent: supply only goes down.
+            Every buy, sell, and bot fill feeds the burn share. It pools as SOL, then buys $VALO on the open market and burns every token — real buy pressure before the supply cut. Burns are permanent: supply only goes down, and every figure here is measured from the chain, not estimated.
           </div>
         </div>
       </div>
