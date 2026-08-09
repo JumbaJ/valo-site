@@ -4,6 +4,21 @@
 // GeckoTerminal if DexScreener is cold.
 const MINT = () => (process.env.VALO_MINT || "").trim();
 
+// A pump.fun token still on its bonding curve has no DEX pool, so DexScreener
+// reports liquidity: null. The curve's SOL reserve is the honest equivalent —
+// it is what actually backs the token — so read it rather than showing zero.
+const curveReserveUsd = async (mint) => {
+  try {
+    const r = await fetch(`https://api.geckoterminal.com/api/v2/networks/solana/tokens/${mint}/pools?page=1`, {
+      headers: { accept: "application/json" }, signal: AbortSignal.timeout(6000),
+    });
+    if (!r.ok) return 0;
+    const j = await r.json();
+    const a = j && j.data && j.data[0] && j.data[0].attributes;
+    return a ? parseFloat(a.reserve_in_usd) || 0 : 0;
+  } catch (e) { return 0; }
+};
+
 const fromDexScreener = async (mint) => {
   const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, {
     headers: { accept: "application/json" }, signal: AbortSignal.timeout(6000),
@@ -25,11 +40,14 @@ const fromDexScreener = async (mint) => {
   const redUsd = total > 0 ? (vol24 * sells) / total : 0;
   const price = +p.priceUsd || 0;
   const mc = +p.marketCap || +p.fdv || 0;
+  // absent liquidity means a curve, not a dead pool — go and find the real number
+  let tvl = +(p.liquidity && p.liquidity.usd) || 0;
+  if (!tvl) tvl = await curveReserveUsd(mint);
   return {
     mint, pool: p.pairAddress || null, sym: String((p.baseToken && p.baseToken.symbol) || "VALO").replace(/^\$+/, ""),
     name: (p.baseToken && p.baseToken.name) || "VALO",
     price, mc,
-    tvl: +(p.liquidity && p.liquidity.usd) || 0,
+    tvl,
     vol24, buys, sells, greenUsd, redUsd,
     ch: +(p.priceChange && (p.priceChange.h1 ?? p.priceChange.h24)) || 0,
     ch24: +(p.priceChange && p.priceChange.h24) || 0,
