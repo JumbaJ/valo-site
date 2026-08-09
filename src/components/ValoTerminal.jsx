@@ -16814,7 +16814,7 @@ export default function App() {
                 : "Metrics below track the $VALO token · not financial advice"}
             </div>
           </div>
-          <div style={UI_NEXT ? { display: "flex", gap: 0, alignItems: "stretch", flexWrap: "nowrap", marginTop: -14, marginRight: 330, marginLeft: "auto", width: "fit-content", height: 32, boxSizing: "border-box", border: "1px solid rgba(125,92,240,0.38)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "linear-gradient(180deg, rgba(20,17,38,0.98), rgba(13,15,22,0.98))", boxShadow: "0 4px 18px rgba(0,0,0,0.45)", overflow: "hidden" } : { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
+          <div style={UI_NEXT ? { display: "flex", gap: 0, alignItems: "stretch", flexWrap: "nowrap", marginTop: -14, marginRight: 330, marginLeft: "auto", width: "fit-content", height: 28, boxSizing: "border-box", border: "1px solid rgba(125,92,240,0.38)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "linear-gradient(180deg, rgba(20,17,38,0.98), rgba(13,15,22,0.98))", boxShadow: "0 4px 18px rgba(0,0,0,0.45)", overflow: "hidden" } : { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
             <div style={UI_NEXT ? { display: "flex", alignItems: "stretch", height: "100%", background: "linear-gradient(180deg, rgba(125,92,240,0.22), rgba(125,92,240,0.06))" } : { display: "contents" }}>
               {UI_NEXT && (<span style={{ display: "flex", alignItems: "center", padding: "0 10px 0 12px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 1.2, color: VALO_PURPLE, borderRight: "1px solid rgba(125,92,240,0.30)" }}>$VALO</span>)}
             {[
@@ -16839,17 +16839,17 @@ export default function App() {
             ))}
             </div>
             <div onClick={() => setBurnOpen(true)} title="Burn tracker — your burn, site burn, circulating supply, live"
-              style={{ ...(UI_NEXT ? { display: "flex", alignItems: "center", gap: 7, height: "100%", boxSizing: "border-box", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)" } : {}), cursor: "pointer", userSelect: "none", background: "rgba(249,115,22,0.10)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 9, padding: "6px 13px" }}>
+              style={{ ...(UI_NEXT ? { display: "flex", alignItems: "center", gap: 7, height: "100%", boxSizing: "border-box", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)" } : {}), cursor: "pointer", userSelect: "none", background: "rgba(249,115,22,0.10)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 9, padding: "6px 13px", ...(UI_NEXT ? { height: "100%", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)", boxShadow: "none" } : {}) }}>
               <div className="burn-swap" style={UI_NEXT ? { fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 1, marginRight: 6 } : { fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>
                 🔥 {burnMine ? "YOUR" : "TOTAL"} $VALO BURNED
               </div>
-              <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: "#f97316" } : { fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: "#f97316" }}>{(burnMine ? myBurned : burned).toFixed(4)}</div>
+              <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: "#f97316" } : { fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: "#f97316" }}>{UI_NEXT ? Math.round(burnMine ? myBurned : burned).toLocaleString() : (burnMine ? myBurned : burned).toFixed(4)}</div>
             </div>
 
             {/* NOTIFICATIONS */}
             <button onClick={() => { setNotifOpen(true); markNotifsRead(); }} title="Notifications — followed callouts, followers, friend requests"
               style={{ ...(UI_NEXT ? { height: "100%", boxSizing: "border-box", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "transparent" } : {}), position: "relative", display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
-                border: `1px solid ${T.border2}`, background: "rgba(125,92,240,0.06)", borderRadius: 9, padding: "6px 12px" }}>
+                border: `1px solid ${T.border2}`, background: "rgba(125,92,240,0.06)", borderRadius: 9, padding: "6px 12px", ...(UI_NEXT ? { height: "100%", boxSizing: "border-box", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(125,92,240,0.10)", boxShadow: "none" } : {}) }}>
               <span style={{ fontSize: 15 }}>🔔</span>
               <span style={UI_NEXT ? { textAlign: "left", lineHeight: 1, display: "flex", alignItems: "baseline", gap: 6 } : { textAlign: "left", lineHeight: 1.15 }}>
                 <span style={{ display: "block", fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: VALO_PURPLE }}>ALERTS</span>
@@ -16861,7 +16861,7 @@ export default function App() {
             {/* 🧭 replay the tour any time */}
             <button onClick={() => setTourOn(true)} title="Show me around VALO"
               style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
-                border: `1px solid ${T.border2}`, background: "rgba(125,92,240,0.06)", borderRadius: 9, padding: "6px 12px" }}>
+                border: `1px solid ${T.border2}`, background: "rgba(125,92,240,0.06)", borderRadius: 9, padding: "6px 12px", ...(UI_NEXT ? { height: "100%", boxSizing: "border-box", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(240,185,11,0.08)", boxShadow: "none" } : {}) }}>
               <span style={{ fontSize: 15 }}>🧭</span>
               <span style={UI_NEXT ? { textAlign: "left", lineHeight: 1, display: "flex", alignItems: "baseline", gap: 6 } : { textAlign: "left", lineHeight: 1.15 }}>
                 <span style={{ display: "block", fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: VALO_PURPLE }}>TOUR</span>
@@ -16870,7 +16870,7 @@ export default function App() {
             </button>
             <button onClick={() => setWpOpen(true)} title="Read the VALO whitepaper"
               style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
-                border: `1px solid ${T.border2}`, background: "rgba(76,154,255,0.06)", borderRadius: 9, padding: "6px 12px" }}>
+                border: `1px solid ${T.border2}`, background: "rgba(76,154,255,0.06)", borderRadius: 9, padding: "6px 12px", ...(UI_NEXT ? { height: "100%", boxSizing: "border-box", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(76,154,255,0.08)", boxShadow: "none" } : {}) }}>
               <span style={{ fontSize: 15 }}>📄</span>
               <span style={UI_NEXT ? { textAlign: "left", lineHeight: 1, display: "flex", alignItems: "baseline", gap: 6 } : { textAlign: "left", lineHeight: 1.15 }}>
                 <span style={{ display: "block", fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: T.blue }}>WHITEPAPER</span>
