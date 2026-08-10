@@ -15998,7 +15998,7 @@ export default function App() {
             !selected ? (
               UI_NEXT ? (() => {
                 const minsTo = 60 - new Date().getMinutes();
-                const seen = new Set();
+                const seen = new Set(); const seenF = new Set();
                 const movers = [...(mktHits || []), ...(moreToks || []), ...(tokens || [])]
                   .filter((t) => t && (t.mc || 0) > 300 && !seen.has(t.id) && seen.add(t.id))
                   .map((t) => { const c = +(t.ch ?? t.ch24);
@@ -16013,8 +16013,22 @@ export default function App() {
                   return mult >= 2 ? { id: t.id, sym: t.sym, mult } : null;
                 }).filter(Boolean).sort((a, b) => b.mult - a.mult).slice(0, 4);
                 const signedIn = !!(wallet && wallet.address);
-                const cell = { background: "#10141c", border: `1px solid ${T.border}`, borderRadius: 10,
-                  padding: "9px 11px", cursor: "pointer", textAlign: "left" };
+                const fresh = [...(mktHits || []), ...(moreToks || []), ...(tokens || [])]
+                  .filter((t) => t && t.createdAt && !seenF.has(t.id) && seenF.add(t.id))
+                  .map((t) => ({ t, age: Date.now() - new Date(t.createdAt).getTime() }))
+                  .filter((x) => x.age > 0 && x.age < 6 * 3600e3)
+                  .sort((a, b) => a.age - b.age)
+                  .slice(0, 7);
+                const row = { display: "flex", alignItems: "center", gap: 8, width: "100%",
+                  padding: "7px 6px", border: "none", background: "transparent", cursor: "pointer",
+                  textAlign: "left", borderRadius: 7 };
+                const colHead = { fontSize: 8, letterSpacing: 1.4, color: T.faint, marginBottom: 6,
+                  paddingLeft: 6, whiteSpace: "nowrap" };
+                const symCss = { display: "block", fontSize: 10.5, fontWeight: 900, color: T.text,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+                const metaCss = { display: "block", fontSize: 8, color: T.faint, whiteSpace: "nowrap" };
+                const numCss = { fontSize: 10, fontWeight: 900, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+                const emptyNote = { color: T.faint, fontSize: 8.5, padding: "10px 6px", lineHeight: 1.6 };
                 return (
                   <div style={{ border: `1px solid ${T.border}`, borderRadius: 12, padding: isMobile ? 12 : 16, fontFamily: T.mono }}>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap",
@@ -16022,60 +16036,75 @@ export default function App() {
                       <span style={{ fontSize: 10, fontWeight: 900, color: T.text }}>⚡ NEXT EPOCH PAYS IN {minsTo}m</span>
                       <span style={{ fontSize: 8.5, color: T.faint }}>300,000 $VALO pool · trade this hour and your wallet is in · paid at :05, on chain</span>
                     </div>
-                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 240px", gap: 14 }}>
-                      <div>
-                        <div style={{ fontSize: 8, letterSpacing: 1.4, color: T.faint, marginBottom: 7 }}>THE FLOOR · BIGGEST MOVES RIGHT NOW</div>
-                        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: 8 }}>
-                          {movers.length === 0 && (
-                            <div style={{ gridColumn: "1 / -1", color: T.faint, fontSize: 9.5, textAlign: "center", padding: 22 }}>
-                              📡 reading the chain — the floor fills as live tokens land
-                            </div>
-                          )}
-                          {movers.map(({ t, ch }) => (
-                            <button key={t.id} onClick={() => openAnyToken(t.id)} style={cell}>
-                              <div style={{ display: "flex", justifyContent: "space-between", gap: 6, alignItems: "center" }}>
-                                <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                                  <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={18} />
-                                  <span style={{ fontSize: 10.5, fontWeight: 900, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.sym}</span>
-                                </span>
-                                <span style={{ fontSize: 10, fontWeight: 900,
-                                  color: ch == null || Math.abs(ch) < 1 ? T.faint : ch > 0 ? T.green : T.red }}>
-                                  {ch == null ? `M${Math.round(t.momentum || 0)}` : `${ch > 0 ? "+" : ""}${ch.toFixed(1)}%`}
-                                </span>
-                              </div>
-                              <div style={{ fontSize: 8.5, color: T.dim, marginTop: 3 }}>
-                                ${(+t.price || 0).toPrecision(3)} · MC {fmt$(t.mc || 0)}
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                        <div style={{ color: T.faint, fontSize: 8.5, textAlign: "center", marginTop: 12 }}>
-                          select a pair anywhere — or tap a mover to open its chart
-                        </div>
+                    <div style={{ display: "grid",
+                      gridTemplateColumns: isMobile ? "1fr" : "1.15fr 1.15fr 0.9fr", gap: 0 }}>
+
+                      {/* ── NEW LAUNCHES ─────────────────────────────── */}
+                      <div style={{ padding: isMobile ? "0 0 14px" : "0 14px 0 0",
+                        borderRight: isMobile ? "none" : `1px solid ${T.border}`,
+                        borderBottom: isMobile ? `1px solid ${T.border}` : "none",
+                        marginBottom: isMobile ? 14 : 0 }}>
+                        <div style={colHead}>NEW LAUNCHES</div>
+                        {fresh.length === 0 && <div style={emptyNote}>watching for the next launch…</div>}
+                        {fresh.map(({ t }) => (
+                          <button key={t.id} onClick={() => openAnyToken(t.id)} style={row}>
+                            <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={20} />
+                            <span style={{ minWidth: 0, flex: 1 }}>
+                              <span style={symCss}>{t.sym}</span>
+                              <span style={metaCss}>
+                                {fmtAge(t.createdAt) || "new"}
+                                {t.holders ? ` · ${t.holders} holders` : ""}
+                              </span>
+                            </span>
+                            <span style={{ ...numCss, color: T.dim }}>{fmt$(t.mc || 0)}</span>
+                          </button>
+                        ))}
                       </div>
-                      <div>
-                        <div style={{ fontSize: 8, letterSpacing: 1.4, color: T.faint, marginBottom: 7 }}>
-                          {signedIn ? "📣 CALLS RIDING NOW" : "GET PAID TO TRADE"}
-                        </div>
+
+                      {/* ── THE FLOOR · movers ───────────────────────── */}
+                      <div style={{ padding: isMobile ? "0 0 14px" : "0 14px",
+                        borderRight: isMobile ? "none" : `1px solid ${T.border}`,
+                        borderBottom: isMobile ? `1px solid ${T.border}` : "none",
+                        marginBottom: isMobile ? 14 : 0 }}>
+                        <div style={colHead}>THE FLOOR · BIGGEST MOVES</div>
+                        {movers.length === 0 && <div style={emptyNote}>📡 reading the chain…</div>}
+                        {movers.map(({ t, ch }) => (
+                          <button key={t.id} onClick={() => openAnyToken(t.id)} style={row}>
+                            <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={20} />
+                            <span style={{ minWidth: 0, flex: 1 }}>
+                              <span style={symCss}>{t.sym}</span>
+                              <span style={metaCss}>MC {fmt$(t.mc || 0)}</span>
+                            </span>
+                            <span style={{ ...numCss,
+                              color: ch == null || Math.abs(ch) < 1 ? T.faint : ch > 0 ? T.green : T.red }}>
+                              {ch == null ? `M${Math.round(t.momentum || 0)}` : `${ch > 0 ? "+" : ""}${ch.toFixed(1)}%`}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* ── CALLS RIDING / the pitch ─────────────────── */}
+                      <div style={{ padding: isMobile ? 0 : "0 0 0 14px" }}>
+                        <div style={colHead}>{signedIn ? "CALLS RIDING NOW" : "GET PAID TO TRADE"}</div>
                         {signedIn ? (
                           riding.length ? riding.map((r) => (
-                            <button key={r.id} onClick={() => openAnyToken(r.id)} style={{ ...cell, width: "100%", marginBottom: 6 }}>
-                              <span style={{ fontSize: 10, fontWeight: 900, color: T.text }}>📣 {r.sym}</span>
-                              <span style={{ float: "right", fontSize: 10, fontWeight: 900, color: T.amber }}>×{r.mult.toFixed(1)}</span>
+                            <button key={r.id} onClick={() => openAnyToken(r.id)} style={row}>
+                              <span style={{ fontSize: 12 }}>📣</span>
+                              <span style={{ ...symCss, flex: 1 }}>{r.sym}</span>
+                              <span style={{ ...numCss, color: T.amber }}>×{r.mult.toFixed(1)}</span>
                             </button>
-                          )) : (
-                            <div style={{ color: T.faint, fontSize: 9, lineHeight: 1.6 }}>
-                              no 2x calls riding right now — call a token from its chart and ride the board when it doubles
-                            </div>
-                          )
+                          )) : <div style={emptyNote}>no 2x calls riding — call one from its chart and it lands here</div>
                         ) : (
-                          <div style={{ color: T.dim, fontSize: 9.5, lineHeight: 1.9 }}>
+                          <div style={{ color: T.dim, fontSize: 9.5, lineHeight: 2 }}>
                             1 · connect your Phantom<br />
                             2 · trade anything, any size<br />
-                            3 · the hourly pool pays your wallet at :05 — automatically, on chain
+                            3 · the pool pays your wallet at :05
                           </div>
                         )}
                       </div>
+                    </div>
+                    <div style={{ color: T.faint, fontSize: 8.5, textAlign: "center", marginTop: 12 }}>
+                      select a pair anywhere — or tap a row to open its chart
                     </div>
                   </div>
                 );
