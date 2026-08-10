@@ -6827,12 +6827,17 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
             <>
               <span onClick={tryEditName} title={nameLocked ? `Name changes are limited to once a week — next in ${nameLockLeft()}` : "Tap to change your username (once a week)"}
                 style={{ fontFamily: T.mono, fontSize: 12.5, fontWeight: 800, color: T.text, flex: "0 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer" }}>@{username}</span>
-              {UI_NEXT && walletConnected && wallet && (
+              {UI_NEXT && (walletConnected && wallet ? (
                 <button onClick={onDisconnectWallet} title="Log the Phantom wallet out of VALO"
                   style={{ border: `1px solid ${T.border}`, background: "transparent", color: T.faint,
                     borderRadius: 999, padding: "2px 8px", cursor: "pointer", fontFamily: T.mono,
                     fontSize: 8, fontWeight: 800, letterSpacing: 0.5, flexShrink: 0 }}>👻 LOG OUT</button>
-              )}
+              ) : liveMode ? (
+                <button onClick={onConnectWallet} title="Log in with Phantom — its balance and address track across the site"
+                  style={{ border: "1px solid rgba(125,92,240,0.5)", background: "rgba(125,92,240,0.1)", color: "#AB9FF2",
+                    borderRadius: 999, padding: "2px 9px", cursor: "pointer", fontFamily: T.mono,
+                    fontSize: 8, fontWeight: 800, letterSpacing: 0.5, flexShrink: 0 }}>👻 LOG IN</button>
+              ) : null)}
               <span style={{ flex: 1 }} />
               {/* highest callout tier — an insignia chip that sits flush in the
                   profile row, styled like the rest of the panel */}
