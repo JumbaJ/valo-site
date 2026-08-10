@@ -16028,7 +16028,7 @@ export default function App() {
                 const seen = new Set(); const seenF = new Set();
                 const movers = [...(floorToks || []), ...(mktHits || []), ...(moreToks || []), ...(tokens || [])]
                   .filter((t) => { if (!t) return false;
-                    const k = t.mint || t.liveMint || t.id;
+                    const k = t.liveMint || t.ca || t.mint || t.pool || `${t.sym}:${t.price}`;
                     return !seen.has(k) && seen.add(k); })
                   .map((t) => { const c = +(t.ch ?? t.ch24);
                     return { t, ch: Number.isFinite(c) ? c : null,
@@ -16044,7 +16044,7 @@ export default function App() {
                 const signedIn = !!(wallet && wallet.address);
                 const fresh = [...(floorToks || []), ...(mktHits || []), ...(moreToks || []), ...(tokens || [])]
                   .filter((t) => { if (!t || !t.createdAt) return false;
-                    const k = t.mint || t.liveMint || t.id;
+                    const k = t.liveMint || t.ca || t.mint || t.pool || `${t.sym}:${t.price}`;
                     return !seenF.has(k) && seenF.add(k); })
                   .map((t) => ({ t, age: Date.now() - new Date(t.createdAt).getTime() }))
                   .filter((x) => x.age > 0 && x.age < 24 * 3600e3)
@@ -16075,7 +16075,6 @@ export default function App() {
                   const bp = Math.round(t.buyPressure || 50);
                   const cells = [
                     ["MCAP", mcTxt(t.mc) || "—"],
-                    ["PRICE", `$${fmtP(t.price)}`],
                     ["TXNS", txns ? kNum(txns) : "—"],
                     ["VOL", vol ? fmt$(vol) : "—"],
                     ...(wide ? [["LP", t.tvl ? fmt$(t.tvl) : "—"]] : []),
@@ -16162,6 +16161,12 @@ export default function App() {
                                 {t.tvl ? ` · LP ${fmt$(t.tvl)}` : ""}
                               </span>
                             </span>
+                            <span onClick={(e) => { e.stopPropagation(); setFloorMc((v) => !v); }}
+                              title="Tap to switch price ⇄ market cap"
+                              style={{ fontSize: 14, fontWeight: 900, fontFamily: T.mono, color: T.text,
+                                whiteSpace: "nowrap", cursor: "pointer" }}>
+                              {figure(t)}
+                            </span>
                             </span>
                             <MetricStrip t={t} wide={!isMobile} />
                           </button>
@@ -16193,6 +16198,12 @@ export default function App() {
                                 <span style={metaCss}>{fmtAge(t.createdAt) || "live"}</span>
                               </span>
                               <span style={{ textAlign: "right" }}>
+                                <span onClick={(e) => { e.stopPropagation(); setFloorMc((v) => !v); }}
+                                  title="Tap to switch price ⇄ market cap"
+                                  style={{ display: "block", fontSize: 14, fontWeight: 900, fontFamily: T.mono,
+                                    color: T.text, whiteSpace: "nowrap", cursor: "pointer" }}>
+                                  {figure(t)}
+                                </span>
                                 <span style={{ ...numCss, display: "block",
                                   color: ch == null || Math.abs(ch) < 1 ? T.faint : ch > 0 ? T.green : T.red }}>
                                   {ch == null ? `M${Math.round(t.momentum || 0)}` : `${ch > 0 ? "+" : ""}${ch.toFixed(1)}%`}
