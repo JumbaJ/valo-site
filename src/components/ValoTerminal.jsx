@@ -672,6 +672,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   const [pinCross, setPinCross] = useState(null); // mobile: held crosshair {cx, cy}
   const pinCrossRef = useRef(null);               // 🔒 read by effects that must not move the chart
   const frozenScaleRef = useRef(null);            // 🔒 the exact axis held while the line is up
+  const lastTouchCrossRef = useRef(null);         // 🧪 UI_NEXT: where the finger last was — the line stays there
   useEffect(() => { pinCrossRef.current = pinCross; }, [pinCross]);
   const [pulseTick, setPulseTick] = useState(0);
   const requestRepaint = useCallback(() => setPulseTick((t) => t + 1), []);
@@ -882,13 +883,13 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     // remember the true range before padding — the log decision depends on it
     // 🔒 crosshair locked (mobile): hold the exact frame the user is reading —
     // arriving candles must not rescale the axis under their finger
-    if (pinCross && frozenScaleRef.current) {
+    if (!UI_NEXT && pinCross && frozenScaleRef.current) {
       const fz = frozenScaleRef.current;
       lo = fz.lo; hi = fz.hi;
     }
     // ⚓ the live close is always visible: whatever the clips decided, the
     // frame stretches to include where the price IS right now
-    if (!(pinCross && frozenScaleRef.current))
+    if (UI_NEXT || !(pinCross && frozenScaleRef.current))
     {
       const lastC = agg[Math.min(total, scaleStart + count) - 1];
       const liveC = lastC && lastC.c > 0 ? lastC.c : 0;
@@ -1652,7 +1653,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     dragRef.current = { sx: cx, sy: cy, startOffset: offset, startPriceOff: view.priceOff || 0, moved: false, t0: Date.now(), touch: !!e.touches };
     if (e.touches) {
       // already reading the chart → keep the crosshair under the finger
-      if (pinCross) {
+      if (pinCross && !UI_NEXT) {
         // 🔓 a deliberate horizontal drag means "I want to scroll" — exit the
         // pinned crosshair and let the pan happen. Without this, one accidental
         // 2s hold froze the axis and every scroll after it clipped off-frame.
@@ -1681,7 +1682,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       clearTimeout(holdRef.current);
       const g2 = geom.current || {};
       const inPlot2 = g2.chartW > 0 ? (cx > (g2.padL || 0) && cx < (g2.padL || 0) + g2.chartW) : true;
-      if (!hit && inPlot2) {               // hold the chart ~2s → crosshair mode
+      if (!hit && inPlot2 && !UI_NEXT) {   // hold the chart ~2s → crosshair mode (legacy)
         holdRef.current = setTimeout(() => {
           if (dragRef.current && dragRef.current.moved) return;
           if (navigator.vibrate) navigator.vibrate(12);
@@ -1768,7 +1769,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       setView((v) => ({ ...v, count: Math.max(12, Math.min(capNow, Math.round((ax.c0 || 60) * factor))) }));
       return;
     }
-    if (pinCross && e.touches) {
+    if (pinCross && e.touches && !UI_NEXT) {
       // 🔒 locked: the chart holds perfectly still, the finger only moves the
       // line. Dragging is USE, not dismissal — movement cancels the hold timer.
       const it3 = touchIntentRef.current;
@@ -1790,6 +1791,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       if (Math.abs(dx) > thr || (d.touch && Math.abs(dyTot) > thr)) { d.moved = true; clearTimeout(holdRef.current); }
       else if (Math.abs(dyTot) > thr) clearTimeout(holdRef.current);
       if (d.moved) {
+        if (UI_NEXT && d.touch) { lastTouchCrossRef.current = { cx, cy }; setCross({ cx, cy }); }
         const g = geom.current;
         // horizontal pan ONLY — up/down does nothing; the axis auto-fits so
         // the visible candles are always fully framed no matter where you are.
@@ -1882,6 +1884,24 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       // the tapped PRICE level — away from market it becomes a pending order
       const level = g.hi - ((cy - g.padT) / g.chartH) * (g.hi - g.lo);
       onChartTrade({ side: clickMode, level });
+      return;
+    }
+    // 🧪 UI_NEXT touch model: drag → the line rides along and STAYS where it
+    // stopped; a clean tap clears it (or places it fresh). No freeze, ever —
+    // the axis keeps fitting, so candles can never run off the frame.
+    if (UI_NEXT && d && d.touch) {
+      if (d.moved) {
+        const last = lastTouchCrossRef.current;
+        if (last) { setPinCross(last); setCross(last); }
+      } else {
+        if (pinCross || cross) { setPinCross(null); setCross(null); }
+        else {
+          const { cx, cy } = ptOf(e);
+          const g2 = geom.current || {};
+          const inPlot3 = cy >= (g2.padT || 0) && cy <= (g2.padT || 0) + (g2.chartH || 1e9);
+          if (inPlot3) { setPinCross({ cx, cy }); setCross({ cx, cy }); }
+        }
+      }
     }
   };
 
