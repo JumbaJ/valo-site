@@ -10029,6 +10029,18 @@ export default function App() {
   const [draft, setDraft] = useState("");
   const [filter, setFilter] = useState("all");
   const [burned, setBurned] = useState(0);
+  const [burnPulse, setBurnPulse] = useState(false);     // 🔥 motion = a burn just landed
+  const prevBurnRef = useRef(null);
+  useEffect(() => {
+    const v = +burned || 0;
+    const prev = prevBurnRef.current;
+    prevBurnRef.current = v;
+    if (prev != null && v > prev + 0.5) {
+      setBurnPulse(true);
+      const t = setTimeout(() => setBurnPulse(false), 4500);
+      return () => clearTimeout(t);
+    }
+  }, [burned]);
   const [tradesByToken, setTradesByToken] = useState({});
   // manual realized P/L in the last 24h (bot flows never enter this feed)
   const realized24For = (sym) => (myActivity || [])
@@ -17049,7 +17061,7 @@ export default function App() {
   // Extracted as a closure so it reads all state directly — zero props to drift.
   const renderTerminalHeader = () => (
           <div style={UI_NEXT ? { display: "flex", gap: 0, alignItems: "stretch", flexWrap: "nowrap", marginTop: -14, marginRight: 330, marginLeft: "auto", width: "fit-content", height: 40, boxSizing: "border-box", border: "1px solid rgba(125,92,240,0.38)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "linear-gradient(180deg, rgba(20,17,38,0.98), rgba(13,15,22,0.98))", boxShadow: "0 4px 18px rgba(0,0,0,0.45)", overflow: "hidden" } : { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
-            <div style={UI_NEXT ? { display: "flex", alignItems: "stretch", height: "100%", background: "linear-gradient(110deg, rgba(125,92,240,0.14) 25%, rgba(168,140,255,0.34) 50%, rgba(125,92,240,0.14) 75%), linear-gradient(180deg, rgba(125,92,240,0.20), rgba(125,92,240,0.05))", backgroundSize: "300% 100%, 100% 100%", animation: "valoSheen 7s ease-in-out infinite" } : { display: "contents" }}>
+            <div style={UI_NEXT ? { display: "flex", alignItems: "stretch", height: "100%", background: "rgba(125,92,240,0.06)" } : { display: "contents" }}>
               {UI_NEXT && (<span style={{ display: "flex", alignItems: "center", padding: "0 10px 0 12px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 1.2, color: VALO_PURPLE, borderRight: "1px solid rgba(125,92,240,0.30)" }}>$VALO</span>)}
             {[
               ["PRICE", valoLive ? `$${fmtP(valoLive.price)}` : "—", VALO_PURPLE,
@@ -17073,9 +17085,9 @@ export default function App() {
             ))}
             </div>
             <div onClick={() => setBurnOpen(true)} title="Burn tracker — your burn, site burn, circulating supply, live"
-              style={{ ...(UI_NEXT ? { display: "flex", alignItems: "center", gap: 7, height: "100%", boxSizing: "border-box", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)" } : {}), cursor: "pointer", userSelect: "none", background: "rgba(249,115,22,0.10)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 9, padding: "6px 13px", ...(UI_NEXT ? { height: "100%", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)", animation: "emberGlow 2.8s ease-in-out infinite" } : {}) }}>
+              style={{ ...(UI_NEXT ? { display: "flex", alignItems: "center", gap: 7, height: "100%", boxSizing: "border-box", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)" } : {}), cursor: "pointer", userSelect: "none", background: "rgba(249,115,22,0.10)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 9, padding: "6px 13px", ...(UI_NEXT ? { height: "100%", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)", animation: burnPulse ? "emberGlow 1.4s ease-in-out 3" : "none" } : {}) }}>
               <div className="burn-swap" style={UI_NEXT ? { fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 1, marginRight: 6 } : { fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>
-                <span style={UI_NEXT ? { display: "inline-block", animation: "flameFlick 1.6s ease-in-out infinite", marginRight: 3 } : {}}>🔥</span> {burnMine ? "YOUR" : "TOTAL"} $VALO BURNED
+                <span style={UI_NEXT ? { display: "inline-block", animation: burnPulse ? "flameFlick 1.5s ease-in-out 3" : "none", marginRight: 3 } : {}}>🔥</span> {burnMine ? "YOUR" : "TOTAL"} $VALO BURNED
               </div>
               <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: "#f97316" } : { fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: "#f97316" }}>{UI_NEXT ? Math.round(burnMine ? myBurned : burned).toLocaleString() : (burnMine ? myBurned : burned).toFixed(4)}</div>
             </div>
