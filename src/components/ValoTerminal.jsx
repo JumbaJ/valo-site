@@ -16077,7 +16077,7 @@ export default function App() {
                   const vol = (+t.greenUsd || 0) + (+t.redUsd || 0);
                   const bp = Math.round(t.buyPressure || 50);
                   const cells = [
-                    ["MCAP", mcTxt(t.mc) || "—"],
+                    ["MCAP", mcTxt(liveMc(t)) || "—"],
                     ["TXNS", txns ? kNum(txns) : "—"],
                     ["VOL", vol ? fmt$(vol) : "—"],
                     ...(wide ? [["LP", t.tvl ? fmt$(t.tvl) : "—"]] : []),
@@ -16096,10 +16096,17 @@ export default function App() {
                   );
                 };
                 // brand-new tokens live in cents — fmt$ floors them to $0.00
+                const liveMc = (t) => {
+                  const fed = +t.mc || 0;
+                  if (fed > 0) return fed;
+                  const sup = +t.supply || 1e9;              // pump.fun ships a fixed 1B
+                  const px = +t.price || 0;
+                  return px > 0 ? px * sup : 0;
+                };
                 const mcTxt = (v) => { const n = +v || 0;
                   return n >= 1000 ? fmt$(n) : n >= 1 ? `$${n.toFixed(0)}` : n > 0 ? `$${n.toFixed(2)}` : null; };
                 // a token with no market cap still deserves a number — fall back to price
-                const figure = (t) => (floorMc ? (mcTxt(t.mc) || `$${fmtP(t.price)}`) : `$${fmtP(t.price)}`);
+                const figure = (t) => (floorMc ? (mcTxt(liveMc(t)) || `$${fmtP(t.price)}`) : `$${fmtP(t.price)}`);
                 return (
                   <div style={{ border: `1px solid ${T.border}`, borderRadius: 12, padding: isMobile ? 12 : 16, fontFamily: T.mono }}>
                     {(() => {
