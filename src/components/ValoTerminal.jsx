@@ -8238,13 +8238,13 @@ function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line",
   const liveEyes = liveViewersOf(t, "pump"); // re-renders ride the price ticks
   const score = scoreToken(t);
   const rug = rugState(t);
-  const rc = rug.rugged ? T.red : ratingColor(score);
+  const rc = rug.rugged ? T.red : (UI_NEXT && score < 80 ? "#5a6478" : ratingColor(score));
   const net = t.greenUsd - t.redUsd;
   const cs = calloutStyle(calloutCount);
   return (
     <div onClick={onOpen} onMouseEnter={onHover} onMouseLeave={onLeave} className="token-card" style={{
       border: `1px solid ${active ? accent(t.hue, 45) : T.border}`,
-      background: cardGrad(t.hue), borderRadius: 18, padding: "14px 18px 0", cursor: "pointer",
+      background: UI_NEXT ? "#10141c" : cardGrad(t.hue), borderRadius: 18, padding: "14px 18px 0", cursor: "pointer",
       boxShadow: active ? `0 0 0 1px ${accent(t.hue, 45)}` : "none", transition: "border-color .2s",
       position: "relative", overflow: "hidden",
     }}>
@@ -8304,8 +8304,12 @@ function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line",
           </>, document.body)}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
-        <Meter label="MOMENTUM" value={Number.isFinite(t.momentum) ? Math.round(t.momentum) : 50} color={accent(t.hue)} />
-        <Meter label="B/S PRESSURE" value={Number.isFinite(t.buyPressure) ? Math.round(t.buyPressure) : 50} color={(t.buyPressure || 50) >= 50 ? T.green : T.red} />
+        <Meter label="MOMENTUM" value={Number.isFinite(t.momentum) ? Math.round(t.momentum) : 50}
+          color={UI_NEXT ? ((t.momentum || 0) >= 85 ? accent(t.hue) : "#4d5666") : accent(t.hue)} />
+        <Meter label="B/S PRESSURE" value={Number.isFinite(t.buyPressure) ? Math.round(t.buyPressure) : 50}
+          color={UI_NEXT
+            ? ((t.buyPressure || 50) >= 70 ? T.green : (t.buyPressure || 50) <= 30 ? T.red : "#4d5666")
+            : ((t.buyPressure || 50) >= 50 ? T.green : T.red)} />
         {fmtAge(t.createdAt) && (
           <span title={`Launched ${new Date(t.createdAt).toLocaleString()}`}
             style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 800, color: (t.ageMin || 0) < 60 ? T.green : T.faint, whiteSpace: "nowrap" }}>
