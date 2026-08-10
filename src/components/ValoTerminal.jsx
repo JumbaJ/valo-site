@@ -10012,6 +10012,7 @@ export default function App() {
   const [mobArmFn, setMobArmFn] = useState(null);        // 🧪 the active panel's arm(), reported via onReadyArm
   const [mobPanelOpen, setMobPanelOpen] = useState(false); // 🧪 ⚙: the mode panel's full controls, hidden by default
   const [chatRoomMenu, setChatRoomMenu] = useState(false); // 💬 the chat header's room selector
+  const [floorMc, setFloorMc] = useState(false);           // 🏛 floor rows: price ⇄ market cap
   const [, setFloorTick] = useState(0);                    // 🏛 the empty-state floor's clock
   useEffect(() => {
     if (sel) return;
@@ -16020,8 +16021,8 @@ export default function App() {
                   .sort((a, b) => a.age - b.age)
                   .slice(0, 7);
                 const row = { display: "flex", alignItems: "center", gap: 8, width: "100%",
-                  padding: "7px 6px", border: "none", background: "transparent", cursor: "pointer",
-                  textAlign: "left", borderRadius: 7 };
+                  padding: "8px 9px", border: `1px solid ${T.border}`, background: "#10141c",
+                  cursor: "pointer", textAlign: "left", borderRadius: 9, marginBottom: 5 };
                 const colHead = { fontSize: 8, letterSpacing: 1.4, color: T.faint, marginBottom: 6,
                   paddingLeft: 6, whiteSpace: "nowrap" };
                 const symCss = { display: "block", fontSize: 10.5, fontWeight: 900, color: T.text,
@@ -16029,6 +16030,9 @@ export default function App() {
                 const metaCss = { display: "block", fontSize: 8, color: T.faint, whiteSpace: "nowrap" };
                 const numCss = { fontSize: 10, fontWeight: 900, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
                 const emptyNote = { color: T.faint, fontSize: 8.5, padding: "10px 6px", lineHeight: 1.6 };
+                // brand-new tokens live in cents — fmt$ floors them to $0.00
+                const mcTxt = (v) => { const n = +v || 0;
+                  return n >= 1000 ? fmt$(n) : n >= 1 ? `$${n.toFixed(0)}` : n > 0 ? `$${n.toFixed(2)}` : "—"; };
                 return (
                   <div style={{ border: `1px solid ${T.border}`, borderRadius: 12, padding: isMobile ? 12 : 16, fontFamily: T.mono }}>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap",
@@ -16037,10 +16041,12 @@ export default function App() {
                       <span style={{ fontSize: 8.5, color: T.faint }}>300,000 $VALO pool · trade this hour and your wallet is in · paid at :05, on chain</span>
                     </div>
                     <div style={{ display: "grid",
-                      gridTemplateColumns: isMobile ? "1fr" : "1.15fr 1.15fr 0.9fr", gap: 0 }}>
+                      gridTemplateColumns: isMobile ? "1fr" : "1.15fr 1.15fr 0.9fr", gap: 0,
+                      minHeight: isMobile ? "auto" : "calc(100vh - 320px)" }}>
 
                       {/* ── NEW LAUNCHES ─────────────────────────────── */}
                       <div style={{ padding: isMobile ? "0 0 14px" : "0 14px 0 0",
+                        overflowY: isMobile ? "visible" : "auto", maxHeight: isMobile ? "none" : "calc(100vh - 330px)",
                         borderRight: isMobile ? "none" : `1px solid ${T.border}`,
                         borderBottom: isMobile ? `1px solid ${T.border}` : "none",
                         marginBottom: isMobile ? 14 : 0 }}>
@@ -16056,13 +16062,18 @@ export default function App() {
                                 {t.holders ? ` · ${t.holders} holders` : ""}
                               </span>
                             </span>
-                            <span style={{ ...numCss, color: T.dim }}>{fmt$(t.mc || 0)}</span>
+                            <span onClick={(e) => { e.stopPropagation(); setFloorMc((v) => !v); }}
+                              title="Tap to switch price ⇄ market cap"
+                              style={{ ...numCss, color: T.dim, textDecoration: "underline dotted", textUnderlineOffset: 3 }}>
+                              {floorMc ? mcTxt(t.mc) : `$${fmtP(t.price)}`}
+                            </span>
                           </button>
                         ))}
                       </div>
 
                       {/* ── THE FLOOR · movers ───────────────────────── */}
                       <div style={{ padding: isMobile ? "0 0 14px" : "0 14px",
+                        overflowY: isMobile ? "visible" : "auto", maxHeight: isMobile ? "none" : "calc(100vh - 330px)",
                         borderRight: isMobile ? "none" : `1px solid ${T.border}`,
                         borderBottom: isMobile ? `1px solid ${T.border}` : "none",
                         marginBottom: isMobile ? 14 : 0 }}>
@@ -16073,7 +16084,11 @@ export default function App() {
                             <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={20} />
                             <span style={{ minWidth: 0, flex: 1 }}>
                               <span style={symCss}>{t.sym}</span>
-                              <span style={metaCss}>MC {fmt$(t.mc || 0)}</span>
+                              <span onClick={(e) => { e.stopPropagation(); setFloorMc((v) => !v); }}
+                                title="Tap to switch price ⇄ market cap"
+                                style={{ ...metaCss, cursor: "pointer" }}>
+                                {floorMc ? `MC ${mcTxt(t.mc)}` : `$${fmtP(t.price)}`}
+                              </span>
                             </span>
                             <span style={{ ...numCss,
                               color: ch == null || Math.abs(ch) < 1 ? T.faint : ch > 0 ? T.green : T.red }}>
@@ -16084,7 +16099,8 @@ export default function App() {
                       </div>
 
                       {/* ── CALLS RIDING / the pitch ─────────────────── */}
-                      <div style={{ padding: isMobile ? 0 : "0 0 0 14px" }}>
+                      <div style={{ padding: isMobile ? 0 : "0 0 0 14px",
+                        overflowY: isMobile ? "visible" : "auto", maxHeight: isMobile ? "none" : "calc(100vh - 330px)" }}>
                         <div style={colHead}>{signedIn ? "CALLS RIDING NOW" : "GET PAID TO TRADE"}</div>
                         {signedIn ? (
                           riding.length ? riding.map((r) => (
