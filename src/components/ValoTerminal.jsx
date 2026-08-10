@@ -10013,6 +10013,7 @@ export default function App() {
   const [mobPanelOpen, setMobPanelOpen] = useState(false); // 🧪 ⚙: the mode panel's full controls, hidden by default
   const [chatRoomMenu, setChatRoomMenu] = useState(false); // 💬 the chat header's room selector
   const [mobView, setMobView] = useState("floor");          // 🏛 mobile idle: "floor" ⇄ "scan"
+  const [floorCol, setFloorCol] = useState("new");         // 🏛 mobile floor: launches ⇄ biggest moves
   const [floorMc, setFloorMc] = useState(false);           // 🏛 floor rows: price ⇄ market cap
   const [floorToks, setFloorToks] = useState([]);          // 🏛 the floor's OWN feed — it never scavenges
   const floorToksRef = useRef([]); floorToksRef.current = floorToks;
@@ -16143,12 +16144,22 @@ export default function App() {
                       minHeight: isMobile ? "auto" : "calc(100vh - 320px)" }}>
 
                       {/* ── NEW LAUNCHES ─────────────────────────────── */}
-                      <div style={{ padding: isMobile ? "0 0 14px" : "0 14px 0 0",
+                      <div style={{ display: isMobile && floorCol !== "new" ? "none" : undefined,
+                        padding: isMobile ? "0 0 14px" : "0 14px 0 0",
                         overflowY: isMobile ? "visible" : "auto", maxHeight: isMobile ? "none" : "calc(100vh - 330px)",
                         borderRight: isMobile ? "none" : `1px solid ${T.border}`,
                         borderBottom: isMobile ? `1px solid ${T.border}` : "none",
                         marginBottom: isMobile ? 14 : 0 }}>
-                        <div style={colHead}>NEW LAUNCHES</div>
+                        {isMobile ? (
+                          <button onClick={() => setFloorCol("movers")}
+                            style={{ ...colHead, display: "flex", width: "100%", alignItems: "center",
+                              justifyContent: "space-between", padding: "8px 10px", marginBottom: 8,
+                              border: `1px solid ${T.border2}`, borderRadius: 9, background: "rgba(255,255,255,0.03)",
+                              color: T.text, cursor: "pointer", fontWeight: 900 }}>
+                            <span>🌱 NEW LAUNCHES</span>
+                            <span style={{ color: T.faint }}>⇄ biggest moves</span>
+                          </button>
+                        ) : <div style={colHead}>NEW LAUNCHES</div>}
                         {fresh.length === 0 && <div style={emptyNote}>watching for the next launch…</div>}
                         {fresh.map(({ t }) => (
                           <button key={t.id} onClick={() => openAnyToken(t.id)} style={{ ...row, display: "block" }}>
@@ -16176,12 +16187,22 @@ export default function App() {
                       </div>
 
                       {/* ── THE FLOOR · movers ───────────────────────── */}
-                      <div style={{ padding: isMobile ? "0 0 14px" : "0 14px",
+                      <div style={{ display: isMobile && floorCol !== "movers" ? "none" : undefined,
+                        padding: isMobile ? "0 0 14px" : "0 14px",
                         overflowY: isMobile ? "visible" : "auto", maxHeight: isMobile ? "none" : "calc(100vh - 330px)",
                         borderRight: isMobile ? "none" : `1px solid ${T.border}`,
                         borderBottom: isMobile ? `1px solid ${T.border}` : "none",
                         marginBottom: isMobile ? 14 : 0 }}>
-                        <div style={colHead}>THE FLOOR · BIGGEST MOVES</div>
+                        {isMobile ? (
+                          <button onClick={() => setFloorCol("new")}
+                            style={{ ...colHead, display: "flex", width: "100%", alignItems: "center",
+                              justifyContent: "space-between", padding: "8px 10px", marginBottom: 8,
+                              border: `1px solid ${T.border2}`, borderRadius: 9, background: "rgba(255,255,255,0.03)",
+                              color: T.text, cursor: "pointer", fontWeight: 900 }}>
+                            <span>📈 BIGGEST MOVES</span>
+                            <span style={{ color: T.faint }}>⇄ new launches</span>
+                          </button>
+                        ) : <div style={colHead}>THE FLOOR · BIGGEST MOVES</div>}
                         {movers.length < 3 && (
                           <div style={emptyNote}>
                             📡 reading the chain — floor feed has {(floorToks || []).length} tokens,
