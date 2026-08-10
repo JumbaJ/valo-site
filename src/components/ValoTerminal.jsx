@@ -10014,6 +10014,7 @@ export default function App() {
   const [chatRoomMenu, setChatRoomMenu] = useState(false); // 💬 the chat header's room selector
   const [floorMc, setFloorMc] = useState(false);           // 🏛 floor rows: price ⇄ market cap
   const [floorToks, setFloorToks] = useState([]);          // 🏛 the floor's OWN feed — it never scavenges
+  const floorToksRef = useRef([]); floorToksRef.current = floorToks;
   useEffect(() => {
     if (sel) return;                                       // only while the floor is showing
     let stop = false;
@@ -13363,7 +13364,7 @@ export default function App() {
     };
     const local = board.find((t) => t.id === id);
     if (local) { paintCached(local); setSel(local.id); setClickMode(null); return; }
-    let hit = [...mktHits, ...moreToks].find((t) => t.id === id);
+    let hit = [...mktHits, ...moreToks, ...(floorToksRef.current || [])].find((t) => t.id === id);
     if (!hit && tokObj) hit = tokObj;               // search-local tokens (fresh feed) open too
     if (!hit) return;
     if (!hit.pool && hit.liveMint) { openTokenByMint(hit.liveMint); setClickMode(null); return; }
