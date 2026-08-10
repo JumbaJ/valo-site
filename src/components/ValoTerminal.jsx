@@ -16138,15 +16138,6 @@ export default function App() {
                         </div>
                       );
                     })()}
-                    {UI_NEXT && isMobile && (
-                      <button onClick={() => setMobView("scan")}
-                        style={{ display: "flex", width: "100%", alignItems: "center", justifyContent: "center", gap: 7,
-                          margin: "0 0 12px", padding: "9px 0", borderRadius: 10, cursor: "pointer",
-                          border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)",
-                          color: T.dim, fontFamily: T.mono, fontSize: 10.5, fontWeight: 900 }}>
-                        📡 SCANNER · browse every live token
-                      </button>
-                    )}
                     <div style={{ display: "grid",
                       gridTemplateColumns: isMobile ? "1fr" : "1.15fr 1.15fr 0.9fr", gap: 0,
                       minHeight: isMobile ? "auto" : "calc(100vh - 320px)" }}>
@@ -17872,9 +17863,19 @@ export default function App() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <SearchBar tokens={tokens} username={username} full eco isMobile liveData={liveData} valoMint={valoMint} onFullEco={() => setEcoFull(true)} mktExtra={[...mktHits, ...moreToks]} onQuery={setEcoQ} onPickToken={openAnyToken} onPickUser={(u) => setProfileUser(u)} />
                 </div>
-                <button onClick={() => setCompactList((v) => !v)} title={compactList ? "Expand cards" : "Compact list"}
-                  style={{ flex: "0 0 auto", border: `1px solid ${compactList ? VALO_PURPLE : T.border2}`, background: T.panel, color: compactList ? VALO_PURPLE : T.dim,
-                    borderRadius: 9, padding: "0 13px", fontSize: 15, fontWeight: 900, cursor: "pointer" }}>{compactList ? "▦" : "▤"}</button>
+                <button
+                  onClick={() => { if (UI_NEXT && isMobile && !sel) setMobView((v) => (v === "floor" ? "scan" : "floor"));
+                    else setCompactList((v) => !v); }}
+                  title={UI_NEXT && isMobile && !sel
+                    ? (mobView === "floor" ? "Show the scanner" : "Show the floor")
+                    : (compactList ? "Expand cards" : "Compact list")}
+                  style={{ flex: "0 0 auto",
+                    border: `1px solid ${(UI_NEXT && isMobile && !sel ? mobView === "floor" : compactList) ? VALO_PURPLE : T.border2}`,
+                    background: T.panel,
+                    color: (UI_NEXT && isMobile && !sel ? mobView === "floor" : compactList) ? VALO_PURPLE : T.dim,
+                    borderRadius: 9, padding: "0 13px", fontSize: 15, fontWeight: 900, cursor: "pointer" }}>
+                  {UI_NEXT && isMobile && !sel ? (mobView === "floor" ? "🏛" : "📡") : (compactList ? "▦" : "▤")}
+                </button>
               </div>
               {/* ▲ back to the top — a full row that fades in once you're down the list */}
               <div onClick={() => { flashTop(); window.scrollTo({ top: 0, behavior: "smooth" }); }}
@@ -17974,15 +17975,6 @@ export default function App() {
               style={{ position: "sticky", top: 0, zIndex: 3, justifySelf: "end", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center",
                 background: "rgba(15,19,28,0.9)", border: `1px solid ${T.border2}`, borderRadius: 7, cursor: "pointer", color: T.dim, fontSize: 12, marginBottom: -34 }}>‹</button>
             {scanPullStrip}
-            {UI_NEXT && isMobile && !sel && (
-              <button onClick={() => setMobView("floor")}
-                style={{ display: "flex", width: "100%", alignItems: "center", justifyContent: "center", gap: 7,
-                  margin: "0 0 8px", padding: "9px 0", borderRadius: 10, cursor: "pointer",
-                  border: `1px solid ${VALO_PURPLE}55`, background: "rgba(125,92,240,0.10)",
-                  color: VALO_PURPLE, fontFamily: T.mono, fontSize: 10.5, fontWeight: 900 }}>
-                🏛 THE FLOOR · epoch, movers &amp; launches
-              </button>
-            )}
             <div style={{ margin: "0 34px 8px 0" }}>{scanModeDropdown}</div>
             {secBanner}
             {liveData && !shown.length && (
