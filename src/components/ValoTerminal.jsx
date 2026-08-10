@@ -16405,7 +16405,7 @@ export default function App() {
     return () => { stop = true; clearInterval(iv); };
   }, [chatTab]);
   const tgRoomBody = (
-    <div style={{ display: "flex", flexDirection: "column", height: 300 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: isPhone ? "56vh" : 430 }}>
       <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, paddingRight: 4 }}>
         {tgFeed.length === 0 && (
           <div style={{ color: T.faint, fontFamily: T.mono, fontSize: 10, textAlign: "center", marginTop: 30 }}>
@@ -16452,8 +16452,7 @@ export default function App() {
                     style={{ display: "flex", alignItems: "center", gap: 6, border: `1px solid ${T.border2}`,
                       background: "rgba(255,255,255,0.03)", color: T.text, borderRadius: 9, padding: "5px 11px",
                       fontFamily: T.mono, fontSize: 10, fontWeight: 900, cursor: "pointer" }}>
-                    {chatTab === "tg" && tgRoomBody}
-              {chatTab === "social" ? "# SOCIAL" : chatTab === "coin" ? `# ${(selected && selected.sym) || "TOKEN"} ROOM`
+                    {chatTab === "social" ? "# SOCIAL" : chatTab === "coin" ? `# ${(selected && selected.sym) || "TOKEN"} ROOM`
                       : chatTab === "alerts" ? "📣 MARKET ALERTS" : chatTab === "private" ? "⚡ MY TRADES" : "✈ TELEGRAM"} {chatRoomMenu ? "▴" : "▾"}
                   </button>
                   <span onClick={() => setChatOn((v) => !v)} title={chatOn ? "Live — tap to pause" : "Paused — tap to resume"}
@@ -16523,7 +16522,7 @@ export default function App() {
                 <div style={{ height: 42, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: T.mono, fontSize: 10.5, color: T.faint }}>
                   Chat hidden — tap 👁 SHOW to bring it back.
                 </div>
-              ) : chatTab === "social" ? (
+              ) : chatTab === "tg" ? tgRoomBody : chatTab === "social" ? (
                 <>
                   <div ref={socialRef} style={{ height: 200, overflowY: "auto", opacity: chatOn ? 1 : 0.35 }}>
                     {socialMsgs.length === 0 && <div style={{ fontSize: 11, color: T.faint }}>Public chat — say anything to other traders. Coin names are clickable.</div>}
