@@ -1653,6 +1653,16 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     if (e.touches) {
       // already reading the chart → keep the crosshair under the finger
       if (pinCross) {
+        // 🔓 a deliberate horizontal drag means "I want to scroll" — exit the
+        // pinned crosshair and let the pan happen. Without this, one accidental
+        // 2s hold froze the axis and every scroll after it clipped off-frame.
+        const d0 = dragRef.current;
+        if (d0 && Math.abs(cx - d0.sx) > 22 && Math.abs(cx - d0.sx) > Math.abs(cy - d0.sy) * 1.4) {
+          clearTimeout(holdRef.current);
+          frozenScaleRef.current = null;
+          setPinCross(null); setCross(null);
+          // fall through — the pan code below takes this same move
+        } else {
         if (e.touches) {
           clearTimeout(holdRef.current);
           holdRef.current = setTimeout(() => {   // hold again ~2s → crosshair goes away
@@ -1663,6 +1673,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
           }, 1900);
         }
         setPinCross({ cx, cy }); setCross({ cx, cy }); return;
+        }
       }
     }
     if (e.touches) {                       // press-and-hold a line → cancel bubble
@@ -2646,6 +2657,9 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
                     {pct === 100 ? "SELL ALL" : `SELL ${pct}%`}
                   </button>
                 ))}
+                <button onClick={() => setRailFold(true)} title="Fold the rail — more chart"
+                  style={{ flex: "0 0 30px", border: "none", borderBottom: "2px solid transparent",
+                    background: "transparent", color: T.faint, cursor: "pointer", fontSize: 11 }}>›</button>
               </div>
             </div>
           ))}
@@ -9911,8 +9925,11 @@ export default function App() {
   const [tf, setTf] = useState(15);
   const [tfMoreOpen, setTfMoreOpen] = useState(false);   // 🧪 UI_NEXT: reveal the rarely-used durations
   const [linksOpen, setLinksOpen] = useState(null);      // 🧪 UI_NEXT: token links popover (by token id)
+  const [sigSheet, setSigSheet] = useState(false);       // 🧪 UI_NEXT mobile: signals bottom sheet
+  const [moreBand, setMoreBand] = useState(false);       // 🧪 UI_NEXT mobile: the band's ⋯ hanging menu
   const [flowDetail, setFlowDetail] = useState(false);   // 🧪 UI_NEXT: momentum + pressure under the flow bar
   const [railTab, setRailTab] = useState("trades");      // 🧪 UI_NEXT: trades | positions | chat in one panel
+  const [railFold, setRailFold] = useState(false);       // 🧪 UI_NEXT: fold the whole rail to a strip while charting
   const tokensRef = useRef([]); tokensRef.current = tokens;
   const selRef = useRef(null); // live mirror for effects that must not re-run on every tick
   const [alerts, setAlerts] = useState([]);     // MARKET ALERTS — rising/falling coins only
@@ -15870,7 +15887,9 @@ export default function App() {
                 Select a pair to open its chart
               </div>
             ) : (
-              <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14, position: "relative" }}>
+              <div style={UI_NEXT && isMobile
+                ? { background: "transparent", border: "none", borderRadius: 0, padding: "0 0 6px", position: "relative" }
+                : { background: T.panel, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14, position: "relative" }}>
 
                 {!isMobile && myMcCallouts[selected.id] && (
                   <div style={{ position: "absolute", top: 10, right: 14, zIndex: 12, pointerEvents: "auto", overflow: "visible" }}>
@@ -15878,9 +15897,48 @@ export default function App() {
                   </div>
                 )}
                 {renderTokenHeader()}
+                {isMobile && UI_NEXT && (
+                  <div style={{ position: "relative", display: "flex", alignItems: "stretch", height: 30,
+                    borderTop: `1px solid ${T.border}`, borderBottom: `1px solid ${T.border}`, marginBottom: 6 }}>
+                    {TIMEFRAMES.filter((f) => TIMEFRAMES_PRIMARY.has(f.m) && f.m !== 1440).map((f) => (
+                      <button key={f.k} onClick={() => setTf(f.m)}
+                        style={{ flex: 1, border: "none", borderRight: `1px solid ${T.border}`, cursor: "pointer",
+                          background: tf === f.m ? "rgba(125,92,240,0.14)" : "transparent",
+                          color: tf === f.m ? VALO_PURPLE : T.dim, fontFamily: T.mono, fontSize: 10, fontWeight: 800 }}>{f.k}</button>
+                    ))}
+                    <button onClick={() => setSigSheet(true)}
+                      style={{ flex: 1.4, border: "none", borderRight: `1px solid ${T.border}`, cursor: "pointer",
+                        background: "transparent", color: T.dim, fontFamily: T.mono, fontSize: 10, fontWeight: 800 }}>
+                      {selected.trending ? "🔥" : ""}{showDevTrades ? "👨‍💻" : ""}{myMcCallouts[selected.id] ? "📣" : "🎛"} ▾
+                    </button>
+                    <button onClick={() => setMoreBand((v) => !v)}
+                      style={{ flex: 0.7, border: "none", cursor: "pointer",
+                        background: moreBand ? "rgba(255,255,255,0.05)" : "transparent",
+                        color: T.dim, fontFamily: T.mono, fontSize: 11, fontWeight: 800 }}>{moreBand ? "▴" : "⋯"}</button>
+                    {moreBand && (
+                      <>
+                        <div onClick={() => setMoreBand(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                        <div style={{ position: "absolute", top: "100%", right: 0, zIndex: 41, minWidth: 190,
+                          background: T.panel, border: `1px solid ${T.border2}`, borderRadius: "0 0 10px 10px",
+                          boxShadow: "0 12px 30px rgba(0,0,0,0.5)", padding: 8 }}>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
+                            {TIMEFRAMES.filter((f) => !TIMEFRAMES_PRIMARY.has(f.m) || f.m === 1440).map((f) => (
+                              <button key={f.k} onClick={() => { setTf(f.m); setMoreBand(false); }}
+                                style={{ ...chip(tf === f.m), padding: "4px 9px", fontSize: 9.5 }}>{f.k}</button>
+                            ))}
+                          </div>
+                          <div style={{ display: "flex", gap: 4 }}>
+                            <button onClick={() => setChartMode("candles")} style={{ ...chip(chartMode === "candles"), padding: "4px 9px", fontSize: 9.5 }}>▮ CANDLES</button>
+                            <button onClick={() => setChartMode("line")} style={{ ...chip(chartMode === "line"), padding: "4px 9px", fontSize: 9.5 }}>∿ LINE</button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
                 {/* MOBILE chart-tools row — candles/line/trending left, callout tier
                     pinned to the right with no frame around it */}
-                {isMobile && (
+                {isMobile && !UI_NEXT && (
                   <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 8, flexWrap: "wrap", minWidth: 0 }}>
                     <button onClick={() => setChartMode("candles")} style={{ ...chip(chartMode === "candles"), padding: "4px 7px", fontSize: 9.5 }}>▮</button>
                     <button onClick={() => setChartMode("line")} style={{ ...chip(chartMode === "line"), padding: "4px 7px", fontSize: 9.5 }}>∿</button>
@@ -15895,6 +15953,36 @@ export default function App() {
                       <span data-tour="callout">{calloutWidget(true, 26, true)}</span>
                     </span>
                   </div>
+                )}
+                
+                {isMobile && UI_NEXT && sigSheet && typeof document !== "undefined" && createPortal(
+                  <>
+                    <div onClick={() => setSigSheet(false)} style={{ position: "fixed", inset: 0, zIndex: 344, background: "rgba(5,7,12,0.55)", backdropFilter: "blur(2px)" }} />
+                    <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: "max(12px, env(safe-area-inset-bottom))",
+                      width: "min(440px, calc(100vw - 20px))", zIndex: 345, maxHeight: "70vh", overflowY: "auto",
+                      borderRadius: 14, border: `1px solid ${T.border2}`, background: T.panel, padding: 12 }}>
+                      <div style={{ fontFamily: T.mono, fontSize: 8.5, letterSpacing: 1.5, color: T.faint, marginBottom: 6 }}>SIGNALS</div>
+                      <div onClick={() => { setSigSheet(false); setDevView(false); setTrendOpen(true); }}
+                        style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 8px", borderRadius: 9, cursor: "pointer",
+                          color: selected.trending ? "#f0b90b" : T.dim, fontFamily: T.mono, fontSize: 11, fontWeight: 800 }}>
+                        🔥 <span>Trending</span><span style={{ marginLeft: "auto", color: T.faint, fontSize: 9 }}>why ↗</span>
+                      </div>
+                      <div onClick={() => setShowDevTrades((v) => !v)}
+                        style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 8px", borderRadius: 9, cursor: "pointer",
+                          color: showDevTrades ? accent(selected.hue) : T.dim, fontFamily: T.mono, fontSize: 11, fontWeight: 800 }}>
+                        👨‍💻 <span>Dev buys on chart</span><span style={{ marginLeft: "auto", fontSize: 9, color: showDevTrades ? T.green : T.faint }}>{showDevTrades ? "ON" : "off"}</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 8px" }}>
+                        📣 <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: T.dim }}>Callout</span>
+                        <span style={{ marginLeft: "auto" }}>{calloutWidget(true, 24, true)}</span>
+                      </div>
+                      <div style={{ fontFamily: T.mono, fontSize: 8.5, letterSpacing: 1.5, color: T.faint, margin: "10px 0 6px" }}>CHART</div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => setChartMode("candles")} style={{ ...chip(chartMode === "candles"), padding: "6px 12px", fontFamily: T.mono, fontSize: 10 }}>▮ CANDLES</button>
+                        <button onClick={() => setChartMode("line")} style={{ ...chip(chartMode === "line"), padding: "6px 12px", fontFamily: T.mono, fontSize: 10 }}>∿ LINE</button>
+                      </div>
+                    </div>
+                  </>, document.body
                 )}
 
                 {/* metrics under price — on mobile this whole block crunches away
@@ -15987,7 +16075,7 @@ export default function App() {
                   );
                 })()}
                 {/* durations — always visible above the chart */}
-                <div style={{ display: UI_NEXT && !isMobile ? "none" : "flex", gap: 4, marginBottom: isMobile ? 0 : 10, flexWrap: "wrap", alignItems: "center" }}>
+                <div style={{ display: UI_NEXT ? "none" : "flex", gap: 4, marginBottom: isMobile ? 0 : 10, flexWrap: "wrap", alignItems: "center" }}>
                   {(UI_NEXT
                     ? TIMEFRAMES.filter((f) => TIMEFRAMES_PRIMARY.has(f.m) || tf === f.m || tfMoreOpen)
                     : TIMEFRAMES
@@ -16804,6 +16892,14 @@ export default function App() {
 
   // ═════════ <RailPanel/> — wallet bar · trades | positions | chat tabs (UI_NEXT rail) ═════════
   const renderRailPanel = () => (
+            railFold ? (
+            <div onClick={() => setRailFold(false)} title="Open trades · positions · chat"
+              style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, cursor: "pointer",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "12px 0 14px",
+                fontFamily: T.mono, fontSize: 11, color: T.dim }}>
+              <span>‹</span><span>⚡</span><span>📊</span><span>💬</span>
+            </div>
+            ) : (
             <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, overflow: "hidden" }}>
               <button onClick={() => setWalletCollapsed((v) => !v)}
                 title={walletCollapsed ? "Open your wallet" : "Close your wallet"}
@@ -16960,6 +17056,7 @@ export default function App() {
                 {railTab === "chat" && chatBlock}
               </div>
             </div>
+            )
   );
 
   return (
@@ -17298,7 +17395,7 @@ export default function App() {
           </>
         ) : (
         <div className="pt-grid" ref={gridRef} style={{ display: "grid", gridTemplateColumns: UI_NEXT
-            ? `${scanCollapsed ? 40 : 300}px minmax(320px,1fr) ${360 + Math.round(chartInsetR * 0.5)}px`
+            ? `${scanCollapsed ? 40 : 300}px minmax(320px,1fr) ${railFold ? 44 : 360 + Math.round(chartInsetR * 0.5)}px`
             : `${scanCollapsed ? 40 : 300}px minmax(320px,1fr) ${(layoutPro ? 330 : 304) + Math.round(chartInsetR * 0.5)}px ${walletCollapsed ? 40 : 322 + Math.round(chartInsetR * 0.5)}px`, gap: 14, alignItems: "start",
           width: `calc(100%/1.13 + ${Math.round(pullR / 1.13)}px)`, "--stkTop": `${Math.round((headerH + 8) / 1.13)}px`, zoom: 1.13 }}>
           {/* scanner — slides left as the chart is pulled over, stays same width */}
