@@ -381,8 +381,20 @@ const relayToSite = async (msg) => {
   } catch (e) { console.error("relay:", e.message); }
 };
 
+const syncEditToSite = async (msg) => {
+  if (!SB_URL || !SB_KEY || String(msg.chat.id) !== String(CHAT_ID)) return;
+  const newText = msg.text || msg.caption || "";
+  if (!newText) return;
+  await fetch(`${SB_URL}/rest/v1/tg_feed?msg_id=eq.${msg.message_id}`, {
+    method: "PATCH",
+    headers: { apikey: SB_KEY, authorization: `Bearer ${SB_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({ text: String(newText).slice(0, 900) }),
+  }).catch(() => {});
+};
+
 const handle = async (u) => {
-  const msg = u.message || u.edited_message;
+  if (u.edited_message) { syncEditToSite(u.edited_message).catch(() => {}); return; }
+  const msg = u.message;
   if (!msg) return;
   const chat = msg.chat && msg.chat.id;
   if (!chat) return;
@@ -399,6 +411,37 @@ const handle = async (u) => {
   }
 
   const text = (msg.text || "").trim();
+
+  // ── MODERATION — /scrub (reply) deletes a message from Telegram AND the
+  // site feed in one act; /scrubuser <name> purges a sender from the site.
+  if (text.startsWith("/scrub") && String(chat) === String(CHAT_ID)) {
+    const isAdmin = await fetch(`${API}/getChatMember?chat_id=${chat}&user_id=${msg.from.id}`)
+      .then((r) => r.json()).then((j) => j.ok && ["creator", "administrator"].includes(j.result.status))
+      .catch(() => false);
+    if (!isAdmin) return;
+    const sbDel = async (filter) => {
+      if (!SB_URL || !SB_KEY) return;
+      await fetch(`${SB_URL}/rest/v1/tg_feed?${filter}`, {
+        method: "DELETE",
+        headers: { apikey: SB_KEY, authorization: `Bearer ${SB_KEY}` },
+      }).catch(() => {});
+    };
+    if (text.startsWith("/scrubuser")) {
+      const who3 = text.replace("/scrubuser", "").trim().slice(0, 48);
+      if (who3) {
+        await sbDel(`name=ilike.${encodeURIComponent(who3 + "*")}`);
+        await fetch(`${API}/deleteMessage?chat_id=${chat}&message_id=${msg.message_id}`).catch(() => {});
+      }
+      return;
+    }
+    const target = msg.reply_to_message;
+    if (target) {
+      await fetch(`${API}/deleteMessage?chat_id=${chat}&message_id=${target.message_id}`).catch(() => {});
+      await sbDel(`msg_id=eq.${target.message_id}`);
+    }
+    await fetch(`${API}/deleteMessage?chat_id=${chat}&message_id=${msg.message_id}`).catch(() => {});
+    return;
+  }
 
   // someone pasted a pump.fun-style mint that is not ours
   if (!text.startsWith("/")) {
