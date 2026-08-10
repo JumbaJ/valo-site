@@ -10012,6 +10012,12 @@ export default function App() {
   const [mobArmFn, setMobArmFn] = useState(null);        // 🧪 the active panel's arm(), reported via onReadyArm
   const [mobPanelOpen, setMobPanelOpen] = useState(false); // 🧪 ⚙: the mode panel's full controls, hidden by default
   const [chatRoomMenu, setChatRoomMenu] = useState(false); // 💬 the chat header's room selector
+  const [, setFloorTick] = useState(0);                    // 🏛 the empty-state floor's clock
+  useEffect(() => {
+    if (sel) return;
+    const iv = setInterval(() => setFloorTick((t2) => t2 + 1), 20000);
+    return () => clearInterval(iv);
+  }, [sel]);
   const [flowDetail, setFlowDetail] = useState(false);   // 🧪 UI_NEXT: momentum + pressure under the flow bar
   const [railTab, setRailTab] = useState("trades");      // 🧪 UI_NEXT: trades | positions | chat in one panel
   const [railFold, setRailFold] = useState(false);       // 🧪 UI_NEXT: fold the whole rail to a strip while charting
@@ -15990,9 +15996,88 @@ export default function App() {
 
   const chartBlock = (
             !selected ? (
+              UI_NEXT ? (() => {
+                const minsTo = 60 - new Date().getMinutes();
+                const movers = (moreToks || [])
+                  .filter((t) => (t.mc || 0) > 3000 && Number.isFinite(+(t.ch ?? t.ch24)))
+                  .sort((a, b) => Math.abs(+(b.ch ?? b.ch24) || 0) - Math.abs(+(a.ch ?? a.ch24) || 0))
+                  .slice(0, 6);
+                const riding = (callouts || []).map((c) => {
+                  const t = tokens.find((x) => x.id === c.tokenId);
+                  if (!t) return null;
+                  const mult = c.mcAt > 0 ? mcOf(t) / c.mcAt : 0;
+                  return mult >= 2 ? { id: t.id, sym: t.sym, mult } : null;
+                }).filter(Boolean).sort((a, b) => b.mult - a.mult).slice(0, 4);
+                const signedIn = !!(wallet && wallet.address);
+                const cell = { background: "#10141c", border: `1px solid ${T.border}`, borderRadius: 10,
+                  padding: "9px 11px", cursor: "pointer", textAlign: "left" };
+                return (
+                  <div style={{ border: `1px solid ${T.border}`, borderRadius: 12, padding: isMobile ? 12 : 16, fontFamily: T.mono }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap",
+                      padding: "2px 2px 10px", borderBottom: `1px solid ${T.border}`, marginBottom: 12 }}>
+                      <span style={{ fontSize: 10, fontWeight: 900, color: T.text }}>⚡ NEXT EPOCH PAYS IN {minsTo}m</span>
+                      <span style={{ fontSize: 8.5, color: T.faint }}>300,000 $VALO pool · trade this hour and your wallet is in · paid at :05, on chain</span>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 240px", gap: 14 }}>
+                      <div>
+                        <div style={{ fontSize: 8, letterSpacing: 1.4, color: T.faint, marginBottom: 7 }}>THE FLOOR · BIGGEST MOVES RIGHT NOW</div>
+                        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: 8 }}>
+                          {movers.length === 0 && (
+                            <div style={{ gridColumn: "1 / -1", color: T.faint, fontSize: 9.5, textAlign: "center", padding: 22 }}>
+                              📡 reading the chain — the floor fills as live tokens land
+                            </div>
+                          )}
+                          {movers.map((t) => {
+                            const c = +(t.ch ?? t.ch24) || 0;
+                            return (
+                              <button key={t.id} onClick={() => openAnyToken(t.id)} style={cell}>
+                                <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
+                                  <span style={{ fontSize: 10.5, fontWeight: 900, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.sym}</span>
+                                  <span style={{ fontSize: 10, fontWeight: 900, color: Math.abs(c) < 1 ? T.faint : c > 0 ? T.green : T.red }}>
+                                    {c > 0 ? "+" : ""}{c.toFixed(1)}%</span>
+                                </div>
+                                <div style={{ fontSize: 8.5, color: T.dim, marginTop: 3 }}>
+                                  ${(+t.price || 0).toPrecision(3)} · MC {fmt$(t.mc || 0)}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div style={{ color: T.faint, fontSize: 8.5, textAlign: "center", marginTop: 12 }}>
+                          select a pair anywhere — or tap a mover to open its chart
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 8, letterSpacing: 1.4, color: T.faint, marginBottom: 7 }}>
+                          {signedIn ? "📣 CALLS RIDING NOW" : "GET PAID TO TRADE"}
+                        </div>
+                        {signedIn ? (
+                          riding.length ? riding.map((r) => (
+                            <button key={r.id} onClick={() => openAnyToken(r.id)} style={{ ...cell, width: "100%", marginBottom: 6 }}>
+                              <span style={{ fontSize: 10, fontWeight: 900, color: T.text }}>📣 {r.sym}</span>
+                              <span style={{ float: "right", fontSize: 10, fontWeight: 900, color: T.amber }}>×{r.mult.toFixed(1)}</span>
+                            </button>
+                          )) : (
+                            <div style={{ color: T.faint, fontSize: 9, lineHeight: 1.6 }}>
+                              no 2x calls riding right now — call a token from its chart and ride the board when it doubles
+                            </div>
+                          )
+                        ) : (
+                          <div style={{ color: T.dim, fontSize: 9.5, lineHeight: 1.9 }}>
+                            1 · connect your Phantom<br />
+                            2 · trade anything, any size<br />
+                            3 · the hourly pool pays your wallet at :05 — automatically, on chain
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })() : (
               <div style={{ border: `1px dashed ${T.border2}`, borderRadius: 12, padding: 70, textAlign: "center", color: T.faint, fontFamily: T.mono, fontSize: 12 }}>
                 Select a pair to open its chart
               </div>
+              )
             ) : (
               <div style={UI_NEXT && isMobile
                 ? { background: "transparent", border: "none", borderRadius: 0, padding: "0 0 6px", position: "relative" }
@@ -16462,7 +16547,15 @@ export default function App() {
     };
     pull();
     const iv = setInterval(pull, 6000);
-    return () => { stop = true; clearInterval(iv); };
+    // ⏰ browsers throttle or kill timers in background tabs and locked
+    // phones — coming BACK to the site must refresh immediately, or the room
+    // shows the world as you left it
+    const wake = () => { if (typeof document === "undefined" || document.visibilityState === "visible") pull(); };
+    window.addEventListener("focus", wake);
+    document.addEventListener("visibilitychange", wake);
+    return () => { stop = true; clearInterval(iv);
+      window.removeEventListener("focus", wake);
+      document.removeEventListener("visibilitychange", wake); };
   }, [chatTab]);
   const tgRoomBody = (
     <div style={{ display: "flex", flexDirection: "column", height: isMobile ? "56vh" : 430 }}>
