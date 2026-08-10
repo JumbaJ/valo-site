@@ -10004,6 +10004,7 @@ export default function App() {
   const [mobModeMenu, setMobModeMenu] = useState(false); // 🧪 auto-trader: the mode picker's hanging menu
   const [mobArmFn, setMobArmFn] = useState(null);        // 🧪 the active panel's arm(), reported via onReadyArm
   const [mobPanelOpen, setMobPanelOpen] = useState(false); // 🧪 ⚙: the mode panel's full controls, hidden by default
+  const [chatRoomMenu, setChatRoomMenu] = useState(false); // 💬 the chat header's room selector
   const [flowDetail, setFlowDetail] = useState(false);   // 🧪 UI_NEXT: momentum + pressure under the flow bar
   const [railTab, setRailTab] = useState("trades");      // 🧪 UI_NEXT: trades | positions | chat in one panel
   const [railFold, setRailFold] = useState(false);       // 🧪 UI_NEXT: fold the whole rail to a strip while charting
@@ -16385,9 +16386,112 @@ export default function App() {
 
   );
 
+  // ✈ the live Telegram group, on-site: reads what the bot relays to tg_feed
+  const TG_JOIN = "https://t.me/VALOTerminal";
+  const [tgFeed, setTgFeed] = useState([]);
+  useEffect(() => {
+    if (chatTab !== "tg") return;
+    const sb2 = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
+    if (!sb2) return;
+    let stop = false;
+    const pull = async () => {
+      try {
+        const { data } = await sb2.from("tg_feed").select("*").order("id", { ascending: false }).limit(60);
+        if (!stop && Array.isArray(data)) setTgFeed(data.slice().reverse());
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 6000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [chatTab]);
+  const tgRoomBody = (
+    <div style={{ display: "flex", flexDirection: "column", height: 300 }}>
+      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, paddingRight: 4 }}>
+        {tgFeed.length === 0 && (
+          <div style={{ color: T.faint, fontFamily: T.mono, fontSize: 10, textAlign: "center", marginTop: 30 }}>
+            ✈ connecting to the group…<br />
+            <span style={{ fontSize: 8.5 }}>live messages, gifs and memes land here</span>
+          </div>
+        )}
+        {tgFeed.map((m) => (
+          <div key={m.id} style={{ background: "rgba(255,255,255,0.025)", border: `1px solid ${T.border}`,
+            borderRadius: 10, padding: "6px 9px" }}>
+            <div style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: "#6ab3f3", marginBottom: 2 }}>
+              {m.name}
+              <span style={{ color: T.faint, fontWeight: 400, marginLeft: 6 }}>
+                {m.ts ? new Date(m.ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
+              </span>
+            </div>
+            {m.file_id && (m.kind === "gif" || m.kind === "video") && (
+              <video src={`/api/tg-media?id=${m.file_id}`} autoPlay muted loop playsInline
+                style={{ maxWidth: "100%", maxHeight: 190, borderRadius: 8, display: "block", margin: "3px 0" }} />
+            )}
+            {m.file_id && (m.kind === "photo" || m.kind === "sticker") && (
+              <img src={`/api/tg-media?id=${m.file_id}`} alt=""
+                onClick={(e) => { try { window.open(e.currentTarget.src, "_blank"); } catch (e2) {} }}
+                style={{ maxWidth: "100%", maxHeight: 190, borderRadius: 8, display: "block", margin: "3px 0", cursor: "pointer" }} />
+            )}
+            {m.text ? <div style={{ fontSize: 11, color: T.text, lineHeight: 1.45, wordBreak: "break-word" }}>{m.text}</div> : null}
+          </div>
+        ))}
+      </div>
+      <a href={TG_JOIN} target="_blank" rel="noopener noreferrer"
+        style={{ display: "block", textAlign: "center", marginTop: 8, padding: "7px 0", borderRadius: 9,
+          border: "1px solid rgba(106,179,243,0.4)", background: "rgba(106,179,243,0.08)", color: "#6ab3f3",
+          fontFamily: T.mono, fontSize: 10, fontWeight: 900, textDecoration: "none" }}>
+        💬 JOIN THE CONVERSATION → TELEGRAM
+      </a>
+    </div>
+  );
+
   const chatBlock = (
             <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12 }}>
-              <div style={{ display: "flex", gap: 6, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
+              {UI_NEXT && (
+                <div style={{ position: "relative", display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
+                  <button onClick={() => setChatRoomMenu((v) => !v)}
+                    style={{ display: "flex", alignItems: "center", gap: 6, border: `1px solid ${T.border2}`,
+                      background: "rgba(255,255,255,0.03)", color: T.text, borderRadius: 9, padding: "5px 11px",
+                      fontFamily: T.mono, fontSize: 10, fontWeight: 900, cursor: "pointer" }}>
+                    {chatTab === "tg" && tgRoomBody}
+              {chatTab === "social" ? "# SOCIAL" : chatTab === "coin" ? `# ${(selected && selected.sym) || "TOKEN"} ROOM`
+                      : chatTab === "alerts" ? "📣 MARKET ALERTS" : chatTab === "private" ? "⚡ MY TRADES" : "✈ TELEGRAM"} {chatRoomMenu ? "▴" : "▾"}
+                  </button>
+                  <span onClick={() => setChatOn((v) => !v)} title={chatOn ? "Live — tap to pause" : "Paused — tap to resume"}
+                    style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer",
+                      fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, color: chatOn ? T.green : T.faint }}>
+                    <span style={{ width: 7, height: 7, borderRadius: 99, background: chatOn ? T.green : T.faint,
+                      boxShadow: chatOn ? `0 0 7px ${T.green}` : "none" }} /> {chatOn ? "live" : "paused"}
+                  </span>
+                  <button onClick={() => setChatHidden((v) => !v)} title="Hide chat"
+                    style={{ border: "none", background: "transparent", color: T.faint, cursor: "pointer",
+                      fontSize: 13, padding: "0 2px" }}>✕</button>
+                  {chatRoomMenu && (
+                    <>
+                      <div onClick={() => setChatRoomMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                      <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 41, minWidth: 250,
+                        background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12,
+                        boxShadow: "0 12px 30px rgba(0,0,0,0.55)", padding: 5 }}>
+                        {[["social", "# SOCIAL", "the trading floor"],
+                          ...(selected ? [["coin", `# ${selected.sym} ROOM`, "this chart's chat"]] : []),
+                          ["alerts", "📣 MARKET ALERTS", "callouts · rising / falling"],
+                          ["private", "⚡ MY TRADES", "your fills, live"],
+                          ["tg", "✈ TELEGRAM", "the group — live, gifs and all"],
+                        ].map(([k, lab, sub]) => (
+                          <button key={k} onClick={() => { setChatTab(k); setChatRoomMenu(false); }}
+                            style={{ display: "flex", width: "100%", alignItems: "baseline", gap: 8, textAlign: "left",
+                              padding: "8px 11px", border: "none", borderRadius: 8, cursor: "pointer",
+                              background: chatTab === k ? "rgba(125,92,240,0.12)" : "transparent",
+                              color: chatTab === k ? T.text : T.dim, fontFamily: T.mono, fontSize: 10.5, fontWeight: 800 }}>
+                            <span style={{ whiteSpace: "nowrap" }}>{lab}</span>
+                            <span style={{ fontSize: 8, color: T.faint, fontWeight: 400 }}>{sub}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+              <div style={{ display: UI_NEXT ? "none" : "flex", gap: 6, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <button onClick={() => setChatTab("social")} style={chip(chatTab === "social")}>
                   🌐 SOCIAL <span style={{ color: T.faint }}>· public</span>
                 </button>
