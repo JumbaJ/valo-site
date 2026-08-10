@@ -57,6 +57,13 @@ const commands = {
     "",
     "Trade the hour → the 300K pool pays your wallet at :05, on chain.",
   ].join("\n"),
+  tg: async () => [
+    "✈ *The VALO group*",
+    "",
+    "[t.me/VALOTerminal](https://t.me/VALOTerminal) — share it, bring your degens.",
+    "",
+    "It's also live inside the terminal: chat → ✈ TELEGRAM.",
+  ].join("\n"),
   x: async () => [
     "𝕏 *VALO on X*",
     "",
