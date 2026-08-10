@@ -10012,6 +10012,7 @@ export default function App() {
   const [mobArmFn, setMobArmFn] = useState(null);        // 🧪 the active panel's arm(), reported via onReadyArm
   const [mobPanelOpen, setMobPanelOpen] = useState(false); // 🧪 ⚙: the mode panel's full controls, hidden by default
   const [chatRoomMenu, setChatRoomMenu] = useState(false); // 💬 the chat header's room selector
+  const [mobView, setMobView] = useState("floor");          // 🏛 mobile idle: "floor" ⇄ "scan"
   const [floorMc, setFloorMc] = useState(false);           // 🏛 floor rows: price ⇄ market cap
   const [floorToks, setFloorToks] = useState([]);          // 🏛 the floor's OWN feed — it never scavenges
   const floorToksRef = useRef([]); floorToksRef.current = floorToks;
@@ -16137,6 +16138,15 @@ export default function App() {
                         </div>
                       );
                     })()}
+                    {UI_NEXT && isMobile && (
+                      <button onClick={() => setMobView("scan")}
+                        style={{ display: "flex", width: "100%", alignItems: "center", justifyContent: "center", gap: 7,
+                          margin: "0 0 12px", padding: "9px 0", borderRadius: 10, cursor: "pointer",
+                          border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)",
+                          color: T.dim, fontFamily: T.mono, fontSize: 10.5, fontWeight: 900 }}>
+                        📡 SCANNER · browse every live token
+                      </button>
+                    )}
                     <div style={{ display: "grid",
                       gridTemplateColumns: isMobile ? "1fr" : "1.15fr 1.15fr 0.9fr", gap: 0,
                       minHeight: isMobile ? "auto" : "calc(100vh - 320px)" }}>
@@ -17940,6 +17950,7 @@ export default function App() {
           </div>
           ) : (
           <div ref={scannerRef} data-scanscroll="1" {...scanPullTouch}
+            data-mobhide={UI_NEXT && isMobile && !sel && mobView === "floor" ? "1" : undefined}
             onWheel={(e) => { e.stopPropagation(); scanPullWheel(e); }}
             onScroll={(e) => { const el = e.currentTarget;
               setScanScrolled(el.scrollTop > 180);
@@ -17963,6 +17974,15 @@ export default function App() {
               style={{ position: "sticky", top: 0, zIndex: 3, justifySelf: "end", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center",
                 background: "rgba(15,19,28,0.9)", border: `1px solid ${T.border2}`, borderRadius: 7, cursor: "pointer", color: T.dim, fontSize: 12, marginBottom: -34 }}>‹</button>
             {scanPullStrip}
+            {UI_NEXT && isMobile && !sel && (
+              <button onClick={() => setMobView("floor")}
+                style={{ display: "flex", width: "100%", alignItems: "center", justifyContent: "center", gap: 7,
+                  margin: "0 0 8px", padding: "9px 0", borderRadius: 10, cursor: "pointer",
+                  border: `1px solid ${VALO_PURPLE}55`, background: "rgba(125,92,240,0.10)",
+                  color: VALO_PURPLE, fontFamily: T.mono, fontSize: 10.5, fontWeight: 900 }}>
+                🏛 THE FLOOR · epoch, movers &amp; launches
+              </button>
+            )}
             <div style={{ margin: "0 34px 8px 0" }}>{scanModeDropdown}</div>
             {secBanner}
             {liveData && !shown.length && (
@@ -17991,9 +18011,10 @@ export default function App() {
           {/* center: chart (resizable) + chat below */}
           <div style={{ display: "grid", gap: 12, position: "relative", marginLeft: -pullX, width: `calc(100% + ${pullX}px)`, transition: resizeRef.current ? "none" : "margin-left .2s, width .2s" }}>
             <div style={{ position: "relative",
-              // 🏛 mobile: with no chart open, the floor IS the landing view —
-              // it leads instead of hiding under forty scanner cards
-              order: UI_NEXT && isMobile && !sel ? -1 : undefined }}>
+              // 🏛 mobile: floor and scanner share the screen — one at a time,
+              // swapped by the button on the scanner's mode row
+              order: UI_NEXT && isMobile && !sel ? -1 : undefined,
+              display: UI_NEXT && isMobile && !sel && mobView === "scan" ? "none" : undefined }}>
               {/* search — the chart's exact width, glued under the callout
                   banner, riding along as you scroll */}
               <div style={{ position: "sticky", top: "calc(var(--stkTop, 8px) - 8px)", zIndex: 34, margin: "0 0 8px" }}>
@@ -20459,6 +20480,7 @@ export default function App() {
         /* sticky dies inside any overflow:hidden ancestor — keep the page chain clean */
         html, body, #root { overflow-x: clip; }
         .goldb{ animation: goldPulse 2.6s ease-in-out infinite; }
+        [data-mobhide="1"]{ display: none !important; }
         @keyframes valoSheen{ 0%{ background-position: -180% 0; } 55%{ background-position: 180% 0; } 100%{ background-position: 180% 0; } }
         @keyframes emberGlow{ 0%,100%{ box-shadow: inset 0 0 12px rgba(249,115,22,0.12); } 50%{ box-shadow: inset 0 0 22px rgba(249,115,22,0.34); } }
         @keyframes flameFlick{ 0%,100%{ transform: scale(1) rotate(-2deg); } 30%{ transform: scale(1.12) rotate(2deg); } 60%{ transform: scale(0.96) rotate(-1deg); } }
