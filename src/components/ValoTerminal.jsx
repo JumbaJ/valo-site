@@ -16445,7 +16445,11 @@ export default function App() {
           <div key={m.id} style={{ background: "rgba(255,255,255,0.025)", border: `1px solid ${T.border}`,
             borderRadius: 10, padding: "6px 9px" }}>
             <div style={{ fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, color: "#6ab3f3", marginBottom: 2 }}>
-              {m.name}
+              <span onClick={() => setProfileUser(String(m.name || "").replace(/ · site$/, "").trim())}
+                title="Open their VALO profile"
+                style={{ cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}>
+                {m.name}
+              </span>
               <span style={{ color: T.faint, fontWeight: 400, marginLeft: 6 }}>
                 {m.ts ? new Date(m.ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
               </span>
