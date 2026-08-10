@@ -15999,7 +15999,7 @@ export default function App() {
               UI_NEXT ? (() => {
                 const minsTo = 60 - new Date().getMinutes();
                 const movers = (moreToks || [])
-                  .filter((t) => (t.mc || 0) > 3000 && Number.isFinite(+(t.ch ?? t.ch24)))
+                  .filter((t) => (t.mc || 0) > 300 && Number.isFinite(+(t.ch ?? t.ch24)))
                   .sort((a, b) => Math.abs(+(b.ch ?? b.ch24) || 0) - Math.abs(+(a.ch ?? a.ch24) || 0))
                   .slice(0, 6);
                 const riding = (callouts || []).map((c) => {
