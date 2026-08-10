@@ -15998,9 +15998,13 @@ export default function App() {
             !selected ? (
               UI_NEXT ? (() => {
                 const minsTo = 60 - new Date().getMinutes();
-                const movers = (moreToks || [])
-                  .filter((t) => (t.mc || 0) > 300 && Number.isFinite(+(t.ch ?? t.ch24)))
-                  .sort((a, b) => Math.abs(+(b.ch ?? b.ch24) || 0) - Math.abs(+(a.ch ?? a.ch24) || 0))
+                const seen = new Set();
+                const movers = [...(tokens || []), ...(moreToks || [])]
+                  .filter((t) => t && (t.mc || 0) > 300 && !seen.has(t.id) && seen.add(t.id))
+                  .map((t) => { const c = +(t.ch ?? t.ch24);
+                    return { t, ch: Number.isFinite(c) ? c : null,
+                      heat: Number.isFinite(c) ? Math.abs(c) : (t.momentum || 0) / 12 }; })
+                  .sort((a, b) => b.heat - a.heat)
                   .slice(0, 6);
                 const riding = (callouts || []).map((c) => {
                   const t = tokens.find((x) => x.id === c.tokenId);
@@ -16027,21 +16031,20 @@ export default function App() {
                               📡 reading the chain — the floor fills as live tokens land
                             </div>
                           )}
-                          {movers.map((t) => {
-                            const c = +(t.ch ?? t.ch24) || 0;
-                            return (
-                              <button key={t.id} onClick={() => openAnyToken(t.id)} style={cell}>
-                                <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
-                                  <span style={{ fontSize: 10.5, fontWeight: 900, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.sym}</span>
-                                  <span style={{ fontSize: 10, fontWeight: 900, color: Math.abs(c) < 1 ? T.faint : c > 0 ? T.green : T.red }}>
-                                    {c > 0 ? "+" : ""}{c.toFixed(1)}%</span>
-                                </div>
-                                <div style={{ fontSize: 8.5, color: T.dim, marginTop: 3 }}>
-                                  ${(+t.price || 0).toPrecision(3)} · MC {fmt$(t.mc || 0)}
-                                </div>
-                              </button>
-                            );
-                          })}
+                          {movers.map(({ t, ch }) => (
+                            <button key={t.id} onClick={() => openAnyToken(t.id)} style={cell}>
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
+                                <span style={{ fontSize: 10.5, fontWeight: 900, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.sym}</span>
+                                <span style={{ fontSize: 10, fontWeight: 900,
+                                  color: ch == null || Math.abs(ch) < 1 ? T.faint : ch > 0 ? T.green : T.red }}>
+                                  {ch == null ? `M${Math.round(t.momentum || 0)}` : `${ch > 0 ? "+" : ""}${ch.toFixed(1)}%`}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: 8.5, color: T.dim, marginTop: 3 }}>
+                                ${(+t.price || 0).toPrecision(3)} · MC {fmt$(t.mc || 0)}
+                              </div>
+                            </button>
+                          ))}
                         </div>
                         <div style={{ color: T.faint, fontSize: 8.5, textAlign: "center", marginTop: 12 }}>
                           select a pair anywhere — or tap a mover to open its chart
