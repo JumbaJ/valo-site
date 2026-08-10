@@ -15736,7 +15736,9 @@ export default function App() {
                       style={{ display: "flex", alignItems: "center", gap: 9,
                         userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" }}>
                     <TokenAvatar sym={selected.sym} hue={selected.hue} img={selected.img} size={22} />
-                    <span style={{ fontWeight: 800, fontSize: 16 }}>{selected.sym}<span style={{ color: T.faint, fontWeight: 400 }}>/SOL</span></span>
+                    <span onClick={(e) => { e.stopPropagation(); setSel(null); setClickMode(null); }}
+                      title="Close this chart — back to the floor"
+                      style={{ fontWeight: 800, fontSize: 16, cursor: "pointer" }}>{selected.sym}<span style={{ color: T.faint, fontWeight: 400 }}>/SOL</span></span>
                     <span
                       onClick={(e) => { e.stopPropagation(); setPriceMode((m) => (m + 1) % 3); }}
                       onTouchStart={(e) => { e.stopPropagation(); priceTapRef.current = Date.now(); }}
@@ -16001,25 +16003,25 @@ export default function App() {
                 const minsTo = 60 - new Date().getMinutes();
                 const seen = new Set(); const seenF = new Set();
                 const movers = [...(mktHits || []), ...(moreToks || []), ...(tokens || [])]
-                  .filter((t) => t && (t.mc || 0) > 300 && !seen.has(t.id) && seen.add(t.id))
+                  .filter((t) => t && (t.mc || 0) > 0 && !seen.has(t.id) && seen.add(t.id))
                   .map((t) => { const c = +(t.ch ?? t.ch24);
                     return { t, ch: Number.isFinite(c) ? c : null,
                       heat: Number.isFinite(c) ? Math.abs(c) : (t.momentum || 0) / 12 }; })
                   .sort((a, b) => b.heat - a.heat)
-                  .slice(0, 6);
+                  .slice(0, 40);
                 const riding = (callouts || []).map((c) => {
                   const t = tokens.find((x) => x.id === c.tokenId);
                   if (!t) return null;
                   const mult = c.mcAt > 0 ? mcOf(t) / c.mcAt : 0;
                   return mult >= 2 ? { id: t.id, sym: t.sym, mult } : null;
-                }).filter(Boolean).sort((a, b) => b.mult - a.mult).slice(0, 4);
+                }).filter(Boolean).sort((a, b) => b.mult - a.mult).slice(0, 20);
                 const signedIn = !!(wallet && wallet.address);
                 const fresh = [...(mktHits || []), ...(moreToks || []), ...(tokens || [])]
                   .filter((t) => t && t.createdAt && !seenF.has(t.id) && seenF.add(t.id))
                   .map((t) => ({ t, age: Date.now() - new Date(t.createdAt).getTime() }))
-                  .filter((x) => x.age > 0 && x.age < 6 * 3600e3)
+                  .filter((x) => x.age > 0 && x.age < 24 * 3600e3)
                   .sort((a, b) => a.age - b.age)
-                  .slice(0, 7);
+                  .slice(0, 40);
                 const row = { display: "flex", alignItems: "center", gap: 8, width: "100%",
                   padding: "8px 9px", border: `1px solid ${T.border}`, background: "#10141c",
                   cursor: "pointer", textAlign: "left", borderRadius: 9, marginBottom: 5 };
