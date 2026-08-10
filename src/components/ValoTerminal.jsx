@@ -16027,7 +16027,9 @@ export default function App() {
                 const minsTo = 60 - new Date().getMinutes();
                 const seen = new Set(); const seenF = new Set();
                 const movers = [...(floorToks || []), ...(mktHits || []), ...(moreToks || []), ...(tokens || [])]
-                  .filter((t) => t && (t.mc || 0) > 0 && !seen.has(t.id) && seen.add(t.id))
+                  .filter((t) => { if (!t) return false;
+                    const k = t.mint || t.liveMint || t.id;
+                    return !seen.has(k) && seen.add(k); })
                   .map((t) => { const c = +(t.ch ?? t.ch24);
                     return { t, ch: Number.isFinite(c) ? c : null,
                       heat: Number.isFinite(c) ? Math.abs(c) : (t.momentum || 0) / 12 }; })
@@ -16041,7 +16043,9 @@ export default function App() {
                 }).filter(Boolean).sort((a, b) => b.mult - a.mult).slice(0, 20);
                 const signedIn = !!(wallet && wallet.address);
                 const fresh = [...(floorToks || []), ...(mktHits || []), ...(moreToks || []), ...(tokens || [])]
-                  .filter((t) => t && t.createdAt && !seenF.has(t.id) && seenF.add(t.id))
+                  .filter((t) => { if (!t || !t.createdAt) return false;
+                    const k = t.mint || t.liveMint || t.id;
+                    return !seenF.has(k) && seenF.add(k); })
                   .map((t) => ({ t, age: Date.now() - new Date(t.createdAt).getTime() }))
                   .filter((x) => x.age > 0 && x.age < 24 * 3600e3)
                   .sort((a, b) => a.age - b.age)
@@ -16056,6 +16060,39 @@ export default function App() {
                 const metaCss = { display: "block", fontSize: 10, color: T.faint, whiteSpace: "nowrap" };
                 const numCss = { fontSize: 12, fontWeight: 900, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
                 const emptyNote = { color: T.faint, fontSize: 10.5, padding: "10px 6px", lineHeight: 1.6 };
+                const strip = { display: "flex", marginTop: 8, border: `1px solid ${T.border}`,
+                  borderRadius: 8, overflow: "hidden", background: "rgba(255,255,255,0.015)" };
+                const cellCss = (i) => ({ flex: 1, minWidth: 0, padding: "5px 6px", textAlign: "center",
+                  borderLeft: i ? `1px solid ${T.border}` : "none" });
+                const labCss = { fontSize: 8, letterSpacing: 0.8, color: T.faint, whiteSpace: "nowrap" };
+                const valCss = { fontSize: 11, fontWeight: 800, fontFamily: T.mono, color: T.text,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+                const kNum = (n) => { const v = +n || 0;
+                  return v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}K` : String(Math.round(v)); };
+                const MetricStrip = ({ t, wide }) => {
+                  const txns = (+t.buys || 0) + (+t.sells || 0);
+                  const vol = (+t.greenUsd || 0) + (+t.redUsd || 0);
+                  const bp = Math.round(t.buyPressure || 50);
+                  const cells = [
+                    ["MCAP", mcTxt(t.mc) || "—"],
+                    ["PRICE", `$${fmtP(t.price)}`],
+                    ["TXNS", txns ? kNum(txns) : "—"],
+                    ["VOL", vol ? fmt$(vol) : "—"],
+                    ...(wide ? [["LP", t.tvl ? fmt$(t.tvl) : "—"]] : []),
+                    ["B/S", <span style={{ color: bp >= 70 ? T.green : bp <= 30 ? T.red : T.text }}>{bp}</span>],
+                    ...(wide ? [["MOM", Math.round(t.momentum || 0)]] : []),
+                  ];
+                  return (
+                    <div style={strip}>
+                      {cells.map(([lab, val], i) => (
+                        <div key={lab} style={cellCss(i)}>
+                          <div style={labCss}>{lab}</div>
+                          <div style={valCss}>{val}</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                };
                 // brand-new tokens live in cents — fmt$ floors them to $0.00
                 const mcTxt = (v) => { const n = +v || 0;
                   return n >= 1000 ? fmt$(n) : n >= 1 ? `$${n.toFixed(0)}` : n > 0 ? `$${n.toFixed(2)}` : null; };
@@ -16081,7 +16118,8 @@ export default function App() {
                         <div style={colHead}>NEW LAUNCHES</div>
                         {fresh.length === 0 && <div style={emptyNote}>watching for the next launch…</div>}
                         {fresh.map(({ t }) => (
-                          <button key={t.id} onClick={() => openAnyToken(t.id)} style={row}>
+                          <button key={t.id} onClick={() => openAnyToken(t.id)} style={{ ...row, display: "block" }}>
+                           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={20} />
                             <span style={{ minWidth: 0, flex: 1 }}>
                               <span style={symCss}>{t.sym}</span>
@@ -16092,11 +16130,8 @@ export default function App() {
                                 {t.tvl ? ` · LP ${fmt$(t.tvl)}` : ""}
                               </span>
                             </span>
-                            <span onClick={(e) => { e.stopPropagation(); setFloorMc((v) => !v); }}
-                              title="Tap to switch price ⇄ market cap"
-                              style={{ ...numCss, color: T.dim, textDecoration: "underline dotted", textUnderlineOffset: 3 }}>
-                              {figure(t)}
                             </span>
+                            <MetricStrip t={t} wide={!isMobile} />
                           </button>
                         ))}
                       </div>
@@ -16118,28 +16153,21 @@ export default function App() {
                           const txns = (+t.buys || 0) + (+t.sells || 0);
                           const vol = (+t.greenUsd || 0) + (+t.redUsd || 0);
                           return (
-                            <button key={t.id} onClick={() => openAnyToken(t.id)} style={row}>
+                            <button key={t.id} onClick={() => openAnyToken(t.id)} style={{ ...row, display: "block" }}>
+                             <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                               <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={20} />
                               <span style={{ minWidth: 0, flex: 1 }}>
                                 <span style={symCss}>{t.sym}</span>
-                                <span onClick={(e) => { e.stopPropagation(); setFloorMc((v) => !v); }}
-                                  title="Tap to switch price ⇄ market cap"
-                                  style={{ ...metaCss, cursor: "pointer" }}>
-                                  {floorMc && mcTxt(t.mc) ? `MC ${mcTxt(t.mc)}` : `$${fmtP(t.price)}`}
-                                  {txns ? ` · ${txns.toLocaleString()} txns` : ""}
-                                  {vol ? ` · vol ${fmt$(vol)}` : ""}
-                                  {t.tvl ? ` · LP ${fmt$(t.tvl)}` : ""}
-                                </span>
+                                <span style={metaCss}>{fmtAge(t.createdAt) || "live"}</span>
                               </span>
                               <span style={{ textAlign: "right" }}>
                                 <span style={{ ...numCss, display: "block",
                                   color: ch == null || Math.abs(ch) < 1 ? T.faint : ch > 0 ? T.green : T.red }}>
                                   {ch == null ? `M${Math.round(t.momentum || 0)}` : `${ch > 0 ? "+" : ""}${ch.toFixed(1)}%`}
                                 </span>
-                                <span style={{ ...metaCss, textAlign: "right" }}>
-                                  {fmtAge(t.createdAt) ? `${fmtAge(t.createdAt)} · ` : ""}B/S {Math.round(t.buyPressure || 50)}
-                                </span>
                               </span>
+                             </span>
+                             <MetricStrip t={t} wide={!isMobile} />
                             </button>
                           );
                         })}
