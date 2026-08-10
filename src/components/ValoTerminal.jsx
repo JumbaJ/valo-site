@@ -16086,6 +16086,8 @@ export default function App() {
                               <span style={metaCss}>
                                 {fmtAge(t.createdAt) || "new"}
                                 {t.holders ? ` · ${t.holders} holders` : ""}
+                                {((+t.buys || 0) + (+t.sells || 0)) ? ` · ${((+t.buys || 0) + (+t.sells || 0)).toLocaleString()} txns` : ""}
+                                {t.tvl ? ` · LP ${fmt$(t.tvl)}` : ""}
                               </span>
                             </span>
                             <span onClick={(e) => { e.stopPropagation(); setFloorMc((v) => !v); }}
@@ -16104,24 +16106,41 @@ export default function App() {
                         borderBottom: isMobile ? `1px solid ${T.border}` : "none",
                         marginBottom: isMobile ? 14 : 0 }}>
                         <div style={colHead}>THE FLOOR · BIGGEST MOVES</div>
-                        {movers.length === 0 && <div style={emptyNote}>📡 reading the chain…</div>}
-                        {movers.map(({ t, ch }) => (
-                          <button key={t.id} onClick={() => openAnyToken(t.id)} style={row}>
-                            <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={20} />
-                            <span style={{ minWidth: 0, flex: 1 }}>
-                              <span style={symCss}>{t.sym}</span>
-                              <span onClick={(e) => { e.stopPropagation(); setFloorMc((v) => !v); }}
-                                title="Tap to switch price ⇄ market cap"
-                                style={{ ...metaCss, cursor: "pointer" }}>
-                                {floorMc ? `MC ${mcTxt(t.mc)}` : `$${fmtP(t.price)}`}
+                        {movers.length < 3 && (
+                          <div style={emptyNote}>
+                            📡 reading the chain — floor feed has {(floorToks || []).length} tokens,
+                            board {(tokens || []).length}, market {(mktHits || []).length}
+                          </div>
+                        )}
+                        {movers.map(({ t, ch }) => {
+                          const txns = (+t.buys || 0) + (+t.sells || 0);
+                          const vol = (+t.greenUsd || 0) + (+t.redUsd || 0);
+                          return (
+                            <button key={t.id} onClick={() => openAnyToken(t.id)} style={row}>
+                              <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={20} />
+                              <span style={{ minWidth: 0, flex: 1 }}>
+                                <span style={symCss}>{t.sym}</span>
+                                <span onClick={(e) => { e.stopPropagation(); setFloorMc((v) => !v); }}
+                                  title="Tap to switch price ⇄ market cap"
+                                  style={{ ...metaCss, cursor: "pointer" }}>
+                                  {floorMc ? `MC ${mcTxt(t.mc)}` : `$${fmtP(t.price)}`}
+                                  {txns ? ` · ${txns.toLocaleString()} txns` : ""}
+                                  {vol ? ` · vol ${fmt$(vol)}` : ""}
+                                  {t.tvl ? ` · LP ${fmt$(t.tvl)}` : ""}
+                                </span>
                               </span>
-                            </span>
-                            <span style={{ ...numCss,
-                              color: ch == null || Math.abs(ch) < 1 ? T.faint : ch > 0 ? T.green : T.red }}>
-                              {ch == null ? `M${Math.round(t.momentum || 0)}` : `${ch > 0 ? "+" : ""}${ch.toFixed(1)}%`}
-                            </span>
-                          </button>
-                        ))}
+                              <span style={{ textAlign: "right" }}>
+                                <span style={{ ...numCss, display: "block",
+                                  color: ch == null || Math.abs(ch) < 1 ? T.faint : ch > 0 ? T.green : T.red }}>
+                                  {ch == null ? `M${Math.round(t.momentum || 0)}` : `${ch > 0 ? "+" : ""}${ch.toFixed(1)}%`}
+                                </span>
+                                <span style={{ ...metaCss, textAlign: "right" }}>
+                                  {fmtAge(t.createdAt) ? `${fmtAge(t.createdAt)} · ` : ""}B/S {Math.round(t.buyPressure || 50)}
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        })}
                       </div>
 
                       {/* ── CALLS RIDING / the pitch ─────────────────── */}
