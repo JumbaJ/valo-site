@@ -9931,6 +9931,7 @@ export default function App() {
   const [linksOpen, setLinksOpen] = useState(null);      // 🧪 UI_NEXT: token links popover (by token id)
   const [sigSheet, setSigSheet] = useState(false);       // 🧪 UI_NEXT mobile: signals bottom sheet
   const [moreBand, setMoreBand] = useState(false);       // 🧪 UI_NEXT mobile: the band's ⋯ hanging menu
+  const [hubOpen, setHubOpen] = useState(false);         // 🧪 UI_NEXT mobile: the all-in-one hub fan
   const [flowDetail, setFlowDetail] = useState(false);   // 🧪 UI_NEXT: momentum + pressure under the flow bar
   const [railTab, setRailTab] = useState("trades");      // 🧪 UI_NEXT: trades | positions | chat in one panel
   const [railFold, setRailFold] = useState(false);       // 🧪 UI_NEXT: fold the whole rail to a strip while charting
@@ -19489,6 +19490,39 @@ export default function App() {
         </div>
       )}
 
+      {/* 🧪 UI_NEXT MOBILE HUB — one pill replaces the right-edge tabs */}
+      {isMobile && UI_NEXT && typeof document !== "undefined" && createPortal(
+        <>
+          {hubOpen && <div onClick={() => setHubOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 338 }} />}
+          <div style={{ position: "fixed", right: 10, bottom: "calc(64px + env(safe-area-inset-bottom))", zIndex: 339,
+            display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+            {hubOpen && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {[["💼", "Wallet", () => { setPortfolioDrawer(true); }],
+                  ["⭐", "Watchlist", () => { setMobWatch(true); setDrawerOpen(true); }],
+                  ["💬", "Chat", () => { setMobWatch(false); setDrawerOpen(true); }],
+                ].map(([ic, label, go]) => (
+                  <button key={label} onClick={() => { setHubOpen(false); go(); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", borderRadius: 999,
+                      border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.97)", color: T.text,
+                      fontFamily: T.mono, fontSize: 11, fontWeight: 800, cursor: "pointer",
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
+                    <span>{ic}</span><span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <button onClick={() => setHubOpen((v) => !v)}
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 999,
+                border: `1px solid ${turboAutoOn ? VALO_PURPLE : T.border2}`,
+                background: turboAutoOn ? "rgba(125,92,240,0.22)" : "rgba(17,21,29,0.97)",
+                color: turboAutoOn ? VALO_PURPLE : T.text, fontFamily: T.mono, fontSize: 11, fontWeight: 900,
+                cursor: "pointer", boxShadow: turboAutoOn ? `0 0 14px ${VALO_PURPLE}55` : "0 8px 24px rgba(0,0,0,0.5)" }}>
+              ⚡ {fmt$(totalEquity)}
+            </button>
+          </div>
+        </>, document.body
+      )}
       {/* MOBILE CHAT DRAWER — tab handle on the right edge, wheels out on tap */}
       {isMobile && (
         <>
@@ -19508,6 +19542,7 @@ export default function App() {
             onClickCapture={(e) => { const n = e.currentTarget; if (n._wfired) { n._wfired = false; e.preventDefault(); e.stopPropagation(); } }}
             onTouchStart={tabTouchStart("chat", chatTabTop)}
             style={{
+              display: UI_NEXT ? "none" : undefined,
               position: "fixed", right: 0, top: `${chatTabTop}%`, zIndex: 52, touchAction: "none",
               background: "rgba(17,21,29,0.96)", color: drawerOpen ? "#f2e394" : T.dim,
               border: `1px solid ${T.border2}`, borderRight: "none",
@@ -19652,6 +19687,7 @@ export default function App() {
             onTouchEnd={(e) => { const n = e.currentTarget; if (n._pk) { clearTimeout(n._pk); n._pk = null; } setRailPeek(false); }}
             onTouchCancel={(e) => { const n = e.currentTarget; if (n._pk) { clearTimeout(n._pk); n._pk = null; } setRailPeek(false); }}
             style={{
+              display: UI_NEXT ? "none" : undefined,
               position: "fixed", right: 0, top: `${walletTabTop}%`, zIndex: 52, touchAction: "none",
               background: portfolioDrawer ? "rgba(17,21,29,0.96)" : (totalEquity > 0 ? (platformPnl >= 0 ? "rgba(22,199,132,0.16)" : "rgba(234,57,67,0.16)") : "rgba(17,21,29,0.96)"),
               color: portfolioDrawer ? VALO_PURPLE : (totalEquity > 0 ? (platformPnl >= 0 ? T.green : T.red) : T.dim),
