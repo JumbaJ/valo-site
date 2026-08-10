@@ -1900,10 +1900,14 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       {isMobile ? (
         <>
           {ohlc && (
-            <div style={{ position: "absolute", top: UI_NEXT ? 24 : 6, left: UI_NEXT ? 8 : "50%", transform: UI_NEXT ? "none" : "translateX(-50%)", zIndex: 3, pointerEvents: "none",
+            <div style={{ position: "absolute", top: 0, left: UI_NEXT ? 0 : "50%", right: UI_NEXT ? 0 : undefined,
+              transform: UI_NEXT ? "none" : "translateX(-50%)", zIndex: 3, pointerEvents: "none",
               display: "flex", gap: 7, alignItems: "center", whiteSpace: "nowrap",
               fontFamily: T.mono, fontSize: 8.5, color: T.dim,
-              background: "rgba(12,15,22,0.88)", border: `1px solid ${T.border}`, borderRadius: 20, padding: "4px 11px" }}>
+              background: UI_NEXT ? "rgba(12,15,22,0.92)" : "rgba(12,15,22,0.88)",
+              border: UI_NEXT ? "none" : `1px solid ${T.border}`, borderBottom: `1px solid ${T.border}`,
+              borderRadius: UI_NEXT ? 0 : 20, padding: UI_NEXT ? "4px 10px" : "4px 11px",
+              overflowX: UI_NEXT ? "auto" : "visible", scrollbarWidth: "none" }}>
               <span>O <b style={{ color: T.text }}>{fmtP(ohlc.o)}</b></span>
               {fmtAge(createdAt) && <span title="Token age — live">⏱ <b style={{ color: T.text }}>{fmtAge(createdAt)}</b></span>}
               <span>H <b style={{ color: T.green }}>{fmtP(ohlc.h)}</b></span>
@@ -1914,11 +1918,11 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
             </div>
           )}
           {eyesToken && (
-            <div style={{ position: "absolute", top: UI_NEXT ? 52 : 32, left: 10, zIndex: 3 }}>
+            <div style={{ position: "absolute", top: UI_NEXT ? 56 : 32, left: 10, zIndex: 3 }}>
               <ViewerPills token={eyesToken} small />
             </div>
           )}
-          <div style={{ position: "absolute", top: UI_NEXT ? 2 : -15, right: 4, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 14, lineHeight: 1 }}>
+          <div style={{ position: "absolute", top: UI_NEXT ? 28 : -15, right: 4, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 14, lineHeight: 1 }}>
             <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: 18, offset: 0, priceOff: 0, priceZoom: 1, follow: true }); }}
               style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 7.5, fontWeight: 800, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>◉ LIVE</button>
             <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: Math.max(15, Math.round(total * 1.12) + 8), offset: 0, priceOff: 0, priceZoom: 1, follow: true }); }}
