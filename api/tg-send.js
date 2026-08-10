@@ -34,7 +34,9 @@ export default async function handler(req, res) {
     const tg = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id: CHAT, text: `💬 ${who}: ${msg}`, disable_web_page_preview: true }),
+      body: JSON.stringify({ chat_id: CHAT, parse_mode: "Markdown",
+        text: `💬 [${who}](https://valotrading.app/?u=${encodeURIComponent(who)}): ${msg}`,
+        disable_web_page_preview: true }),
     }).then((r) => r.json());
     if (!tg || !tg.ok) return res.status(502).json({ error: "telegram rejected the message" });
 

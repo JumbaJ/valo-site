@@ -10401,6 +10401,14 @@ export default function App() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifSetting, setNotifSetting] = useState(true);    // website setting: callout pushes
   const [profileUser, setProfileUser] = useState(null);      // open user profile popup
+  // ✈ deep link: t.me messages link the sender's name to ?u=<handle> — opening
+  // the site through one lands with that trader's profile up
+  useEffect(() => {
+    try {
+      const m = (window.location.search || "").match(/[?&]u=([^&]+)/);
+      if (m) setTimeout(() => setProfileUser(decodeURIComponent(m[1]).slice(0, 32)), 900);
+    } catch (e) {}
+  }, []);
   const [followListOpen, setFollowListOpen] = useState(null);// "followers" | "following"
   const [dmLogs, setDmLogs] = useState({});                  // { name: [{me, text}] }
   const unreadCount = notifs.filter((n) => !n.read).length + friendReqs.length;
