@@ -16100,11 +16100,43 @@ export default function App() {
                 const figure = (t) => (floorMc ? (mcTxt(t.mc) || `$${fmtP(t.price)}`) : `$${fmtP(t.price)}`);
                 return (
                   <div style={{ border: `1px solid ${T.border}`, borderRadius: 12, padding: isMobile ? 12 : 16, fontFamily: T.mono }}>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap",
-                      padding: "2px 2px 10px", borderBottom: `1px solid ${T.border}`, marginBottom: 12 }}>
-                      <span style={{ fontSize: 10, fontWeight: 900, color: T.text }}>⚡ NEXT EPOCH PAYS IN {minsTo}m</span>
-                      <span style={{ fontSize: 8.5, color: T.faint }}>300,000 $VALO pool · trade this hour and your wallet is in · paid at :05, on chain</span>
-                    </div>
+                    {(() => {
+                      const hot = minsTo <= 10;              // the closing window — this is when people act
+                      return (
+                        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 12 : 22,
+                          flexWrap: "wrap", padding: isMobile ? "14px 14px" : "16px 20px", marginBottom: 16,
+                          border: `1px solid ${hot ? T.amber : VALO_PURPLE}`, borderRadius: 14,
+                          background: hot ? "rgba(249,180,22,0.07)" : "rgba(125,92,240,0.08)",
+                          boxShadow: hot ? "0 0 22px rgba(249,180,22,0.16)" : "0 0 18px rgba(125,92,240,0.12)" }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 9, letterSpacing: 1.6, color: hot ? T.amber : VALO_PURPLE,
+                              fontWeight: 900, marginBottom: 3 }}>
+                              {hot ? "⚡ CLOSING — LAST CALL" : "⚡ NEXT PAYOUT"}
+                            </div>
+                            <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+                              <span style={{ fontSize: isMobile ? 30 : 38, fontWeight: 900, color: T.text,
+                                fontFamily: T.mono, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{minsTo}</span>
+                              <span style={{ fontSize: 12, color: T.dim, fontWeight: 800 }}>min</span>
+                            </div>
+                          </div>
+                          <div style={{ width: 1, alignSelf: "stretch", background: T.border }} />
+                          <div>
+                            <div style={{ fontSize: 9, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 3 }}>THIS HOUR'S POOL</div>
+                            <div style={{ fontSize: isMobile ? 17 : 21, fontWeight: 900, color: T.text, fontFamily: T.mono, lineHeight: 1.1 }}>
+                              300,000 <span style={{ color: VALO_PURPLE }}>$VALO</span>
+                            </div>
+                          </div>
+                          <div style={{ flex: 1, minWidth: 190 }}>
+                            <div style={{ fontSize: 11, color: T.text, fontWeight: 800, lineHeight: 1.5 }}>
+                              Trade anything this hour → your wallet is in the split.
+                            </div>
+                            <div style={{ fontSize: 9.5, color: T.faint, marginTop: 3 }}>
+                              Paid automatically at :05 · on chain · no claiming, no gas, no buttons.
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <div style={{ display: "grid",
                       gridTemplateColumns: isMobile ? "1fr" : "1.15fr 1.15fr 0.9fr", gap: 0,
                       minHeight: isMobile ? "auto" : "calc(100vh - 320px)" }}>
