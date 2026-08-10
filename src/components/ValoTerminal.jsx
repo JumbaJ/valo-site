@@ -6807,6 +6807,12 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
             <>
               <span onClick={tryEditName} title={nameLocked ? `Name changes are limited to once a week — next in ${nameLockLeft()}` : "Tap to change your username (once a week)"}
                 style={{ fontFamily: T.mono, fontSize: 12.5, fontWeight: 800, color: T.text, flex: "0 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer" }}>@{username}</span>
+              {UI_NEXT && walletConnected && wallet && (
+                <button onClick={onDisconnectWallet} title="Log the Phantom wallet out of VALO"
+                  style={{ border: `1px solid ${T.border}`, background: "transparent", color: T.faint,
+                    borderRadius: 999, padding: "2px 8px", cursor: "pointer", fontFamily: T.mono,
+                    fontSize: 8, fontWeight: 800, letterSpacing: 0.5, flexShrink: 0 }}>👻 LOG OUT</button>
+              )}
               <span style={{ flex: 1 }} />
               {/* highest callout tier — an insignia chip that sits flush in the
                   profile row, styled like the rest of the panel */}
@@ -6861,7 +6867,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           👑 SPLIT CREATOR FEES · 25% 🔥 burn · 50% 🎁 vault · 25% keep
         </button>
       )}
-      {(liveMode || (walletConnected && wallet) || (turboState && turboState.pubkey)) && (
+      {!UI_NEXT && (liveMode || (walletConnected && wallet) || (turboState && turboState.pubkey)) && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, paddingBottom: 10,
           borderBottom: `1px solid ${T.border}`, flexWrap: "wrap" }}>
           {walletConnected && wallet ? (<>
@@ -7061,14 +7067,16 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                         return (
                           <div style={{ display: "flex", gap: 6, justifyContent: "center", marginTop: 7 }}>
                             {chips.map(([ic, addr, col]) => (
-                              <div key={ic} onClick={(e) => { e.stopPropagation();
-                                  try { navigator.clipboard.writeText(addr); e.currentTarget.textContent = "copied ✓"; } catch (e2) {} }}
-                                title="Tap to copy"
+                              <a key={ic} href={`https://solscan.io/account/${addr}`} target="_blank" rel="noopener noreferrer"
+                                title="Open this wallet on Solscan · ⧉ copies"
                                 style={{ padding: "2px 9px", borderRadius: 999, border: `1px solid ${col}44`,
                                   background: "rgba(255,255,255,0.04)", fontFamily: T.mono, fontSize: 8.5,
-                                  color: col, cursor: "pointer" }}>
-                                {ic} {addr.slice(0, 4)}…{addr.slice(-4)} ⧉
-                              </div>
+                                  color: col, cursor: "pointer", textDecoration: "none", display: "inline-flex", gap: 4 }}>
+                                {ic} {addr.slice(0, 4)}…{addr.slice(-4)}
+                                <span onClick={(e) => { e.preventDefault(); e.stopPropagation();
+                                    try { navigator.clipboard.writeText(addr); e.currentTarget.textContent = "✓"; } catch (e2) {} }}
+                                  title="Copy address">⧉</span>
+                              </a>
                             ))}
                           </div>
                         );
@@ -19499,10 +19507,9 @@ export default function App() {
           {hubOpen && (
             <div style={{ position: "fixed", right: 30, top: `${hubTop}%`, transform: "translateY(-50%)", zIndex: 340,
               display: "flex", flexDirection: "column", gap: 6 }}>
-              {[["💼", "Wallet", () => setPortfolioDrawer(true)],
+              {[["⚡", fmt$(totalEquity), () => setPortfolioDrawer(true)],
                 ["⭐", "Watchlist", () => { setMobWatch(true); setDrawerOpen(true); }],
                 ["💬", "Chat", () => { setMobWatch(false); setDrawerOpen(true); }],
-                ["⚡", fmt$(totalEquity), () => setPortfolioDrawer(true)],
               ].map(([ic, label, go]) => (
                 <button key={label} onClick={() => { setHubOpen(false); go(); }}
                   style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", borderRadius: 999,
