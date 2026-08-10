@@ -10000,6 +10000,7 @@ export default function App() {
   const [hubOpen, setHubOpen] = useState(false);         // 🧪 UI_NEXT mobile: the all-in-one hub fan
   const [hubTop, setHubTop] = useState(58);              // 🧪 dock height, % of viewport — drag to move
   const [mobModeMenu, setMobModeMenu] = useState(false); // 🧪 auto-trader: the mode picker's hanging menu
+  const [mobArmFn, setMobArmFn] = useState(null);        // 🧪 the active panel's arm(), reported via onReadyArm
   const [flowDetail, setFlowDetail] = useState(false);   // 🧪 UI_NEXT: momentum + pressure under the flow bar
   const [railTab, setRailTab] = useState("trades");      // 🧪 UI_NEXT: trades | positions | chat in one panel
   const [railFold, setRailFold] = useState(false);       // 🧪 UI_NEXT: fold the whole rail to a strip while charting
@@ -19024,9 +19025,25 @@ export default function App() {
                 {mobPageTab === "visual" ? "👁 VISUAL" : mobPageTab === "bots" ? "📊 BOTS" : "🤖 TRADER"} {mobModeMenu ? "▴" : "▾"}
               </button>
               <button onClick={() => setBotDragSet((v) => !v)} title="Drag-set: drag levels on the chart"
-                style={{ flex: "0 0 44px", border: `1px solid ${botDragSet ? T.amber : T.border2}`,
+                style={{ flex: "0 0 40px", border: `1px solid ${botDragSet ? T.amber : T.border2}`,
                   background: botDragSet ? "rgba(249,180,22,0.14)" : "rgba(255,255,255,0.03)",
                   color: botDragSet ? T.amber : T.dim, borderRadius: 999, fontSize: 12, cursor: "pointer" }}>✋</button>
+              <div style={{ flex: 1.1, display: "flex", alignItems: "center", border: `1px solid ${T.border2}`,
+                borderRadius: 999, background: "rgba(255,255,255,0.03)", padding: "0 10px" }}>
+                <input value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+                  inputMode="decimal"
+                  style={{ width: "100%", minWidth: 0, border: "none", background: "transparent", color: T.text,
+                    fontFamily: T.mono, fontSize: 11, fontWeight: 900, textAlign: "center", outline: "none" }} />
+                <span style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>{pay}</span>
+              </div>
+              <button onClick={() => { if (mobArmFn) mobArmFn(); }}
+                disabled={!mobArmFn}
+                style={{ flex: 1, border: `1px solid ${mobArmFn ? T.green : T.border2}`,
+                  background: mobArmFn ? "rgba(22,199,132,0.16)" : "rgba(255,255,255,0.02)",
+                  color: mobArmFn ? T.green : T.faint, borderRadius: 999, padding: "6px 4px",
+                  fontFamily: T.mono, fontSize: 10, fontWeight: 900, cursor: mobArmFn ? "pointer" : "default" }}>
+                ⚡ ARM
+              </button>
               {mobModeMenu && (
                 <>
                   <div onClick={() => setMobModeMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
@@ -19095,7 +19112,8 @@ export default function App() {
             ) : mobPageTab === "visual" ? (
               <>
               {mobStatsBar}
-              <VisualTrading token={selected} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} compactArm
+              <VisualTrading onReadyArm={UI_NEXT ? (fn) => setMobArmFn(() => fn) : undefined}
+                token={selected} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} compactArm
                 editBot={pendingOrders.find((o) => o.id === editingBotId && o.vt) || null}
                 botLock={botLock} onStageSide={(m) => setBotSide(m)} onArmPair={armVisualPair}
                 dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
@@ -19107,7 +19125,8 @@ export default function App() {
             {/* live wallet — state-driven, so it moves the instant any bot or trade does */}
             {mobStatsBar}
             {/* live auto trader — arm or relaunch right here under the chart */}
-            <TradePanel key={editingBotId || "mnew"} token={selected} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} compactArm
+            <TradePanel onReadyArm={UI_NEXT ? (fn) => setMobArmFn(() => fn) : undefined}
+              key={editingBotId || "mnew"} token={selected} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} compactArm
               onExecute={(o) => execute(selected, o)}
               editBot={pendingOrders.find((o) => o.id === editingBotId) || null}
               onRelaunch={(id, o) => relaunchBot(id, o, selected)} botLock={botLock}
