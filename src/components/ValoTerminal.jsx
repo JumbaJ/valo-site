@@ -1277,8 +1277,15 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     if (!(isMobile && mode === "candles")) drawBotLines();
 
     // crosshair
-    if (cross && !dragRef.current?.moved) {
-      const { cx, cy } = cross;
+    if (cross && (UI_NEXT || !dragRef.current?.moved)) {
+      let { cx, cy } = cross;
+      // 🧷 DexScreener stickiness: a released line is anchored to its CANDLE
+      // and PRICE — panning moves the chart and the line rides along
+      if (UI_NEXT && cross.idx != null) {
+        const sD = cross.idx - winStart;
+        cx = x(Math.max(-2, Math.min(count + 1, sD)));
+        if (cross.price != null) cy = y(cross.price);
+      }
       const s = Math.max(0, Math.min(count - 1, Math.round((cx - step / 2) / step)));
       const sx = x(s);
       const armCol = clickMode === "buy" ? T.green : clickMode === "sell" ? T.red : "rgba(255,255,255,0.35)";
@@ -1916,7 +1923,17 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     // 🧪 DexScreener model: the hold-summoned line survives release; a clean
     // motionless tap is the ONLY thing that clears it. No freeze, ever.
     if (UI_NEXT && d && d.touch) {
-      if (crossModeRef.current) crossModeRef.current = false;        // line stays put
+      if (crossModeRef.current) {
+        crossModeRef.current = false;
+        // 🧷 pin the line to the candle + price under it, so pans carry it
+        const c0 = cross || pinCross;
+        const g3 = geom.current || {};
+        if (c0 && g3.step > 0 && g3.idxOf) {
+          const s3 = Math.round((c0.cx - g3.step / 2) / g3.step);
+          const anchored = { ...c0, idx: g3.idxOf(s3), price: priceAtY(c0.cy) };
+          setPinCross(anchored); setCross(anchored);
+        }
+      }
       else if (!d.moved && (pinCross || cross)) { setPinCross(null); setCross(null); }
     }
   };
@@ -16025,17 +16042,13 @@ export default function App() {
                       <div onClick={() => setShowDevTrades((v) => !v)}
                         style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 8px", borderRadius: 9, cursor: "pointer",
                           color: showDevTrades ? accent(selected.hue) : T.dim, fontFamily: T.mono, fontSize: 11, fontWeight: 800 }}>
-                        👨‍💻 <span>Dev buys on chart</span><span style={{ marginLeft: "auto", fontSize: 9, color: showDevTrades ? T.green : T.faint }}>{showDevTrades ? "ON" : "off"}</span>
+                        👨‍💻 <span>Dev Buys</span><span style={{ marginLeft: "auto", fontSize: 9, color: showDevTrades ? T.green : T.faint }}>{showDevTrades ? "ON" : "off"}</span>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 8px" }}>
                         📣 <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: T.dim }}>Callout</span>
                         <span style={{ marginLeft: "auto" }}>{calloutWidget(true, 24, true)}</span>
                       </div>
-                      <div style={{ fontFamily: T.mono, fontSize: 8.5, letterSpacing: 1.5, color: T.faint, margin: "10px 0 6px" }}>CHART</div>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button onClick={() => setChartMode("candles")} style={{ ...chip(chartMode === "candles"), padding: "6px 12px", fontFamily: T.mono, fontSize: 10 }}>▮ CANDLES</button>
-                        <button onClick={() => setChartMode("line")} style={{ ...chip(chartMode === "line"), padding: "6px 12px", fontFamily: T.mono, fontSize: 10 }}>∿ LINE</button>
-                      </div>
+
                     </div>
                   </>, document.body
                 )}
@@ -19548,7 +19561,7 @@ export default function App() {
           {hubOpen && (
             <div style={{ position: "fixed", right: 30, top: `${hubTop}%`, transform: "translateY(-50%)", zIndex: 340,
               display: "flex", flexDirection: "column", gap: 6 }}>
-              {[["⚡", fmt$(totalEquity), () => setPortfolioDrawer(true)],
+              {[["⚡", fmt$(((turboSolBal || 0) * SOL_USD) + (chainHoldingsLive || []).reduce((a, h) => a + ((h && h.src !== "phantom" && !h.spam && !h.dust && h.usd) || 0), 0)), () => setPortfolioDrawer(true)],
                 ["⭐", "Watchlist", () => { setMobWatch(true); setDrawerOpen(true); }],
                 ["💬", "Chat", () => { setMobWatch(false); setDrawerOpen(true); }],
               ].map(([ic, label, go]) => (
