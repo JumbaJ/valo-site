@@ -10001,6 +10001,7 @@ export default function App() {
   const [hubTop, setHubTop] = useState(58);              // 🧪 dock height, % of viewport — drag to move
   const [mobModeMenu, setMobModeMenu] = useState(false); // 🧪 auto-trader: the mode picker's hanging menu
   const [mobArmFn, setMobArmFn] = useState(null);        // 🧪 the active panel's arm(), reported via onReadyArm
+  const [mobPanelOpen, setMobPanelOpen] = useState(false); // 🧪 ⚙: the mode panel's full controls, hidden by default
   const [flowDetail, setFlowDetail] = useState(false);   // 🧪 UI_NEXT: momentum + pressure under the flow bar
   const [railTab, setRailTab] = useState("trades");      // 🧪 UI_NEXT: trades | positions | chat in one panel
   const [railFold, setRailFold] = useState(false);       // 🧪 UI_NEXT: fold the whole rail to a strip while charting
@@ -16547,9 +16548,13 @@ export default function App() {
         })()],
         ["TOTAL", <b style={{ color: T.text }}>${((sbLive ? sbSol * SOL_USD + (walletChain ? visHolds(walletChain.holdings).reduce((s3, h3) => s3 + (h3.usd || 0), 0) : 0) : solBalance * SOL_USD + valoWallet * valoUnit()) + (sbLive ? 0 : strategyEquityUsd)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b>],
       ]; })().map(([k, v], i) => (
-        <div key={i} data-wtotal={k === "TOTAL" ? "1" : undefined} style={{ flex: 1, textAlign: "center", padding: "6px 2px", borderLeft: i ? `1px solid ${T.border}` : "none", minWidth: 0 }}>
-          <div style={{ color: T.faint, fontSize: 6.5, letterSpacing: 0.8, marginBottom: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k}</div>
-          <div style={{ fontSize: 9.5, fontWeight: 800 }}>{v}</div>
+        <div key={i} data-wtotal={k === "TOTAL" ? "1" : undefined}
+          style={UI_NEXT
+            ? { flex: 1, display: "flex", alignItems: "baseline", justifyContent: "center", gap: 4,
+                padding: "3px 2px", borderLeft: i ? `1px solid ${T.border}` : "none", minWidth: 0 }
+            : { flex: 1, textAlign: "center", padding: "6px 2px", borderLeft: i ? `1px solid ${T.border}` : "none", minWidth: 0 }}>
+          <div style={{ color: T.faint, fontSize: 6.5, letterSpacing: 0.8, marginBottom: UI_NEXT ? 0 : 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k}</div>
+          <div style={{ fontSize: UI_NEXT ? 8.5 : 9.5, fontWeight: 800, whiteSpace: "nowrap" }}>{v}</div>
         </div>
       ))}
     </div>
@@ -19036,6 +19041,10 @@ export default function App() {
                     fontFamily: T.mono, fontSize: 11, fontWeight: 900, textAlign: "center", outline: "none" }} />
                 <span style={{ fontFamily: T.mono, fontSize: 8, color: T.faint }}>{pay}</span>
               </div>
+              <button onClick={() => setMobPanelOpen((v) => !v)} title="Tune: entry, trailing loss, presets"
+                style={{ flex: "0 0 40px", border: `1px solid ${mobPanelOpen ? VALO_PURPLE : T.border2}`,
+                  background: mobPanelOpen ? "rgba(125,92,240,0.14)" : "rgba(255,255,255,0.03)",
+                  color: mobPanelOpen ? VALO_PURPLE : T.dim, borderRadius: 999, fontSize: 12, cursor: "pointer" }}>⚙</button>
               <button onClick={() => { if (mobArmFn) mobArmFn(); }}
                 disabled={!mobArmFn}
                 style={{ flex: 1, border: `1px solid ${mobArmFn ? T.green : T.border2}`,
@@ -19112,27 +19121,27 @@ export default function App() {
             ) : mobPageTab === "visual" ? (
               <>
               {mobStatsBar}
-              <VisualTrading onReadyArm={UI_NEXT ? (fn) => setMobArmFn(() => fn) : undefined}
+              {(!UI_NEXT || mobPanelOpen) && <VisualTrading onReadyArm={UI_NEXT ? (fn) => setMobArmFn(() => fn) : undefined}
                 token={selected} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} compactArm
                 editBot={pendingOrders.find((o) => o.id === editingBotId && o.vt) || null}
                 botLock={botLock} onStageSide={(m) => setBotSide(m)} onArmPair={armVisualPair}
                 dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
                 onSetDragSet={(v) => setBotDragSet(!!v)} onLinesChange={(l) => setVtLines(l)}
-                onDraftLevel={(lvl, tid, side) => setBotDraftLevel(lvl ? { tokenId: tid != null ? tid : selected.id, level: lvl, side: side || botSide } : null)} />
+                onDraftLevel={(lvl, tid, side) => setBotDraftLevel(lvl ? { tokenId: tid != null ? tid : selected.id, level: lvl, side: side || botSide } : null)} />}
               </>
             ) : (
             <>
             {/* live wallet — state-driven, so it moves the instant any bot or trade does */}
             {mobStatsBar}
             {/* live auto trader — arm or relaunch right here under the chart */}
-            <TradePanel onReadyArm={UI_NEXT ? (fn) => setMobArmFn(() => fn) : undefined}
+            {(!UI_NEXT || mobPanelOpen) && <TradePanel onReadyArm={UI_NEXT ? (fn) => setMobArmFn(() => fn) : undefined}
               key={editingBotId || "mnew"} token={selected} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} compactArm
               onExecute={(o) => execute(selected, o)}
               editBot={pendingOrders.find((o) => o.id === editingBotId) || null}
               onRelaunch={(id, o) => relaunchBot(id, o, selected)} botLock={botLock}
               dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
               solBalance={dispSol} valoWallet={dispValo}
-              onDraftLevel={(lvl, tid, side) => setBotDraftLevel(lvl ? { tokenId: tid != null ? tid : selected.id, level: lvl, side: side || botSide } : null)} />
+              onDraftLevel={(lvl, tid, side) => setBotDraftLevel(lvl ? { tokenId: tid != null ? tid : selected.id, level: lvl, side: side || botSide } : null)} />}
             <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1.5, margin: "12px 0 7px" }}>BOT METRICS · CLOSEST TRIGGER FIRST</div>
             {pendingOrders.length === 0 && <div style={{ fontFamily: T.mono, fontSize: 10, color: T.faint, textAlign: "center", padding: 24 }}>No bots armed yet — arm buy/sell and tap the chart, or use the auto strategy.</div>}
             {pendingOrders
