@@ -16389,6 +16389,26 @@ export default function App() {
   // ✈ the live Telegram group, on-site: reads what the bot relays to tg_feed
   const TG_JOIN = "https://t.me/VALOTerminal";
   const [tgFeed, setTgFeed] = useState([]);
+  const [tgDraft, setTgDraft] = useState("");
+  const [tgSending, setTgSending] = useState(false);
+  const sendToTg = async () => {
+    const msg = tgDraft.trim();
+    if (!msg || tgSending) return;
+    setTgSending(true);
+    try {
+      const r = await fetch("/api/tg-send", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: msg, name: username || "anon" }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.ok) {
+        setTgDraft("");
+        setTgFeed((f) => [...f, { id: `local-${Date.now()}`, name: `${username || "anon"} · site`,
+          text: msg, kind: "text", file_id: null, ts: Math.floor(Date.now() / 1000) }]);
+      } else if (r.status === 429) setTgDraft(msg + " ");   // keep their words on a rate-limit
+    } catch (e) {}
+    setTgSending(false);
+  };
   useEffect(() => {
     if (chatTab !== "tg") return;
     const sb2 = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
@@ -16435,11 +16455,24 @@ export default function App() {
           </div>
         ))}
       </div>
+      <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
+        <input value={tgDraft} onChange={(e) => setTgDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") sendToTg(); }}
+          placeholder={`message the group as ${username || "anon"}…`}
+          maxLength={280}
+          style={{ flex: 1, minWidth: 0, border: `1px solid ${T.border2}`, background: "rgba(255,255,255,0.03)",
+            color: T.text, borderRadius: 9, padding: "8px 11px", fontFamily: T.mono, fontSize: 10.5, outline: "none" }} />
+        <button onClick={sendToTg} disabled={!tgDraft.trim() || tgSending}
+          style={{ border: "1px solid rgba(106,179,243,0.5)", background: tgDraft.trim() ? "rgba(106,179,243,0.14)" : "rgba(255,255,255,0.02)",
+            color: tgDraft.trim() ? "#6ab3f3" : T.faint, borderRadius: 9, padding: "8px 13px",
+            fontFamily: T.mono, fontSize: 11, fontWeight: 900, cursor: tgDraft.trim() ? "pointer" : "default" }}>
+          {tgSending ? "…" : "➤"}
+        </button>
+      </div>
       <a href={TG_JOIN} target="_blank" rel="noopener noreferrer"
-        style={{ display: "block", textAlign: "center", marginTop: 8, padding: "7px 0", borderRadius: 9,
-          border: "1px solid rgba(106,179,243,0.4)", background: "rgba(106,179,243,0.08)", color: "#6ab3f3",
-          fontFamily: T.mono, fontSize: 10, fontWeight: 900, textDecoration: "none" }}>
-        💬 JOIN THE CONVERSATION → TELEGRAM
+        style={{ display: "block", textAlign: "center", marginTop: 6, fontFamily: T.mono, fontSize: 8.5,
+          color: T.faint, textDecoration: "none" }}>
+        open the full group on Telegram ↗
       </a>
     </div>
   );
