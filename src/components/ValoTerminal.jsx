@@ -673,6 +673,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
   const pinCrossRef = useRef(null);               // 🔒 read by effects that must not move the chart
   const frozenScaleRef = useRef(null);            // 🔒 the exact axis held while the line is up
   const lastTouchCrossRef = useRef(null);         // 🧪 UI_NEXT: where the finger last was — the line stays there
+  const crossModeRef = useRef(false);             // 🧪 UI_NEXT: this touch is READING (hold-summoned), not panning
   useEffect(() => { pinCrossRef.current = pinCross; }, [pinCross]);
   const [pulseTick, setPulseTick] = useState(0);
   const requestRepaint = useCallback(() => setPulseTick((t) => t + 1), []);
@@ -923,6 +924,8 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
     // NO vertical drag — the axis always auto-fits the visible candles so the
     // chart is fully on-screen wherever you pan left/right (DexScreener-style).
     // switch to log automatically once the range is too wide to read linearly
+    const po = UI_NEXT ? +(view.priceOff || 0) : 0;
+    if (po) { const r0 = hi - lo; lo += po * r0; hi += po * r0; }
     const logOn = logMode === "log"
       || (logMode === "auto" && trueLo > 0 && trueHi / trueLo > 150);
     const lgLo = logOn ? Math.log(Math.max(lo, 1e-15)) : 0;
@@ -1682,6 +1685,14 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       clearTimeout(holdRef.current);
       const g2 = geom.current || {};
       const inPlot2 = g2.chartW > 0 ? (cx > (g2.padL || 0) && cx < (g2.padL || 0) + g2.chartW) : true;
+      if (!hit && inPlot2 && UI_NEXT) {    // ⏱ hold ~1s → the reading line (DexScreener style)
+        holdRef.current = setTimeout(() => {
+          if (dragRef.current && dragRef.current.moved) return;
+          crossModeRef.current = true;
+          if (navigator.vibrate) navigator.vibrate(10);
+          setPinCross({ cx, cy }); setCross({ cx, cy });
+        }, 1000);
+      }
       if (!hit && inPlot2 && !UI_NEXT) {   // hold the chart ~2s → crosshair mode (legacy)
         holdRef.current = setTimeout(() => {
           if (dragRef.current && dragRef.current.moved) return;
@@ -1769,6 +1780,17 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       setView((v) => ({ ...v, count: Math.max(12, Math.min(capNow, Math.round((ax.c0 || 60) * factor))) }));
       return;
     }
+    if (UI_NEXT && crossModeRef.current && e.touches) {
+      // ✏️ reading: the line rides the finger; releasing leaves it in place
+      if (dragRef.current) dragRef.current.moved = true;   // never counts as a tap
+      crossPendRef.current = { cx, cy };
+      if (!crossRafRef.current) crossRafRef.current = requestAnimationFrame(() => {
+        crossRafRef.current = 0;
+        const c2 = crossPendRef.current;
+        if (c2) { setPinCross(c2); setCross(c2); }
+      });
+      return;
+    }
     if (pinCross && e.touches && !UI_NEXT) {
       // 🔒 locked: the chart holds perfectly still, the finger only moves the
       // line. Dragging is USE, not dismissal — movement cancels the hold timer.
@@ -1791,7 +1813,6 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       if (Math.abs(dx) > thr || (d.touch && Math.abs(dyTot) > thr)) { d.moved = true; clearTimeout(holdRef.current); }
       else if (Math.abs(dyTot) > thr) clearTimeout(holdRef.current);
       if (d.moved) {
-        if (UI_NEXT && d.touch) { lastTouchCrossRef.current = { cx, cy }; setCross({ cx, cy }); }
         const g = geom.current;
         // horizontal pan ONLY — up/down does nothing; the axis auto-fits so
         // the visible candles are always fully framed no matter where you are.
@@ -1804,11 +1825,17 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
             ? agg[endIdx].t : anchorRef.current;
         // 📱 coalesce: touchmove can fire at 120Hz — one setView per frame
         // keeps the drag glassy instead of render-thrashed
-        panPendingRef.current = nextOff;
+        let po2 = null;
+        if (UI_NEXT && d.touch) {
+          const g0 = geom.current || {};
+          if (g0.chartH > 0 && Math.abs(dyTot) > 6) po2 = (d.startPriceOff || 0) + dyTot / g0.chartH;
+        }
+        panPendingRef.current = { off: nextOff, po: po2 };
         if (!panRafRef.current) panRafRef.current = requestAnimationFrame(() => {
           panRafRef.current = 0;
-          const off2 = panPendingRef.current;
-          if (off2 != null) setView((v) => ({ ...v, offset: off2, priceOff: 0 }));
+          const pp = panPendingRef.current;
+          if (pp && pp.off != null) setView((v) => ({ ...v, offset: pp.off,
+            priceOff: pp.po != null ? pp.po : (UI_NEXT ? (v.priceOff || 0) : 0) }));
         });
         return;
       }
@@ -1886,22 +1913,11 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       onChartTrade({ side: clickMode, level });
       return;
     }
-    // 🧪 UI_NEXT touch model: drag → the line rides along and STAYS where it
-    // stopped; a clean tap clears it (or places it fresh). No freeze, ever —
-    // the axis keeps fitting, so candles can never run off the frame.
+    // 🧪 DexScreener model: the hold-summoned line survives release; a clean
+    // motionless tap is the ONLY thing that clears it. No freeze, ever.
     if (UI_NEXT && d && d.touch) {
-      if (d.moved) {
-        const last = lastTouchCrossRef.current;
-        if (last) { setPinCross(last); setCross(last); }
-      } else {
-        if (pinCross || cross) { setPinCross(null); setCross(null); }
-        else {
-          const { cx, cy } = ptOf(e);
-          const g2 = geom.current || {};
-          const inPlot3 = cy >= (g2.padT || 0) && cy <= (g2.padT || 0) + (g2.chartH || 1e9);
-          if (inPlot3) { setPinCross({ cx, cy }); setCross({ cx, cy }); }
-        }
-      }
+      if (crossModeRef.current) crossModeRef.current = false;        // line stays put
+      else if (!d.moved && (pinCross || cross)) { setPinCross(null); setCross(null); }
     }
   };
 
