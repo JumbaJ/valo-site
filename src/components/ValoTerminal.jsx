@@ -16047,18 +16047,20 @@ export default function App() {
                   .sort((a, b) => a.age - b.age)
                   .slice(0, 40);
                 const row = { display: "flex", alignItems: "center", gap: 8, width: "100%",
-                  padding: "8px 9px", border: `1px solid ${T.border}`, background: "#10141c",
+                  padding: "10px 11px", border: `1px solid ${T.border}`, background: "#10141c",
                   cursor: "pointer", textAlign: "left", borderRadius: 9, marginBottom: 5 };
-                const colHead = { fontSize: 8, letterSpacing: 1.4, color: T.faint, marginBottom: 6,
+                const colHead = { fontSize: 9.5, letterSpacing: 1.4, color: T.faint, marginBottom: 6,
                   paddingLeft: 6, whiteSpace: "nowrap" };
-                const symCss = { display: "block", fontSize: 10.5, fontWeight: 900, color: T.text,
+                const symCss = { display: "block", fontSize: 12.5, fontWeight: 900, color: T.text,
                   overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-                const metaCss = { display: "block", fontSize: 8, color: T.faint, whiteSpace: "nowrap" };
-                const numCss = { fontSize: 10, fontWeight: 900, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
-                const emptyNote = { color: T.faint, fontSize: 8.5, padding: "10px 6px", lineHeight: 1.6 };
+                const metaCss = { display: "block", fontSize: 10, color: T.faint, whiteSpace: "nowrap" };
+                const numCss = { fontSize: 12, fontWeight: 900, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+                const emptyNote = { color: T.faint, fontSize: 10.5, padding: "10px 6px", lineHeight: 1.6 };
                 // brand-new tokens live in cents — fmt$ floors them to $0.00
                 const mcTxt = (v) => { const n = +v || 0;
-                  return n >= 1000 ? fmt$(n) : n >= 1 ? `$${n.toFixed(0)}` : n > 0 ? `$${n.toFixed(2)}` : "—"; };
+                  return n >= 1000 ? fmt$(n) : n >= 1 ? `$${n.toFixed(0)}` : n > 0 ? `$${n.toFixed(2)}` : null; };
+                // a token with no market cap still deserves a number — fall back to price
+                const figure = (t) => (floorMc ? (mcTxt(t.mc) || `$${fmtP(t.price)}`) : `$${fmtP(t.price)}`);
                 return (
                   <div style={{ border: `1px solid ${T.border}`, borderRadius: 12, padding: isMobile ? 12 : 16, fontFamily: T.mono }}>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap",
@@ -16093,7 +16095,7 @@ export default function App() {
                             <span onClick={(e) => { e.stopPropagation(); setFloorMc((v) => !v); }}
                               title="Tap to switch price ⇄ market cap"
                               style={{ ...numCss, color: T.dim, textDecoration: "underline dotted", textUnderlineOffset: 3 }}>
-                              {floorMc ? mcTxt(t.mc) : `$${fmtP(t.price)}`}
+                              {figure(t)}
                             </span>
                           </button>
                         ))}
@@ -16123,7 +16125,7 @@ export default function App() {
                                 <span onClick={(e) => { e.stopPropagation(); setFloorMc((v) => !v); }}
                                   title="Tap to switch price ⇄ market cap"
                                   style={{ ...metaCss, cursor: "pointer" }}>
-                                  {floorMc ? `MC ${mcTxt(t.mc)}` : `$${fmtP(t.price)}`}
+                                  {floorMc && mcTxt(t.mc) ? `MC ${mcTxt(t.mc)}` : `$${fmtP(t.price)}`}
                                   {txns ? ` · ${txns.toLocaleString()} txns` : ""}
                                   {vol ? ` · vol ${fmt$(vol)}` : ""}
                                   {t.tvl ? ` · LP ${fmt$(t.tvl)}` : ""}
