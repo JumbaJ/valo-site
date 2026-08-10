@@ -9999,6 +9999,7 @@ export default function App() {
   const [moreBand, setMoreBand] = useState(false);       // 🧪 UI_NEXT mobile: the band's ⋯ hanging menu
   const [hubOpen, setHubOpen] = useState(false);         // 🧪 UI_NEXT mobile: the all-in-one hub fan
   const [hubTop, setHubTop] = useState(58);              // 🧪 dock height, % of viewport — drag to move
+  const [mobModeMenu, setMobModeMenu] = useState(false); // 🧪 auto-trader: the mode picker's hanging menu
   const [flowDetail, setFlowDetail] = useState(false);   // 🧪 UI_NEXT: momentum + pressure under the flow bar
   const [railTab, setRailTab] = useState("trades");      // 🧪 UI_NEXT: trades | positions | chat in one panel
   const [railFold, setRailFold] = useState(false);       // 🧪 UI_NEXT: fold the whole rail to a strip while charting
@@ -18993,7 +18994,7 @@ export default function App() {
           <ProChart candles={selected.candles} hue={selected.hue} synthetic={!selected.hasDex} createdAt={selected.createdAt || null}
             mode="candles" tfMin={tf} trades={chartTrades} traderPrefs={traderPrefs} theme={themeIdx}
             onMarkerClick={(tr) => { setMarkerInfo(tr); if (tr && tr.tx) setHighlightTx(tr.tx); }} highlightTx={highlightTx}
-            price={selected.price} sym={selected.sym} isMobile height={Math.round((typeof window !== "undefined" ? window.innerHeight : 800) * 0.38)}
+            price={selected.price} sym={selected.sym} isMobile height={Math.round((typeof window !== "undefined" ? window.innerHeight : 800) * (UI_NEXT ? 0.55 : 0.38))}
             pendingLevels={[
               ...pendingOrders.filter((o) => String(o.tokenId) === String(selected.id)),
               ...pendingOrders.filter((o) => String(o.tokenId) === String(selected.id) && o.vt && o.side === "buy" && o.vtSell > 0)
@@ -19014,8 +19015,42 @@ export default function App() {
               times live. drag-set · trader · visual · all bots · watchlist.
               HOLD the watchlist pill and it swaps into 📊 POSITIONS (the auto
               page's normal tab-out); hold again to swap back. */}
+          {UI_NEXT && (
+            <div style={{ position: "relative", display: "flex", gap: 4, alignItems: "stretch", margin: "5px 10px 0" }}>
+              <button onClick={() => setMobModeMenu((v) => !v)}
+                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                  border: `1px solid ${VALO_PURPLE}55`, background: "rgba(125,92,240,0.12)", color: VALO_PURPLE,
+                  borderRadius: 999, padding: "6px 8px", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, cursor: "pointer" }}>
+                {mobPageTab === "visual" ? "👁 VISUAL" : mobPageTab === "bots" ? "📊 BOTS" : "🤖 TRADER"} {mobModeMenu ? "▴" : "▾"}
+              </button>
+              <button onClick={() => setBotDragSet((v) => !v)} title="Drag-set: drag levels on the chart"
+                style={{ flex: "0 0 44px", border: `1px solid ${botDragSet ? T.amber : T.border2}`,
+                  background: botDragSet ? "rgba(249,180,22,0.14)" : "rgba(255,255,255,0.03)",
+                  color: botDragSet ? T.amber : T.dim, borderRadius: 999, fontSize: 12, cursor: "pointer" }}>✋</button>
+              {mobModeMenu && (
+                <>
+                  <div onClick={() => setMobModeMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                  <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 41,
+                    background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12,
+                    boxShadow: "0 12px 30px rgba(0,0,0,0.55)", padding: 5 }}>
+                    {[["🤖 Trader", () => setMobPageTab("trader")],
+                      ["👁 Visual", () => setMobPageTab("visual")],
+                      ["📊 Bots", () => setMobPageTab("bots")],
+                      ["📋 Watchlist", () => { setMobWatch(true); setDrawerOpen(true); setQuickWatch(true); }],
+                      ["🧾 Positions", () => setPosDrawer(true)],
+                    ].map(([lab, go]) => (
+                      <button key={lab} onClick={() => { setMobModeMenu(false); go(); }}
+                        style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 11px",
+                          border: "none", background: "transparent", color: T.text, borderRadius: 8,
+                          fontFamily: T.mono, fontSize: 11, fontWeight: 800, cursor: "pointer" }}>{lab}</button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           <div onContextMenu={(e) => e.preventDefault()}
-            style={{ display: "flex", gap: 3, alignItems: "stretch", margin: "5px 10px 0", padding: 3,
+            style={{ display: UI_NEXT ? "none" : "flex", gap: 3, alignItems: "stretch", margin: "5px 10px 0", padding: 3,
               border: `1px solid ${T.border2}`, borderRadius: 999, background: "rgba(255,255,255,0.03)",
               userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" }}>
             {[
