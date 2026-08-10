@@ -17576,7 +17576,13 @@ export default function App() {
                 {railTab === "trades" && selected && (
                   <LiveTrades token={selected} isMobile={false} traderPrefs={traderPrefs} onPickTrader={pickTraderRow} />
                 )}
-                {railTab === "positions" && selected && (
+                {railTab === "trades" && !selected && UI_NEXT && (
+                  <div style={{ color: T.faint, fontFamily: T.mono, fontSize: 10, textAlign: "center", padding: "26px 14px", lineHeight: 1.7 }}>
+                    open a pair to watch its tape<br />
+                    <span style={{ fontSize: 9 }}>your positions stay available in the tab beside this one</span>
+                  </div>
+                )}
+                {railTab === "positions" && (UI_NEXT || selected) && (
                   <MyPositionsHub liveMode={liveData} chainHoldings={chainHoldingsLive} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} onBurn={burnAndReclaim} tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
                     onOpenToken={(id) => { setSel(id); setClickMode(null); }} onSellPos={sellPos} onCloseTickets={closeAllTickets}
                     onSellRun={sellRun} onSellAllBots={sellAllRuns} onCancelBot={cancelBot} />
