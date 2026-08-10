@@ -1900,7 +1900,7 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
       {isMobile ? (
         <>
           {ohlc && (
-            <div style={{ position: "absolute", top: 6, left: "50%", transform: "translateX(-50%)", zIndex: 3, pointerEvents: "none",
+            <div style={{ position: "absolute", top: UI_NEXT ? 24 : 6, left: UI_NEXT ? 8 : "50%", transform: UI_NEXT ? "none" : "translateX(-50%)", zIndex: 3, pointerEvents: "none",
               display: "flex", gap: 7, alignItems: "center", whiteSpace: "nowrap",
               fontFamily: T.mono, fontSize: 8.5, color: T.dim,
               background: "rgba(12,15,22,0.88)", border: `1px solid ${T.border}`, borderRadius: 20, padding: "4px 11px" }}>
@@ -1914,11 +1914,11 @@ function ProChartBase({ candles, hue, synthetic, mode, tfMin, trades, clickMode,
             </div>
           )}
           {eyesToken && (
-            <div style={{ position: "absolute", top: 32, left: 10, zIndex: 3 }}>
+            <div style={{ position: "absolute", top: UI_NEXT ? 52 : 32, left: 10, zIndex: 3 }}>
               <ViewerPills token={eyesToken} small />
             </div>
           )}
-          <div style={{ position: "absolute", top: -15, right: 4, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 14, lineHeight: 1 }}>
+          <div style={{ position: "absolute", top: UI_NEXT ? 2 : -15, right: 4, zIndex: 6, display: "flex", gap: 4, alignItems: "center", height: 14, lineHeight: 1 }}>
             <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: 18, offset: 0, priceOff: 0, priceZoom: 1, follow: true }); }}
               style={{ height: 16, padding: "0 6px", borderRadius: 5, border: `1px solid ${T.blue}55`, background: "rgba(76,154,255,0.2)", color: T.blue, cursor: "pointer", fontSize: 7.5, fontWeight: 800, fontFamily: T.mono, lineHeight: 1, whiteSpace: "nowrap" }}>◉ LIVE</button>
             <button onClick={() => { scaleRef.current = { key: null, lo: NaN, hi: NaN }; anchorRef.current = null; setView({ count: Math.max(15, Math.round(total * 1.12) + 8), offset: 0, priceOff: 0, priceZoom: 1, follow: true }); }}
@@ -16141,8 +16141,11 @@ export default function App() {
                       }
                     }}
                     aria-label="Tap: chart covers the page up to the token name — tap again to restore"
-                    style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "5px 0 8px", touchAction: "none", cursor: "pointer" }}>
-                    <div style={{ width: 68, height: 5, borderRadius: 3, background: metricsCrunch > 0 ? VALO_PURPLE : T.border2, boxShadow: metricsCrunch > 0 ? `0 0 8px ${VALO_PURPLE}` : "none" }} />
+                    style={UI_NEXT
+                      ? { display: "flex", justifyContent: "center", alignItems: "center", height: 14,
+                          margin: "0 0 -14px", position: "relative", zIndex: 7, touchAction: "none", cursor: "grab" }
+                      : { display: "flex", justifyContent: "center", alignItems: "center", padding: "5px 0 8px", touchAction: "none", cursor: "pointer" }}>
+                    <div style={{ width: UI_NEXT ? 90 : 68, height: 5, borderRadius: 3, background: metricsCrunch > 0 ? VALO_PURPLE : T.border2, boxShadow: metricsCrunch > 0 ? `0 0 8px ${VALO_PURPLE}` : "none" }} />
                   </div>
                 )}
                 {!isMobile && (
