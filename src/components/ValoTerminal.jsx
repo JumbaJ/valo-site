@@ -9932,6 +9932,7 @@ export default function App() {
   const [sigSheet, setSigSheet] = useState(false);       // 🧪 UI_NEXT mobile: signals bottom sheet
   const [moreBand, setMoreBand] = useState(false);       // 🧪 UI_NEXT mobile: the band's ⋯ hanging menu
   const [hubOpen, setHubOpen] = useState(false);         // 🧪 UI_NEXT mobile: the all-in-one hub fan
+  const [hubTop, setHubTop] = useState(58);              // 🧪 dock height, % of viewport — drag to move
   const [flowDetail, setFlowDetail] = useState(false);   // 🧪 UI_NEXT: momentum + pressure under the flow bar
   const [railTab, setRailTab] = useState("trades");      // 🧪 UI_NEXT: trades | positions | chat in one panel
   const [railFold, setRailFold] = useState(false);       // 🧪 UI_NEXT: fold the whole rail to a strip while charting
@@ -19490,37 +19491,49 @@ export default function App() {
         </div>
       )}
 
-      {/* 🧪 UI_NEXT MOBILE HUB — one pill replaces the right-edge tabs */}
+      {/* 🧪 UI_NEXT MOBILE HUB — an edge dock in the price-axis gutter, draggable */}
       {isMobile && UI_NEXT && typeof document !== "undefined" && createPortal(
         <>
-          {hubOpen && <div onClick={() => setHubOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 338 }} />}
-          <div style={{ position: "fixed", right: 10, bottom: "calc(64px + env(safe-area-inset-bottom))", zIndex: 339,
-            display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-            {hubOpen && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {[["💼", "Wallet", () => { setPortfolioDrawer(true); }],
-                  ["⭐", "Watchlist", () => { setMobWatch(true); setDrawerOpen(true); }],
-                  ["💬", "Chat", () => { setMobWatch(false); setDrawerOpen(true); }],
-                ].map(([ic, label, go]) => (
-                  <button key={label} onClick={() => { setHubOpen(false); go(); }}
-                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", borderRadius: 999,
-                      border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.97)", color: T.text,
-                      fontFamily: T.mono, fontSize: 11, fontWeight: 800, cursor: "pointer",
-                      boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
-                    <span>{ic}</span><span>{label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            <button onClick={() => setHubOpen((v) => !v)}
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 999,
-                border: `1px solid ${liveAuto ? VALO_PURPLE : T.border2}`,
-                background: liveAuto ? "rgba(125,92,240,0.22)" : "rgba(17,21,29,0.97)",
-                color: liveAuto ? VALO_PURPLE : T.text, fontFamily: T.mono, fontSize: 11, fontWeight: 900,
-                cursor: "pointer", boxShadow: liveAuto ? `0 0 14px ${VALO_PURPLE}55` : "0 8px 24px rgba(0,0,0,0.5)" }}>
-              ⚡ {fmt$(totalEquity)}
-            </button>
-          </div>
+          {hubOpen && <div onClick={() => setHubOpen(false)}
+            style={{ position: "fixed", inset: 0, zIndex: 338, background: "rgba(5,7,12,0.45)" }} />}
+          {hubOpen && (
+            <div style={{ position: "fixed", right: 30, top: `${hubTop}%`, transform: "translateY(-50%)", zIndex: 340,
+              display: "flex", flexDirection: "column", gap: 6 }}>
+              {[["💼", "Wallet", () => setPortfolioDrawer(true)],
+                ["⭐", "Watchlist", () => { setMobWatch(true); setDrawerOpen(true); }],
+                ["💬", "Chat", () => { setMobWatch(false); setDrawerOpen(true); }],
+                ["⚡", fmt$(totalEquity), () => setPortfolioDrawer(true)],
+              ].map(([ic, label, go]) => (
+                <button key={label} onClick={() => { setHubOpen(false); go(); }}
+                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", borderRadius: 999,
+                    border: `1px solid ${T.border2}`, background: "rgba(17,21,29,0.97)", color: T.text,
+                    fontFamily: T.mono, fontSize: 11, fontWeight: 800, cursor: "pointer",
+                    boxShadow: "0 8px 24px rgba(0,0,0,0.5)", justifyContent: "flex-start" }}>
+                  <span>{ic}</span><span>{label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <button
+            onTouchStart={(e) => { const t0 = e.touches[0]; const n = e.currentTarget;
+              n._hy = t0.clientY; n._h0 = hubTop; n._hm = false; }}
+            onTouchMove={(e) => { const t0 = e.touches[0]; const n = e.currentTarget;
+              if (t0 == null || n._hy == null) return;
+              const dy = t0.clientY - n._hy;
+              if (Math.abs(dy) > 8) n._hm = true;
+              if (n._hm) setHubTop(Math.max(8, Math.min(82, n._h0 + (dy / window.innerHeight) * 100))); }}
+            onTouchEnd={(e) => { const n = e.currentTarget;
+              if (!n._hm) setHubOpen((v) => !v); n._hy = null; }}
+            onClick={(e) => { if (e.detail !== 0) setHubOpen((v) => !v); }}
+            aria-label="Wallet · watchlist · chat — drag to move"
+            style={{ position: "fixed", right: 0, top: `${hubTop}%`, transform: "translateY(-50%)", zIndex: 339,
+              width: 24, height: 52, border: `1px solid ${liveAuto ? VALO_PURPLE : T.border2}`, borderRight: "none",
+              borderRadius: "12px 0 0 12px", touchAction: "none", cursor: "pointer",
+              background: liveAuto ? "rgba(125,92,240,0.24)" : "rgba(17,21,29,0.94)",
+              color: liveAuto ? VALO_PURPLE : T.dim, fontSize: 13,
+              boxShadow: liveAuto ? `0 0 12px ${VALO_PURPLE}55` : "-3px 0 14px rgba(0,0,0,0.4)" }}>
+            ⚡
+          </button>
         </>, document.body
       )}
       {/* MOBILE CHAT DRAWER — tab handle on the right edge, wheels out on tap */}
