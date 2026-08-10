@@ -10013,6 +10013,30 @@ export default function App() {
   const [mobPanelOpen, setMobPanelOpen] = useState(false); // 🧪 ⚙: the mode panel's full controls, hidden by default
   const [chatRoomMenu, setChatRoomMenu] = useState(false); // 💬 the chat header's room selector
   const [floorMc, setFloorMc] = useState(false);           // 🏛 floor rows: price ⇄ market cap
+  const [floorToks, setFloorToks] = useState([]);          // 🏛 the floor's OWN feed — it never scavenges
+  useEffect(() => {
+    if (sel) return;                                       // only while the floor is showing
+    let stop = false;
+    const pull = async () => {
+      try {
+        const feeds = ["trending", "top", "new"];
+        const rs = await Promise.allSettled(feeds.map((f) =>
+          fetch(`/api/tokens?feed=${f}&t=${Math.floor(Date.now() / 15000)}`)));
+        const out = [];
+        for (const r of rs) {
+          if (r.status !== "fulfilled" || !r.value.ok) continue;
+          const rows = await r.value.json().catch(() => null);
+          if (Array.isArray(rows)) out.push(...rows.filter((x) => (+x.mc || 0) < 1e11).map(adoptMarketToken));
+        }
+        if (!stop && out.length) setFloorToks(out);
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 30000);
+    const wake = () => { if (typeof document === "undefined" || document.visibilityState === "visible") pull(); };
+    window.addEventListener("focus", wake);
+    return () => { stop = true; clearInterval(iv); window.removeEventListener("focus", wake); };
+  }, [sel]);
   const [, setFloorTick] = useState(0);                    // 🏛 the empty-state floor's clock
   useEffect(() => {
     if (sel) return;
@@ -16002,7 +16026,7 @@ export default function App() {
               UI_NEXT ? (() => {
                 const minsTo = 60 - new Date().getMinutes();
                 const seen = new Set(); const seenF = new Set();
-                const movers = [...(mktHits || []), ...(moreToks || []), ...(tokens || [])]
+                const movers = [...(floorToks || []), ...(mktHits || []), ...(moreToks || []), ...(tokens || [])]
                   .filter((t) => t && (t.mc || 0) > 0 && !seen.has(t.id) && seen.add(t.id))
                   .map((t) => { const c = +(t.ch ?? t.ch24);
                     return { t, ch: Number.isFinite(c) ? c : null,
@@ -16016,7 +16040,7 @@ export default function App() {
                   return mult >= 2 ? { id: t.id, sym: t.sym, mult } : null;
                 }).filter(Boolean).sort((a, b) => b.mult - a.mult).slice(0, 20);
                 const signedIn = !!(wallet && wallet.address);
-                const fresh = [...(mktHits || []), ...(moreToks || []), ...(tokens || [])]
+                const fresh = [...(floorToks || []), ...(mktHits || []), ...(moreToks || []), ...(tokens || [])]
                   .filter((t) => t && t.createdAt && !seenF.has(t.id) && seenF.add(t.id))
                   .map((t) => ({ t, age: Date.now() - new Date(t.createdAt).getTime() }))
                   .filter((x) => x.age > 0 && x.age < 24 * 3600e3)
