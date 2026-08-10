@@ -19647,8 +19647,13 @@ export default function App() {
               if (Math.abs(dy) > 8) n._hm = true;
               if (n._hm) setHubTop(Math.max(8, Math.min(82, n._h0 + (dy / window.innerHeight) * 100))); }}
             onTouchEnd={(e) => { const n = e.currentTarget;
-              if (!n._hm) setHubOpen((v) => !v); n._hy = null; }}
-            onClick={(e) => { if (e.detail !== 0) setHubOpen((v) => !v); }}
+              if (!n._hm) { setHubOpen((v) => !v); n._ht = Date.now(); }   // tap toggles: open ⇄ closed
+              n._hy = null; }}
+            onClick={(e) => { const n = e.currentTarget;
+              // mobile Safari fires a synthetic click after touchend — one
+              // toggle already happened there; a second here re-opened the fan
+              if (n._ht && Date.now() - n._ht < 500) return;
+              setHubOpen((v) => !v); }}
             aria-label="Wallet · watchlist · chat — drag to move"
             style={{ position: "fixed", right: 0, top: `${hubTop}%`, transform: "translateY(-50%)", zIndex: 339,
               width: 24, height: 52, border: `1px solid ${liveAuto ? VALO_PURPLE : T.border2}`, borderRight: "none",
