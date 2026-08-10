@@ -6982,8 +6982,10 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           <button onClick={() => setTab("wallet")}
             style={{ ...chip(tab === "wallet"), flex: 1, textAlign: "center", padding: "7px", fontSize: 11,
               ...(UI_NEXT ? { borderRadius: "10px 10px 0 0", borderBottom: "none",
-                background: tab === "wallet" ? "linear-gradient(180deg, rgba(125,92,240,0.20), rgba(125,92,240,0.06))" : "rgba(255,255,255,0.02)",
-                borderColor: tab === "wallet" ? `${VALO_PURPLE}44` : T.border } : {}),
+                background: tab === "wallet" ? "#11151d" : "rgba(255,255,255,0.015)",
+                borderColor: tab === "wallet" ? T.border2 : T.border,
+                boxShadow: tab === "wallet" ? `inset 0 2px 0 ${VALO_PURPLE}` : "none",
+                color: tab === "wallet" ? T.text : T.faint } : {}),
               borderTopRightRadius: liveMode && turboState ? 0 : undefined, borderBottomRightRadius: liveMode && turboState ? 0 : undefined }}>💼 Wallet</button>
           {liveMode && !UI_NEXT && (
             <button data-tour="turbo" onClick={() => setTurboPop((v) => !v)}
@@ -7015,8 +7017,10 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
         <button onClick={() => setTab("performance")}
           style={{ ...chip(tab === "performance"), flex: 1, textAlign: "center", padding: "7px", fontSize: 11,
             ...(UI_NEXT ? { borderRadius: "10px 10px 0 0", borderBottom: "none", marginLeft: 6,
-              background: tab === "performance" ? "linear-gradient(180deg, rgba(125,92,240,0.20), rgba(125,92,240,0.06))" : "rgba(255,255,255,0.02)",
-              borderColor: tab === "performance" ? `${VALO_PURPLE}44` : T.border } : {}) }}>📈 Performance</button>
+              background: tab === "performance" ? "#11151d" : "rgba(255,255,255,0.015)",
+              borderColor: tab === "performance" ? T.border2 : T.border,
+              boxShadow: tab === "performance" ? `inset 0 2px 0 ${VALO_PURPLE}` : "none",
+              color: tab === "performance" ? T.text : T.faint } : {}) }}>📈 Performance</button>
         {/* ⚡ TURBO popover — floats OVER the wallet, pushes nothing */}
         {liveMode && turboPop && typeof document !== "undefined" && createPortal(
           <>
@@ -7047,9 +7051,8 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           {/* total equity + pnl + privacy eye — under UI_NEXT this IS the wallet card */}
           <div style={UI_NEXT
             ? { textAlign: "center", marginBottom: 0, position: "relative", padding: "16px 12px 14px",
-                borderRadius: 0, border: `1px solid ${VALO_PURPLE}44`,
-                background: "linear-gradient(160deg, rgba(125,92,240,0.20), rgba(20,17,38,0.9) 55%, rgba(13,15,22,0.95))",
-                boxShadow: "0 6px 22px rgba(125,92,240,0.16)" }
+                borderRadius: 0, border: `1px solid ${T.border2}`,
+                background: "#11151d" }
             : { textAlign: "center", marginBottom: 12, position: "relative" }}>
             <button onClick={() => setHideBalance && setHideBalance((v) => !v)} title="Hide/show balances"
               style={{ position: "absolute", right: UI_NEXT ? 8 : 0, top: UI_NEXT ? 8 : 0, ...chip(false), padding: "3px 8px", fontSize: 11 }}>
@@ -7129,9 +7132,9 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                             {chips.map(([ic, addr, col]) => (
                               <a key={ic} href={`https://solscan.io/account/${addr}`} target="_blank" rel="noopener noreferrer"
                                 title="Open this wallet on Solscan · ⧉ copies"
-                                style={{ padding: "2px 9px", borderRadius: 999, border: `1px solid ${col}44`,
-                                  background: "rgba(255,255,255,0.04)", fontFamily: T.mono, fontSize: 8.5,
-                                  color: col, cursor: "pointer", textDecoration: "none", display: "inline-flex", gap: 4 }}>
+                                style={{ padding: "2px 9px", borderRadius: 999, border: `1px solid ${T.border2}`,
+                                  background: "rgba(255,255,255,0.03)", fontFamily: T.mono, fontSize: 8.5,
+                                  color: T.dim, cursor: "pointer", textDecoration: "none", display: "inline-flex", gap: 4 }}>
                                 {ic} {addr.slice(0, 4)}…{addr.slice(-4)}
                                 <span onClick={(e) => { e.preventDefault(); e.stopPropagation();
                                     try { navigator.clipboard.writeText(addr); e.currentTarget.textContent = "✓"; } catch (e2) {} }}
@@ -7169,14 +7172,14 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               <button onClick={() => setWalletSeg((v) => (v === k ? null : k))}
                 style={{ flex: 1, padding: "8px 6px", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 0.8,
                   cursor: "pointer", border: "none", borderBottom: `2px solid ${walletSeg === k ? VALO_PURPLE : "transparent"}`,
-                  background: walletSeg === k ? "rgba(125,92,240,0.10)" : "transparent",
+                  background: "transparent",
                   color: walletSeg === k ? T.text : T.faint }}>{label}</button>
             );
             return (
-              <div style={{ display: "flex", border: `1px solid ${VALO_PURPLE}33`, borderTop: "none",
+              <div style={{ display: "flex", border: `1px solid ${T.border2}`, borderTop: "none",
                 borderRadius: walletSeg ? 0 : "0 0 12px 12px", overflow: "hidden", marginBottom: walletSeg ? 0 : 10 }}>
                 {segBtn("assets", `▾ ASSETS · ${holds.length} · ${hideBalance ? "•••" : "$" + aUsd.toFixed(2)}`)}
-                <span style={{ width: 1, background: `${VALO_PURPLE}33` }} />
+                <span style={{ width: 1, background: T.border }} />
                 {segBtn("activity", "⛓ ACTIVITY")}
               </div>
             );
@@ -10407,6 +10410,8 @@ export default function App() {
     try {
       const m = (window.location.search || "").match(/[?&]u=([^&]+)/);
       if (m) setTimeout(() => setProfileUser(decodeURIComponent(m[1]).slice(0, 32)), 900);
+      const dk = (window.location.search || "").match(/[?&]devkey=([^&]+)/);
+      if (dk) localStorage.setItem("valo-dev-key", decodeURIComponent(dk[1]));
     } catch (e) {}
   }, []);
   const [followListOpen, setFollowListOpen] = useState(null);// "followers" | "following"
@@ -16399,6 +16404,17 @@ export default function App() {
   const [tgFeed, setTgFeed] = useState([]);
   const [tgDraft, setTgDraft] = useState("");
   const [tgSending, setTgSending] = useState(false);
+  const tgDevKey = (typeof localStorage !== "undefined" && localStorage.getItem("valo-dev-key")) || "";
+  const scrubTgMsg = async (m) => {
+    setTgFeed((f) => f.filter((x) => x.id !== m.id));   // optimistic — it's the dev's call
+    try {
+      await fetch("/api/tg-scrub", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-dev-key": tgDevKey },
+        body: JSON.stringify({ row_id: String(m.id).startsWith("local-") ? null : m.id, msg_id: m.msg_id || null }),
+      });
+    } catch (e) {}
+  };
   const sendToTg = async () => {
     const msg = tgDraft.trim();
     if (!msg || tgSending) return;
@@ -16453,6 +16469,10 @@ export default function App() {
               <span style={{ color: T.faint, fontWeight: 400, marginLeft: 6 }}>
                 {m.ts ? new Date(m.ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
               </span>
+              {tgDevKey && (
+                <span onClick={(e) => { e.stopPropagation(); scrubTgMsg(m); }} title="Dev: delete from site + Telegram"
+                  style={{ float: "right", color: T.faint, cursor: "pointer", padding: "0 3px", fontSize: 10 }}>✕</span>
+              )}
             </div>
             {m.file_id && (m.kind === "gif" || m.kind === "video") && (
               <video src={`/api/tg-media?id=${m.file_id}`} autoPlay muted loop playsInline
