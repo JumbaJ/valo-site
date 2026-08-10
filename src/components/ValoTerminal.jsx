@@ -286,10 +286,12 @@ function aggregate(candles, tfMin) {
 const UI_NEXT = (() => {
   try {
     const q = window.location.search || "";
+    // 3.0.5: the new terminal IS the terminal. ?ui=off opts out (sticky),
+    // ?ui=next opts back in — both persist per device.
     if (/[?&]ui=next/.test(q)) { localStorage.setItem("valo-ui-next", "1"); return true; }
-    if (/[?&]ui=off/.test(q)) { localStorage.removeItem("valo-ui-next"); return false; }
-    return localStorage.getItem("valo-ui-next") === "1";
-  } catch (e) { return false; }
+    if (/[?&]ui=off/.test(q)) { localStorage.setItem("valo-ui-next", "0"); return false; }
+    return localStorage.getItem("valo-ui-next") !== "0";
+  } catch (e) { return true; }
 })();
 
 // Nine durations is more than anyone switches between. The five people use
