@@ -15999,7 +15999,7 @@ export default function App() {
               UI_NEXT ? (() => {
                 const minsTo = 60 - new Date().getMinutes();
                 const seen = new Set();
-                const movers = [...(tokens || []), ...(moreToks || [])]
+                const movers = [...(mktHits || []), ...(moreToks || []), ...(tokens || [])]
                   .filter((t) => t && (t.mc || 0) > 300 && !seen.has(t.id) && seen.add(t.id))
                   .map((t) => { const c = +(t.ch ?? t.ch24);
                     return { t, ch: Number.isFinite(c) ? c : null,
@@ -16033,8 +16033,11 @@ export default function App() {
                           )}
                           {movers.map(({ t, ch }) => (
                             <button key={t.id} onClick={() => openAnyToken(t.id)} style={cell}>
-                              <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
-                                <span style={{ fontSize: 10.5, fontWeight: 900, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.sym}</span>
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 6, alignItems: "center" }}>
+                                <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                                  <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={18} />
+                                  <span style={{ fontSize: 10.5, fontWeight: 900, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.sym}</span>
+                                </span>
                                 <span style={{ fontSize: 10, fontWeight: 900,
                                   color: ch == null || Math.abs(ch) < 1 ? T.faint : ch > 0 ? T.green : T.red }}>
                                   {ch == null ? `M${Math.round(t.momentum || 0)}` : `${ch > 0 ? "+" : ""}${ch.toFixed(1)}%`}
