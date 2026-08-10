@@ -223,20 +223,9 @@ commands.chart = commands.price;
 commands.contract = commands.ca;
 
 const WELCOME = (name) => [
-  `Welcome to VALO Terminal, ${name}. ⚡`,
-  "",
-  "Live Solana trading — real on-chain fills, real charts, not a dashboard.",
-  "",
-  "*$VALO CA*",
-  `\`${CA}\``,
-  `[pump.fun](https://pump.fun/coin/${CA}) · [chart](https://dexscreener.com/solana/${CA})`,
-  "",
-  "Every trade pays 0.6%, split three ways:",
-  "🔥 40% burned · 🎁 40% hourly rewards · 🏦 20% treasury",
-  "",
-  "Try /burn, /price or /epoch for live numbers.",
-  "",
-  "⚠️ Admins will never DM you first and will never ask for your seed phrase or private key. Anyone who does is a scammer.",
+  `Welcome, ${name} ⚡ [valotrading.app](https://valotrading.app) — live Solana trading, hourly $VALO rewards.`,
+  `CA: \`${CA}\` · /price /burn /epoch for live numbers`,
+  "⚠️ Admins never DM first or ask for keys.",
 ].join("\n");
 
 // ── polling loop ────────────────────────────────────────────────────────────
@@ -363,11 +352,41 @@ if (CHAT_ID) {
 }
 console.log("VALO bot up — polling for updates");
 
+// ── TG → SITE RELAY — mirrors the group into Supabase so the terminal's
+// ✈ TELEGRAM room shows the live conversation (text, photos, gifs, stickers).
+const BOT_USERNAME = process.env.BOT_USERNAME || "ValoTerminalBot";
+const SB_URL = process.env.SUPABASE_URL || "";
+const SB_KEY = process.env.SUPABASE_SERVICE_KEY || "";
+const relayToSite = async (msg) => {
+  if (!SB_URL || !SB_KEY) return;                       // relay off until envs set
+  if (String(msg.chat.id) !== String(CHAT_ID)) return;  // the group only
+  const from = msg.from || {};
+  if (from.is_bot && from.username === BOT_USERNAME) return; // not our own posts
+  let kind = "text", file_id = null;
+  if (msg.animation) { kind = "gif"; file_id = msg.animation.file_id; }
+  else if (msg.photo && msg.photo.length) { kind = "photo"; file_id = msg.photo[msg.photo.length - 1].file_id; }
+  else if (msg.sticker) { kind = "sticker"; file_id = msg.sticker.thumbnail ? msg.sticker.thumbnail.file_id : null; }
+  else if (msg.video) { kind = "video"; file_id = msg.video.file_id; }
+  const text = msg.text || msg.caption || (kind === "sticker" && !file_id ? (msg.sticker.emoji || "🩵") : "");
+  if (!text && !file_id) return;
+  const name = [from.first_name, from.last_name].filter(Boolean).join(" ") || from.username || "anon";
+  try {
+    await fetch(`${SB_URL}/rest/v1/tg_feed`, {
+      method: "POST",
+      headers: { apikey: SB_KEY, authorization: `Bearer ${SB_KEY}`, "content-type": "application/json",
+        prefer: "resolution=ignore-duplicates" },
+      body: JSON.stringify([{ msg_id: msg.message_id, name: String(name).slice(0, 48),
+        text: String(text).slice(0, 900), kind, file_id, ts: (msg.date || Math.floor(Date.now() / 1000)) }]),
+    });
+  } catch (e) { console.error("relay:", e.message); }
+};
+
 const handle = async (u) => {
   const msg = u.message || u.edited_message;
   if (!msg) return;
   const chat = msg.chat && msg.chat.id;
   if (!chat) return;
+  relayToSite(msg).catch(() => {});
 
   // greet new members
   if (msg.new_chat_members && msg.new_chat_members.length) {
