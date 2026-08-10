@@ -17990,7 +17990,10 @@ export default function App() {
 
           {/* center: chart (resizable) + chat below */}
           <div style={{ display: "grid", gap: 12, position: "relative", marginLeft: -pullX, width: `calc(100% + ${pullX}px)`, transition: resizeRef.current ? "none" : "margin-left .2s, width .2s" }}>
-            <div style={{ position: "relative" }}>
+            <div style={{ position: "relative",
+              // 🏛 mobile: with no chart open, the floor IS the landing view —
+              // it leads instead of hiding under forty scanner cards
+              order: UI_NEXT && isMobile && !sel ? -1 : undefined }}>
               {/* search — the chart's exact width, glued under the callout
                   banner, riding along as you scroll */}
               <div style={{ position: "sticky", top: "calc(var(--stkTop, 8px) - 8px)", zIndex: 34, margin: "0 0 8px" }}>
