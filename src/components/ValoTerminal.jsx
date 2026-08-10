@@ -17890,7 +17890,12 @@ export default function App() {
                   letterSpacing: 2, backdropFilter: "blur(3px)" }}>▲</div>
             </StickySearch>
 
-            <div {...scanPullTouch} style={{ display: "grid", gap: compactList ? 6 : 10, paddingRight: 6 }}>
+            {UI_NEXT && !selected && mobView === "floor" && (
+              <div style={{ marginBottom: 10 }}>{chartBlock}</div>
+            )}
+
+            <div {...scanPullTouch} style={{ display: UI_NEXT && !selected && mobView === "floor" ? "none" : "grid",
+              gap: compactList ? 6 : 10, paddingRight: 6 }}>
               {scanPullStrip}
               <div>{scanModeDropdown}</div>
               {secBanner}
