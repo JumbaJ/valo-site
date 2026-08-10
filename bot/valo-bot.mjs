@@ -47,7 +47,21 @@ const rows = (pairs, pad = 9) => "```\n" + pairs.map(([k, v]) => String(k).toUpp
 const usd = (v) => (v == null || !Number.isFinite(+v) ? "—" : "$" + (+v).toLocaleString(undefined, { maximumFractionDigits: +v < 0.01 ? 8 : 2 }));
 
 // ── commands ────────────────────────────────────────────────────────────────
+const X_URL = process.env.X_URL || "https://x.com/VALOTerminal";
+
 const commands = {
+  website: async () => [
+    "🖥 *VALO Terminal*",
+    "",
+    `[valotrading.app](${SITE}) — live Solana trading, hourly $VALO rewards.`,
+    "",
+    "Trade the hour → the 300K pool pays your wallet at :05, on chain.",
+  ].join("\n"),
+  x: async () => [
+    "𝕏 *VALO on X*",
+    "",
+    `[Follow for patches, payouts and receipts →](${X_URL})`,
+  ].join("\n"),
   async price() {
     const v = await get("/api/valo");
     if (!v || !v.price) return "Couldn't reach the price feed. Try again in a moment.";
