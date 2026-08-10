@@ -16405,7 +16405,7 @@ export default function App() {
     return () => { stop = true; clearInterval(iv); };
   }, [chatTab]);
   const tgRoomBody = (
-    <div style={{ display: "flex", flexDirection: "column", height: isPhone ? "56vh" : 430 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: isMobile ? "56vh" : 430 }}>
       <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, paddingRight: 4 }}>
         {tgFeed.length === 0 && (
           <div style={{ color: T.faint, fontFamily: T.mono, fontSize: 10, textAlign: "center", marginTop: 30 }}>
