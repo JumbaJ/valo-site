@@ -223,20 +223,9 @@ commands.chart = commands.price;
 commands.contract = commands.ca;
 
 const WELCOME = (name) => [
-  `Welcome to VALO Terminal, ${name}. ⚡`,
-  "",
-  "Live Solana trading — real on-chain fills, real charts, not a dashboard.",
-  "",
-  "*$VALO CA*",
-  `\`${CA}\``,
-  `[pump.fun](https://pump.fun/coin/${CA}) · [chart](https://dexscreener.com/solana/${CA})`,
-  "",
-  "Every trade pays 0.6%, split three ways:",
-  "🔥 40% burned · 🎁 40% hourly rewards · 🏦 20% treasury",
-  "",
-  "Try /burn, /price or /epoch for live numbers.",
-  "",
-  "⚠️ Admins will never DM you first and will never ask for your seed phrase or private key. Anyone who does is a scammer.",
+  `Welcome, ${name} ⚡ [valotrading.app](https://valotrading.app) — live Solana trading, hourly $VALO rewards.`,
+  `CA: \`${CA}\` · /price /burn /epoch for live numbers`,
+  "⚠️ Admins never DM first or ask for keys.",
 ].join("\n");
 
 // ── polling loop ────────────────────────────────────────────────────────────
