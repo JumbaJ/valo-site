@@ -19514,10 +19514,10 @@ export default function App() {
             )}
             <button onClick={() => setHubOpen((v) => !v)}
               style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 999,
-                border: `1px solid ${turboAutoOn ? VALO_PURPLE : T.border2}`,
-                background: turboAutoOn ? "rgba(125,92,240,0.22)" : "rgba(17,21,29,0.97)",
-                color: turboAutoOn ? VALO_PURPLE : T.text, fontFamily: T.mono, fontSize: 11, fontWeight: 900,
-                cursor: "pointer", boxShadow: turboAutoOn ? `0 0 14px ${VALO_PURPLE}55` : "0 8px 24px rgba(0,0,0,0.5)" }}>
+                border: `1px solid ${liveAuto ? VALO_PURPLE : T.border2}`,
+                background: liveAuto ? "rgba(125,92,240,0.22)" : "rgba(17,21,29,0.97)",
+                color: liveAuto ? VALO_PURPLE : T.text, fontFamily: T.mono, fontSize: 11, fontWeight: 900,
+                cursor: "pointer", boxShadow: liveAuto ? `0 0 14px ${VALO_PURPLE}55` : "0 8px 24px rgba(0,0,0,0.5)" }}>
               ⚡ {fmt$(totalEquity)}
             </button>
           </div>
