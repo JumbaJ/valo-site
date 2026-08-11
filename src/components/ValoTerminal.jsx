@@ -11999,6 +11999,8 @@ export default function App() {
   // 📋 WATCHLIST — loose bars + user-named subsections, drag-anything
   const [watchLoose, setWatchLoose] = useState([]);
   const [watchSections, setWatchSections] = useState([]);   // {id, name, ids[]}
+  const watchTokRef = useRef({});                           // 📌 id → token snapshot, so watched
+                                                            //    rows survive feed refreshes
   // ☁ PHASE 3 — Supabase cloud accounts. The client is created in main.jsx
   // (window.__VALO_SB_CLIENT__); absent = cloud features simply off (artifact
   // preview, local dev without env vars). All tables are RLS-locked per user.
@@ -12860,6 +12862,7 @@ export default function App() {
   // 🔎 market-wide search: every Solana / pump.fun token DexScreener
   // indexes, merged in behind whatever is already on screen
   const [mktHits, setMktHits] = useState([]);
+  const mktHitsRef = useRef([]); mktHitsRef.current = mktHits;
 
   useEffect(() => {
     const q = (ecoQ || "").trim();
@@ -15717,6 +15720,7 @@ export default function App() {
   // 🏛 the header's hold / right-click watchlist gesture, for any token row
   const rowWatchFire = (tok, x, y) => {
     if (!tok) return;
+    try { watchTokRef.current = { ...watchTokRef.current, [tok.id]: tok }; } catch (e) {}
     const sec2 = scanSec != null ? watchSections.find((w) => w.id === scanSec) : null;
     const inSec = !!(sec2 && sec2.ids.includes(tok.id));
     if (navigator.vibrate) navigator.vibrate(10);
@@ -18414,7 +18418,11 @@ export default function App() {
             </div>
             <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: wallOpen ? "6px" : "6px 0" }}>
               {(() => { try {
-                const tokOf = (id) => tokens.find((x) => x.id === id);
+                const tokOf = (id) => tokens.find((x) => x.id === id)
+    || (mktHitsRef.current || []).find((x) => x.id === id)
+    || (moreToksRef.current || []).find((x) => x.id === id)
+    || (floorToksRef.current || []).find((x) => x.id === id)
+    || (watchTokRef.current || {})[id];
                 const allIds = [...watchLoose, ...watchSections.flatMap((s) => s.ids)];
                 if (!wallOpen) return allIds.map(tokOf).filter(Boolean).map((t) => {
                   const score = scoreToken(t); const rc = ratingColor(score);
@@ -20270,7 +20278,11 @@ export default function App() {
               </span>
             </div>
             {mobWatch ? (() => {
-              const tokOf = (id) => tokens.find((x) => x.id === id);
+              const tokOf = (id) => tokens.find((x) => x.id === id)
+    || (mktHitsRef.current || []).find((x) => x.id === id)
+    || (moreToksRef.current || []).find((x) => x.id === id)
+    || (floorToksRef.current || []).find((x) => x.id === id)
+    || (watchTokRef.current || {})[id];
               const row = (t, secId) => {
                 const score = scoreToken(t); const rc = ratingColor(score);
                 const cs4 = t.candles || [];
