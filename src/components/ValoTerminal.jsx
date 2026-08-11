@@ -6982,8 +6982,10 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           <button onClick={() => setTab("wallet")}
             style={{ ...chip(tab === "wallet"), flex: 1, textAlign: "center", padding: "7px", fontSize: 11,
               ...(UI_NEXT ? { borderRadius: "10px 10px 0 0", borderBottom: "none",
-                background: tab === "wallet" ? "linear-gradient(180deg, rgba(125,92,240,0.20), rgba(125,92,240,0.06))" : "rgba(255,255,255,0.02)",
-                borderColor: tab === "wallet" ? `${VALO_PURPLE}44` : T.border } : {}),
+                background: tab === "wallet" ? "#11151d" : "rgba(255,255,255,0.015)",
+                borderColor: tab === "wallet" ? T.border2 : T.border,
+                boxShadow: tab === "wallet" ? `inset 0 2px 0 ${VALO_PURPLE}` : "none",
+                color: tab === "wallet" ? T.text : T.faint } : {}),
               borderTopRightRadius: liveMode && turboState ? 0 : undefined, borderBottomRightRadius: liveMode && turboState ? 0 : undefined }}>💼 Wallet</button>
           {liveMode && !UI_NEXT && (
             <button data-tour="turbo" onClick={() => setTurboPop((v) => !v)}
@@ -7015,8 +7017,10 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
         <button onClick={() => setTab("performance")}
           style={{ ...chip(tab === "performance"), flex: 1, textAlign: "center", padding: "7px", fontSize: 11,
             ...(UI_NEXT ? { borderRadius: "10px 10px 0 0", borderBottom: "none", marginLeft: 6,
-              background: tab === "performance" ? "linear-gradient(180deg, rgba(125,92,240,0.20), rgba(125,92,240,0.06))" : "rgba(255,255,255,0.02)",
-              borderColor: tab === "performance" ? `${VALO_PURPLE}44` : T.border } : {}) }}>📈 Performance</button>
+              background: tab === "performance" ? "#11151d" : "rgba(255,255,255,0.015)",
+              borderColor: tab === "performance" ? T.border2 : T.border,
+              boxShadow: tab === "performance" ? `inset 0 2px 0 ${VALO_PURPLE}` : "none",
+              color: tab === "performance" ? T.text : T.faint } : {}) }}>📈 Performance</button>
         {/* ⚡ TURBO popover — floats OVER the wallet, pushes nothing */}
         {liveMode && turboPop && typeof document !== "undefined" && createPortal(
           <>
@@ -7047,9 +7051,8 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           {/* total equity + pnl + privacy eye — under UI_NEXT this IS the wallet card */}
           <div style={UI_NEXT
             ? { textAlign: "center", marginBottom: 0, position: "relative", padding: "16px 12px 14px",
-                borderRadius: 0, border: `1px solid ${VALO_PURPLE}44`,
-                background: "linear-gradient(160deg, rgba(125,92,240,0.20), rgba(20,17,38,0.9) 55%, rgba(13,15,22,0.95))",
-                boxShadow: "0 6px 22px rgba(125,92,240,0.16)" }
+                borderRadius: 0, border: `1px solid ${T.border2}`,
+                background: "#11151d" }
             : { textAlign: "center", marginBottom: 12, position: "relative" }}>
             <button onClick={() => setHideBalance && setHideBalance((v) => !v)} title="Hide/show balances"
               style={{ position: "absolute", right: UI_NEXT ? 8 : 0, top: UI_NEXT ? 8 : 0, ...chip(false), padding: "3px 8px", fontSize: 11 }}>
@@ -7129,9 +7132,9 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                             {chips.map(([ic, addr, col]) => (
                               <a key={ic} href={`https://solscan.io/account/${addr}`} target="_blank" rel="noopener noreferrer"
                                 title="Open this wallet on Solscan · ⧉ copies"
-                                style={{ padding: "2px 9px", borderRadius: 999, border: `1px solid ${col}44`,
-                                  background: "rgba(255,255,255,0.04)", fontFamily: T.mono, fontSize: 8.5,
-                                  color: col, cursor: "pointer", textDecoration: "none", display: "inline-flex", gap: 4 }}>
+                                style={{ padding: "2px 9px", borderRadius: 999, border: `1px solid ${T.border2}`,
+                                  background: "rgba(255,255,255,0.03)", fontFamily: T.mono, fontSize: 8.5,
+                                  color: T.dim, cursor: "pointer", textDecoration: "none", display: "inline-flex", gap: 4 }}>
                                 {ic} {addr.slice(0, 4)}…{addr.slice(-4)}
                                 <span onClick={(e) => { e.preventDefault(); e.stopPropagation();
                                     try { navigator.clipboard.writeText(addr); e.currentTarget.textContent = "✓"; } catch (e2) {} }}
@@ -7169,14 +7172,14 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
               <button onClick={() => setWalletSeg((v) => (v === k ? null : k))}
                 style={{ flex: 1, padding: "8px 6px", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 0.8,
                   cursor: "pointer", border: "none", borderBottom: `2px solid ${walletSeg === k ? VALO_PURPLE : "transparent"}`,
-                  background: walletSeg === k ? "rgba(125,92,240,0.10)" : "transparent",
+                  background: "transparent",
                   color: walletSeg === k ? T.text : T.faint }}>{label}</button>
             );
             return (
-              <div style={{ display: "flex", border: `1px solid ${VALO_PURPLE}33`, borderTop: "none",
+              <div style={{ display: "flex", border: `1px solid ${T.border2}`, borderTop: "none",
                 borderRadius: walletSeg ? 0 : "0 0 12px 12px", overflow: "hidden", marginBottom: walletSeg ? 0 : 10 }}>
                 {segBtn("assets", `▾ ASSETS · ${holds.length} · ${hideBalance ? "•••" : "$" + aUsd.toFixed(2)}`)}
-                <span style={{ width: 1, background: `${VALO_PURPLE}33` }} />
+                <span style={{ width: 1, background: T.border }} />
                 {segBtn("activity", "⛓ ACTIVITY")}
               </div>
             );
@@ -8235,13 +8238,13 @@ function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line",
   const liveEyes = liveViewersOf(t, "pump"); // re-renders ride the price ticks
   const score = scoreToken(t);
   const rug = rugState(t);
-  const rc = rug.rugged ? T.red : ratingColor(score);
+  const rc = rug.rugged ? T.red : (UI_NEXT && score < 80 ? "#5a6478" : ratingColor(score));
   const net = t.greenUsd - t.redUsd;
   const cs = calloutStyle(calloutCount);
   return (
     <div onClick={onOpen} onMouseEnter={onHover} onMouseLeave={onLeave} className="token-card" style={{
       border: `1px solid ${active ? accent(t.hue, 45) : T.border}`,
-      background: cardGrad(t.hue), borderRadius: 18, padding: "14px 18px 0", cursor: "pointer",
+      background: UI_NEXT ? "#10141c" : cardGrad(t.hue), borderRadius: 18, padding: "14px 18px 0", cursor: "pointer",
       boxShadow: active ? `0 0 0 1px ${accent(t.hue, 45)}` : "none", transition: "border-color .2s",
       position: "relative", overflow: "hidden",
     }}>
@@ -8301,8 +8304,12 @@ function TokenCardBase({ t, active, onOpen, calloutCount = 0, miniMode = "line",
           </>, document.body)}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
-        <Meter label="MOMENTUM" value={Number.isFinite(t.momentum) ? Math.round(t.momentum) : 50} color={accent(t.hue)} />
-        <Meter label="B/S PRESSURE" value={Number.isFinite(t.buyPressure) ? Math.round(t.buyPressure) : 50} color={(t.buyPressure || 50) >= 50 ? T.green : T.red} />
+        <Meter label="MOMENTUM" value={Number.isFinite(t.momentum) ? Math.round(t.momentum) : 50}
+          color={UI_NEXT ? ((t.momentum || 0) >= 85 ? accent(t.hue) : "#4d5666") : accent(t.hue)} />
+        <Meter label="B/S PRESSURE" value={Number.isFinite(t.buyPressure) ? Math.round(t.buyPressure) : 50}
+          color={UI_NEXT
+            ? ((t.buyPressure || 50) >= 70 ? T.green : (t.buyPressure || 50) <= 30 ? T.red : "#4d5666")
+            : ((t.buyPressure || 50) >= 50 ? T.green : T.red)} />
         {fmtAge(t.createdAt) && (
           <span title={`Launched ${new Date(t.createdAt).toLocaleString()}`}
             style={{ fontFamily: T.mono, fontSize: 7.5, fontWeight: 800, color: (t.ageMin || 0) < 60 ? T.green : T.faint, whiteSpace: "nowrap" }}>
@@ -10005,6 +10012,40 @@ export default function App() {
   const [mobArmFn, setMobArmFn] = useState(null);        // 🧪 the active panel's arm(), reported via onReadyArm
   const [mobPanelOpen, setMobPanelOpen] = useState(false); // 🧪 ⚙: the mode panel's full controls, hidden by default
   const [chatRoomMenu, setChatRoomMenu] = useState(false); // 💬 the chat header's room selector
+  const [mobView, setMobView] = useState("floor");          // 🏛 mobile idle: "floor" ⇄ "scan"
+  const [floorCol, setFloorCol] = useState("new");         // 🏛 mobile floor: launches ⇄ biggest moves
+  const [floorMc, setFloorMc] = useState(false);           // 🏛 floor rows: price ⇄ market cap
+  const [floorToks, setFloorToks] = useState([]);          // 🏛 the floor's OWN feed — it never scavenges
+  const floorToksRef = useRef([]); floorToksRef.current = floorToks;
+  useEffect(() => {
+    if (sel) return;                                       // only while the floor is showing
+    let stop = false;
+    const pull = async () => {
+      try {
+        const feeds = ["trending", "top", "new"];
+        const rs = await Promise.allSettled(feeds.map((f) =>
+          fetch(`/api/tokens?feed=${f}&t=${Math.floor(Date.now() / 15000)}`)));
+        const out = [];
+        for (const r of rs) {
+          if (r.status !== "fulfilled" || !r.value.ok) continue;
+          const rows = await r.value.json().catch(() => null);
+          if (Array.isArray(rows)) out.push(...rows.filter((x) => (+x.mc || 0) < 1e11).map(adoptMarketToken));
+        }
+        if (!stop && out.length) setFloorToks(out);
+      } catch (e) {}
+    };
+    pull();
+    const iv = setInterval(pull, 30000);
+    const wake = () => { if (typeof document === "undefined" || document.visibilityState === "visible") pull(); };
+    window.addEventListener("focus", wake);
+    return () => { stop = true; clearInterval(iv); window.removeEventListener("focus", wake); };
+  }, [sel]);
+  const [, setFloorTick] = useState(0);                    // 🏛 the empty-state floor's clock
+  useEffect(() => {
+    if (sel) return;
+    const iv = setInterval(() => setFloorTick((t2) => t2 + 1), 20000);
+    return () => clearInterval(iv);
+  }, [sel]);
   const [flowDetail, setFlowDetail] = useState(false);   // 🧪 UI_NEXT: momentum + pressure under the flow bar
   const [railTab, setRailTab] = useState("trades");      // 🧪 UI_NEXT: trades | positions | chat in one panel
   const [railFold, setRailFold] = useState(false);       // 🧪 UI_NEXT: fold the whole rail to a strip while charting
@@ -10026,6 +10067,18 @@ export default function App() {
   const [draft, setDraft] = useState("");
   const [filter, setFilter] = useState("all");
   const [burned, setBurned] = useState(0);
+  const [burnPulse, setBurnPulse] = useState(false);     // 🔥 motion = a burn just landed
+  const prevBurnRef = useRef(null);
+  useEffect(() => {
+    const v = +burned || 0;
+    const prev = prevBurnRef.current;
+    prevBurnRef.current = v;
+    if (prev != null && v > prev + 0.5) {
+      setBurnPulse(true);
+      const t = setTimeout(() => setBurnPulse(false), 4500);
+      return () => clearTimeout(t);
+    }
+  }, [burned]);
   const [tradesByToken, setTradesByToken] = useState({});
   // manual realized P/L in the last 24h (bot flows never enter this feed)
   const realized24For = (sym) => (myActivity || [])
@@ -10407,6 +10460,8 @@ export default function App() {
     try {
       const m = (window.location.search || "").match(/[?&]u=([^&]+)/);
       if (m) setTimeout(() => setProfileUser(decodeURIComponent(m[1]).slice(0, 32)), 900);
+      const dk = (window.location.search || "").match(/[?&]devkey=([^&]+)/);
+      if (dk) localStorage.setItem("valo-dev-key", decodeURIComponent(dk[1]));
     } catch (e) {}
   }, []);
   const [followListOpen, setFollowListOpen] = useState(null);// "followers" | "following"
@@ -13311,7 +13366,7 @@ export default function App() {
     };
     const local = board.find((t) => t.id === id);
     if (local) { paintCached(local); setSel(local.id); setClickMode(null); return; }
-    let hit = [...mktHits, ...moreToks].find((t) => t.id === id);
+    let hit = [...mktHits, ...moreToks, ...(floorToksRef.current || [])].find((t) => t.id === id);
     if (!hit && tokObj) hit = tokObj;               // search-local tokens (fresh feed) open too
     if (!hit) return;
     if (!hit.pool && hit.liveMint) { openTokenByMint(hit.liveMint); setClickMode(null); return; }
@@ -15708,7 +15763,9 @@ export default function App() {
                       style={{ display: "flex", alignItems: "center", gap: 9,
                         userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent" }}>
                     <TokenAvatar sym={selected.sym} hue={selected.hue} img={selected.img} size={22} />
-                    <span style={{ fontWeight: 800, fontSize: 16 }}>{selected.sym}<span style={{ color: T.faint, fontWeight: 400 }}>/SOL</span></span>
+                    <span onClick={(e) => { e.stopPropagation(); setSel(null); setClickMode(null); }}
+                      title="Close this chart — back to the floor"
+                      style={{ fontWeight: 800, fontSize: 16, cursor: "pointer" }}>{selected.sym}<span style={{ color: T.faint, fontWeight: 400 }}>/SOL</span></span>
                     <span
                       onClick={(e) => { e.stopPropagation(); setPriceMode((m) => (m + 1) % 3); }}
                       onTouchStart={(e) => { e.stopPropagation(); priceTapRef.current = Date.now(); }}
@@ -15969,9 +16026,257 @@ export default function App() {
 
   const chartBlock = (
             !selected ? (
+              UI_NEXT ? (() => {
+                const minsTo = 60 - new Date().getMinutes();
+                const seen = new Set(); const seenF = new Set();
+                const movers = [...(floorToks || []), ...(mktHits || []), ...(moreToks || []), ...(tokens || [])]
+                  .filter((t) => { if (!t) return false;
+                    const k = t.liveMint || t.ca || t.mint || t.pool || `${t.sym}:${t.price}`;
+                    return !seen.has(k) && seen.add(k); })
+                  .map((t) => { const c = +(t.ch ?? t.ch24);
+                    return { t, ch: Number.isFinite(c) ? c : null,
+                      heat: Number.isFinite(c) ? Math.abs(c) : (t.momentum || 0) / 12 }; })
+                  .sort((a, b) => b.heat - a.heat)
+                  .slice(0, 40);
+                const riding = (callouts || []).map((c) => {
+                  const t = tokens.find((x) => x.id === c.tokenId);
+                  if (!t) return null;
+                  const mult = c.mcAt > 0 ? mcOf(t) / c.mcAt : 0;
+                  return mult >= 2 ? { id: t.id, sym: t.sym, mult } : null;
+                }).filter(Boolean).sort((a, b) => b.mult - a.mult).slice(0, 20);
+                const signedIn = !!(wallet && wallet.address);
+                const fresh = [...(floorToks || []), ...(mktHits || []), ...(moreToks || []), ...(tokens || [])]
+                  .filter((t) => { if (!t || !t.createdAt) return false;
+                    const k = t.liveMint || t.ca || t.mint || t.pool || `${t.sym}:${t.price}`;
+                    return !seenF.has(k) && seenF.add(k); })
+                  .map((t) => ({ t, age: Date.now() - new Date(t.createdAt).getTime() }))
+                  .filter((x) => x.age > 0 && x.age < 24 * 3600e3)
+                  .sort((a, b) => a.age - b.age)
+                  .slice(0, 40);
+                const row = { display: "flex", alignItems: "center", gap: 8, width: "100%",
+                  padding: "10px 11px", border: `1px solid ${T.border}`, background: "#10141c",
+                  cursor: "pointer", textAlign: "left", borderRadius: 9, marginBottom: 5 };
+                const colHead = { fontSize: 9.5, letterSpacing: 1.4, color: T.faint, marginBottom: 6,
+                  paddingLeft: 6, whiteSpace: "nowrap" };
+                const symCss = { display: "block", fontSize: 12.5, fontWeight: 900, color: T.text,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+                const metaCss = { display: "block", fontSize: 10, color: T.faint, whiteSpace: "nowrap" };
+                const numCss = { fontSize: 12, fontWeight: 900, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+                const emptyNote = { color: T.faint, fontSize: 10.5, padding: "10px 6px", lineHeight: 1.6 };
+                const strip = { display: "flex", marginTop: 8, border: `1px solid ${T.border}`,
+                  borderRadius: 8, overflow: "hidden", background: "rgba(255,255,255,0.015)" };
+                const cellCss = (i) => ({ flex: 1, minWidth: 0, padding: "5px 6px", textAlign: "center",
+                  borderLeft: i ? `1px solid ${T.border}` : "none" });
+                const labCss = { fontSize: 8, letterSpacing: 0.8, color: T.faint, whiteSpace: "nowrap" };
+                const valCss = { fontSize: 11, fontWeight: 800, fontFamily: T.mono, color: T.text,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+                const kNum = (n) => { const v = +n || 0;
+                  return v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}K` : String(Math.round(v)); };
+                const MetricStrip = ({ t, wide }) => {
+                  const txns = (+t.buys || 0) + (+t.sells || 0);
+                  const vol = (+t.greenUsd || 0) + (+t.redUsd || 0);
+                  const bp = Math.round(t.buyPressure || 50);
+                  const cells = [
+                    ["MCAP", mcTxt(liveMc(t)) || "—"],
+                    ["TXNS", txns ? kNum(txns) : "—"],
+                    ["VOL", vol ? fmt$(vol) : "—"],
+                    ...(wide ? [["LP", t.tvl ? fmt$(t.tvl) : "—"]] : []),
+                    ["B/S", <span style={{ color: bp >= 70 ? T.green : bp <= 30 ? T.red : T.text }}>{bp}</span>],
+                    ...(wide ? [["MOM", Math.round(t.momentum || 0)]] : []),
+                  ];
+                  return (
+                    <div style={strip}>
+                      {cells.map(([lab, val], i) => (
+                        <div key={lab} style={cellCss(i)}>
+                          <div style={labCss}>{lab}</div>
+                          <div style={valCss}>{val}</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                };
+                // brand-new tokens live in cents — fmt$ floors them to $0.00
+                const liveMc = (t) => {
+                  const fed = +t.mc || 0;
+                  if (fed > 0) return fed;
+                  const sup = +t.supply || 1e9;              // pump.fun ships a fixed 1B
+                  const px = +t.price || 0;
+                  return px > 0 ? px * sup : 0;
+                };
+                const mcTxt = (v) => { const n = +v || 0;
+                  return n >= 1000 ? fmt$(n) : n >= 1 ? `$${n.toFixed(0)}` : n > 0 ? `$${n.toFixed(2)}` : null; };
+                // a token with no market cap still deserves a number — fall back to price
+                const figure = (t) => (floorMc ? (mcTxt(liveMc(t)) || `$${fmtP(t.price)}`) : `$${fmtP(t.price)}`);
+                return (
+                  <div style={{ border: `1px solid ${T.border}`, borderRadius: 12, padding: isMobile ? 12 : 16, fontFamily: T.mono }}>
+                    {(() => {
+                      const hot = minsTo <= 10;              // the closing window — this is when people act
+                      return (
+                        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 12 : 22,
+                          flexWrap: "wrap", padding: isMobile ? "14px 14px" : "16px 20px", marginBottom: 16,
+                          border: `1px solid ${hot ? T.amber : VALO_PURPLE}`, borderRadius: 14,
+                          background: hot ? "rgba(249,180,22,0.07)" : "rgba(125,92,240,0.08)",
+                          boxShadow: hot ? "0 0 22px rgba(249,180,22,0.16)" : "0 0 18px rgba(125,92,240,0.12)" }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 9, letterSpacing: 1.6, color: hot ? T.amber : VALO_PURPLE,
+                              fontWeight: 900, marginBottom: 3 }}>
+                              {hot ? "⚡ CLOSING — LAST CALL" : "⚡ NEXT PAYOUT"}
+                            </div>
+                            <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+                              <span style={{ fontSize: isMobile ? 30 : 38, fontWeight: 900, color: T.text,
+                                fontFamily: T.mono, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{minsTo}</span>
+                              <span style={{ fontSize: 12, color: T.dim, fontWeight: 800 }}>min</span>
+                            </div>
+                          </div>
+                          <div style={{ width: 1, alignSelf: "stretch", background: T.border }} />
+                          <div>
+                            <div style={{ fontSize: 9, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 3 }}>THIS HOUR'S POOL</div>
+                            <div style={{ fontSize: isMobile ? 17 : 21, fontWeight: 900, color: T.text, fontFamily: T.mono, lineHeight: 1.1 }}>
+                              300,000 <span style={{ color: VALO_PURPLE }}>$VALO</span>
+                            </div>
+                          </div>
+                          <div style={{ flex: 1, minWidth: 190 }}>
+                            <div style={{ fontSize: 11, color: T.text, fontWeight: 800, lineHeight: 1.5 }}>
+                              Trade anything this hour → your wallet is in the split.
+                            </div>
+                            <div style={{ fontSize: 9.5, color: T.faint, marginTop: 3 }}>
+                              Paid automatically at :05 · on chain · no claiming, no gas, no buttons.
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    <div style={{ display: "grid",
+                      gridTemplateColumns: isMobile ? "1fr" : "1.15fr 1.15fr 0.9fr", gap: 0,
+                      minHeight: isMobile ? "auto" : "calc(100vh - 320px)" }}>
+
+                      {/* ── NEW LAUNCHES ─────────────────────────────── */}
+                      <div style={{ display: isMobile && floorCol !== "new" ? "none" : undefined,
+                        padding: isMobile ? "0 0 14px" : "0 14px 0 0",
+                        overflowY: isMobile ? "visible" : "auto", maxHeight: isMobile ? "none" : "calc(100vh - 330px)",
+                        borderRight: isMobile ? "none" : `1px solid ${T.border}`,
+                        borderBottom: isMobile ? `1px solid ${T.border}` : "none",
+                        marginBottom: isMobile ? 14 : 0 }}>
+                        {isMobile ? (
+                          <button onClick={() => setFloorCol("movers")}
+                            style={{ ...colHead, display: "flex", width: "100%", alignItems: "center",
+                              justifyContent: "space-between", padding: "8px 10px", marginBottom: 8,
+                              border: `1px solid ${T.border2}`, borderRadius: 9, background: "rgba(255,255,255,0.03)",
+                              color: T.text, cursor: "pointer", fontWeight: 900 }}>
+                            <span>🌱 NEW LAUNCHES</span>
+                            <span style={{ color: T.faint }}>⇄ biggest moves</span>
+                          </button>
+                        ) : <div style={colHead}>NEW LAUNCHES</div>}
+                        {fresh.length === 0 && <div style={emptyNote}>watching for the next launch…</div>}
+                        {fresh.map(({ t }) => (
+                          <button key={t.id} onClick={() => openAnyToken(t.id)} style={{ ...row, display: "block" }}>
+                           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={20} />
+                            <span style={{ minWidth: 0, flex: 1 }}>
+                              <span style={symCss}>{t.sym}</span>
+                              <span style={metaCss}>
+                                {fmtAge(t.createdAt) || "new"}
+                                {t.holders ? ` · ${t.holders} holders` : ""}
+                                {((+t.buys || 0) + (+t.sells || 0)) ? ` · ${((+t.buys || 0) + (+t.sells || 0)).toLocaleString()} txns` : ""}
+                                {t.tvl ? ` · LP ${fmt$(t.tvl)}` : ""}
+                              </span>
+                            </span>
+                            <span onClick={(e) => { e.stopPropagation(); setFloorMc((v) => !v); }}
+                              title="Tap to switch price ⇄ market cap"
+                              style={{ fontSize: 14, fontWeight: 900, fontFamily: T.mono, color: T.text,
+                                whiteSpace: "nowrap", cursor: "pointer" }}>
+                              {figure(t)}
+                            </span>
+                            </span>
+                            <MetricStrip t={t} wide={!isMobile} />
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* ── THE FLOOR · movers ───────────────────────── */}
+                      <div style={{ display: isMobile && floorCol !== "movers" ? "none" : undefined,
+                        padding: isMobile ? "0 0 14px" : "0 14px",
+                        overflowY: isMobile ? "visible" : "auto", maxHeight: isMobile ? "none" : "calc(100vh - 330px)",
+                        borderRight: isMobile ? "none" : `1px solid ${T.border}`,
+                        borderBottom: isMobile ? `1px solid ${T.border}` : "none",
+                        marginBottom: isMobile ? 14 : 0 }}>
+                        {isMobile ? (
+                          <button onClick={() => setFloorCol("new")}
+                            style={{ ...colHead, display: "flex", width: "100%", alignItems: "center",
+                              justifyContent: "space-between", padding: "8px 10px", marginBottom: 8,
+                              border: `1px solid ${T.border2}`, borderRadius: 9, background: "rgba(255,255,255,0.03)",
+                              color: T.text, cursor: "pointer", fontWeight: 900 }}>
+                            <span>📈 BIGGEST MOVES</span>
+                            <span style={{ color: T.faint }}>⇄ new launches</span>
+                          </button>
+                        ) : <div style={colHead}>THE FLOOR · BIGGEST MOVES</div>}
+                        {movers.length < 3 && (
+                          <div style={emptyNote}>
+                            📡 reading the chain — floor feed has {(floorToks || []).length} tokens,
+                            board {(tokens || []).length}, market {(mktHits || []).length}
+                          </div>
+                        )}
+                        {movers.map(({ t, ch }) => {
+                          const txns = (+t.buys || 0) + (+t.sells || 0);
+                          const vol = (+t.greenUsd || 0) + (+t.redUsd || 0);
+                          return (
+                            <button key={t.id} onClick={() => openAnyToken(t.id)} style={{ ...row, display: "block" }}>
+                             <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={20} />
+                              <span style={{ minWidth: 0, flex: 1 }}>
+                                <span style={symCss}>{t.sym}</span>
+                                <span style={metaCss}>{fmtAge(t.createdAt) || "live"}</span>
+                              </span>
+                              <span style={{ textAlign: "right" }}>
+                                <span onClick={(e) => { e.stopPropagation(); setFloorMc((v) => !v); }}
+                                  title="Tap to switch price ⇄ market cap"
+                                  style={{ display: "block", fontSize: 14, fontWeight: 900, fontFamily: T.mono,
+                                    color: T.text, whiteSpace: "nowrap", cursor: "pointer" }}>
+                                  {figure(t)}
+                                </span>
+                                <span style={{ ...numCss, display: "block",
+                                  color: ch == null || Math.abs(ch) < 1 ? T.faint : ch > 0 ? T.green : T.red }}>
+                                  {ch == null ? `M${Math.round(t.momentum || 0)}` : `${ch > 0 ? "+" : ""}${ch.toFixed(1)}%`}
+                                </span>
+                              </span>
+                             </span>
+                             <MetricStrip t={t} wide={!isMobile} />
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* ── CALLS RIDING / the pitch ─────────────────── */}
+                      <div style={{ padding: isMobile ? 0 : "0 0 0 14px",
+                        overflowY: isMobile ? "visible" : "auto", maxHeight: isMobile ? "none" : "calc(100vh - 330px)" }}>
+                        <div style={colHead}>{signedIn ? "CALLS RIDING NOW" : "GET PAID TO TRADE"}</div>
+                        {signedIn ? (
+                          riding.length ? riding.map((r) => (
+                            <button key={r.id} onClick={() => openAnyToken(r.id)} style={row}>
+                              <span style={{ fontSize: 12 }}>📣</span>
+                              <span style={{ ...symCss, flex: 1 }}>{r.sym}</span>
+                              <span style={{ ...numCss, color: T.amber }}>×{r.mult.toFixed(1)}</span>
+                            </button>
+                          )) : <div style={emptyNote}>no 2x calls riding — call one from its chart and it lands here</div>
+                        ) : (
+                          <div style={{ color: T.dim, fontSize: 9.5, lineHeight: 2 }}>
+                            1 · connect your Phantom<br />
+                            2 · trade anything, any size<br />
+                            3 · the pool pays your wallet at :05
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ color: T.faint, fontSize: 8.5, textAlign: "center", marginTop: 12 }}>
+                      select a pair anywhere — or tap a row to open its chart
+                    </div>
+                  </div>
+                );
+              })() : (
               <div style={{ border: `1px dashed ${T.border2}`, borderRadius: 12, padding: 70, textAlign: "center", color: T.faint, fontFamily: T.mono, fontSize: 12 }}>
                 Select a pair to open its chart
               </div>
+              )
             ) : (
               <div style={UI_NEXT && isMobile
                 ? { background: "transparent", border: "none", borderRadius: 0, padding: "0 0 6px", position: "relative" }
@@ -16399,6 +16704,17 @@ export default function App() {
   const [tgFeed, setTgFeed] = useState([]);
   const [tgDraft, setTgDraft] = useState("");
   const [tgSending, setTgSending] = useState(false);
+  const tgDevKey = (typeof localStorage !== "undefined" && localStorage.getItem("valo-dev-key")) || "";
+  const scrubTgMsg = async (m) => {
+    setTgFeed((f) => f.filter((x) => x.id !== m.id));   // optimistic — it's the dev's call
+    try {
+      await fetch("/api/tg-scrub", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-dev-key": tgDevKey },
+        body: JSON.stringify({ row_id: String(m.id).startsWith("local-") ? null : m.id, msg_id: m.msg_id || null }),
+      });
+    } catch (e) {}
+  };
   const sendToTg = async () => {
     const msg = tgDraft.trim();
     if (!msg || tgSending) return;
@@ -16430,7 +16746,15 @@ export default function App() {
     };
     pull();
     const iv = setInterval(pull, 6000);
-    return () => { stop = true; clearInterval(iv); };
+    // ⏰ browsers throttle or kill timers in background tabs and locked
+    // phones — coming BACK to the site must refresh immediately, or the room
+    // shows the world as you left it
+    const wake = () => { if (typeof document === "undefined" || document.visibilityState === "visible") pull(); };
+    window.addEventListener("focus", wake);
+    document.addEventListener("visibilitychange", wake);
+    return () => { stop = true; clearInterval(iv);
+      window.removeEventListener("focus", wake);
+      document.removeEventListener("visibilitychange", wake); };
   }, [chatTab]);
   const tgRoomBody = (
     <div style={{ display: "flex", flexDirection: "column", height: isMobile ? "56vh" : 430 }}>
@@ -16453,6 +16777,10 @@ export default function App() {
               <span style={{ color: T.faint, fontWeight: 400, marginLeft: 6 }}>
                 {m.ts ? new Date(m.ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
               </span>
+              {tgDevKey && (
+                <span onClick={(e) => { e.stopPropagation(); scrubTgMsg(m); }} title="Dev: delete from site + Telegram"
+                  style={{ float: "right", color: T.faint, cursor: "pointer", padding: "0 3px", fontSize: 10 }}>✕</span>
+              )}
             </div>
             {m.file_id && (m.kind === "gif" || m.kind === "video") && (
               <video src={`/api/tg-media?id=${m.file_id}`} autoPlay muted loop playsInline
@@ -17029,7 +17357,7 @@ export default function App() {
   // Extracted as a closure so it reads all state directly — zero props to drift.
   const renderTerminalHeader = () => (
           <div style={UI_NEXT ? { display: "flex", gap: 0, alignItems: "stretch", flexWrap: "nowrap", marginTop: -14, marginRight: 330, marginLeft: "auto", width: "fit-content", height: 40, boxSizing: "border-box", border: "1px solid rgba(125,92,240,0.38)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "linear-gradient(180deg, rgba(20,17,38,0.98), rgba(13,15,22,0.98))", boxShadow: "0 4px 18px rgba(0,0,0,0.45)", overflow: "hidden" } : { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
-            <div style={UI_NEXT ? { display: "flex", alignItems: "stretch", height: "100%", background: "linear-gradient(110deg, rgba(125,92,240,0.14) 25%, rgba(168,140,255,0.34) 50%, rgba(125,92,240,0.14) 75%), linear-gradient(180deg, rgba(125,92,240,0.20), rgba(125,92,240,0.05))", backgroundSize: "300% 100%, 100% 100%", animation: "valoSheen 7s ease-in-out infinite" } : { display: "contents" }}>
+            <div style={UI_NEXT ? { display: "flex", alignItems: "stretch", height: "100%", background: "rgba(125,92,240,0.06)" } : { display: "contents" }}>
               {UI_NEXT && (<span style={{ display: "flex", alignItems: "center", padding: "0 10px 0 12px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 1.2, color: VALO_PURPLE, borderRight: "1px solid rgba(125,92,240,0.30)" }}>$VALO</span>)}
             {[
               ["PRICE", valoLive ? `$${fmtP(valoLive.price)}` : "—", VALO_PURPLE,
@@ -17053,9 +17381,9 @@ export default function App() {
             ))}
             </div>
             <div onClick={() => setBurnOpen(true)} title="Burn tracker — your burn, site burn, circulating supply, live"
-              style={{ ...(UI_NEXT ? { display: "flex", alignItems: "center", gap: 7, height: "100%", boxSizing: "border-box", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)" } : {}), cursor: "pointer", userSelect: "none", background: "rgba(249,115,22,0.10)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 9, padding: "6px 13px", ...(UI_NEXT ? { height: "100%", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)", animation: "emberGlow 2.8s ease-in-out infinite" } : {}) }}>
+              style={{ ...(UI_NEXT ? { display: "flex", alignItems: "center", gap: 7, height: "100%", boxSizing: "border-box", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)" } : {}), cursor: "pointer", userSelect: "none", background: "rgba(249,115,22,0.10)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 9, padding: "6px 13px", ...(UI_NEXT ? { height: "100%", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)", animation: burnPulse ? "emberGlow 1.4s ease-in-out 3" : "none" } : {}) }}>
               <div className="burn-swap" style={UI_NEXT ? { fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 1, marginRight: 6 } : { fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>
-                <span style={UI_NEXT ? { display: "inline-block", animation: "flameFlick 1.6s ease-in-out infinite", marginRight: 3 } : {}}>🔥</span> {burnMine ? "YOUR" : "TOTAL"} $VALO BURNED
+                <span style={UI_NEXT ? { display: "inline-block", animation: burnPulse ? "flameFlick 1.5s ease-in-out 3" : "none", marginRight: 3 } : {}}>🔥</span> {burnMine ? "YOUR" : "TOTAL"} $VALO BURNED
               </div>
               <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: "#f97316" } : { fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: "#f97316" }}>{UI_NEXT ? Math.round(burnMine ? myBurned : burned).toLocaleString() : (burnMine ? myBurned : burned).toFixed(4)}</div>
             </div>
@@ -17276,7 +17604,13 @@ export default function App() {
                 {railTab === "trades" && selected && (
                   <LiveTrades token={selected} isMobile={false} traderPrefs={traderPrefs} onPickTrader={pickTraderRow} />
                 )}
-                {railTab === "positions" && selected && (
+                {railTab === "trades" && !selected && UI_NEXT && (
+                  <div style={{ color: T.faint, fontFamily: T.mono, fontSize: 10, textAlign: "center", padding: "26px 14px", lineHeight: 1.7 }}>
+                    open a pair to watch its tape<br />
+                    <span style={{ fontSize: 9 }}>your positions stay available in the tab beside this one</span>
+                  </div>
+                )}
+                {railTab === "positions" && (UI_NEXT || selected) && (
                   <MyPositionsHub liveMode={liveData} chainHoldings={chainHoldingsLive} onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings} onOpenMint={openTokenByMint} onBurn={burnAndReclaim} tokens={tokens} positions={positions} botRuns={botRuns} pendingOrders={pendingOrders} pay={pay}
                     onOpenToken={(id) => { setSel(id); setClickMode(null); }} onSellPos={sellPos} onCloseTickets={closeAllTickets}
                     onSellRun={sellRun} onSellAllBots={sellAllRuns} onCancelBot={cancelBot} />
@@ -17563,9 +17897,19 @@ export default function App() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <SearchBar tokens={tokens} username={username} full eco isMobile liveData={liveData} valoMint={valoMint} onFullEco={() => setEcoFull(true)} mktExtra={[...mktHits, ...moreToks]} onQuery={setEcoQ} onPickToken={openAnyToken} onPickUser={(u) => setProfileUser(u)} />
                 </div>
-                <button onClick={() => setCompactList((v) => !v)} title={compactList ? "Expand cards" : "Compact list"}
-                  style={{ flex: "0 0 auto", border: `1px solid ${compactList ? VALO_PURPLE : T.border2}`, background: T.panel, color: compactList ? VALO_PURPLE : T.dim,
-                    borderRadius: 9, padding: "0 13px", fontSize: 15, fontWeight: 900, cursor: "pointer" }}>{compactList ? "▦" : "▤"}</button>
+                <button
+                  onClick={() => { if (UI_NEXT && isMobile && !sel) setMobView((v) => (v === "floor" ? "scan" : "floor"));
+                    else setCompactList((v) => !v); }}
+                  title={UI_NEXT && isMobile && !sel
+                    ? (mobView === "floor" ? "Show the scanner" : "Show the floor")
+                    : (compactList ? "Expand cards" : "Compact list")}
+                  style={{ flex: "0 0 auto",
+                    border: `1px solid ${(UI_NEXT && isMobile && !sel ? mobView === "floor" : compactList) ? VALO_PURPLE : T.border2}`,
+                    background: T.panel,
+                    color: (UI_NEXT && isMobile && !sel ? mobView === "floor" : compactList) ? VALO_PURPLE : T.dim,
+                    borderRadius: 9, padding: "0 13px", fontSize: 15, fontWeight: 900, cursor: "pointer" }}>
+                  {UI_NEXT && isMobile && !sel ? (mobView === "floor" ? "🏛" : "📡") : (compactList ? "▦" : "▤")}
+                </button>
               </div>
               {/* ▲ back to the top — a full row that fades in once you're down the list */}
               <div onClick={() => { flashTop(); window.scrollTo({ top: 0, behavior: "smooth" }); }}
@@ -17580,7 +17924,12 @@ export default function App() {
                   letterSpacing: 2, backdropFilter: "blur(3px)" }}>▲</div>
             </StickySearch>
 
-            <div {...scanPullTouch} style={{ display: "grid", gap: compactList ? 6 : 10, paddingRight: 6 }}>
+            {UI_NEXT && !selected && mobView === "floor" && (
+              <div style={{ marginBottom: 10 }}>{chartBlock}</div>
+            )}
+
+            <div {...scanPullTouch} style={{ display: UI_NEXT && !selected && mobView === "floor" ? "none" : "grid",
+              gap: compactList ? 6 : 10, paddingRight: 6 }}>
               {scanPullStrip}
               <div>{scanModeDropdown}</div>
               {secBanner}
@@ -17641,6 +17990,7 @@ export default function App() {
           </div>
           ) : (
           <div ref={scannerRef} data-scanscroll="1" {...scanPullTouch}
+            data-mobhide={UI_NEXT && isMobile && !sel && mobView === "floor" ? "1" : undefined}
             onWheel={(e) => { e.stopPropagation(); scanPullWheel(e); }}
             onScroll={(e) => { const el = e.currentTarget;
               setScanScrolled(el.scrollTop > 180);
@@ -17691,7 +18041,11 @@ export default function App() {
 
           {/* center: chart (resizable) + chat below */}
           <div style={{ display: "grid", gap: 12, position: "relative", marginLeft: -pullX, width: `calc(100% + ${pullX}px)`, transition: resizeRef.current ? "none" : "margin-left .2s, width .2s" }}>
-            <div style={{ position: "relative" }}>
+            <div style={{ position: "relative",
+              // 🏛 mobile: floor and scanner share the screen — one at a time,
+              // swapped by the button on the scanner's mode row
+              order: UI_NEXT && isMobile && !sel ? -1 : undefined,
+              display: UI_NEXT && isMobile && !sel && mobView === "scan" ? "none" : undefined }}>
               {/* search — the chart's exact width, glued under the callout
                   banner, riding along as you scroll */}
               <div style={{ position: "sticky", top: "calc(var(--stkTop, 8px) - 8px)", zIndex: 34, margin: "0 0 8px" }}>
@@ -20157,6 +20511,7 @@ export default function App() {
         /* sticky dies inside any overflow:hidden ancestor — keep the page chain clean */
         html, body, #root { overflow-x: clip; }
         .goldb{ animation: goldPulse 2.6s ease-in-out infinite; }
+        [data-mobhide="1"]{ display: none !important; }
         @keyframes valoSheen{ 0%{ background-position: -180% 0; } 55%{ background-position: 180% 0; } 100%{ background-position: 180% 0; } }
         @keyframes emberGlow{ 0%,100%{ box-shadow: inset 0 0 12px rgba(249,115,22,0.12); } 50%{ box-shadow: inset 0 0 22px rgba(249,115,22,0.34); } }
         @keyframes flameFlick{ 0%,100%{ transform: scale(1) rotate(-2deg); } 30%{ transform: scale(1.12) rotate(2deg); } 60%{ transform: scale(0.96) rotate(-1deg); } }
