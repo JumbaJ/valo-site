@@ -16135,7 +16135,9 @@ export default function App() {
                 return (
                   <div style={{ border: `1px solid ${T.border}`, borderRadius: 12, padding: isMobile ? 12 : 16, fontFamily: T.mono }}>
                     {(() => {
-                      const hot = minsTo <= 10;              // the closing window — this is when people act
+                      const poolNow = (epochLive && Number.isFinite(+epochLive.pool)) ? +epochLive.pool : 300000;
+                      const mins = (epochLive && Number.isFinite(+epochLive.minsLeft)) ? +epochLive.minsLeft : minsTo;
+                      const hot = mins <= 10;                // the closing window — this is when people act
                       return (
                         <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 12 : 22,
                           flexWrap: "wrap", padding: isMobile ? "14px 14px" : "16px 20px", marginBottom: 16,
@@ -16149,7 +16151,7 @@ export default function App() {
                             </div>
                             <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
                               <span style={{ fontSize: isMobile ? 30 : 38, fontWeight: 900, color: T.text,
-                                fontFamily: T.mono, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{minsTo}</span>
+                                fontFamily: T.mono, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{mins}</span>
                               <span style={{ fontSize: 12, color: T.dim, fontWeight: 800 }}>min</span>
                             </div>
                           </div>
@@ -16157,8 +16159,19 @@ export default function App() {
                           <div>
                             <div style={{ fontSize: 9, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 3 }}>THIS HOUR'S POOL</div>
                             <div style={{ fontSize: isMobile ? 17 : 21, fontWeight: 900, color: T.text, fontFamily: T.mono, lineHeight: 1.1 }}>
-                              300,000 <span style={{ color: VALO_PURPLE }}>$VALO</span>
+                              {Math.round(poolNow).toLocaleString()} <span style={{ color: VALO_PURPLE }}>$VALO</span>
                             </div>
+                            {epochLive && Number.isFinite(+epochLive.vault) && (
+                              <div style={{ fontSize: 9, color: T.faint, marginTop: 3 }}>
+                                vault holds {Math.round(+epochLive.vault).toLocaleString()} $VALO
+                                {poolNow > 0 ? ` · ~${Math.floor(+epochLive.vault / poolNow)} epochs left` : ""}
+                              </div>
+                            )}
+                            {epochLive && epochLive.participants != null && (
+                              <div style={{ fontSize: 9, color: T.faint, marginTop: 2 }}>
+                                {epochLive.participants} wallet{epochLive.participants === 1 ? "" : "s"} in this hour
+                              </div>
+                            )}
                           </div>
                           <div style={{ flex: 1, minWidth: 190 }}>
                             <div style={{ fontSize: 11, color: T.text, fontWeight: 800, lineHeight: 1.5 }}>
