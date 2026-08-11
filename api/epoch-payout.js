@@ -130,7 +130,14 @@ export default async function handler(req, res) {
     const decimals = parsed && parsed.info && Number.isInteger(parsed.info.decimals) ? parsed.info.decimals : 6;
     const tokenProgram = mintAcc && mintAcc.value && mintAcc.value.owner === TOKEN_2022_PROGRAM ? TOKEN_2022_PROGRAM : TOKEN_PROGRAM;
 
-    const vaultAccs = await rpc("getTokenAccountsByOwner", [EPOCH_ADDR, { mint: MINT }, { encoding: "jsonParsed" }]);
+    // a throw here used to fall through and look like an empty vault
+    let vaultAccs = null, vaultReadOk = true, vaultReadErr = null;
+    try {
+      vaultAccs = await rpc("getTokenAccountsByOwner", [EPOCH_ADDR, { mint: MINT }, { encoding: "jsonParsed" }]);
+    } catch (e) {
+      vaultReadOk = false;
+      vaultReadErr = String(e && e.message || e).slice(0, 180);
+    }
     const vaultHit = vaultAccs && Array.isArray(vaultAccs.value) && vaultAccs.value[0];
     const vaultAta = vaultHit ? vaultHit.pubkey : null;
     const vaultBal = vaultHit ? BigInt(vaultHit.account.data.parsed.info.tokenAmount.amount || "0") : 0n;
@@ -219,6 +226,14 @@ export default async function handler(req, res) {
     }
 
     // 7. armed
+    // never report "empty vault" when the truth is "could not read the vault"
+    if (!vaultReadOk) {
+      return res.status(200).json({
+        ok: false, rpcDown: true, epoch, executed: false,
+        error: `could not read the epoch vault: ${vaultReadErr}`,
+        note: "NOTHING WAS PAID. This is an RPC failure, not an empty vault — check the provider's credits and retry this epoch with ?force=1.",
+      });
+    }
     if (!vaultAta || vaultBal <= 0n) {
       return res.status(200).json({ ok: true, epoch, executed: false, note: "the epoch vault holds no $VALO — nothing to distribute" });
     }

@@ -113,6 +113,13 @@ export default async function handler(req, res) {
     epoch, minsLeft, pool, poolUnit: "VALO", vaultTokens, capTokens: capTokens || null,
     poolSol, participants: weights.length, totalWeight: +totalW.toFixed(3),
     configured: !!EPOCH_W,
+    // a null balance means the RPC read FAILED — it does not mean the vault is
+    // empty. Without this the two are indistinguishable, which is exactly how
+    // an expired Helius key went unnoticed while payouts quietly failed.
+    rpcOk: !(EPOCH_W && (vaultTokens === null || poolSol === null)),
+    alert: (EPOCH_W && (vaultTokens === null || poolSol === null))
+      ? "chain read failed — balances unknown, not zero. Check the RPC provider."
+      : null,
     // the vault pays rent for recipients who don't hold $VALO yet (~0.002 each)
     gasOk: poolSol == null ? null : poolSol >= 0.01,
     you: mine ? { volSol: +mine.volSol.toFixed(4), weight: +mine.w.toFixed(3),
