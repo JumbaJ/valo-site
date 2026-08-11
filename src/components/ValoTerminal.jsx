@@ -10778,12 +10778,14 @@ export default function App() {
   const [compactList, setCompactList] = useState(false); // mobile: collapse cards into rows
   // ---- airdrop / merkle epoch state ----
   const [vaultTotal, setVaultTotal] = useState(0);        // legacy session counter (paper trades)
+  const uidRef = useRef(null);                            // 🎁 who we are, for /api/epoch
   const [epochLive, setEpochLive] = useState(null);       // ⛓ the real epoch, from chain
   useEffect(() => {
     let stop = false;
     const pull = async () => {
       try {
-        const r = await fetch("/api/epoch");
+        const uid = uidRef.current;
+        const r = await fetch(`/api/epoch${uid ? `?user=${encodeURIComponent(uid)}` : ""}`);
         if (!r.ok) return;
         const j = await r.json();
         if (!stop) setEpochLive(j);
@@ -12005,7 +12007,8 @@ export default function App() {
   // (window.__VALO_SB_CLIENT__); absent = cloud features simply off (artifact
   // preview, local dev without env vars). All tables are RLS-locked per user.
   const sb = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
-  const [cloudUser, setCloudUser] = useState(null);     // supabase auth user
+  const [cloudUser, setCloudUser] = useState(null);
+  useEffect(() => { uidRef.current = (cloudUser && cloudUser.id) || null; }, [cloudUser && cloudUser.id]);     // supabase auth user
   const [mobHeadPill, setMobHeadPill] = useState("cloud"); // mobile header slot: "cloud" sign-in pill ⇄ "epoch" reward pill (hold to swap)
   const [cloudOpen, setCloudOpen] = useState(false);    // sign-in modal
   const [cloudEmail, setCloudEmail] = useState("");
