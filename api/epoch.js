@@ -100,7 +100,13 @@ export default async function handler(req, res) {
   }
 
   // GET status (+ per-user projection)
-  const user = String(req.query.user || "").trim();
+  // req.query is not always populated here — fall back to the raw URL so the
+  // per-user projection never silently returns null.
+  let user = String((req.query && req.query.user) || "").trim();
+  if (!user) {
+    try { user = (new URL(req.url, "http://x").searchParams.get("user") || "").trim(); }
+    catch (e) { user = ""; }
+  }
   const mine = user ? weights.find((x) => x.user === user) : null;
   res.setHeader("Cache-Control", "s-maxage=20, stale-while-revalidate=60");
   return res.status(200).json({
