@@ -16186,9 +16186,17 @@ export default function App() {
                       // your slice this hour, straight from the indexer — zero until
                       // the chain actually records activity for your wallet
                       const yr = (epochLive && epochLive.you) || null;
-                      const yw = yr && Number.isFinite(+yr.weight) ? +yr.weight
-                        : yr && Number.isFinite(+yr.share) ? +yr.share : 0;
-                      const epochYou = yr && Number.isFinite(+yr.tokens) ? +yr.tokens : poolNow * yw;
+                      // youEarn-v2 — `amount` is what /api/epoch actually returns.
+                      // `share` is the fraction; `weight` is raw SOL volume and must
+                      // never be multiplied by the pool (that produced the phantom
+                      // 614 and 1,175 figures).
+                      const yShare = yr && Number.isFinite(+yr.share) ? +yr.share : null;
+                      const epochYou = yr && Number.isFinite(+yr.amount) ? +yr.amount
+                        : (yShare != null && poolNow > 0 ? poolNow * yShare : null);
+                      // what is already yours, waiting in the vault
+                      const youClaimable = Array.isArray(pendingEpochs)
+                        ? pendingEpochs.reduce((a, e) => a + (+(e && e.amount) || 0), 0) : 0;
+                      const yw = yShare != null ? yShare : 0;
                       const vaultTok = epochLive
                         ? (Number.isFinite(+epochLive.vaultTokens) ? +epochLive.vaultTokens
                           : Number.isFinite(+epochLive.vault) ? +epochLive.vault : 0)
@@ -16227,15 +16235,25 @@ export default function App() {
                               <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 4 }}>YOU EARN THIS HOUR</div>
                               <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 900, fontFamily: T.mono, lineHeight: 1,
                                 color: epochYou > 0 ? T.green : T.dim }}>
-                                {epochYou > 0
-                                  ? epochYou.toLocaleString(undefined, { maximumFractionDigits: epochYou >= 1 ? 0 : 3 })
-                                  : "0"}
+                                {epochYou == null ? "—"
+                                  : epochYou > 0
+                                    ? epochYou.toLocaleString(undefined, { maximumFractionDigits: epochYou >= 1 ? 0 : 3 })
+                                    : "0"}
                               </div>
                               <div style={{ fontSize: 9, color: T.faint, fontFamily: T.mono, marginTop: 3 }}>
-                                {epochYou > 0
-                                  ? `$VALO · ≈ $${(epochYou * (valoLive && +valoLive.price > 0 ? +valoLive.price : 0)).toFixed(2)}`
-                                  : "trade this hour to be in the split"}
+                                {epochYou == null ? "no activity recorded yet"
+                                  : epochYou > 0
+                                    ? `$VALO · ≈ $${(epochYou * (valoLive && +valoLive.price > 0 ? +valoLive.price : 0)).toFixed(2)}`
+                                    : "trade this hour to be in the split"}
                               </div>
+                              {youClaimable > 0 && (
+                                <div
+                                  onClick={() => setClaimOpen(true)}
+                                  style={{ fontSize: 10, color: T.green, fontFamily: T.mono, fontWeight: 900,
+                                    marginTop: 5, paddingTop: 5, borderTop: `1px solid ${T.border}`, cursor: "pointer" }}>
+                                  {Math.round(youClaimable).toLocaleString()} claimable →
+                                </div>
+                              )}
                             </div>
                           </div>
 
