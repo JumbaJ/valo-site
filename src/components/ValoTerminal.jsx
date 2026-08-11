@@ -15714,6 +15714,31 @@ export default function App() {
       ? { id: selected.id, sym: selected.sym, confirmRemove: sec2.id, secName: sec2.name, x: Math.min(x, window.innerWidth - 230), y: Math.min(y, window.innerHeight - 170) }
       : { id: selected.id, sym: selected.sym, x: Math.min(x, window.innerWidth - 190), y: Math.min(y, window.innerHeight - 200) });
   };
+  // 🏛 the header's hold / right-click watchlist gesture, for any token row
+  const rowWatchFire = (tok, x, y) => {
+    if (!tok) return;
+    const sec2 = scanSec != null ? watchSections.find((w) => w.id === scanSec) : null;
+    const inSec = !!(sec2 && sec2.ids.includes(tok.id));
+    if (navigator.vibrate) navigator.vibrate(10);
+    setWatchMenu(inSec
+      ? { id: tok.id, sym: tok.sym, confirmRemove: sec2.id, secName: sec2.name,
+          x: Math.min(x, window.innerWidth - 230), y: Math.min(y, window.innerHeight - 170) }
+      : { id: tok.id, sym: tok.sym,
+          x: Math.min(x, window.innerWidth - 190), y: Math.min(y, window.innerHeight - 200) });
+  };
+  const rowWatchProps = (tok) => ({
+    onContextMenu: (e) => { e.preventDefault(); e.stopPropagation(); rowWatchFire(tok, e.clientX, e.clientY); },
+    onTouchStart: (e) => {
+      const t0 = e.touches && e.touches[0]; if (!t0) return;
+      const n = e.currentTarget; n._hx = t0.clientX; n._hy = t0.clientY;
+      if (n._ht) clearTimeout(n._ht);
+      n._ht = setTimeout(() => { n._ht = null; n._hf = true; rowWatchFire(tok, n._hx, n._hy); }, 450);
+    },
+    onTouchMove: (e) => { const t0 = e.touches && e.touches[0]; const n = e.currentTarget;
+      if (t0 && n._ht && (Math.abs(t0.clientX - n._hx) > 12 || Math.abs(t0.clientY - n._hy) > 12)) { clearTimeout(n._ht); n._ht = null; } },
+    onTouchEnd: (e) => { const n = e.currentTarget; if (n._ht) { clearTimeout(n._ht); n._ht = null; } },
+    onClickCapture: (e) => { const n = e.currentTarget; if (n._hf) { n._hf = false; e.preventDefault(); e.stopPropagation(); } },
+  });
   const headWatchProps = {
     onContextMenu: (e) => { e.preventDefault(); e.stopPropagation(); headWatchFire(e.clientX, e.clientY); },
     onTouchStart: (e) => {
@@ -16169,7 +16194,9 @@ export default function App() {
                         ) : <div style={colHead}>NEW LAUNCHES</div>}
                         {fresh.length === 0 && <div style={emptyNote}>watching for the next launch…</div>}
                         {fresh.map(({ t }) => (
-                          <button key={t.id} onClick={() => openAnyToken(t.id)} style={{ ...row, display: "block" }}>
+                          <button key={t.id} {...rowWatchProps(t)} onClick={() => openAnyToken(t.id)}
+                              title="Hold (right-click on PC) to add to your watchlist"
+                              style={{ ...row, display: "block" }}>
                            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={20} />
                             <span style={{ minWidth: 0, flex: 1 }}>
@@ -16220,7 +16247,9 @@ export default function App() {
                           const txns = (+t.buys || 0) + (+t.sells || 0);
                           const vol = (+t.greenUsd || 0) + (+t.redUsd || 0);
                           return (
-                            <button key={t.id} onClick={() => openAnyToken(t.id)} style={{ ...row, display: "block" }}>
+                            <button key={t.id} {...rowWatchProps(t)} onClick={() => openAnyToken(t.id)}
+                              title="Hold (right-click on PC) to add to your watchlist"
+                              style={{ ...row, display: "block" }}>
                              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                               <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={20} />
                               <span style={{ minWidth: 0, flex: 1 }}>
