@@ -16140,6 +16140,10 @@ export default function App() {
                   <div style={{ border: `1px solid ${T.border}`, borderRadius: 12, padding: isMobile ? 12 : 16, fontFamily: T.mono }}>
                     {(() => {
                       const poolNow = (epochLive && Number.isFinite(+epochLive.pool)) ? +epochLive.pool : 300000;
+                      const vaultTok = epochLive
+                        ? (Number.isFinite(+epochLive.vaultTokens) ? +epochLive.vaultTokens
+                          : Number.isFinite(+epochLive.vault) ? +epochLive.vault : 0)
+                        : 0;
                       const mins = (epochLive && Number.isFinite(+epochLive.minsLeft)) ? +epochLive.minsLeft : minsTo;
                       const hot = mins <= 10;                // the closing window — this is when people act
                       return (
@@ -16165,15 +16169,20 @@ export default function App() {
                             <div style={{ fontSize: isMobile ? 17 : 21, fontWeight: 900, color: T.text, fontFamily: T.mono, lineHeight: 1.1 }}>
                               {Math.round(poolNow).toLocaleString()} <span style={{ color: VALO_PURPLE }}>$VALO</span>
                             </div>
-                            {epochLive && Number.isFinite(+epochLive.vault) && (
+                            {vaultTok > 0 && (
                               <div style={{ fontSize: 9, color: T.faint, marginTop: 3 }}>
-                                vault holds {Math.round(+epochLive.vault).toLocaleString()} $VALO
-                                {poolNow > 0 ? ` · ~${Math.floor(+epochLive.vault / poolNow)} epochs left` : ""}
+                                vault holds {Math.round(vaultTok).toLocaleString()} $VALO
+                                {poolNow > 0 ? ` · ~${Math.floor(vaultTok / poolNow)} epochs left` : ""}
+                              </div>
+                            )}
+                            {epochLive && Number.isFinite(+epochLive.poolSol) && +epochLive.poolSol > 0 && (
+                              <div style={{ fontSize: 9, color: T.faint, marginTop: 2 }}>
+                                fees accrued this hour: <span style={{ color: T.text }}>◎{(+epochLive.poolSol).toFixed(4)}</span>
                               </div>
                             )}
                             {epochLive && epochLive.participants != null && (
                               <div style={{ fontSize: 9, color: T.faint, marginTop: 2 }}>
-                                {epochLive.participants} wallet{epochLive.participants === 1 ? "" : "s"} in this hour
+                                {epochLive.participants} wallet{+epochLive.participants === 1 ? "" : "s"} in this hour
                               </div>
                             )}
                           </div>
