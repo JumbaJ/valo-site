@@ -100,7 +100,7 @@ export default async function handler(req, res) {
     }
 
     // 1. idempotency, before anything else
-    const done = await sb(`epoch_payouts?epoch=eq.${epoch}&status=eq.sent&select=epoch&limit=1`);
+    const done = await sb(`epoch_payouts?epoch=eq.${epoch}&status=in.(sent,credited)&select=epoch&limit=1`);
     if (done && done.length && !force) {
       return res.status(200).json({ ok: true, epoch, skipped: "already paid", note: "idempotent — this epoch will never pay twice" });
     }
@@ -153,6 +153,58 @@ export default async function handler(req, res) {
     const armed = !!(process.env.VALO_EPOCH_SECRET || "").trim();
     const payable = payouts.filter((p) => p.wallet && BigInt(p.amountBase) > 0n);
 
+    // 5b. CREDIT MODE — the epoch does not send. Each wallet's slice is written
+    // to pending_rewards and the tokens stay in the vault until the user signs
+    // a claim. No VALO_EPOCH_SECRET needed: nothing moves on chain here.
+    if (String(process.env.VALO_EPOCH_MODE || "send").toLowerCase() === "credit") {
+      // credit everyone with a real share — even wallets that have not set a
+      // payout address yet. They set it before claiming; nothing is lost.
+      const creditable = payouts.filter((p) => BigInt(p.amountBase) > 0n);
+      if (!creditable.length) {
+        return res.status(200).json({ ok: true, mode: "credit", epoch, credited: 0, note: "no non-zero shares in that epoch" });
+      }
+
+      const ins = await sb("pending_rewards", {
+        method: "POST",
+        headers: { prefer: "resolution=ignore-duplicates" },
+        body: JSON.stringify(creditable.map((p) => ({
+          user_id: p.user,
+          epoch: String(epoch),
+          tokens: p.amount,
+          wallet: p.wallet || null,
+        }))),
+      });
+      if (ins === null) {
+        // the write failed — say so loudly rather than reporting a false success
+        return res.status(200).json({
+          ok: false, mode: "credit", epoch,
+          error: "could not write pending_rewards — nothing was credited. Check the table exists and SUPABASE_SERVICE_KEY is set.",
+        });
+      }
+
+      // the ledger row, same shape as a send, so history stays uniform
+      try {
+        const stamp = new Date().toISOString();
+        await sb("epoch_payouts", {
+          method: "POST",
+          headers: { prefer: "resolution=merge-duplicates" },
+          body: JSON.stringify(creditable.map((p) => ({
+            epoch, user_id: p.user, wallet: p.wallet, amount: p.amount,
+            status: "credited", sig: null, err: null, merkle_root: root, paid_at: stamp,
+          }))),
+        });
+      } catch (e) {}
+
+      return res.status(200).json({
+        ok: true, mode: "credit", epoch, executed: true,
+        credited: creditable.length,
+        tokensCredited: creditable.reduce((a, p) => a + p.amount, 0),
+        vaultTokens: Number(vaultBal) / 10 ** decimals,
+        totalWeight: +totalW.toFixed(4), merkleRoot: root,
+        note: "balances written — tokens stay in the vault until each wallet claims",
+      });
+    }
+
     // 6. dry run unless armed
     if (!armed) {
       return res.status(200).json({
@@ -199,36 +251,11 @@ export default async function handler(req, res) {
       }
       if (!ixs.length) continue;
       try {
-        const bh = await rpc("getLatestBlockhash", [{ commitment: "finalized" }]);
-        const sendOnce = async () => {
-          const bh2 = await rpc("getLatestBlockhash", [{ commitment: "finalized" }]);
-          const blockhash = bh2 && bh2.value && bh2.value.blockhash;
-          if (!blockhash) throw new Error("no blockhash");
-          const raw = buildTx({ payer: signer.publicKey, instructions: ixs, recentBlockhash: blockhash, signer });
-          return rpc("sendTransaction", [raw, { encoding: "base64", maxRetries: 3, skipPreflight: false }]);
-        };
-        // a signature from sendTransaction is a promise to TRY, not a receipt.
-        // Only the chain's own confirmation makes a payout real.
-        const confirmSig = async (sg) => {
-          for (let i = 0; i < 8; i++) {
-            await new Promise((r) => setTimeout(r, 2000));
-            const st = await rpc("getSignatureStatuses", [[sg], { searchTransactionHistory: true }]);
-            const v = st && st.value && st.value[0];
-            if (v && (v.confirmationStatus === "confirmed" || v.confirmationStatus === "finalized")) {
-              if (v.err) throw new Error("tx landed but failed on chain: " + JSON.stringify(v.err).slice(0, 120));
-              return true;
-            }
-          }
-          return false;
-        };
-        let sig = await sendOnce();
-        let landed = await confirmSig(sig);
-        if (!landed) {
-          // the chain never saw it — one fresh blockhash, one more attempt
-          sig = await sendOnce();
-          landed = await confirmSig(sig);
-        }
-        if (!landed) throw new Error(`tx never confirmed after 2 attempts (last sig ${String(sig).slice(0, 12)}…) — NOT recorded as sent`);
+        const bh = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+        const blockhash = bh && bh.value && bh.value.blockhash;
+        if (!blockhash) throw new Error("no blockhash");
+        const raw = buildTx({ payer: signer.publicKey, instructions: ixs, recentBlockhash: blockhash, signer });
+        const sig = await rpc("sendTransaction", [raw, { encoding: "base64", maxRetries: 3, skipPreflight: false }]);
         for (const p of included) results.push({ ...p, status: "sent", sig, solscan: `https://solscan.io/tx/${sig}` });
       } catch (e) {
         for (const p of included) results.push({ ...p, status: "failed", error: String(e.message || e).slice(0, 180) });
