@@ -12861,6 +12861,38 @@ export default function App() {
   }, [liveData]);
   // 🔎 market-wide search: every Solana / pump.fun token DexScreener
   // indexes, merged in behind whatever is already on screen
+  // 🎁 the real ledger: the unclaimed rows the hourly job credited to this
+  // wallet. Without this the panel only ever showed local state, so a balance
+  // sitting in pending_rewards was invisible and CLAIM had nothing to send.
+  useEffect(() => {
+    if (!cloudUser || !cloudUser.id) return;
+    let stop = false;
+    const pull = async () => {
+      try {
+        const { data, error } = await sb
+          .from("pending_rewards")
+          .select("id,epoch,tokens,created_at")
+          .eq("user_id", cloudUser.id)
+          .is("claimed_at", null)
+          .order("id", { ascending: true });
+        if (stop || error || !Array.isArray(data)) return;
+        setPendingEpochs(data.map((r) => ({
+          epoch: r.epoch,
+          amount: +r.tokens || 0,
+          root: null, weightPct: 0, holdPct: 0, volPct: 0,
+          at: r.created_at,
+        })));
+      } catch (e) { /* panel keeps whatever it had */ }
+    };
+    pull();
+    const iv = setInterval(pull, 45000);
+    const wake = () => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") pull();
+    };
+    window.addEventListener("focus", wake);
+    return () => { stop = true; clearInterval(iv); window.removeEventListener("focus", wake); };
+  }, [cloudUser && cloudUser.id]);
+
   const [mktHits, setMktHits] = useState([]);
   const mktHitsRef = useRef([]); mktHitsRef.current = mktHits;
 
