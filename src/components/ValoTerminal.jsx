@@ -10778,12 +10778,14 @@ export default function App() {
   const [compactList, setCompactList] = useState(false); // mobile: collapse cards into rows
   // ---- airdrop / merkle epoch state ----
   const [vaultTotal, setVaultTotal] = useState(0);        // legacy session counter (paper trades)
+  const uidRef = useRef(null);                            // 🎁 who we are, for /api/epoch
   const [epochLive, setEpochLive] = useState(null);       // ⛓ the real epoch, from chain
   useEffect(() => {
     let stop = false;
     const pull = async () => {
       try {
-        const r = await fetch("/api/epoch");
+        const uid = uidRef.current;
+        const r = await fetch(`/api/epoch${uid ? `?user=${encodeURIComponent(uid)}` : ""}`);
         if (!r.ok) return;
         const j = await r.json();
         if (!stop) setEpochLive(j);
@@ -12005,7 +12007,8 @@ export default function App() {
   // (window.__VALO_SB_CLIENT__); absent = cloud features simply off (artifact
   // preview, local dev without env vars). All tables are RLS-locked per user.
   const sb = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
-  const [cloudUser, setCloudUser] = useState(null);     // supabase auth user
+  const [cloudUser, setCloudUser] = useState(null);
+  useEffect(() => { uidRef.current = (cloudUser && cloudUser.id) || null; }, [cloudUser && cloudUser.id]);     // supabase auth user
   const [mobHeadPill, setMobHeadPill] = useState("cloud"); // mobile header slot: "cloud" sign-in pill ⇄ "epoch" reward pill (hold to swap)
   const [cloudOpen, setCloudOpen] = useState(false);    // sign-in modal
   const [cloudEmail, setCloudEmail] = useState("");
@@ -16183,9 +16186,17 @@ export default function App() {
                       // your slice this hour, straight from the indexer — zero until
                       // the chain actually records activity for your wallet
                       const yr = (epochLive && epochLive.you) || null;
-                      const yw = yr && Number.isFinite(+yr.weight) ? +yr.weight
-                        : yr && Number.isFinite(+yr.share) ? +yr.share : 0;
-                      const epochYou = yr && Number.isFinite(+yr.tokens) ? +yr.tokens : poolNow * yw;
+                      // youEarn-v2 — `amount` is what /api/epoch actually returns.
+                      // `share` is the fraction; `weight` is raw SOL volume and must
+                      // never be multiplied by the pool (that produced the phantom
+                      // 614 and 1,175 figures).
+                      const yShare = yr && Number.isFinite(+yr.share) ? +yr.share : null;
+                      const epochYou = yr && Number.isFinite(+yr.amount) ? +yr.amount
+                        : (yShare != null && poolNow > 0 ? poolNow * yShare : null);
+                      // what is already yours, waiting in the vault
+                      const youClaimable = Array.isArray(pendingEpochs)
+                        ? pendingEpochs.reduce((a, e) => a + (+(e && e.amount) || 0), 0) : 0;
+                      const yw = yShare != null ? yShare : 0;
                       const vaultTok = epochLive
                         ? (Number.isFinite(+epochLive.vaultTokens) ? +epochLive.vaultTokens
                           : Number.isFinite(+epochLive.vault) ? +epochLive.vault : 0)
@@ -16224,27 +16235,40 @@ export default function App() {
                               <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 4 }}>YOU EARN THIS HOUR</div>
                               <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 900, fontFamily: T.mono, lineHeight: 1,
                                 color: epochYou > 0 ? T.green : T.dim }}>
-                                {epochYou > 0
-                                  ? epochYou.toLocaleString(undefined, { maximumFractionDigits: epochYou >= 1 ? 0 : 3 })
-                                  : "0"}
+                                {epochYou == null ? "—"
+                                  : epochYou > 0
+                                    ? epochYou.toLocaleString(undefined, { maximumFractionDigits: epochYou >= 1 ? 0 : 3 })
+                                    : "0"}
                               </div>
                               <div style={{ fontSize: 9, color: T.faint, fontFamily: T.mono, marginTop: 3 }}>
-                                {epochYou > 0
-                                  ? `$VALO · ≈ $${(epochYou * (valoLive && +valoLive.price > 0 ? +valoLive.price : 0)).toFixed(2)}`
-                                  : "trade this hour to be in the split"}
+                                {epochYou == null ? "no activity recorded yet"
+                                  : epochYou > 0
+                                    ? `$VALO · ≈ $${(epochYou * (valoLive && +valoLive.price > 0 ? +valoLive.price : 0)).toFixed(2)}`
+                                    : "trade this hour to be in the split"}
                               </div>
+                              {youClaimable > 0 && (
+                                <div
+                                  onClick={() => setClaimOpen(true)}
+                                  style={{ fontSize: 10, color: T.green, fontFamily: T.mono, fontWeight: 900,
+                                    marginTop: 5, paddingTop: 5, borderTop: `1px solid ${T.border}`, cursor: "pointer" }}>
+                                  {Math.round(youClaimable).toLocaleString()} claimable →
+                                </div>
+                              )}
                             </div>
                           </div>
 
                           {!isMobile && (
                             <div style={{ textAlign: "right", paddingLeft: 16, borderLeft: `1px solid ${T.border}`, minWidth: 148 }}>
                               <div style={{ fontSize: 9, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 3 }}>POOL SO FAR</div>
-                              <div style={{ fontSize: 17, fontWeight: 900, color: T.text, fontFamily: T.mono, lineHeight: 1.15 }}>
-                                ◎{accSol.toFixed(4)}
+                              {/* poolSoFar-v2 — the token figure leads, SOL sits under it */}
+                              <div style={{ fontSize: 17, fontWeight: 900, color: T.text,
+                                fontFamily: T.mono, lineHeight: 1.15, whiteSpace: "nowrap" }}>
+                                {vaultTok > 0 ? Math.round(vaultTok).toLocaleString() : "—"}
+                                <span style={{ fontSize: 10, color: VALO_PURPLE, marginLeft: 4 }}>$VALO</span>
                               </div>
-                              <div style={{ fontSize: 9, color: T.faint, marginTop: 2 }}>
-                                trade fees, live
-                                {vaultTok > 0 ? <><br />vault {Math.round(vaultTok).toLocaleString()} $VALO</> : null}
+                              <div style={{ fontSize: 11, color: T.dim, fontFamily: T.mono,
+                                marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
+                                ◎{accSol.toFixed(4)}
                               </div>
                             </div>
                           )}
