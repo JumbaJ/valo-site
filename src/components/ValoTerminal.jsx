@@ -16166,15 +16166,16 @@ export default function App() {
                           border: `1px solid ${hot ? T.amber : VALO_PURPLE}`, borderRadius: 14,
                           background: hot ? "rgba(249,180,22,0.07)" : "rgba(125,92,240,0.08)",
                           boxShadow: hot ? "0 0 22px rgba(249,180,22,0.16)" : "0 0 18px rgba(125,92,240,0.12)" }}>
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: 9, letterSpacing: 1.6, color: hot ? T.amber : VALO_PURPLE,
-                              fontWeight: 900, marginBottom: 3 }}>
+                          <div style={{ minWidth: 0, paddingRight: isMobile ? 12 : 18,
+                            borderRight: `1px solid ${T.border}` }}>
+                            <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: hot ? T.amber : VALO_PURPLE,
+                              fontWeight: 900, marginBottom: 2 }}>
                               {hot ? "⚡ CLOSING — LAST CALL" : "⚡ NEXT PAYOUT"}
                             </div>
-                            <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
-                              <span style={{ fontSize: isMobile ? 30 : 38, fontWeight: 900, color: T.text,
+                            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                              <span style={{ fontSize: isMobile ? 24 : 28, fontWeight: 900, color: T.text,
                                 fontFamily: T.mono, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{mins}</span>
-                              <span style={{ fontSize: 12, color: T.dim, fontWeight: 800 }}>min</span>
+                              <span style={{ fontSize: 11, color: T.dim, fontWeight: 800 }}>min</span>
                             </div>
                           </div>
                           <div style={{ display: "flex", gap: 10, flex: 1, justifyContent: "flex-end", flexWrap: "wrap" }}>
@@ -17405,21 +17406,46 @@ export default function App() {
   const inThisEpoch = chainSharePct != null || (epochLive && +epochLive.totalWeight > 0 && volPctNow > 0);
   const claimable = pendingEpochs.reduce((a, e) => a + e.amount, 0);
 
-  const doClaim = (auto = false) => {
+  const doClaim = async (auto = false) => {
     if (!pendingEpochs.length) return;
     if (!auto && claiming) return;
     setClaiming(true);
-    // API: GET /api/merkle/proof?wallet=…&epoch=… → submit claim tx (user pays SOL gas)
-    setTimeout(() => {
-      const total = pendingEpochs.reduce((a, e) => a + e.amount, 0);
-      const n = pendingEpochs.length;
-      setMyHoldings((h) => h + total);
-      setPendingEpochs([]);
-      setLoyaltyDays(0); // withdrawing resets the loyalty multiplier to 1x
+    const total = pendingEpochs.reduce((a, e) => a + e.amount, 0);
+    const n = pendingEpochs.length;
+    try {
+      // 🎁 REAL CLAIM — rewards sit in the vault until this call; the server
+      // sends one transfer and only records the rows once the chain confirms.
+      const sess = await sb.auth.getSession();
+      const tok = sess && sess.data && sess.data.session && sess.data.session.access_token;
+      if (!tok) {
+        setClaiming(false);
+        sayPrivate({ type: "sys", text: "🎁 sign in to claim your rewards" });
+        return;
+      }
+      const r = await fetch("/api/epoch-claim", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${tok}` },
+      });
+      const j = await r.json().catch(() => ({}));
       setClaiming(false);
+      if (!r.ok || !j.ok) {
+        sayPrivate({ type: "sys", text: `🎁 claim failed — ${j.error || "try again in a moment"}` });
+        return;
+      }
+      if (!(j.tokens > 0)) {
+        sayPrivate({ type: "sys", text: "🎁 nothing pending to claim yet" });
+        return;
+      }
+      setMyHoldings((h) => h + (+j.tokens || 0));
+      setPendingEpochs([]);
+      setLoyaltyDays(0);                 // claiming resets the loyalty stack to 1×
       if (!auto) setClaimOpen(false);
-      sayPrivate({ type: "pnl", gain: true, text: `🎁 ${auto ? "AUTO-" : ""}CLAIMED ${total.toFixed(4)} $VALO from ${n} epoch${n > 1 ? "s" : ""} — loyalty reset to 1×` });
-    }, auto ? 400 : 1600);
+      sayPrivate({ type: "pnl", gain: true,
+        text: `🎁 ${auto ? "AUTO-" : ""}CLAIMED ${(+j.tokens).toFixed(4)} $VALO from ${j.rows} epoch${j.rows > 1 ? "s" : ""} — ${j.signature ? `tx ${String(j.signature).slice(0, 8)}…` : "settled"} · loyalty reset to 1×` });
+    } catch (e) {
+      setClaiming(false);
+      sayPrivate({ type: "sys", text: "🎁 claim failed — network error, nothing was sent" });
+    }
   };
 
   // auto-claim: fire after each epoch depending on the user's setting
