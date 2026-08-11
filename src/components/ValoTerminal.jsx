@@ -16140,6 +16140,14 @@ export default function App() {
                   <div style={{ border: `1px solid ${T.border}`, borderRadius: 12, padding: isMobile ? 12 : 16, fontFamily: T.mono }}>
                     {(() => {
                       const poolNow = (epochLive && Number.isFinite(+epochLive.pool)) ? +epochLive.pool : 300000;
+                      const accSol = (epochLive && Number.isFinite(+epochLive.poolSol)) ? +epochLive.poolSol : 0;
+                      const vPx = (valoLive && +valoLive.price > 0) ? +valoLive.price : 0;
+                      const capTok = (epochLive && Number.isFinite(+epochLive.capTokens)) ? +epochLive.capTokens : poolNow;
+                      const FLOOR_TOK = 25000;               // a quiet hour still pays something
+                      // what the fees have actually bought so far, at this moment's rate
+                      const estTok = (accSol > 0 && vPx > 0 && SOL_USD > 0)
+                        ? Math.min(capTok, Math.max(FLOOR_TOK, (accSol * SOL_USD) / vPx))
+                        : null;
                       const vaultTok = epochLive
                         ? (Number.isFinite(+epochLive.vaultTokens) ? +epochLive.vaultTokens
                           : Number.isFinite(+epochLive.vault) ? +epochLive.vault : 0)
@@ -16167,19 +16175,22 @@ export default function App() {
                           <div>
                             <div style={{ fontSize: 9, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 3 }}>THIS HOUR'S POOL</div>
                             <div style={{ fontSize: isMobile ? 17 : 21, fontWeight: 900, color: T.text, fontFamily: T.mono, lineHeight: 1.1 }}>
-                              {Math.round(poolNow).toLocaleString()} <span style={{ color: VALO_PURPLE }}>$VALO</span>
+                              {estTok != null ? "≈ " : ""}{Math.round(estTok != null ? estTok : poolNow).toLocaleString()}
+                              <span style={{ color: VALO_PURPLE }}> $VALO</span>
                             </div>
+                            {estTok != null && (
+                              <div style={{ fontSize: 9, color: T.faint, marginTop: 3 }}>
+                                from ◎{accSol.toFixed(4)} in fees so far · capped at {Math.round(capTok).toLocaleString()}
+                                <br />rate is locked when the payout is built at :05
+                              </div>
+                            )}
                             {vaultTok > 0 && (
                               <div style={{ fontSize: 9, color: T.faint, marginTop: 3 }}>
                                 vault holds {Math.round(vaultTok).toLocaleString()} $VALO
                                 {poolNow > 0 ? ` · ~${Math.floor(vaultTok / poolNow)} epochs left` : ""}
                               </div>
                             )}
-                            {epochLive && Number.isFinite(+epochLive.poolSol) && +epochLive.poolSol > 0 && (
-                              <div style={{ fontSize: 9, color: T.faint, marginTop: 2 }}>
-                                fees accrued this hour: <span style={{ color: T.text }}>◎{(+epochLive.poolSol).toFixed(4)}</span>
-                              </div>
-                            )}
+
                             {epochLive && epochLive.participants != null && (
                               <div style={{ fontSize: 9, color: T.faint, marginTop: 2 }}>
                                 {epochLive.participants} wallet{+epochLive.participants === 1 ? "" : "s"} in this hour
