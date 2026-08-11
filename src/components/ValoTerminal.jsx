@@ -10780,11 +10780,12 @@ export default function App() {
   const [vaultTotal, setVaultTotal] = useState(0);        // legacy session counter (paper trades)
   const uidRef = useRef(null);                            // 🎁 who we are, for /api/epoch
   const [epochLive, setEpochLive] = useState(null);       // ⛓ the real epoch, from chain
+  const [epochUid, setEpochUid] = useState(null);         // epoch-uid-v3
   useEffect(() => {
     let stop = false;
     const pull = async () => {
       try {
-        const uid = uidRef.current;
+        const uid = epochUid || uidRef.current;                 // epoch-uid-v3
         const r = await fetch(`/api/epoch${uid ? `?user=${encodeURIComponent(uid)}` : ""}`);
         if (!r.ok) return;
         const j = await r.json();
@@ -10794,7 +10795,7 @@ export default function App() {
     pull();
     const t = setInterval(pull, 30000);
     return () => { stop = true; clearInterval(t); };
-  }, []);
+  }, [epochUid]);
   const [myEpochVol, setMyEpochVol] = useState(0);        // your traded volume this epoch
   const [poolVol, setPoolVol] = useState(1);              // all users' volume this epoch
   const [myHoldings, setMyHoldings] = useState(() => rnd(180000, 900000)); // $VALO held
@@ -12008,7 +12009,11 @@ export default function App() {
   // preview, local dev without env vars). All tables are RLS-locked per user.
   const sb = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
   const [cloudUser, setCloudUser] = useState(null);
-  useEffect(() => { uidRef.current = (cloudUser && cloudUser.id) || null; }, [cloudUser && cloudUser.id]);     // supabase auth user
+  useEffect(() => {                                       // epoch-uid-v3
+    const id = (cloudUser && cloudUser.id) || null;
+    uidRef.current = id;
+    setEpochUid(id);
+  }, [cloudUser && cloudUser.id]);
   const [mobHeadPill, setMobHeadPill] = useState("cloud"); // mobile header slot: "cloud" sign-in pill ⇄ "epoch" reward pill (hold to swap)
   const [cloudOpen, setCloudOpen] = useState(false);    // sign-in modal
   const [cloudEmail, setCloudEmail] = useState("");
@@ -17462,7 +17467,7 @@ export default function App() {
     ? +youLive.amount
     : chainSharePct != null
       ? (livePool != null ? livePool : vaultTotal) * chainSharePct
-      : (epochLive && +epochLive.totalWeight === 0 ? 0 : localProjection);
+      : 0;   // epoch-uid-v3 - no you block means zero, not localProjection
   const inThisEpoch = chainSharePct != null || (epochLive && +epochLive.totalWeight > 0 && volPctNow > 0);
   const claimable = pendingEpochs.reduce((a, e) => a + e.amount, 0);
 
