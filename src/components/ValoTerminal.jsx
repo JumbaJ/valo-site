@@ -12879,7 +12879,7 @@ export default function App() {
         setPendingEpochs(data.map((r) => ({
           epoch: r.epoch,
           amount: +r.tokens || 0,
-          root: null, weightPct: 0, holdPct: 0, volPct: 0,
+          root: "", weightPct: 0, holdPct: 0, volPct: 0,
           at: r.created_at,
         })));
       } catch (e) { /* panel keeps whatever it had */ }
