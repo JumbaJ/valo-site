@@ -11999,6 +11999,8 @@ export default function App() {
   // 📋 WATCHLIST — loose bars + user-named subsections, drag-anything
   const [watchLoose, setWatchLoose] = useState([]);
   const [watchSections, setWatchSections] = useState([]);   // {id, name, ids[]}
+  const watchTokRef = useRef({});                           // 📌 id → token snapshot, so watched
+                                                            //    rows survive feed refreshes
   // ☁ PHASE 3 — Supabase cloud accounts. The client is created in main.jsx
   // (window.__VALO_SB_CLIENT__); absent = cloud features simply off (artifact
   // preview, local dev without env vars). All tables are RLS-locked per user.
@@ -12859,7 +12861,40 @@ export default function App() {
   }, [liveData]);
   // 🔎 market-wide search: every Solana / pump.fun token DexScreener
   // indexes, merged in behind whatever is already on screen
+  // 🎁 the real ledger: the unclaimed rows the hourly job credited to this
+  // wallet. Without this the panel only ever showed local state, so a balance
+  // sitting in pending_rewards was invisible and CLAIM had nothing to send.
+  useEffect(() => {
+    if (!cloudUser || !cloudUser.id) return;
+    let stop = false;
+    const pull = async () => {
+      try {
+        const { data, error } = await sb
+          .from("pending_rewards")
+          .select("id,epoch,tokens,created_at")
+          .eq("user_id", cloudUser.id)
+          .is("claimed_at", null)
+          .order("id", { ascending: true });
+        if (stop || error || !Array.isArray(data)) return;
+        setPendingEpochs(data.map((r) => ({
+          epoch: r.epoch,
+          amount: +r.tokens || 0,
+          root: "", weightPct: 0, holdPct: 0, volPct: 0,
+          at: r.created_at,
+        })));
+      } catch (e) { /* panel keeps whatever it had */ }
+    };
+    pull();
+    const iv = setInterval(pull, 45000);
+    const wake = () => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") pull();
+    };
+    window.addEventListener("focus", wake);
+    return () => { stop = true; clearInterval(iv); window.removeEventListener("focus", wake); };
+  }, [cloudUser && cloudUser.id]);
+
   const [mktHits, setMktHits] = useState([]);
+  const mktHitsRef = useRef([]); mktHitsRef.current = mktHits;
 
   useEffect(() => {
     const q = (ecoQ || "").trim();
@@ -15714,6 +15749,32 @@ export default function App() {
       ? { id: selected.id, sym: selected.sym, confirmRemove: sec2.id, secName: sec2.name, x: Math.min(x, window.innerWidth - 230), y: Math.min(y, window.innerHeight - 170) }
       : { id: selected.id, sym: selected.sym, x: Math.min(x, window.innerWidth - 190), y: Math.min(y, window.innerHeight - 200) });
   };
+  // 🏛 the header's hold / right-click watchlist gesture, for any token row
+  const rowWatchFire = (tok, x, y) => {
+    if (!tok) return;
+    try { watchTokRef.current = { ...watchTokRef.current, [tok.id]: tok }; } catch (e) {}
+    const sec2 = scanSec != null ? watchSections.find((w) => w.id === scanSec) : null;
+    const inSec = !!(sec2 && sec2.ids.includes(tok.id));
+    if (navigator.vibrate) navigator.vibrate(10);
+    setWatchMenu(inSec
+      ? { id: tok.id, sym: tok.sym, confirmRemove: sec2.id, secName: sec2.name,
+          x: Math.min(x, window.innerWidth - 230), y: Math.min(y, window.innerHeight - 170) }
+      : { id: tok.id, sym: tok.sym,
+          x: Math.min(x, window.innerWidth - 190), y: Math.min(y, window.innerHeight - 200) });
+  };
+  const rowWatchProps = (tok) => ({
+    onContextMenu: (e) => { e.preventDefault(); e.stopPropagation(); rowWatchFire(tok, e.clientX, e.clientY); },
+    onTouchStart: (e) => {
+      const t0 = e.touches && e.touches[0]; if (!t0) return;
+      const n = e.currentTarget; n._hx = t0.clientX; n._hy = t0.clientY;
+      if (n._ht) clearTimeout(n._ht);
+      n._ht = setTimeout(() => { n._ht = null; n._hf = true; rowWatchFire(tok, n._hx, n._hy); }, 450);
+    },
+    onTouchMove: (e) => { const t0 = e.touches && e.touches[0]; const n = e.currentTarget;
+      if (t0 && n._ht && (Math.abs(t0.clientX - n._hx) > 12 || Math.abs(t0.clientY - n._hy) > 12)) { clearTimeout(n._ht); n._ht = null; } },
+    onTouchEnd: (e) => { const n = e.currentTarget; if (n._ht) { clearTimeout(n._ht); n._ht = null; } },
+    onClickCapture: (e) => { const n = e.currentTarget; if (n._hf) { n._hf = false; e.preventDefault(); e.stopPropagation(); } },
+  });
   const headWatchProps = {
     onContextMenu: (e) => { e.preventDefault(); e.stopPropagation(); headWatchFire(e.clientX, e.clientY); },
     onTouchStart: (e) => {
@@ -16110,39 +16171,83 @@ export default function App() {
                 return (
                   <div style={{ border: `1px solid ${T.border}`, borderRadius: 12, padding: isMobile ? 12 : 16, fontFamily: T.mono }}>
                     {(() => {
-                      const hot = minsTo <= 10;              // the closing window — this is when people act
+                      const poolNow = (epochLive && Number.isFinite(+epochLive.pool)) ? +epochLive.pool : 300000;
+                      const accSol = (epochLive && Number.isFinite(+epochLive.poolSol)) ? +epochLive.poolSol : 0;
+                      const vPx = (valoLive && +valoLive.price > 0) ? +valoLive.price : 0;
+                      const capTok = (epochLive && Number.isFinite(+epochLive.capTokens)) ? +epochLive.capTokens : poolNow;
+                      const FLOOR_TOK = 25000;               // a quiet hour still pays something
+                      // what the fees have actually bought so far, at this moment's rate
+                      const estTok = (accSol > 0 && vPx > 0 && SOL_USD > 0)
+                        ? Math.min(capTok, Math.max(FLOOR_TOK, (accSol * SOL_USD) / vPx))
+                        : null;
+                      // your slice this hour, straight from the indexer — zero until
+                      // the chain actually records activity for your wallet
+                      const yr = (epochLive && epochLive.you) || null;
+                      const yw = yr && Number.isFinite(+yr.weight) ? +yr.weight
+                        : yr && Number.isFinite(+yr.share) ? +yr.share : 0;
+                      const epochYou = yr && Number.isFinite(+yr.tokens) ? +yr.tokens : poolNow * yw;
+                      const vaultTok = epochLive
+                        ? (Number.isFinite(+epochLive.vaultTokens) ? +epochLive.vaultTokens
+                          : Number.isFinite(+epochLive.vault) ? +epochLive.vault : 0)
+                        : 0;
+                      const mins = (epochLive && Number.isFinite(+epochLive.minsLeft)) ? +epochLive.minsLeft : minsTo;
+                      const hot = mins <= 10;                // the closing window — this is when people act
                       return (
                         <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 12 : 22,
                           flexWrap: "wrap", padding: isMobile ? "14px 14px" : "16px 20px", marginBottom: 16,
                           border: `1px solid ${hot ? T.amber : VALO_PURPLE}`, borderRadius: 14,
                           background: hot ? "rgba(249,180,22,0.07)" : "rgba(125,92,240,0.08)",
                           boxShadow: hot ? "0 0 22px rgba(249,180,22,0.16)" : "0 0 18px rgba(125,92,240,0.12)" }}>
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: 9, letterSpacing: 1.6, color: hot ? T.amber : VALO_PURPLE,
-                              fontWeight: 900, marginBottom: 3 }}>
+                          <div style={{ minWidth: 0, paddingRight: isMobile ? 12 : 18,
+                            borderRight: `1px solid ${T.border}` }}>
+                            <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: hot ? T.amber : VALO_PURPLE,
+                              fontWeight: 900, marginBottom: 2 }}>
                               {hot ? "⚡ CLOSING — LAST CALL" : "⚡ NEXT PAYOUT"}
                             </div>
-                            <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
-                              <span style={{ fontSize: isMobile ? 30 : 38, fontWeight: 900, color: T.text,
-                                fontFamily: T.mono, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{minsTo}</span>
-                              <span style={{ fontSize: 12, color: T.dim, fontWeight: 800 }}>min</span>
+                            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                              <span style={{ fontSize: isMobile ? 24 : 28, fontWeight: 900, color: T.text,
+                                fontFamily: T.mono, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{mins}</span>
+                              <span style={{ fontSize: 11, color: T.dim, fontWeight: 800 }}>min</span>
                             </div>
                           </div>
-                          <div style={{ width: 1, alignSelf: "stretch", background: T.border }} />
-                          <div>
-                            <div style={{ fontSize: 9, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 3 }}>THIS HOUR'S POOL</div>
-                            <div style={{ fontSize: isMobile ? 17 : 21, fontWeight: 900, color: T.text, fontFamily: T.mono, lineHeight: 1.1 }}>
-                              300,000 <span style={{ color: VALO_PURPLE }}>$VALO</span>
+                          <div style={{ display: "flex", gap: 10, flex: 1, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                            <div style={{ border: `1px solid ${T.border2}`, borderRadius: 10, padding: "10px 14px", minWidth: 148 }}>
+                              <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 4 }}>TOTAL POOL</div>
+                              <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 900, color: T.text, fontFamily: T.mono, lineHeight: 1 }}>
+                                {Math.round(poolNow).toLocaleString()}
+                              </div>
+                              <div style={{ fontSize: 9, color: VALO_PURPLE, fontFamily: T.mono, marginTop: 3 }}>$VALO</div>
+                            </div>
+                            <div style={{ border: `1px solid ${epochYou > 0 ? T.green : T.border2}`, borderRadius: 10,
+                              padding: "10px 14px", minWidth: 158,
+                              background: epochYou > 0 ? "rgba(22,199,132,0.06)" : "transparent" }}>
+                              <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 4 }}>YOU EARN THIS HOUR</div>
+                              <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 900, fontFamily: T.mono, lineHeight: 1,
+                                color: epochYou > 0 ? T.green : T.dim }}>
+                                {epochYou > 0
+                                  ? epochYou.toLocaleString(undefined, { maximumFractionDigits: epochYou >= 1 ? 0 : 3 })
+                                  : "0"}
+                              </div>
+                              <div style={{ fontSize: 9, color: T.faint, fontFamily: T.mono, marginTop: 3 }}>
+                                {epochYou > 0
+                                  ? `$VALO · ≈ $${(epochYou * (valoLive && +valoLive.price > 0 ? +valoLive.price : 0)).toFixed(2)}`
+                                  : "trade this hour to be in the split"}
+                              </div>
                             </div>
                           </div>
-                          <div style={{ flex: 1, minWidth: 190 }}>
-                            <div style={{ fontSize: 11, color: T.text, fontWeight: 800, lineHeight: 1.5 }}>
-                              Trade anything this hour → your wallet is in the split.
+
+                          {!isMobile && (
+                            <div style={{ textAlign: "right", paddingLeft: 16, borderLeft: `1px solid ${T.border}`, minWidth: 148 }}>
+                              <div style={{ fontSize: 9, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 3 }}>POOL SO FAR</div>
+                              <div style={{ fontSize: 17, fontWeight: 900, color: T.text, fontFamily: T.mono, lineHeight: 1.15 }}>
+                                ◎{accSol.toFixed(4)}
+                              </div>
+                              <div style={{ fontSize: 9, color: T.faint, marginTop: 2 }}>
+                                trade fees, live
+                                {vaultTok > 0 ? <><br />vault {Math.round(vaultTok).toLocaleString()} $VALO</> : null}
+                              </div>
                             </div>
-                            <div style={{ fontSize: 9.5, color: T.faint, marginTop: 3 }}>
-                              Paid automatically at :05 · on chain · no claiming, no gas, no buttons.
-                            </div>
-                          </div>
+                          )}
                         </div>
                       );
                     })()}
@@ -16169,7 +16274,9 @@ export default function App() {
                         ) : <div style={colHead}>NEW LAUNCHES</div>}
                         {fresh.length === 0 && <div style={emptyNote}>watching for the next launch…</div>}
                         {fresh.map(({ t }) => (
-                          <button key={t.id} onClick={() => openAnyToken(t.id)} style={{ ...row, display: "block" }}>
+                          <button key={t.id} {...rowWatchProps(t)} onClick={() => openAnyToken(t.id)}
+                              title="Hold (right-click on PC) to add to your watchlist"
+                              style={{ ...row, display: "block" }}>
                            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={20} />
                             <span style={{ minWidth: 0, flex: 1 }}>
@@ -16220,7 +16327,9 @@ export default function App() {
                           const txns = (+t.buys || 0) + (+t.sells || 0);
                           const vol = (+t.greenUsd || 0) + (+t.redUsd || 0);
                           return (
-                            <button key={t.id} onClick={() => openAnyToken(t.id)} style={{ ...row, display: "block" }}>
+                            <button key={t.id} {...rowWatchProps(t)} onClick={() => openAnyToken(t.id)}
+                              title="Hold (right-click on PC) to add to your watchlist"
+                              style={{ ...row, display: "block" }}>
                              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                               <TokenAvatar sym={t.sym} hue={t.hue} img={t.img} size={20} />
                               <span style={{ minWidth: 0, flex: 1 }}>
@@ -17312,26 +17421,63 @@ export default function App() {
   // the pool the chain will actually pay this hour, in $VALO — falls back to
   // the local counter only when the endpoint is unreachable
   const livePool = epochLive && Number.isFinite(+epochLive.pool) ? +epochLive.pool : null;
-  const accruingNow = livePool != null
-    ? livePool * weightNow * stackNow
-    : vaultTotal * weightNow * stackNow;
+  // minutes left in the epoch — the chain's own figure when it answers
+  const epochMins = (epochLive && Number.isFinite(+epochLive.minsLeft))
+    ? +epochLive.minsLeft
+    : 60 - new Date().getMinutes();
+  // ⚠️ the projection must answer to the indexer, not to a local formula.
+  // epochLive.you carries your recorded weight/share for THIS epoch; when the
+  // chain has nothing for you (no trades yet) the honest answer is zero.
+  const youLive = (epochLive && epochLive.you) || null;
+  const chainSharePct = youLive && Number.isFinite(+youLive.weight) ? +youLive.weight
+    : youLive && Number.isFinite(+youLive.share) ? +youLive.share : null;
+  const localProjection = (livePool != null ? livePool : vaultTotal) * weightNow * stackNow;
+  const accruingNow = chainSharePct != null
+    ? (livePool != null ? livePool : vaultTotal) * chainSharePct * stackNow
+    : (epochLive && +epochLive.totalWeight === 0 ? 0 : localProjection);
+  const inThisEpoch = chainSharePct != null || (epochLive && +epochLive.totalWeight > 0 && volPctNow > 0);
   const claimable = pendingEpochs.reduce((a, e) => a + e.amount, 0);
 
-  const doClaim = (auto = false) => {
+  const doClaim = async (auto = false) => {
     if (!pendingEpochs.length) return;
     if (!auto && claiming) return;
     setClaiming(true);
-    // API: GET /api/merkle/proof?wallet=…&epoch=… → submit claim tx (user pays SOL gas)
-    setTimeout(() => {
-      const total = pendingEpochs.reduce((a, e) => a + e.amount, 0);
-      const n = pendingEpochs.length;
-      setMyHoldings((h) => h + total);
-      setPendingEpochs([]);
-      setLoyaltyDays(0); // withdrawing resets the loyalty multiplier to 1x
+    const total = pendingEpochs.reduce((a, e) => a + e.amount, 0);
+    const n = pendingEpochs.length;
+    try {
+      // 🎁 REAL CLAIM — rewards sit in the vault until this call; the server
+      // sends one transfer and only records the rows once the chain confirms.
+      const sess = await sb.auth.getSession();
+      const tok = sess && sess.data && sess.data.session && sess.data.session.access_token;
+      if (!tok) {
+        setClaiming(false);
+        sayPrivate({ type: "sys", text: "🎁 sign in to claim your rewards" });
+        return;
+      }
+      const r = await fetch("/api/epoch-claim", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${tok}` },
+      });
+      const j = await r.json().catch(() => ({}));
       setClaiming(false);
+      if (!r.ok || !j.ok) {
+        sayPrivate({ type: "sys", text: `🎁 claim failed — ${j.error || "try again in a moment"}` });
+        return;
+      }
+      if (!(j.tokens > 0)) {
+        sayPrivate({ type: "sys", text: "🎁 nothing pending to claim yet" });
+        return;
+      }
+      setMyHoldings((h) => h + (+j.tokens || 0));
+      setPendingEpochs([]);
+      setLoyaltyDays(0);                 // claiming resets the loyalty stack to 1×
       if (!auto) setClaimOpen(false);
-      sayPrivate({ type: "pnl", gain: true, text: `🎁 ${auto ? "AUTO-" : ""}CLAIMED ${total.toFixed(4)} $VALO from ${n} epoch${n > 1 ? "s" : ""} — loyalty reset to 1×` });
-    }, auto ? 400 : 1600);
+      sayPrivate({ type: "pnl", gain: true,
+        text: `🎁 ${auto ? "AUTO-" : ""}CLAIMED ${(+j.tokens).toFixed(4)} $VALO from ${j.rows} epoch${j.rows > 1 ? "s" : ""} — ${j.signature ? `tx ${String(j.signature).slice(0, 8)}…` : "settled"} · loyalty reset to 1×` });
+    } catch (e) {
+      setClaiming(false);
+      sayPrivate({ type: "sys", text: "🎁 claim failed — network error, nothing was sent" });
+    }
   };
 
   // auto-claim: fire after each epoch depending on the user's setting
@@ -17438,6 +17584,12 @@ export default function App() {
                 <span style={{ display: "block", fontFamily: T.mono, fontSize: 13, fontWeight: 800, color: claimable > 0 ? T.green : T.dim }}>
                   {claimable.toFixed(3)} <span style={{ color: VALO_PURPLE }}>$VALO</span>
                 </span>
+                {!isMobile && (
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 8.5, letterSpacing: 0.3,
+                    color: accruingNow > 0 ? T.green : T.faint }}>
+                    ≈{accruingNow.toLocaleString(undefined, { maximumFractionDigits: accruingNow >= 1 ? 0 : 3 })} this hour · {epochMins}m
+                  </span>
+                )}
                 <span style={UI_NEXT ? { display: "none" } : { display: "block", fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 0.3 }}>
                   {autoClaim !== "off" ? "AUTO " : "CLAIM"}{pendingEpochs.length > 0 ? ` · ${pendingEpochs.length}×` : ""} · {fmtDur(msToEpoch).slice(0, 5)}
                 </span>
@@ -18372,7 +18524,11 @@ export default function App() {
             </div>
             <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: wallOpen ? "6px" : "6px 0" }}>
               {(() => { try {
-                const tokOf = (id) => tokens.find((x) => x.id === id);
+                const tokOf = (id) => tokens.find((x) => x.id === id)
+    || (mktHitsRef.current || []).find((x) => x.id === id)
+    || (moreToksRef.current || []).find((x) => x.id === id)
+    || (floorToksRef.current || []).find((x) => x.id === id)
+    || (watchTokRef.current || {})[id];
                 const allIds = [...watchLoose, ...watchSections.flatMap((s) => s.ids)];
                 if (!wallOpen) return allIds.map(tokOf).filter(Boolean).map((t) => {
                   const score = scoreToken(t); const rc = ratingColor(score);
@@ -19962,6 +20118,38 @@ export default function App() {
               <button onClick={() => !claiming && setClaimOpen(false)} style={{ ...chip(false), padding: "3px 9px" }}>✕</button>
             </div>
 
+            {/* ⚡ this hour, at a glance — the countdown and your projected slice */}
+            <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+              <div style={{ flex: 1, background: "#0c0f16", border: `1px solid ${epochMins <= 10 ? T.amber : T.border2}`,
+                borderRadius: 10, padding: "12px 13px" }}>
+                <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: epochMins <= 10 ? T.amber : T.faint, fontFamily: T.mono, fontWeight: 900 }}>
+                  {epochMins <= 10 ? "CLOSING — LAST CALL" : "THIS EPOCH ENDS IN"}
+                </div>
+                <div style={{ fontFamily: T.mono, fontSize: 30, fontWeight: 900, color: T.text, lineHeight: 1.1,
+                  fontVariantNumeric: "tabular-nums" }}>{epochMins}<span style={{ fontSize: 13, color: T.dim }}> min</span></div>
+                <div style={{ fontSize: 9, color: T.faint, fontFamily: T.mono, marginTop: 2 }}>pays at :05, on chain</div>
+              </div>
+              <div style={{ flex: 1.2, background: "#0c0f16", border: `1px solid ${VALO_PURPLE}55`,
+                borderRadius: 10, padding: "12px 13px" }}>
+                <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: VALO_PURPLE, fontFamily: T.mono, fontWeight: 900 }}>YOU EARN THIS HOUR</div>
+                <div style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 900, color: accruingNow > 0 ? T.green : T.dim, lineHeight: 1.15 }}>
+                  {accruingNow > 0 ? "≈ " : ""}{accruingNow.toLocaleString(undefined, { maximumFractionDigits: accruingNow >= 1 ? 0 : 4 })}
+                  <span style={{ fontSize: 12, color: VALO_PURPLE }}> $VALO</span>
+                </div>
+                <div style={{ fontSize: 11, color: T.faint, fontFamily: T.mono, marginTop: 2 }}>
+                  ≈ ${(accruingNow * valoUsdPrice).toFixed(2)}
+                </div>
+                <div style={{ fontSize: 9, color: T.faint, fontFamily: T.mono, marginTop: 3 }}>
+                  {accruingNow > 0
+                    ? `weight ${((chainSharePct != null ? chainSharePct : weightNow) * 100).toFixed(3)}% of the pool · ×${stackNow.toFixed(1)} loyalty`
+                    : "trade this hour and your wallet enters the split"}
+                </div>
+                <div style={{ fontSize: 8.5, color: T.faint, fontFamily: T.mono, marginTop: 1 }}>
+                  resets to zero the moment this epoch pays
+                </div>
+              </div>
+            </div>
+
             <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 10, padding: 14, textAlign: "center", marginBottom: 12 }}>
               <div style={{ fontSize: 9, letterSpacing: 2, color: T.faint, fontFamily: T.mono }}>CLAIMABLE NOW</div>
               <div style={{ fontFamily: T.mono, fontSize: 28, fontWeight: 900, color: claimable > 0 ? T.green : T.dim, textShadow: claimable > 0 ? "0 0 18px rgba(22,199,132,0.4)" : "none" }}>
@@ -20228,7 +20416,11 @@ export default function App() {
               </span>
             </div>
             {mobWatch ? (() => {
-              const tokOf = (id) => tokens.find((x) => x.id === id);
+              const tokOf = (id) => tokens.find((x) => x.id === id)
+    || (mktHitsRef.current || []).find((x) => x.id === id)
+    || (moreToksRef.current || []).find((x) => x.id === id)
+    || (floorToksRef.current || []).find((x) => x.id === id)
+    || (watchTokRef.current || {})[id];
               const row = (t, secId) => {
                 const score = scoreToken(t); const rc = ratingColor(score);
                 const cs4 = t.candles || [];
