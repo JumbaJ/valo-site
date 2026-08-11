@@ -100,7 +100,7 @@ export default async function handler(req, res) {
     }
 
     // 1. idempotency, before anything else
-    const done = await sb(`epoch_payouts?epoch=eq.${epoch}&status=eq.sent&select=epoch&limit=1`);
+    const done = await sb(`epoch_payouts?epoch=eq.${epoch}&status=in.(sent,credited)&select=epoch&limit=1`);
     if (done && done.length && !force) {
       return res.status(200).json({ ok: true, epoch, skipped: "already paid", note: "idempotent — this epoch will never pay twice" });
     }
@@ -152,6 +152,58 @@ export default async function handler(req, res) {
     const root = merkleRoot(payouts.map((p) => `${epoch}|${p.user}|${p.wallet || ""}|${p.amountBase}`));
     const armed = !!(process.env.VALO_EPOCH_SECRET || "").trim();
     const payable = payouts.filter((p) => p.wallet && BigInt(p.amountBase) > 0n);
+
+    // 5b. CREDIT MODE — the epoch does not send. Each wallet's slice is written
+    // to pending_rewards and the tokens stay in the vault until the user signs
+    // a claim. No VALO_EPOCH_SECRET needed: nothing moves on chain here.
+    if (String(process.env.VALO_EPOCH_MODE || "send").toLowerCase() === "credit") {
+      // credit everyone with a real share — even wallets that have not set a
+      // payout address yet. They set it before claiming; nothing is lost.
+      const creditable = payouts.filter((p) => BigInt(p.amountBase) > 0n);
+      if (!creditable.length) {
+        return res.status(200).json({ ok: true, mode: "credit", epoch, credited: 0, note: "no non-zero shares in that epoch" });
+      }
+
+      const ins = await sb("pending_rewards", {
+        method: "POST",
+        headers: { prefer: "resolution=ignore-duplicates" },
+        body: JSON.stringify(creditable.map((p) => ({
+          user_id: p.user,
+          epoch: String(epoch),
+          tokens: p.amount,
+          wallet: p.wallet || null,
+        }))),
+      });
+      if (ins === null) {
+        // the write failed — say so loudly rather than reporting a false success
+        return res.status(200).json({
+          ok: false, mode: "credit", epoch,
+          error: "could not write pending_rewards — nothing was credited. Check the table exists and SUPABASE_SERVICE_KEY is set.",
+        });
+      }
+
+      // the ledger row, same shape as a send, so history stays uniform
+      try {
+        const stamp = new Date().toISOString();
+        await sb("epoch_payouts", {
+          method: "POST",
+          headers: { prefer: "resolution=merge-duplicates" },
+          body: JSON.stringify(creditable.map((p) => ({
+            epoch, user_id: p.user, wallet: p.wallet, amount: p.amount,
+            status: "credited", sig: null, err: null, merkle_root: root, paid_at: stamp,
+          }))),
+        });
+      } catch (e) {}
+
+      return res.status(200).json({
+        ok: true, mode: "credit", epoch, executed: true,
+        credited: creditable.length,
+        tokensCredited: creditable.reduce((a, p) => a + p.amount, 0),
+        vaultTokens: Number(vaultBal) / 10 ** decimals,
+        totalWeight: +totalW.toFixed(4), merkleRoot: root,
+        note: "balances written — tokens stay in the vault until each wallet claims",
+      });
+    }
 
     // 6. dry run unless armed
     if (!armed) {
