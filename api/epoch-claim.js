@@ -164,7 +164,7 @@ export default async function handler(req, res) {
         source: vaultAta, mint: MINT, dest: ata, owner: signer.publicKey,
         amount: amountBase.toString(), decimals, tokenProgram,
       }));
-      const bh = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+      const bh = await rpc("getLatestBlockhash", [{ commitment: "finalized" }]);
       const blockhash = bh && bh.value && bh.value.blockhash;
       if (!blockhash) throw new Error("no blockhash");
       const raw = buildTx({ payer: signer.publicKey, instructions: ixs, recentBlockhash: blockhash, signer });
