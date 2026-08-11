@@ -16148,6 +16148,12 @@ export default function App() {
                       const estTok = (accSol > 0 && vPx > 0 && SOL_USD > 0)
                         ? Math.min(capTok, Math.max(FLOOR_TOK, (accSol * SOL_USD) / vPx))
                         : null;
+                      // your slice this hour, straight from the indexer — zero until
+                      // the chain actually records activity for your wallet
+                      const yr = (epochLive && epochLive.you) || null;
+                      const yw = yr && Number.isFinite(+yr.weight) ? +yr.weight
+                        : yr && Number.isFinite(+yr.share) ? +yr.share : 0;
+                      const epochYou = yr && Number.isFinite(+yr.tokens) ? +yr.tokens : poolNow * yw;
                       const vaultTok = epochLive
                         ? (Number.isFinite(+epochLive.vaultTokens) ? +epochLive.vaultTokens
                           : Number.isFinite(+epochLive.vault) ? +epochLive.vault : 0)
@@ -16171,21 +16177,32 @@ export default function App() {
                               <span style={{ fontSize: 12, color: T.dim, fontWeight: 800 }}>min</span>
                             </div>
                           </div>
-                          <div style={{ width: 1, alignSelf: "stretch", background: T.border }} />
-                          <div>
-                            <div style={{ fontSize: 9, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 3 }}>THIS HOUR'S POOL</div>
-                            <div style={{ fontSize: isMobile ? 17 : 21, fontWeight: 900, color: T.text, fontFamily: T.mono, lineHeight: 1.1 }}>
-                              {Math.round(poolNow).toLocaleString()} <span style={{ color: VALO_PURPLE }}>$VALO</span>
+                          <div style={{ display: "flex", gap: 10, flex: 1, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                            <div style={{ border: `1px solid ${T.border2}`, borderRadius: 10, padding: "10px 14px", minWidth: 148 }}>
+                              <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 4 }}>TOTAL POOL</div>
+                              <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 900, color: T.text, fontFamily: T.mono, lineHeight: 1 }}>
+                                {Math.round(poolNow).toLocaleString()}
+                              </div>
+                              <div style={{ fontSize: 9, color: VALO_PURPLE, fontFamily: T.mono, marginTop: 3 }}>$VALO</div>
+                            </div>
+                            <div style={{ border: `1px solid ${epochYou > 0 ? T.green : T.border2}`, borderRadius: 10,
+                              padding: "10px 14px", minWidth: 158,
+                              background: epochYou > 0 ? "rgba(22,199,132,0.06)" : "transparent" }}>
+                              <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 4 }}>YOU EARN THIS HOUR</div>
+                              <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 900, fontFamily: T.mono, lineHeight: 1,
+                                color: epochYou > 0 ? T.green : T.dim }}>
+                                {epochYou > 0
+                                  ? epochYou.toLocaleString(undefined, { maximumFractionDigits: epochYou >= 1 ? 0 : 3 })
+                                  : "0"}
+                              </div>
+                              <div style={{ fontSize: 9, color: T.faint, fontFamily: T.mono, marginTop: 3 }}>
+                                {epochYou > 0
+                                  ? `$VALO · ≈ $${(epochYou * (valoLive && +valoLive.price > 0 ? +valoLive.price : 0)).toFixed(2)}`
+                                  : "trade this hour to be in the split"}
+                              </div>
                             </div>
                           </div>
-                          <div style={{ flex: 1, minWidth: 170 }}>
-                            <div style={{ fontSize: 11, color: T.text, fontWeight: 800, lineHeight: 1.5 }}>
-                              Trade anything this hour → your wallet is in the split.
-                            </div>
-                            <div style={{ fontSize: 9.5, color: T.faint, marginTop: 3 }}>
-                              Paid automatically at :05 · on chain · no claiming, no gas, no buttons.
-                            </div>
-                          </div>
+
                           {!isMobile && (
                             <div style={{ textAlign: "right", paddingLeft: 16, borderLeft: `1px solid ${T.border}`, minWidth: 148 }}>
                               <div style={{ fontSize: 9, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 3 }}>POOL SO FAR</div>
@@ -17375,9 +17392,17 @@ export default function App() {
   const epochMins = (epochLive && Number.isFinite(+epochLive.minsLeft))
     ? +epochLive.minsLeft
     : 60 - new Date().getMinutes();
-  const accruingNow = livePool != null
-    ? livePool * weightNow * stackNow
-    : vaultTotal * weightNow * stackNow;
+  // ⚠️ the projection must answer to the indexer, not to a local formula.
+  // epochLive.you carries your recorded weight/share for THIS epoch; when the
+  // chain has nothing for you (no trades yet) the honest answer is zero.
+  const youLive = (epochLive && epochLive.you) || null;
+  const chainSharePct = youLive && Number.isFinite(+youLive.weight) ? +youLive.weight
+    : youLive && Number.isFinite(+youLive.share) ? +youLive.share : null;
+  const localProjection = (livePool != null ? livePool : vaultTotal) * weightNow * stackNow;
+  const accruingNow = chainSharePct != null
+    ? (livePool != null ? livePool : vaultTotal) * chainSharePct * stackNow
+    : (epochLive && +epochLive.totalWeight === 0 ? 0 : localProjection);
+  const inThisEpoch = chainSharePct != null || (epochLive && +epochLive.totalWeight > 0 && volPctNow > 0);
   const claimable = pendingEpochs.reduce((a, e) => a + e.amount, 0);
 
   const doClaim = (auto = false) => {
@@ -20050,11 +20075,16 @@ export default function App() {
                 borderRadius: 10, padding: "12px 13px" }}>
                 <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: VALO_PURPLE, fontFamily: T.mono, fontWeight: 900 }}>YOU EARN THIS HOUR</div>
                 <div style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 900, color: accruingNow > 0 ? T.green : T.dim, lineHeight: 1.15 }}>
-                  ≈ {accruingNow.toLocaleString(undefined, { maximumFractionDigits: accruingNow >= 1 ? 0 : 4 })}
+                  {accruingNow > 0 ? "≈ " : ""}{accruingNow.toLocaleString(undefined, { maximumFractionDigits: accruingNow >= 1 ? 0 : 4 })}
                   <span style={{ fontSize: 12, color: VALO_PURPLE }}> $VALO</span>
                 </div>
-                <div style={{ fontSize: 9, color: T.faint, fontFamily: T.mono, marginTop: 2 }}>
-                  your weight {(weightNow * 100).toFixed(3)}% of the pool · ×{stackNow.toFixed(1)} loyalty
+                <div style={{ fontSize: 11, color: T.faint, fontFamily: T.mono, marginTop: 2 }}>
+                  ≈ ${(accruingNow * valoUsdPrice).toFixed(2)}
+                </div>
+                <div style={{ fontSize: 9, color: T.faint, fontFamily: T.mono, marginTop: 3 }}>
+                  {accruingNow > 0
+                    ? `weight ${((chainSharePct != null ? chainSharePct : weightNow) * 100).toFixed(3)}% of the pool · ×${stackNow.toFixed(1)} loyalty`
+                    : "trade this hour and your wallet enters the split"}
                 </div>
                 <div style={{ fontSize: 8.5, color: T.faint, fontFamily: T.mono, marginTop: 1 }}>
                   resets to zero the moment this epoch pays
