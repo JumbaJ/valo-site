@@ -16175,29 +16175,10 @@ export default function App() {
                           <div>
                             <div style={{ fontSize: 9, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 3 }}>THIS HOUR'S POOL</div>
                             <div style={{ fontSize: isMobile ? 17 : 21, fontWeight: 900, color: T.text, fontFamily: T.mono, lineHeight: 1.1 }}>
-                              {estTok != null ? "≈ " : ""}{Math.round(estTok != null ? estTok : poolNow).toLocaleString()}
-                              <span style={{ color: VALO_PURPLE }}> $VALO</span>
+                              {Math.round(poolNow).toLocaleString()} <span style={{ color: VALO_PURPLE }}>$VALO</span>
                             </div>
-                            {estTok != null && (
-                              <div style={{ fontSize: 9, color: T.faint, marginTop: 3 }}>
-                                from ◎{accSol.toFixed(4)} in fees so far · capped at {Math.round(capTok).toLocaleString()}
-                                <br />rate is locked when the payout is built at :05
-                              </div>
-                            )}
-                            {vaultTok > 0 && (
-                              <div style={{ fontSize: 9, color: T.faint, marginTop: 3 }}>
-                                vault holds {Math.round(vaultTok).toLocaleString()} $VALO
-                                {poolNow > 0 ? ` · ~${Math.floor(vaultTok / poolNow)} epochs left` : ""}
-                              </div>
-                            )}
-
-                            {epochLive && epochLive.participants != null && (
-                              <div style={{ fontSize: 9, color: T.faint, marginTop: 2 }}>
-                                {epochLive.participants} wallet{+epochLive.participants === 1 ? "" : "s"} in this hour
-                              </div>
-                            )}
                           </div>
-                          <div style={{ flex: 1, minWidth: 190 }}>
+                          <div style={{ flex: 1, minWidth: 170 }}>
                             <div style={{ fontSize: 11, color: T.text, fontWeight: 800, lineHeight: 1.5 }}>
                               Trade anything this hour → your wallet is in the split.
                             </div>
@@ -16205,6 +16186,18 @@ export default function App() {
                               Paid automatically at :05 · on chain · no claiming, no gas, no buttons.
                             </div>
                           </div>
+                          {!isMobile && (
+                            <div style={{ textAlign: "right", paddingLeft: 16, borderLeft: `1px solid ${T.border}`, minWidth: 148 }}>
+                              <div style={{ fontSize: 9, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 3 }}>POOL SO FAR</div>
+                              <div style={{ fontSize: 17, fontWeight: 900, color: T.text, fontFamily: T.mono, lineHeight: 1.15 }}>
+                                ◎{accSol.toFixed(4)}
+                              </div>
+                              <div style={{ fontSize: 9, color: T.faint, marginTop: 2 }}>
+                                trade fees, live
+                                {vaultTok > 0 ? <><br />vault {Math.round(vaultTok).toLocaleString()} $VALO</> : null}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })()}
@@ -17378,6 +17371,10 @@ export default function App() {
   // the pool the chain will actually pay this hour, in $VALO — falls back to
   // the local counter only when the endpoint is unreachable
   const livePool = epochLive && Number.isFinite(+epochLive.pool) ? +epochLive.pool : null;
+  // minutes left in the epoch — the chain's own figure when it answers
+  const epochMins = (epochLive && Number.isFinite(+epochLive.minsLeft))
+    ? +epochLive.minsLeft
+    : 60 - new Date().getMinutes();
   const accruingNow = livePool != null
     ? livePool * weightNow * stackNow
     : vaultTotal * weightNow * stackNow;
@@ -17504,6 +17501,12 @@ export default function App() {
                 <span style={{ display: "block", fontFamily: T.mono, fontSize: 13, fontWeight: 800, color: claimable > 0 ? T.green : T.dim }}>
                   {claimable.toFixed(3)} <span style={{ color: VALO_PURPLE }}>$VALO</span>
                 </span>
+                {!isMobile && (
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 8.5, letterSpacing: 0.3,
+                    color: accruingNow > 0 ? T.green : T.faint }}>
+                    ≈{accruingNow.toLocaleString(undefined, { maximumFractionDigits: accruingNow >= 1 ? 0 : 3 })} this hour · {epochMins}m
+                  </span>
+                )}
                 <span style={UI_NEXT ? { display: "none" } : { display: "block", fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 0.3 }}>
                   {autoClaim !== "off" ? "AUTO " : "CLAIM"}{pendingEpochs.length > 0 ? ` · ${pendingEpochs.length}×` : ""} · {fmtDur(msToEpoch).slice(0, 5)}
                 </span>
@@ -20030,6 +20033,33 @@ export default function App() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <span style={{ fontFamily: T.mono, fontSize: 12, letterSpacing: 2, color: T.dim }}>🎁 AIRDROP VAULT · ROLLING HOURLY</span>
               <button onClick={() => !claiming && setClaimOpen(false)} style={{ ...chip(false), padding: "3px 9px" }}>✕</button>
+            </div>
+
+            {/* ⚡ this hour, at a glance — the countdown and your projected slice */}
+            <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+              <div style={{ flex: 1, background: "#0c0f16", border: `1px solid ${epochMins <= 10 ? T.amber : T.border2}`,
+                borderRadius: 10, padding: "12px 13px" }}>
+                <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: epochMins <= 10 ? T.amber : T.faint, fontFamily: T.mono, fontWeight: 900 }}>
+                  {epochMins <= 10 ? "CLOSING — LAST CALL" : "THIS EPOCH ENDS IN"}
+                </div>
+                <div style={{ fontFamily: T.mono, fontSize: 30, fontWeight: 900, color: T.text, lineHeight: 1.1,
+                  fontVariantNumeric: "tabular-nums" }}>{epochMins}<span style={{ fontSize: 13, color: T.dim }}> min</span></div>
+                <div style={{ fontSize: 9, color: T.faint, fontFamily: T.mono, marginTop: 2 }}>pays at :05, on chain</div>
+              </div>
+              <div style={{ flex: 1.2, background: "#0c0f16", border: `1px solid ${VALO_PURPLE}55`,
+                borderRadius: 10, padding: "12px 13px" }}>
+                <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: VALO_PURPLE, fontFamily: T.mono, fontWeight: 900 }}>YOU EARN THIS HOUR</div>
+                <div style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 900, color: accruingNow > 0 ? T.green : T.dim, lineHeight: 1.15 }}>
+                  ≈ {accruingNow.toLocaleString(undefined, { maximumFractionDigits: accruingNow >= 1 ? 0 : 4 })}
+                  <span style={{ fontSize: 12, color: VALO_PURPLE }}> $VALO</span>
+                </div>
+                <div style={{ fontSize: 9, color: T.faint, fontFamily: T.mono, marginTop: 2 }}>
+                  your weight {(weightNow * 100).toFixed(3)}% of the pool · ×{stackNow.toFixed(1)} loyalty
+                </div>
+                <div style={{ fontSize: 8.5, color: T.faint, fontFamily: T.mono, marginTop: 1 }}>
+                  resets to zero the moment this epoch pays
+                </div>
+              </div>
             </div>
 
             <div style={{ background: "#0c0f16", border: `1px solid ${T.border}`, borderRadius: 10, padding: 14, textAlign: "center", marginBottom: 12 }}>
