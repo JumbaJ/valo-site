@@ -16242,12 +16242,15 @@ export default function App() {
                           {!isMobile && (
                             <div style={{ textAlign: "right", paddingLeft: 16, borderLeft: `1px solid ${T.border}`, minWidth: 148 }}>
                               <div style={{ fontSize: 9, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 3 }}>POOL SO FAR</div>
-                              <div style={{ fontSize: 17, fontWeight: 900, color: T.text, fontFamily: T.mono, lineHeight: 1.15 }}>
-                                ◎{accSol.toFixed(4)}
+                              {/* poolSoFar-v2 — the token figure leads, SOL sits under it */}
+                              <div style={{ fontSize: 17, fontWeight: 900, color: T.text,
+                                fontFamily: T.mono, lineHeight: 1.15, whiteSpace: "nowrap" }}>
+                                {vaultTok > 0 ? Math.round(vaultTok).toLocaleString() : "—"}
+                                <span style={{ fontSize: 10, color: VALO_PURPLE, marginLeft: 4 }}>$VALO</span>
                               </div>
-                              <div style={{ fontSize: 9, color: T.faint, marginTop: 2 }}>
-                                trade fees, live
-                                {vaultTok > 0 ? <><br />vault {Math.round(vaultTok).toLocaleString()} $VALO</> : null}
+                              <div style={{ fontSize: 11, color: T.dim, fontFamily: T.mono,
+                                marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
+                                ◎{accSol.toFixed(4)}
                               </div>
                             </div>
                           )}
