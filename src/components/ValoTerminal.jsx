@@ -17453,12 +17453,16 @@ export default function App() {
   // epochLive.you carries your recorded weight/share for THIS epoch; when the
   // chain has nothing for you (no trades yet) the honest answer is zero.
   const youLive = (epochLive && epochLive.you) || null;
-  const chainSharePct = youLive && Number.isFinite(+youLive.weight) ? +youLive.weight
-    : youLive && Number.isFinite(+youLive.share) ? +youLive.share : null;
-  const localProjection = (livePool != null ? livePool : vaultTotal) * weightNow * stackNow;
-  const accruingNow = chainSharePct != null
-    ? (livePool != null ? livePool : vaultTotal) * chainSharePct * stackNow
-    : (epochLive && +epochLive.totalWeight === 0 ? 0 : localProjection);
+  // accruingNow-v2 — `share` is the fraction; `weight` is raw SOL volume and
+  // must never be multiplied by the pool. `amount` is what the endpoint already
+  // computed, and the same figure epoch-payout credits — prefer it outright.
+  const chainSharePct = youLive && Number.isFinite(+youLive.share) ? +youLive.share : null;
+  const localProjection = (livePool != null ? livePool : vaultTotal) * weightNow;
+  const accruingNow = youLive && Number.isFinite(+youLive.amount)
+    ? +youLive.amount
+    : chainSharePct != null
+      ? (livePool != null ? livePool : vaultTotal) * chainSharePct
+      : (epochLive && +epochLive.totalWeight === 0 ? 0 : localProjection);
   const inThisEpoch = chainSharePct != null || (epochLive && +epochLive.totalWeight > 0 && volPctNow > 0);
   const claimable = pendingEpochs.reduce((a, e) => a + e.amount, 0);
 
