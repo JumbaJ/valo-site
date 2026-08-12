@@ -18614,7 +18614,7 @@ export default function App() {
                 if (!wallOpen) return allIds.map(tokOf).filter(Boolean).map((t) => {
                   const score = scoreToken(t); const rc = ratingColor(score);
                   return (
-                    <button key={t.id} onClick={() => { setSel(t.id); setClickMode(null); }} className="wall-bar" title={`${t.sym} · ${score}`}
+                    <button key={t.id} onClick={() => { openAnyToken(t.id, t); setClickMode(null); }} className="wall-bar" title={`${t.sym} · ${score}`}
                       style={{ pointerEvents: "auto", cursor: "pointer", border: "none", background: "transparent", width: "100%", display: "flex", justifyContent: "center", padding: "5px 0" }}>
                       <span style={{ width: 18, height: 18, borderRadius: "50%", background: `${rc}22`, border: `1px solid ${rc}`, color: rc, fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, display: "grid", placeItems: "center" }}>{score}</span>
                     </button>
@@ -18622,7 +18622,10 @@ export default function App() {
                 });
                 const row = (t, secId) => {
                   const score = scoreToken(t); const rc = ratingColor(score);
-                  const cs3 = t.candles || [];
+                  // floor-sourced tokens are adopted with candles:[] — the real bars
+                  // live in the prefetch cache, keyed by pool+timeframe
+                  const cs3 = (t.candles && t.candles.length) ? t.candles
+                    : (t.pool ? (candleCache.current[t.pool + ":" + tf] || []) : []);
                   const b3 = cs3.length ? cs3[Math.max(0, cs3.length - 96)] : null;
                   const base = b3 ? b3.c : (t.price || 0);
                   const ch = base > 0 ? ((t.price - base) / base) * 100 : 0;
@@ -18646,18 +18649,22 @@ export default function App() {
                       </button>
                       {exp && (
                         <div style={{ pointerEvents: "auto", border: `1px solid ${VALO_PURPLE}55`, borderTop: "none", borderRadius: "0 0 10px 10px", background: "rgba(12,15,22,0.92)", padding: "12px 12px 11px", marginBottom: 6 }}>
-                          <TraceMini candles={t.candles} hue={t.hue} h={112} />
+                          <TraceMini candles={cs3} hue={t.hue} h={112} />
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "7px 14px", fontFamily: T.mono, fontSize: 10.5, color: T.dim, margin: "11px 0", lineHeight: 1.35 }}>
                             <span>24H VOL <b style={{ color: T.text }}>{fmt$(t.greenUsd + t.redUsd)}</b></span>
                             <span>24H Δ <b style={{ color: ch >= 0 ? T.green : T.red }}>{pct(ch)}</b></span>
                             <span>PRICE <b style={{ color: T.text }}>${fmtP(t.price)}</b></span>
                             <span>MC <b style={{ color: T.text }}>{fmt$(mcOf(t))}</b></span>
-                            <span>CIRC <b style={{ color: T.text }}>{fmtQty(1e9 * (0.35 + (Math.abs(tokSeed(t) * 13) % 50) / 100))}</b></span>
-                            <span>TOP 10 HOLD <b style={{ color: T.amber }}>{(16 + (Math.abs(tokSeed(t) * 7) % 26)).toFixed(1)}%</b></span>
+                            {/* CIRC and TOP 10 HOLD were seeded from a hash of the token —
+                                stable across refreshes, so they read as real, and entirely
+                                invented. Show the supply we can actually derive, and a dash
+                                for concentration until a real source provides it. */}
+                            <span>SUPPLY <b style={{ color: T.text }}>{Number.isFinite(+t.supply) && +t.supply > 0 ? fmtQty(+t.supply) : "—"}</b></span>
+                            <span>TOP 10 HOLD <b style={{ color: T.amber }}>—</b></span>
                             <span>MOM <b style={{ color: t.momentum > 60 ? T.green : T.dim }}>{Math.round(t.momentum)}</b></span>
                             <span>HOLDERS <b style={{ color: T.text }}>{fmtHolders(holdersOf(t))}</b></span>
                           </div>
-                          <button onClick={() => { setSel(t.id); setClickMode(null); setWatchExp(null); }}
+                          <button onClick={() => { openAnyToken(t.id, t); setClickMode(null); setWatchExp(null); }}
                             style={{ width: "100%", border: `1px solid ${VALO_PURPLE}`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE, borderRadius: 9, padding: "9px", fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1.2, cursor: "pointer" }}>
                             OPEN FULL CHART ▸
                           </button>
