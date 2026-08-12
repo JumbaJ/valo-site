@@ -16222,7 +16222,8 @@ export default function App() {
                       const hot = mins <= 10;                // the closing window — this is when people act
                       return (
                         <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 12 : 22,
-                          flexWrap: "wrap", padding: isMobile ? "14px 14px" : "16px 20px", marginBottom: 16,
+                          flexWrap: "wrap", padding: isMobile ? "9px 12px" : "16px 20px",
+                          marginBottom: isMobile ? 11 : 16,  /* band-mobile-v2 */
                           border: `1px solid ${hot ? T.amber : VALO_PURPLE}`, borderRadius: 14,
                           background: hot ? "rgba(249,180,22,0.07)" : "rgba(125,92,240,0.08)",
                           boxShadow: hot ? "0 0 22px rgba(249,180,22,0.16)" : "0 0 18px rgba(125,92,240,0.12)" }}>
@@ -16233,13 +16234,15 @@ export default function App() {
                               {hot ? "⚡ CLOSING — LAST CALL" : "⚡ NEXT PAYOUT"}
                             </div>
                             <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                              <span style={{ fontSize: isMobile ? 24 : 28, fontWeight: 900, color: T.text,
+                              <span style={{ fontSize: isMobile ? 21 : 28, fontWeight: 900, color: T.text,
                                 fontFamily: T.mono, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{mins}</span>
                               <span style={{ fontSize: 11, color: T.dim, fontWeight: 800 }}>min</span>
                             </div>
                           </div>
                           <div style={{ display: "flex", gap: 10, flex: 1, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                            <div style={{ border: `1px solid ${T.border2}`, borderRadius: 10, padding: "10px 14px", minWidth: 148 }}>
+                            <div style={{ border: `1px solid ${T.border2}`, borderRadius: 10,
+                              padding: isMobile ? "8px 12px" : "10px 14px",
+                              minWidth: isMobile ? 128 : 148, flex: isMobile ? 1 : "none" }}>
                               <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 4 }}>TOTAL POOL</div>
                               <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 900, color: T.text, fontFamily: T.mono, lineHeight: 1 }}>
                                 {Math.round(poolNow).toLocaleString()}
@@ -16247,7 +16250,8 @@ export default function App() {
                               <div style={{ fontSize: 9, color: VALO_PURPLE, fontFamily: T.mono, marginTop: 3 }}>$VALO</div>
                             </div>
                             <div style={{ border: `1px solid ${epochYou > 0 ? T.green : T.border2}`, borderRadius: 10,
-                              padding: "10px 14px", minWidth: 158,
+                              padding: isMobile ? "8px 12px" : "10px 14px",
+                              minWidth: isMobile ? 128 : 148, flex: isMobile ? 1 : "none",
                               background: epochYou > 0 ? "rgba(22,199,132,0.06)" : "transparent" }}>
                               <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 4 }}>YOU EARN THIS HOUR</div>
                               <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 900, fontFamily: T.mono, lineHeight: 1,
@@ -16258,10 +16262,10 @@ export default function App() {
                                     : "0"}
                               </div>
                               <div style={{ fontSize: 9, color: T.faint, fontFamily: T.mono, marginTop: 3 }}>
-                                {epochYou == null ? "no activity recorded yet"
+                                {epochYou == null ? (isMobile ? "no activity yet" : "no activity recorded yet")
                                   : epochYou > 0
                                     ? `$VALO · ≈ $${(epochYou * (valoLive && +valoLive.price > 0 ? +valoLive.price : 0)).toFixed(2)}`
-                                    : "trade this hour to be in the split"}
+                                    : isMobile ? "trade to enter" : "trade this hour to be in the split"}
                               </div>
                               {youClaimable > 0 && (
                                 <div
