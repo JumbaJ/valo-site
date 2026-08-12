@@ -1,3 +1,4 @@
+import { cors } from "./_cors.js";
 // VALO — /api/sendtx : relay an ALREADY-SIGNED transaction to the network.
 // The signature was produced by the user's wallet; we only forward the bytes
 // and report what the chain says. Optional — the client can submit directly.
@@ -6,6 +7,7 @@ const RPC = () => (process.env.HELIUS_API_KEY
   : "https://api.mainnet-beta.solana.com");
 
 export default async function handler(req, res) {
+  if (cors(req, res)) return;
   if (String(process.env.VALO_ONCHAIN || "").trim() !== "1") {
     return res.status(200).json({ enabled: false });
   }
