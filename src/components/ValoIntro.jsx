@@ -162,16 +162,23 @@ export default function ValoIntro({ force = false }) {
         marginBottom: 26, textAlign: "center",
       }}>
         <div style={{
-          display: "inline-block",
+          display: "flex", justifyContent: "center", alignItems: "baseline",
+          columnGap: 7,
           fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
           fontSize: 12, fontWeight: 900, color: "#E6E9F0",
-          // letter-spacing leaves a trailing gap after the last glyph; the
-          // matching indent puts the ink back on the shared axis
-          letterSpacing: 7, textIndent: 7,
           opacity: 0, animation: "valoWord .8s cubic-bezier(.16,1,.3,1) .45s forwards",
           whiteSpace: "nowrap",
         }}>
-          VALO <span style={{ color: VIOLET }}>·</span> TERMINAL
+          {/* Letter-spacing leaves a trailing gap after the last glyph in some
+              engines and not others, so a centred box does not centre the ink.
+              A flex gap only ever falls BETWEEN characters — never after the
+              last one — so this is exact on every browser. */}
+          {"VALO·TERMINAL".split("").map((ch, i) => (
+            <span key={i} style={{
+              color: ch === "\u00B7" ? VIOLET : undefined,
+              ...(ch === "\u00B7" ? { paddingLeft: 3, paddingRight: 3 } : null),
+            }}>{ch}</span>
+          ))}
         </div>
       </div>
 
