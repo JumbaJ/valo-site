@@ -17624,7 +17624,7 @@ export default function App() {
                 <span style={{ display: "block", fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: VALO_PURPLE }}>ALERTS</span>
                 <span style={UI_NEXT ? { display: "none" } : { display: "block", fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 0.3 }}>callouts · social</span>
               </span>
-              {unreadCount > 0 && <span style={{ position: "absolute", top: -6, right: -6, minWidth: 16, height: 16, borderRadius: 8, background: T.red, color: "#fff", fontFamily: T.mono, fontSize: 9, fontWeight: 900, display: "grid", placeItems: "center", padding: "0 4px" }}>{unreadCount}</span>}
+              {unreadCount > 0 && <span style={{ position: "absolute", top: -2, right: -4, minWidth: 16, height: 16, borderRadius: 8, zIndex: 3, background: T.red, color: "#fff", fontFamily: T.mono, fontSize: 9, fontWeight: 900, display: "grid", placeItems: "center", padding: "0 4px" }}>{unreadCount}</span>}
             </button>
             {/* WHITEPAPER */}
             {/* 🧭 replay the tour any time */}
@@ -17971,7 +17971,7 @@ export default function App() {
                   style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
                     border: `1px solid ${T.border2}`, background: "rgba(125,92,240,0.08)", borderRadius: 9, padding: "7px 9px" }}>
                   <span style={{ fontSize: 15 }}>🔔</span>
-                  {unreadCount > 0 && <span style={{ position: "absolute", top: -5, right: -5, minWidth: 15, height: 15, borderRadius: 8, background: T.red, color: "#fff", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, display: "grid", placeItems: "center", padding: "0 3px" }}>{unreadCount}</span>}
+                  {unreadCount > 0 && <span style={{ position: "absolute", top: -2, right: -3, minWidth: 15, height: 15, borderRadius: 8, zIndex: 3, background: T.red, color: "#fff", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, display: "grid", placeItems: "center", padding: "0 3px" }}>{unreadCount}</span>}
                 </button>
                 <button onClick={() => setWpOpen(true)} title="Read the whitepaper"
                   style={{ display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
