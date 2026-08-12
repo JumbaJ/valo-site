@@ -20548,7 +20548,7 @@ export default function App() {
                           <span>24H VOL <b style={{ color: T.text }}>{fmt$(t.greenUsd + t.redUsd)}</b></span>
                           <span>24H Δ <b style={{ color: ch >= 0 ? T.green : T.red }}>{pct(ch)}</b></span>
                           <span>PRICE <b style={{ color: T.text }}>${fmtP(t.price)}</b></span>
-                          <span>TOP 10 <b style={{ color: T.amber }}>{(16 + (Math.abs(tokSeed(t) * 7) % 26)).toFixed(1)}%</b></span>
+                          <span>TOP 10 <b style={{ color: T.amber }}>—</b></span>
                         </div>
                         <div style={{ display: "flex", gap: 6 }}>
                           <button onClick={() => { setSel(t.id); setClickMode(null); setWatchExp(null); setDrawerOpen(false); }}
