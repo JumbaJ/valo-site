@@ -41,6 +41,17 @@ const MARK =
   "M19.05 7.95a7 7 0 0 1 9.9 0l11.1 11.1a7 7 0 0 1 0 9.9" +
   "l-11.1 11.1a7 7 0 0 1-9.9 0L7.95 28.95a7 7 0 0 1 0-9.9z";
 
+// Claim the flag at MODULE LOAD, not in an effect. Effect ordering between
+// sibling trees is not guaranteed to favour us, and the tour's own effect was
+// reading `undefined` and starting its timer before we ever set it.
+const willPlay = (() => {
+  if (typeof window === "undefined") return false;
+  try { if (sessionStorage.getItem(KEY) === "1") return false; } catch (e) {}
+  const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return !reduce;
+})();
+try { if (willPlay) window.__VALO_INTRO__ = true; } catch (e) {}
+
 export default function ValoIntro({ force = false }) {
   const [phase, setPhase] = useState(() => {
     if (force) return "draw";
@@ -52,6 +63,20 @@ export default function ValoIntro({ force = false }) {
   const timers = useRef([]);
 
   const seal = () => { try { sessionStorage.setItem(KEY, "1"); } catch (e) {} };
+
+  // Anything that must not begin behind the doors — the first-run tour, most of
+  // all — can read this flag or wait for the event.
+  //   if (window.__VALO_INTRO__) { wait for "valo-intro-done" }
+  useEffect(() => {
+    try {
+      if (phase === "gone") {
+        window.__VALO_INTRO__ = false;
+        window.dispatchEvent(new Event("valo-intro-done"));
+      } else {
+        window.__VALO_INTRO__ = true;
+      }
+    } catch (e) {}
+  }, [phase]);
 
   useEffect(() => {
     if (phase === "gone") return;
@@ -69,6 +94,14 @@ export default function ValoIntro({ force = false }) {
     setTimeout(() => { setPhase("gone"); seal(); }, DOOR_MS - 150);
   };
 
+  // hold the page still while the doors are shut — a swipe during the sequence
+  // would otherwise scroll the terminal behind them
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") skip(); };
     window.addEventListener("keydown", onKey);
@@ -84,7 +117,7 @@ export default function ValoIntro({ force = false }) {
   // centre — no subpixel gap can open up before the split.
   const door = (side) => ({
     position: "fixed", top: 0, height: "100%", width: "calc(50% + 1px)",
-    background: BG, zIndex: 61, willChange: "transform", [side]: 0,
+    background: BG, zIndex: 2147483001, willChange: "transform", [side]: 0,
     transform: parting ? `translateX(${side === "left" ? "-102%" : "102%"})` : "none",
     transition: `transform ${DOOR_MS}ms cubic-bezier(.76,0,.24,1)`,
   });
@@ -93,7 +126,8 @@ export default function ValoIntro({ force = false }) {
   // then clipped to this door's half. Both halves therefore sit on the same
   // screen coordinates and reassemble into one image at rest.
   const half = (side) => ({
-    position: "absolute", top: 0, height: "100%", width: "100vw",
+    position: "absolute", top: 0, height: "100%",
+    width: "calc(200% - 2px)",
     [side]: 0, zIndex: 1,
     display: "grid", placeItems: "center",
     clipPath: side === "left" ? "inset(0 50% 0 0)" : "inset(0 0 0 50%)",
@@ -151,7 +185,7 @@ export default function ValoIntro({ force = false }) {
   );
 
   return (
-    <div onClick={skip} style={{ position: "fixed", inset: 0, zIndex: 60, cursor: "pointer" }} aria-hidden="true">
+    <div onClick={skip} style={{ position: "fixed", inset: 0, zIndex: 2147483000, cursor: "pointer" }} aria-hidden="true">
       <style>{`
         @keyframes valoDraw  { to { stroke-dashoffset: 0 } }
         @keyframes valoFlood { 0%{opacity:0} 100%{opacity:1} }
@@ -220,7 +254,7 @@ export default function ValoIntro({ force = false }) {
       <button
         onClick={(e) => { e.stopPropagation(); skip(); }}
         style={{
-          position: "fixed", right: 16, bottom: 14, zIndex: 64,
+          position: "fixed", right: 16, bottom: 14, zIndex: 2147483004,
           background: "none", border: 0, color: "#5C6478", cursor: "pointer",
           fontFamily: "ui-monospace, Menlo, monospace", fontSize: 10, letterSpacing: 2,
           opacity: 0, animation: "valoUp .5s ease 1.5s forwards",

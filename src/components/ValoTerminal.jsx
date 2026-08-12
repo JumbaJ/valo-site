@@ -13850,7 +13850,19 @@ export default function App() {
   useEffect(() => {
     let seen = true;
     try { seen = localStorage.getItem("valo-tour-v1") === "done"; } catch (e) {}
-    if (!seen) { const t = setTimeout(() => setTourOn(true), 1400); return () => clearTimeout(t); }
+    if (!seen) {
+      // the tour must not begin behind the intro doors — wait for them to open,
+      // then give the terminal a beat to settle before pointing at it
+      let t = null;
+      const start = () => { t = setTimeout(() => setTourOn(true), 1400); };
+      if (typeof window !== "undefined" && window.__VALO_INTRO__) {
+        const go = () => start();
+        window.addEventListener("valo-intro-done", go, { once: true });
+        return () => { window.removeEventListener("valo-intro-done", go); if (t) clearTimeout(t); };
+      }
+      start();
+      return () => { if (t) clearTimeout(t); };
+    }
   }, []);
   const endTour = useCallback(() => {
     setTourOn(false);
