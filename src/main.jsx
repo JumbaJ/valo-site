@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import { createClient } from "@supabase/supabase-js";
 import "./index.css";
 import App from "./App.jsx";
-import ValoIntro from "./components/ValoIntro.jsx";
 
 window.__VALO_LIVE__ = import.meta.env.VITE_LIVE_DATA === "1";
 window.__VALO_STREAM__ = import.meta.env.VITE_VALO_STREAM || null;
@@ -43,4 +42,4 @@ class ValoBoundary extends React.Component {
   }
 }
 
-createRoot(document.getElementById("root")).render(<ValoBoundary><ValoIntro /><App /></ValoBoundary>);
+createRoot(document.getElementById("root")).render(<ValoBoundary><App /></ValoBoundary>);
