@@ -12814,6 +12814,20 @@ export default function App() {
     }));
   };
   const watchAdd = (id, sec) => {
+    // 📌 snapshot the token as it goes in. Floor and market rows carry synthetic
+    // ids that are reissued whenever their feed refreshes, so an id alone stops
+    // resolving minutes later — the row still draws from state but will not open,
+    // and tokOf returns undefined for every entry but the one still in the live
+    // array. The snapshot is what makes a watchlist entry durable.
+    try {
+      if (!watchTokRef.current[id]) {
+        const found = (tokensRef.current || []).find((t) => t.id === id)
+          || (mktHitsRef.current || []).find((t) => t.id === id)
+          || (moreToksRef.current || []).find((t) => t.id === id)
+          || (floorToksRef.current || []).find((t) => t.id === id);
+        if (found) watchTokRef.current = { ...watchTokRef.current, [id]: found };
+      }
+    } catch (e) {}
     watchRemove(id, null); watchSections.forEach((s) => watchRemove(id, s.id)); // move, don't duplicate
     if (sec == null) setWatchLoose((L) => (L.includes(id) ? L : [...L, id]));
     else setWatchSections((S) => S.map((s) => (s.id === sec ? { ...s, ids: s.ids.includes(id) ? s.ids : [...s.ids, id] } : s)));
