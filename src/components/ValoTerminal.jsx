@@ -106,11 +106,22 @@ if (typeof window !== "undefined") window.__valoTest = TestLog;
 // smooth sin-wobble makes people "join and leave" live; totals only ever climb
 const VIEW_EPOCH = 1700000000000;
 // real holder count when we've looked it up, else the estimate
-const holdersOf = (t, fallback) => {
+// holders-truth-v1 — the REAL on-chain holder count, or null.
+//
+// This used to fall back to whatever the caller passed, and callers passed
+// `traders` — which is buys + sells, a trade count. A token with 39 holders and
+// 112,000 trades therefore read "112K holders" everywhere the helper is used.
+// A number that confident and that wrong is worse than no number, so when the
+// chain has not answered yet this returns null and the UI shows a dash.
+const holdersOf = (t, _fallback) => {
   const real = typeof window !== "undefined" && window.__VALO_HOLDERS__ && t && t.liveMint
     ? window.__VALO_HOLDERS__[t.liveMint] : null;
-  return Number.isFinite(real) && real > 0 ? real : fallback;
+  return Number.isFinite(real) && real > 0 ? real : null;
 };
+// render a holder count: a real number, or an honest dash
+const fmtHolders = (n) => (Number.isFinite(n) && n > 0
+  ? (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "K" : String(Math.round(n)))
+  : "—");
 const liveViewersOf = (t, mode) => {
   if (mode === "valo") {
     // TRUE count of VALO users on this token now — 1 when it's only you
@@ -9503,7 +9514,7 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
                   <span style={{ color: T.green }}>B {fmt$(t.greenUsd)}</span>
                   <span style={{ color: T.red }}>S {fmt$(t.redUsd)}</span>
                   <span>M {Math.round(t.momentum)}</span>
-                  <span title={holdersOf(t, null) ? "real on-chain holders" : "estimated"}>👥{holdersOf(t, t.traders)}</span>
+                  <span title={holdersOf(t) ? "real on-chain holders" : "waiting on chain"}>👥{fmtHolders(holdersOf(t))}</span>
                   {(() => { const v = liveViewersOf(t, "pump"); return v != null ? <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>💬{v}</span> : null; })()}
                   <span style={{ fontSize: 6.5, fontWeight: 800, color: platOf(t) === "pump" ? T.green : "#c6f24e", marginLeft: "auto" }}>{platOf(t) === "pump" ? "PUMP" : "RH"}</span>
                 </div>
@@ -15494,7 +15505,14 @@ export default function App() {
   useEffect(() => {
     if (!liveData) return;
     const pull = () => {
-      const mints = (tokens || []).map((t) => t.liveMint).filter(Boolean).slice(0, 30);
+      // the floor and the watchlist need counts too — they were never asked
+      // for, which is why their HOLDERS read as a dash while the scanner's
+      // filled in. The endpoint takes 30 at a time; the board comes first.
+      const mints = [...new Set([
+        ...(tokens || []).map((t) => t.liveMint),
+        ...(floorToksRef.current || []).map((t) => t.liveMint),
+        ...Object.values(watchTokRef.current || {}).map((t) => t && t.liveMint),
+      ].filter(Boolean))].slice(0, 30);
       if (mints.length) {
         for (const m of mints) { const c = holderCache.current[m]; if (c) prevHolders.current[m] = c.holders; }
         fetchHoldersBatch(mints);
@@ -18637,7 +18655,7 @@ export default function App() {
                             <span>CIRC <b style={{ color: T.text }}>{fmtQty(1e9 * (0.35 + (Math.abs(tokSeed(t) * 13) % 50) / 100))}</b></span>
                             <span>TOP 10 HOLD <b style={{ color: T.amber }}>{(16 + (Math.abs(tokSeed(t) * 7) % 26)).toFixed(1)}%</b></span>
                             <span>MOM <b style={{ color: t.momentum > 60 ? T.green : T.dim }}>{Math.round(t.momentum)}</b></span>
-                            <span>HOLDERS <b style={{ color: T.text }}>{holdersOf(t, t.traders)}</b></span>
+                            <span>HOLDERS <b style={{ color: T.text }}>{fmtHolders(holdersOf(t))}</b></span>
                           </div>
                           <button onClick={() => { setSel(t.id); setClickMode(null); setWatchExp(null); }}
                             style={{ width: "100%", border: `1px solid ${VALO_PURPLE}`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE, borderRadius: 9, padding: "9px", fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1.2, cursor: "pointer" }}>
