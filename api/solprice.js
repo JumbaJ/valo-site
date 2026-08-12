@@ -1,7 +1,9 @@
+import { cors } from "./_cors.js";
 // VALO — /api/solprice : the live SOL/USD price.
 // Every dollar figure on the site converts through this, so it must be real.
 // Source: the deepest SOL/USDC pool on DexScreener, with CoinGecko as a check.
 export default async function handler(req, res) {
+  if (cors(req, res)) return;
   let price = null, src = null;
   // 1) deepest SOL/USDC pair — same data the charts price against
   try {
