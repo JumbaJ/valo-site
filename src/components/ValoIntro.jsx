@@ -94,13 +94,29 @@ export default function ValoIntro({ force = false }) {
     setTimeout(() => { setPhase("gone"); seal(); }, DOOR_MS - 150);
   };
 
-  // hold the page still while the doors are shut — a swipe during the sequence
-  // would otherwise scroll the terminal behind them
+  // Hold the page still while the doors are shut — a swipe during the sequence
+  // would otherwise scroll the terminal behind them.
+  //
+  // Keyed to `phase`, NOT to mount: this component renders null when it is
+  // finished but never actually unmounts, so an unmount-only cleanup left the
+  // page locked forever. That is what stopped mobile scrolling.
   useEffect(() => {
+    if (phase === "gone") return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = prev; };
-  }, []);
+    return () => { document.body.style.overflow = prev || ""; };
+  }, [phase === "gone"]);
+
+  // Sticky/measured elements — the search bar most of all — take their offsets
+  // while the doors are still covering the page. Nudge them to re-measure once
+  // the viewport is really visible.
+  useEffect(() => {
+    if (phase !== "gone") return;
+    const id = requestAnimationFrame(() => {
+      try { window.dispatchEvent(new Event("resize")); } catch (e) {}
+    });
+    return () => cancelAnimationFrame(id);
+  }, [phase]);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") skip(); };
