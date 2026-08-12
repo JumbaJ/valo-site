@@ -10912,9 +10912,6 @@ export default function App() {
   const [payoutDraft, setPayoutDraft] = useState("");
   const [payoutMsg, setPayoutMsg] = useState("");
   useEffect(() => { try { payoutWallet ? localStorage.setItem("valo-payout-wallet", payoutWallet) : localStorage.removeItem("valo-payout-wallet"); } catch (e) {} }, [payoutWallet]);
-  // phantom-addr-v1 - mirror the connected address so it survives reload
-  // and so the extension bridge can read it. public data, never a key.
-  useEffect(() => { try { (wallet && wallet.address) ? localStorage.setItem("valo-phantom-addr", wallet.address) : localStorage.removeItem("valo-phantom-addr"); } catch (e) {} }, [wallet && wallet.address]);
   useEffect(() => { if (claimOpen) setPayoutDraft(payoutWallet || ""); /* eslint-disable-next-line */ }, [claimOpen]);
   // ⛓ real trading (off unless the server enables it)
   const [onchain, setOnchain] = useState({ enabled: false, maxSol: 0 });
