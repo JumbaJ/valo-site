@@ -1,3 +1,4 @@
+import { cors } from "./_cors.js";
 // VALO — /api/wallet?address=<wallet>
 // Real balance, real holdings, real trade count — all from Helius RPC/DAS.
 // Prices come from DexScreener so holdings can be valued in USD.
@@ -40,6 +41,7 @@ async function priceMap(mints) {
 }
 
 export default async function handler(req, res) {
+  if (cors(req, res)) return;
   const address = String(req.query.address || "");
   if (!/^[A-Za-z0-9]{32,50}$/.test(address)) return res.status(400).json({ error: "bad address" });
   try {

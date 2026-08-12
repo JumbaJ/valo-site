@@ -1,3 +1,4 @@
+import { cors } from "./_cors.js";
 // VALO — /api/swap : real on-chain execution, non-custodial.
 //
 //   ?mode=quote  → what you'd get, before anything is signed
@@ -155,6 +156,7 @@ async function resolveAmount(q, inputMint) {
 }
 
 export default async function handler(req, res) {
+  if (cors(req, res)) return;
   if (!ENABLED) {
     return res.status(200).json({
       enabled: false,

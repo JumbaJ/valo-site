@@ -1,3 +1,4 @@
+import { cors } from "./_cors.js";
 // 🎁 /api/epoch-claim — the user's claim.
 //
 // Under credit mode the hourly job writes balances into pending_rewards and
@@ -79,6 +80,7 @@ const destFor = async (owner, mint, tokenProgram) => {
 };
 
 export default async function handler(req, res) {
+  if (cors(req, res)) return;
   try {
     if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
     if (!SB_URL() || !SB_KEY()) return res.status(200).json({ ok: false, error: "storage not configured" });
