@@ -133,8 +133,13 @@ function Unlock() {
         if (!kp) { reply({ ok: false, locked: true, err: "turbo is locked" }); return; }
         if (!armedRef.current) { reply({ ok: false, err: "not armed — arm this window first" }); return; }
 
+        // amountRaw is exact base units and is what the endpoint prefers; a UI
+        // amount rounds, which leaves dust behind on what should be a full exit.
+        const amtOf = (m) => (m.raw ? `&amountRaw=${m.raw}` : `&amountUi=${m.qty}`);
+
         if (d.op === "sellQuote") {
-          const r = await fetch(`/api/swap?mode=quote&inputMint=${d.mint}&outputMint=${SOLM}&amountUi=${d.qty}&slippageBps=${d.slip || 500}`);
+          if (!d.raw && !(Number(d.qty) > 0)) { reply({ ok: false, err: "no amount for that holding" }); return; }
+          const r = await fetch(`/api/swap?mode=quote&inputMint=${d.mint}&outputMint=${SOLM}${amtOf(d)}&slippageBps=${d.slip || 500}`);
           const j = await r.json();
           if (!r.ok || j.error) { reply({ ok: false, err: j.error || "no route" }); return; }
           const outSol = Number(j.outAmount || (j.quote && j.quote.outAmount) || 0) / 1e9;
@@ -146,7 +151,8 @@ function Unlock() {
         if (d.op === "sellConfirm") {
           say("selling " + String(d.mint).slice(0, 6));
           const web3 = await loadWeb3();
-          const br = await fetch(`/api/swap?mode=build&inputMint=${d.mint}&outputMint=${SOLM}&amountUi=${d.qty}&slippageBps=${d.slip || 600}&user=${rec.pubkey}`);
+          if (!d.raw && !(Number(d.qty) > 0)) { reply({ ok: false, err: "no amount for that holding" }); return; }
+          const br = await fetch(`/api/swap?mode=build&inputMint=${d.mint}&outputMint=${SOLM}${amtOf(d)}&slippageBps=${d.slip || 600}&user=${rec.pubkey}`);
           const bj = await br.json();
           if (!br.ok || bj.error || !bj.swapTransaction) { reply({ ok: false, err: bj.error || "no route" }); return; }
           const raw = Uint8Array.from(atob(bj.swapTransaction), (c) => c.charCodeAt(0));
