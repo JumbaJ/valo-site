@@ -65,6 +65,10 @@ function Unlock() {
   const kpRef = useRef(null);
   const armedRef = useRef(false);
   const [armLeft, setArmLeft] = useState(0);   // seconds of standing permission
+  // ?sign=1 - the extension needs a page with Phantom's provider on it, not the
+  // turbo key. Showing a PIN box here would ask for a secret the request does
+  // not use.
+  const signMode = (() => { try { return /[?&]sign=1/.test(window.location.search); } catch (e) { return false; } })();
 
   const say = (t) => setLog((L) => [{ t, at: Date.now() }, ...L].slice(0, 6));
 
@@ -285,7 +289,20 @@ function Unlock() {
         VALO<span style={{ color: T.purple }}>·</span>TURBO
       </div>
 
-      <div style={{ ...box, marginBottom: 12 }}>
+      {signMode && (
+        <div style={{ ...box, marginBottom: 12 }}>
+          <div style={{ fontSize: 8.5, letterSpacing: 1.5, fontWeight: 900, color: T.faint, marginBottom: 6 }}>
+            PHANTOM
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 5 }}>Approve in your wallet</div>
+          <div style={{ fontSize: 11, color: T.dim, lineHeight: 1.6 }}>
+            Phantom signs this itself and shows you the amounts. The turbo key is
+            not involved, so there is no PIN to enter.
+          </div>
+        </div>
+      )}
+
+      <div style={{ ...box, marginBottom: 12, display: signMode ? "none" : undefined }}>
         <div style={{ fontSize: 8.5, letterSpacing: 1.5, fontWeight: 900, color: T.faint, marginBottom: 6 }}>
           TRADING KEY
         </div>
