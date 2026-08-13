@@ -13697,6 +13697,17 @@ export default function App() {
     return () => document.removeEventListener("fullscreenchange", on);
   }, []);
   const [wallet, setWallet] = useState(null);        // { address, verified }
+
+  // phantom-addr-v2 - mirror the connected address so it survives reload and
+  // the extension can read it. Public data, never a key.
+  useEffect(() => {
+    try {
+      (wallet && wallet.address)
+        ? localStorage.setItem("valo-phantom-addr", wallet.address)
+        : localStorage.removeItem("valo-phantom-addr");
+    } catch (e) {}
+  }, [wallet && wallet.address]);
+
   const [walletBusy, setWalletBusy] = useState(false);
   const [walletChain, setWalletChain] = useState(null); // real on-chain balances
   // what trading surfaces DISPLAY as balance. On the live site paper numbers
@@ -14600,6 +14611,99 @@ export default function App() {
         pnlUsd, pnlPct: basisUsd > 0 ? (pnlUsd / basisUsd) * 100 : null };
     });
   }, [walletChain, walletVault, tokens, chainLedger, tradeAddr, vaultAddr, recentlyClosed]);
+  // -- extension bridge --------------------------------------------------
+  // The extension cannot sign: the turbo key is decrypted into turboKpRef and
+  // never leaves this page, and Phantom's provider lives in page context. So
+  // the extension asks, and this listener decides. It takes no destination.
+  const extQuoteRef = useRef(null);
+  useEffect(() => {
+    const SOLM = "So11111111111111111111111111111111111111112";
+    const findHold = (mint) => (chainHoldingsLive || []).find((h) => h && h.mint === mint) || null;
+
+    const onMsg = async (ev) => {
+      if (ev.source !== window) return;
+      if (ev.origin !== window.location.origin) return;
+      const d = ev.data;
+      if (!d || d.__VALO_EXT_BRIDGE__ !== 1 || !d.nonce) return;
+      const reply = (p) => window.postMessage(
+        { __VALO_EXT_BRIDGE__: 2, nonce: d.nonce, ...p }, window.location.origin);
+
+      try {
+        if (d.op === "ready") {
+          reply({ ok: true, unlocked: !!turboKpRef.current,
+            turbo: (turbo && turbo.pubkey) || null,
+            phantom: (wallet && wallet.address) || null });
+          return;
+        }
+
+        if (d.op === "send") {
+          if (!turboKpRef.current) { reply({ ok: false, locked: true, err: "turbo is locked" }); return; }
+          if (!(wallet && wallet.address)) { reply({ ok: false, err: "connect phantom first" }); return; }
+          const r = await turboSweep();
+          reply(r && r.ok ? { ok: true, sig: r.sig, sol: r.sol } : { ok: false, err: (r && r.err) || "sweep failed" });
+          return;
+        }
+
+        // step 1 - price it, execute nothing. the popup shows this and waits.
+        if (d.op === "sellQuote") {
+          const h = findHold(d.mint);
+          if (!h) { reply({ ok: false, err: "not holding that token" }); return; }
+          const isTurbo = h.src === "turbo";
+          if (isTurbo && !turboKpRef.current) { reply({ ok: false, locked: true, err: "turbo is locked" }); return; }
+          const amt = h.raw ? `&amountRaw=${h.raw}` : `&amountUi=${h.qty}`;
+          const r = await fetch(`/api/swap?mode=quote&inputMint=${h.mint}&outputMint=${SOLM}${amt}&slippageBps=${slipBps}`);
+          const j = await r.json();
+          if (!r.ok || j.error) { reply({ ok: false, err: j.error || "no route" }); return; }
+          const outSol = Number(j.outAmount || (j.quote && j.quote.outAmount) || 0) / 1e9;
+          extQuoteRef.current = { mint: h.mint, at: Date.now() };
+          reply({ ok: true, quote: true, sym: h.sym || h.mint.slice(0, 5), qty: h.qty,
+            outSol, impact: Number((j.priceImpactPct != null ? j.priceImpactPct
+              : (j.quote && j.quote.priceImpactPct)) || 0), wallet: isTurbo ? "turbo" : "phantom" });
+          return;
+        }
+
+        // step 2 - only runs after a quote for the same mint, and only once
+        if (d.op === "sellConfirm") {
+          const q = extQuoteRef.current;
+          extQuoteRef.current = null;
+          if (!q || q.mint !== d.mint || Date.now() - q.at > 120000) {
+            reply({ ok: false, err: "quote expired - price it again" }); return;
+          }
+          const h = findHold(d.mint);
+          if (!h) { reply({ ok: false, err: "not holding that token" }); return; }
+          const isTurbo = h.src === "turbo";
+          if (isTurbo && !turboKpRef.current) { reply({ ok: false, locked: true, err: "turbo is locked" }); return; }
+
+          const web3 = await loadWeb3();
+          const amt = h.raw ? `&amountRaw=${h.raw}` : `&amountUi=${h.qty}`;
+          const br = await fetch(`/api/swap?mode=build&inputMint=${h.mint}&outputMint=${SOLM}${amt}&slippageBps=${Math.min(3000, slipBps + 100)}&user=${h.owner}`);
+          const bj = await br.json();
+          if (!br.ok || bj.error || !bj.swapTransaction) { reply({ ok: false, err: bj.error || "no route" }); return; }
+          const raw = Uint8Array.from(atob(bj.swapTransaction), (ch) => ch.charCodeAt(0));
+          const tx = web3.VersionedTransaction.deserialize(raw);
+
+          let sig;
+          if (isTurbo) {
+            tx.sign([turboKpRef.current]);
+            sig = await turboSignSend(tx);
+          } else {
+            const ph = getProvider();
+            if (!ph) { reply({ ok: false, err: "connect phantom first" }); return; }
+            // Phantom raises its own approval sheet over this page
+            const res = await ph.signAndSendTransaction(tx);
+            sig = (res && (res.signature || res.sig)) || null;
+          }
+          reply(sig ? { ok: true, sig } : { ok: false, err: "no signature" });
+          return;
+        }
+
+        reply({ ok: false, err: "unknown op: " + String(d.op) });
+      } catch (e) { reply({ ok: false, err: String((e && e.message) || e) }); }
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [turbo, wallet, chainHoldingsLive, slipBps]);
+
   // 🧾 combined chain — the portfolio's truth: both wallets, one book
   const combinedChain = useMemo(() => {
     if (!walletChain) return null;
