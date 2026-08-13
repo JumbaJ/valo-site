@@ -120,8 +120,12 @@ function Unlock() {
       if (ev.source !== window || ev.origin !== window.location.origin) return;
       const d = ev.data;
       if (!d || d.__VALO_EXT_BRIDGE__ !== 1 || !d.nonce) return;
+      // identify the responder, so a wrong answer names its own source
       const reply = (p) => window.postMessage(
-        { __VALO_EXT_BRIDGE__: 2, nonce: d.nonce, ...p }, window.location.origin);
+        { __VALO_EXT_BRIDGE__: 2, nonce: d.nonce,
+          from: "unlock", path: window.location.pathname,
+          ops: ["hasKey", "ready", "send", "sellQuote", "sellConfirm"], ...p },
+        window.location.origin);
 
       const kp = kpRef.current;
       try {
@@ -142,7 +146,11 @@ function Unlock() {
         // here. A bridge message can never name a payee.
         if (d.op === "send") {
           const dest = (() => { try { return localStorage.getItem("valo-phantom-addr"); } catch (e) { return null; } })();
-          if (!dest) { reply({ ok: false, err: "connect phantom on the terminal first" }); return; }
+          // validated here, not trusted: the value is read from this origin's
+          // own storage, but a malformed address would fail deep inside web3
+          if (!dest || !/^[A-Za-z0-9]{32,50}$/.test(dest)) {
+            reply({ ok: false, err: "connect phantom first" }); return;
+          }
           if (dest === rec.pubkey) { reply({ ok: false, err: "same wallet" }); return; }
           say("sweeping\u2026");
           const web3 = await loadWeb3();
