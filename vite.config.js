@@ -12,6 +12,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         unlock: resolve(__dirname, 'unlock.html'),
+        privacy: resolve(__dirname, 'privacy.html'),
       },
     },
   },
