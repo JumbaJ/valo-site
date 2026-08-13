@@ -14638,8 +14638,16 @@ export default function App() {
 
         if (d.op === "send") {
           if (!turboKpRef.current) { reply({ ok: false, locked: true, err: "turbo is locked" }); return; }
-          if (!(wallet && wallet.address)) { reply({ ok: false, err: "connect phantom first" }); return; }
-          const r = await turboSweep();
+          // send-dest-v1 - wallet.address is this tab's session state and is
+          // empty when Phantom was connected elsewhere. The persisted address
+          // is the same one unlock.jsx sweeps to, so both instances agree.
+          const dest = (wallet && wallet.address) || (() => {
+            try { return localStorage.getItem("valo-phantom-addr"); } catch (e) { return null; }
+          })();
+          if (!dest || !/^[A-Za-z0-9]{32,50}$/.test(dest)) {
+            reply({ ok: false, err: "connect phantom first" }); return;
+          }
+          const r = await turboSweep(dest);
           reply(r && r.ok ? { ok: true, sig: r.sig, sol: r.sol } : { ok: false, err: (r && r.err) || "sweep failed" });
           return;
         }
