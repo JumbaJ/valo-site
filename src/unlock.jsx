@@ -137,6 +137,54 @@ function Unlock() {
         // amount rounds, which leaves dust behind on what should be a full exit.
         const amtOf = (m) => (m.raw ? `&amountRaw=${m.raw}` : `&amountUi=${m.qty}`);
 
+        // sweep: turbo -> phantom. The destination is NOT taken from the
+        // message — it is whatever Phantom is connected on this device, read
+        // here. A bridge message can never name a payee.
+        if (d.op === "send") {
+          const dest = (() => { try { return localStorage.getItem("valo-phantom-addr"); } catch (e) { return null; } })();
+          if (!dest) { reply({ ok: false, err: "connect phantom on the terminal first" }); return; }
+          if (dest === rec.pubkey) { reply({ ok: false, err: "same wallet" }); return; }
+          say("sweeping\u2026");
+          const web3 = await loadWeb3();
+          const bal = await (await fetch(`/api/wallet?address=${rec.pubkey}&t=${Date.now()}`)).json();
+          const lamports = Math.floor(((bal && bal.sol) || 0) * 1e9);
+          // Solana's rule: an account may be emptied to EXACTLY 0, or must keep
+          // the rent-exempt minimum. Anything in between is rejected outright.
+          const FEE = 5000, RENT_MIN = 895000;
+          const attempt = async (lam) => {
+            if (lam <= 0) throw new Error("nothing to sweep");
+            const bh = await (await fetch("/api/sendtx?blockhash=1&t=" + Date.now())).json();
+            if (!bh || !bh.blockhash) throw new Error((bh && bh.error) || "no blockhash");
+            const tx = new web3.Transaction({
+              feePayer: new web3.PublicKey(rec.pubkey), recentBlockhash: bh.blockhash });
+            tx.add(web3.SystemProgram.transfer({
+              fromPubkey: new web3.PublicKey(rec.pubkey),
+              toPubkey: new web3.PublicKey(dest),
+              lamports: lam,
+            }));
+            tx.sign(kp);
+            const out = await relay(web3, tx);
+            if (!out.sig) throw new Error(out.err);
+            return { sig: out.sig, sol: lam / 1e9 };
+          };
+          try {
+            const r1 = await attempt(lamports - FEE);            // empty to exactly 0
+            say("swept " + r1.sol.toFixed(6) + " SOL");
+            reply({ ok: true, sig: r1.sig, sol: r1.sol });
+          } catch (e1) {
+            if (!/rent/i.test(String(e1.message || e1))) {
+              say("sweep failed: " + String(e1.message || e1));
+              reply({ ok: false, err: String(e1.message || e1) });
+              return;
+            }
+            // stale balance or an edge case - leave the rent minimum behind
+            const r2 = await attempt(lamports - FEE - RENT_MIN);
+            say("swept " + r2.sol.toFixed(6) + " SOL");
+            reply({ ok: true, sig: r2.sig, sol: r2.sol });
+          }
+          return;
+        }
+
         if (d.op === "sellQuote") {
           if (!d.raw && !(Number(d.qty) > 0)) { reply({ ok: false, err: "no amount for that holding" }); return; }
           const r = await fetch(`/api/swap?mode=quote&inputMint=${d.mint}&outputMint=${SOLM}${amtOf(d)}&slippageBps=${d.slip || 500}`);
