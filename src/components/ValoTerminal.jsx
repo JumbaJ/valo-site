@@ -10525,6 +10525,10 @@ export default function App() {
   const [callouts, setCallouts] = useState([]); // [{id, tokenId, user, mcAt, ts}]
   const [bannerPaused, setBannerPaused] = useState(false);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
+  // narrowHdr-v1 - a 15.6" 1080p laptop at 150% Windows scaling reports 1280
+  // wide. Desktop by every other measure, but not wide enough for the header
+  // band at full size.
+  const [isNarrow, setIsNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth < 1700);
   // browser tab reads VALO, not the repo name
   useEffect(() => { try { document.title = "VALO"; } catch (e) {} }, []);
   // mobile: stop the phone from zooming in when a keyboard input focuses —
@@ -13975,7 +13979,7 @@ export default function App() {
     return () => clearInterval(iv);
   }, [liveData, valoMint, valoLive && valoLive.mc, valoLive && valoLive.price]);
   useEffect(() => {
-    const on = () => setIsMobile(window.innerWidth < 900);
+    const on = () => { setIsMobile(window.innerWidth < 900); setIsNarrow(window.innerWidth < 1700); };
     window.addEventListener("resize", on);
     return () => window.removeEventListener("resize", on);
   }, []);
@@ -17699,7 +17703,7 @@ export default function App() {
   // ═════════ <TerminalHeader/> — top hanging band: $VALO stats · burn · alerts · tour · whitepaper · claim ═════════
   // Extracted as a closure so it reads all state directly — zero props to drift.
   const renderTerminalHeader = () => (
-          <div style={UI_NEXT ? { display: "flex", gap: 0, alignItems: "stretch", flexWrap: "nowrap", marginTop: -14, marginRight: 330, marginLeft: "auto", width: "fit-content", height: 40, boxSizing: "border-box", border: "1px solid rgba(125,92,240,0.38)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "linear-gradient(180deg, rgba(20,17,38,0.98), rgba(13,15,22,0.98))", boxShadow: "0 4px 18px rgba(0,0,0,0.45)", overflow: "hidden" } : { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
+          <div style={UI_NEXT ? { display: "flex", gap: 0, alignItems: "stretch", flexWrap: "nowrap", marginTop: isNarrow ? 0 : -14, marginRight: isNarrow ? 8 : 330, marginLeft: "auto", paddingLeft: 0, minWidth: 0, maxWidth: isNarrow ? "calc(100% - 336px)" : undefined, width: "fit-content", overflowX: isNarrow ? "auto" : "hidden", height: isNarrow ? 34 : 40, boxSizing: "border-box", border: "1px solid rgba(125,92,240,0.38)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "linear-gradient(180deg, rgba(20,17,38,0.98), rgba(13,15,22,0.98))", boxShadow: "0 4px 18px rgba(0,0,0,0.45)", overflow: "hidden" } : { display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
             <div style={UI_NEXT ? { display: "flex", alignItems: "stretch", height: "100%", background: "rgba(125,92,240,0.06)" } : { display: "contents" }}>
               {UI_NEXT && (<span style={{ display: "flex", alignItems: "center", padding: "0 10px 0 12px", fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 1.2, color: VALO_PURPLE, borderRight: "1px solid rgba(125,92,240,0.30)" }}>$VALO</span>)}
             {[
@@ -17717,15 +17721,15 @@ export default function App() {
                 : [["24H PnL", `${platformPnl >= 0 ? "+" : "−"}$${Math.abs(platformPnl).toFixed(0)}`, platformPnl >= 0 ? T.green : T.red, "Your realized + unrealized PnL across all coins"]]),
             ].map(([k, v, col, tip]) => (
               <div key={k} onClick={openValoChart} title={(tip ? tip + " · " : "") + "Tap: open the $VALO chart"}
-                style={UI_NEXT ? { display: "flex", flexDirection: "column", justifyContent: "center", gap: 1, height: "100%", boxSizing: "border-box", borderRadius: 0, padding: "0 13px", cursor: "pointer", border: "none", borderRight: "1px solid rgba(125,92,240,0.22)", background: "transparent" } : { background: "rgba(255,255,255,0.02)", border: "1px solid " + T.border, borderRadius: 9, padding: "6px 13px", minWidth: 78, cursor: "pointer" }}>
-                <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 7.5, color: "rgba(190,175,255,0.75)", letterSpacing: 1.4, fontWeight: 800 } : { fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>{k}</div>
-                <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 14.5, fontWeight: 900, color: col, lineHeight: 1 } : { fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: col }}>{v}</div>
+                style={UI_NEXT ? { display: "flex", flexDirection: "column", justifyContent: "center", gap: 1, height: "100%", boxSizing: "border-box", borderRadius: 0, padding: isNarrow ? "0 7px" : "0 13px", cursor: "pointer", border: "none", borderRight: "1px solid rgba(125,92,240,0.22)", background: "transparent" } : { background: "rgba(255,255,255,0.02)", border: "1px solid " + T.border, borderRadius: 9, padding: "6px 13px", minWidth: 78, cursor: "pointer" }}>
+                <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: isNarrow ? 6.5 : 7.5, color: "rgba(190,175,255,0.75)", letterSpacing: isNarrow ? 0.8 : 1.4, fontWeight: 800, whiteSpace: "nowrap" } : { fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>{k}</div>
+                <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: isNarrow ? 11.5 : 14.5, fontWeight: 900, color: col, lineHeight: 1 } : { fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: col }}>{v}</div>
               </div>
             ))}
             </div>
             <div onClick={() => setBurnOpen(true)} title="Burn tracker — your burn, site burn, circulating supply, live"
               style={{ ...(UI_NEXT ? { display: "flex", alignItems: "center", gap: 7, height: "100%", boxSizing: "border-box", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)" } : {}), cursor: "pointer", userSelect: "none", background: "rgba(249,115,22,0.10)", border: "1px solid rgba(249,115,22,0.25)", borderRadius: 9, padding: "6px 13px", ...(UI_NEXT ? { height: "100%", border: "none", borderLeft: "1px solid rgba(255,255,255,0.10)", borderRadius: 0, padding: "0 13px", background: "rgba(249,115,22,0.10)", animation: burnPulse ? "emberGlow 1.4s ease-in-out 3" : "none" } : {}) }}>
-              <div className="burn-swap" style={UI_NEXT ? { fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 1, marginRight: 6 } : { fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>
+              <div className="burn-swap" style={UI_NEXT ? { fontFamily: T.mono, fontSize: isNarrow ? 6.5 : 8, color: T.faint, letterSpacing: isNarrow ? 0.6 : 1, marginRight: isNarrow ? 4 : 6, whiteSpace: "nowrap" } : { fontFamily: T.mono, fontSize: 8.5, color: T.faint, letterSpacing: 1, marginBottom: 2 }}>
                 <span style={UI_NEXT ? { display: "inline-block", animation: burnPulse ? "flameFlick 1.5s ease-in-out 3" : "none", marginRight: 3 } : {}}>🔥</span> {burnMine ? "YOUR" : "TOTAL"} $VALO BURNED
               </div>
               <div style={UI_NEXT ? { fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: "#f97316" } : { fontFamily: T.mono, fontSize: 16, fontWeight: 800, color: "#f97316" }}>{UI_NEXT ? Math.round(burnMine ? myBurned : burned).toLocaleString() : (burnMine ? myBurned : burned).toFixed(4)}</div>
