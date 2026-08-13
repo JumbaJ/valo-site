@@ -14625,8 +14625,12 @@ export default function App() {
       if (ev.origin !== window.location.origin) return;
       const d = ev.data;
       if (!d || d.__VALO_EXT_BRIDGE__ !== 1 || !d.nonce) return;
+      // bridge-id-v1 - identify the responder on every reply
       const reply = (p) => window.postMessage(
-        { __VALO_EXT_BRIDGE__: 2, nonce: d.nonce, ...p }, window.location.origin);
+        { __VALO_EXT_BRIDGE__: 2, nonce: d.nonce,
+          from: "terminal", path: window.location.pathname,
+          ops: ["ready", "send", "sellQuote", "sellConfirm"], ...p },
+        window.location.origin);
 
       try {
         if (d.op === "ready") {
