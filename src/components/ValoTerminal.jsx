@@ -106,11 +106,22 @@ if (typeof window !== "undefined") window.__valoTest = TestLog;
 // smooth sin-wobble makes people "join and leave" live; totals only ever climb
 const VIEW_EPOCH = 1700000000000;
 // real holder count when we've looked it up, else the estimate
-const holdersOf = (t, fallback) => {
+// holders-truth-v1 — the REAL on-chain holder count, or null.
+//
+// This used to fall back to whatever the caller passed, and callers passed
+// `traders` — which is buys + sells, a trade count. A token with 39 holders and
+// 112,000 trades therefore read "112K holders" everywhere the helper is used.
+// A number that confident and that wrong is worse than no number, so when the
+// chain has not answered yet this returns null and the UI shows a dash.
+const holdersOf = (t, _fallback) => {
   const real = typeof window !== "undefined" && window.__VALO_HOLDERS__ && t && t.liveMint
     ? window.__VALO_HOLDERS__[t.liveMint] : null;
-  return Number.isFinite(real) && real > 0 ? real : fallback;
+  return Number.isFinite(real) && real > 0 ? real : null;
 };
+// render a holder count: a real number, or an honest dash
+const fmtHolders = (n) => (Number.isFinite(n) && n > 0
+  ? (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "K" : String(Math.round(n)))
+  : "—");
 const liveViewersOf = (t, mode) => {
   if (mode === "valo") {
     // TRUE count of VALO users on this token now — 1 when it's only you
@@ -9503,7 +9514,7 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
                   <span style={{ color: T.green }}>B {fmt$(t.greenUsd)}</span>
                   <span style={{ color: T.red }}>S {fmt$(t.redUsd)}</span>
                   <span>M {Math.round(t.momentum)}</span>
-                  <span title={holdersOf(t, null) ? "real on-chain holders" : "estimated"}>👥{holdersOf(t, t.traders)}</span>
+                  <span title={holdersOf(t) ? "real on-chain holders" : "waiting on chain"}>👥{fmtHolders(holdersOf(t))}</span>
                   {(() => { const v = liveViewersOf(t, "pump"); return v != null ? <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>💬{v}</span> : null; })()}
                   <span style={{ fontSize: 6.5, fontWeight: 800, color: platOf(t) === "pump" ? T.green : "#c6f24e", marginLeft: "auto" }}>{platOf(t) === "pump" ? "PUMP" : "RH"}</span>
                 </div>
@@ -12814,6 +12825,20 @@ export default function App() {
     }));
   };
   const watchAdd = (id, sec) => {
+    // 📌 snapshot the token as it goes in. Floor and market rows carry synthetic
+    // ids that are reissued whenever their feed refreshes, so an id alone stops
+    // resolving minutes later — the row still draws from state but will not open,
+    // and tokOf returns undefined for every entry but the one still in the live
+    // array. The snapshot is what makes a watchlist entry durable.
+    try {
+      if (!watchTokRef.current[id]) {
+        const found = (tokensRef.current || []).find((t) => t.id === id)
+          || (mktHitsRef.current || []).find((t) => t.id === id)
+          || (moreToksRef.current || []).find((t) => t.id === id)
+          || (floorToksRef.current || []).find((t) => t.id === id);
+        if (found) watchTokRef.current = { ...watchTokRef.current, [id]: found };
+      }
+    } catch (e) {}
     watchRemove(id, null); watchSections.forEach((s) => watchRemove(id, s.id)); // move, don't duplicate
     if (sec == null) setWatchLoose((L) => (L.includes(id) ? L : [...L, id]));
     else setWatchSections((S) => S.map((s) => (s.id === sec ? { ...s, ids: s.ids.includes(id) ? s.ids : [...s.ids, id] } : s)));
@@ -15480,7 +15505,14 @@ export default function App() {
   useEffect(() => {
     if (!liveData) return;
     const pull = () => {
-      const mints = (tokens || []).map((t) => t.liveMint).filter(Boolean).slice(0, 30);
+      // the floor and the watchlist need counts too — they were never asked
+      // for, which is why their HOLDERS read as a dash while the scanner's
+      // filled in. The endpoint takes 30 at a time; the board comes first.
+      const mints = [...new Set([
+        ...(tokens || []).map((t) => t.liveMint),
+        ...(floorToksRef.current || []).map((t) => t.liveMint),
+        ...Object.values(watchTokRef.current || {}).map((t) => t && t.liveMint),
+      ].filter(Boolean))].slice(0, 30);
       if (mints.length) {
         for (const m of mints) { const c = holderCache.current[m]; if (c) prevHolders.current[m] = c.holders; }
         fetchHoldersBatch(mints);
@@ -16222,7 +16254,8 @@ export default function App() {
                       const hot = mins <= 10;                // the closing window — this is when people act
                       return (
                         <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 12 : 22,
-                          flexWrap: "wrap", padding: isMobile ? "14px 14px" : "16px 20px", marginBottom: 16,
+                          flexWrap: "wrap", padding: isMobile ? "9px 12px" : "16px 20px",
+                          marginBottom: isMobile ? 11 : 16,  /* band-mobile-v2 */
                           border: `1px solid ${hot ? T.amber : VALO_PURPLE}`, borderRadius: 14,
                           background: hot ? "rgba(249,180,22,0.07)" : "rgba(125,92,240,0.08)",
                           boxShadow: hot ? "0 0 22px rgba(249,180,22,0.16)" : "0 0 18px rgba(125,92,240,0.12)" }}>
@@ -16233,13 +16266,15 @@ export default function App() {
                               {hot ? "⚡ CLOSING — LAST CALL" : "⚡ NEXT PAYOUT"}
                             </div>
                             <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                              <span style={{ fontSize: isMobile ? 24 : 28, fontWeight: 900, color: T.text,
+                              <span style={{ fontSize: isMobile ? 21 : 28, fontWeight: 900, color: T.text,
                                 fontFamily: T.mono, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{mins}</span>
                               <span style={{ fontSize: 11, color: T.dim, fontWeight: 800 }}>min</span>
                             </div>
                           </div>
                           <div style={{ display: "flex", gap: 10, flex: 1, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                            <div style={{ border: `1px solid ${T.border2}`, borderRadius: 10, padding: "10px 14px", minWidth: 148 }}>
+                            <div style={{ border: `1px solid ${T.border2}`, borderRadius: 10,
+                              padding: isMobile ? "8px 12px" : "10px 14px",
+                              minWidth: isMobile ? 128 : 148, flex: isMobile ? 1 : "none" }}>
                               <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 4 }}>TOTAL POOL</div>
                               <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 900, color: T.text, fontFamily: T.mono, lineHeight: 1 }}>
                                 {Math.round(poolNow).toLocaleString()}
@@ -16247,7 +16282,8 @@ export default function App() {
                               <div style={{ fontSize: 9, color: VALO_PURPLE, fontFamily: T.mono, marginTop: 3 }}>$VALO</div>
                             </div>
                             <div style={{ border: `1px solid ${epochYou > 0 ? T.green : T.border2}`, borderRadius: 10,
-                              padding: "10px 14px", minWidth: 158,
+                              padding: isMobile ? "8px 12px" : "10px 14px",
+                              minWidth: isMobile ? 128 : 148, flex: isMobile ? 1 : "none",
                               background: epochYou > 0 ? "rgba(22,199,132,0.06)" : "transparent" }}>
                               <div style={{ fontSize: 8.5, letterSpacing: 1.6, color: T.faint, fontWeight: 900, marginBottom: 4 }}>YOU EARN THIS HOUR</div>
                               <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 900, fontFamily: T.mono, lineHeight: 1,
@@ -16258,10 +16294,10 @@ export default function App() {
                                     : "0"}
                               </div>
                               <div style={{ fontSize: 9, color: T.faint, fontFamily: T.mono, marginTop: 3 }}>
-                                {epochYou == null ? "no activity recorded yet"
+                                {epochYou == null ? (isMobile ? "no activity yet" : "no activity recorded yet")
                                   : epochYou > 0
                                     ? `$VALO · ≈ $${(epochYou * (valoLive && +valoLive.price > 0 ? +valoLive.price : 0)).toFixed(2)}`
-                                    : "trade this hour to be in the split"}
+                                    : isMobile ? "trade to enter" : "trade this hour to be in the split"}
                               </div>
                               {youClaimable > 0 && (
                                 <div
@@ -17588,7 +17624,7 @@ export default function App() {
                 <span style={{ display: "block", fontFamily: T.mono, fontSize: 11, fontWeight: 800, color: VALO_PURPLE }}>ALERTS</span>
                 <span style={UI_NEXT ? { display: "none" } : { display: "block", fontFamily: T.mono, fontSize: 8, color: T.faint, letterSpacing: 0.3 }}>callouts · social</span>
               </span>
-              {unreadCount > 0 && <span style={{ position: "absolute", top: -6, right: -6, minWidth: 16, height: 16, borderRadius: 8, background: T.red, color: "#fff", fontFamily: T.mono, fontSize: 9, fontWeight: 900, display: "grid", placeItems: "center", padding: "0 4px" }}>{unreadCount}</span>}
+              {unreadCount > 0 && <span style={{ position: "absolute", top: -2, right: -4, minWidth: 16, height: 16, borderRadius: 8, zIndex: 3, background: T.red, color: "#fff", fontFamily: T.mono, fontSize: 9, fontWeight: 900, display: "grid", placeItems: "center", padding: "0 4px" }}>{unreadCount}</span>}
             </button>
             {/* WHITEPAPER */}
             {/* 🧭 replay the tour any time */}
@@ -17935,7 +17971,7 @@ export default function App() {
                   style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
                     border: `1px solid ${T.border2}`, background: "rgba(125,92,240,0.08)", borderRadius: 9, padding: "7px 9px" }}>
                   <span style={{ fontSize: 15 }}>🔔</span>
-                  {unreadCount > 0 && <span style={{ position: "absolute", top: -5, right: -5, minWidth: 15, height: 15, borderRadius: 8, background: T.red, color: "#fff", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, display: "grid", placeItems: "center", padding: "0 3px" }}>{unreadCount}</span>}
+                  {unreadCount > 0 && <span style={{ position: "absolute", top: -2, right: -3, minWidth: 15, height: 15, borderRadius: 8, zIndex: 3, background: T.red, color: "#fff", fontFamily: T.mono, fontSize: 8.5, fontWeight: 900, display: "grid", placeItems: "center", padding: "0 3px" }}>{unreadCount}</span>}
                 </button>
                 <button onClick={() => setWpOpen(true)} title="Read the whitepaper"
                   style={{ display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
@@ -18578,7 +18614,7 @@ export default function App() {
                 if (!wallOpen) return allIds.map(tokOf).filter(Boolean).map((t) => {
                   const score = scoreToken(t); const rc = ratingColor(score);
                   return (
-                    <button key={t.id} onClick={() => { setSel(t.id); setClickMode(null); }} className="wall-bar" title={`${t.sym} · ${score}`}
+                    <button key={t.id} onClick={() => { openAnyToken(t.id, t); setClickMode(null); }} className="wall-bar" title={`${t.sym} · ${score}`}
                       style={{ pointerEvents: "auto", cursor: "pointer", border: "none", background: "transparent", width: "100%", display: "flex", justifyContent: "center", padding: "5px 0" }}>
                       <span style={{ width: 18, height: 18, borderRadius: "50%", background: `${rc}22`, border: `1px solid ${rc}`, color: rc, fontFamily: T.mono, fontSize: 8.5, fontWeight: 800, display: "grid", placeItems: "center" }}>{score}</span>
                     </button>
@@ -18586,7 +18622,10 @@ export default function App() {
                 });
                 const row = (t, secId) => {
                   const score = scoreToken(t); const rc = ratingColor(score);
-                  const cs3 = t.candles || [];
+                  // floor-sourced tokens are adopted with candles:[] — the real bars
+                  // live in the prefetch cache, keyed by pool+timeframe
+                  const cs3 = (t.candles && t.candles.length) ? t.candles
+                    : (t.pool ? (candleCache.current[t.pool + ":" + tf] || []) : []);
                   const b3 = cs3.length ? cs3[Math.max(0, cs3.length - 96)] : null;
                   const base = b3 ? b3.c : (t.price || 0);
                   const ch = base > 0 ? ((t.price - base) / base) * 100 : 0;
@@ -18610,18 +18649,22 @@ export default function App() {
                       </button>
                       {exp && (
                         <div style={{ pointerEvents: "auto", border: `1px solid ${VALO_PURPLE}55`, borderTop: "none", borderRadius: "0 0 10px 10px", background: "rgba(12,15,22,0.92)", padding: "12px 12px 11px", marginBottom: 6 }}>
-                          <TraceMini candles={t.candles} hue={t.hue} h={112} />
+                          <TraceMini candles={cs3} hue={t.hue} h={112} />
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "7px 14px", fontFamily: T.mono, fontSize: 10.5, color: T.dim, margin: "11px 0", lineHeight: 1.35 }}>
                             <span>24H VOL <b style={{ color: T.text }}>{fmt$(t.greenUsd + t.redUsd)}</b></span>
                             <span>24H Δ <b style={{ color: ch >= 0 ? T.green : T.red }}>{pct(ch)}</b></span>
                             <span>PRICE <b style={{ color: T.text }}>${fmtP(t.price)}</b></span>
                             <span>MC <b style={{ color: T.text }}>{fmt$(mcOf(t))}</b></span>
-                            <span>CIRC <b style={{ color: T.text }}>{fmtQty(1e9 * (0.35 + (Math.abs(tokSeed(t) * 13) % 50) / 100))}</b></span>
-                            <span>TOP 10 HOLD <b style={{ color: T.amber }}>{(16 + (Math.abs(tokSeed(t) * 7) % 26)).toFixed(1)}%</b></span>
+                            {/* CIRC and TOP 10 HOLD were seeded from a hash of the token —
+                                stable across refreshes, so they read as real, and entirely
+                                invented. Show the supply we can actually derive, and a dash
+                                for concentration until a real source provides it. */}
+                            <span>SUPPLY <b style={{ color: T.text }}>{Number.isFinite(+t.supply) && +t.supply > 0 ? fmtQty(+t.supply) : "—"}</b></span>
+                            <span>TOP 10 HOLD <b style={{ color: T.amber }}>—</b></span>
                             <span>MOM <b style={{ color: t.momentum > 60 ? T.green : T.dim }}>{Math.round(t.momentum)}</b></span>
-                            <span>HOLDERS <b style={{ color: T.text }}>{holdersOf(t, t.traders)}</b></span>
+                            <span>HOLDERS <b style={{ color: T.text }}>{fmtHolders(holdersOf(t))}</b></span>
                           </div>
-                          <button onClick={() => { setSel(t.id); setClickMode(null); setWatchExp(null); }}
+                          <button onClick={() => { openAnyToken(t.id, t); setClickMode(null); setWatchExp(null); }}
                             style={{ width: "100%", border: `1px solid ${VALO_PURPLE}`, background: "rgba(125,92,240,0.14)", color: VALO_PURPLE, borderRadius: 9, padding: "9px", fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1.2, cursor: "pointer" }}>
                             OPEN FULL CHART ▸
                           </button>
@@ -20505,7 +20548,7 @@ export default function App() {
                           <span>24H VOL <b style={{ color: T.text }}>{fmt$(t.greenUsd + t.redUsd)}</b></span>
                           <span>24H Δ <b style={{ color: ch >= 0 ? T.green : T.red }}>{pct(ch)}</b></span>
                           <span>PRICE <b style={{ color: T.text }}>${fmtP(t.price)}</b></span>
-                          <span>TOP 10 <b style={{ color: T.amber }}>{(16 + (Math.abs(tokSeed(t) * 7) % 26)).toFixed(1)}%</b></span>
+                          <span>TOP 10 <b style={{ color: T.amber }}>—</b></span>
                         </div>
                         <div style={{ display: "flex", gap: 6 }}>
                           <button onClick={() => { setSel(t.id); setClickMode(null); setWatchExp(null); setDrawerOpen(false); }}
