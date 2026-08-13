@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VALO Terminal — Privacy Policy</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0B0E14; color: #E6E9F0;
+    font: 15px/1.75 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 48px 24px 80px; }
+  h1 { font-size: 24px; letter-spacing: -.3px; margin: 0 0 4px; }
+  h2 { font-size: 15px; letter-spacing: 1.4px; text-transform: uppercase;
+       color: #8A93A6; margin: 36px 0 10px; font-weight: 800; }
+  .date { color: #5C6478; font-size: 13px; margin-bottom: 32px; }
+  p, li { color: #C7CDD9; }
+  ul { padding-left: 20px; }
+  strong { color: #E6E9F0; }
+  a { color: #7D5CF0; }
+  .line { height: 1px; background: #1c2230; margin: 40px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Privacy Policy — VALO Terminal extension</h1>
+  <div class="date">Last updated 12 August 2026</div>
+
+  <p>The short version: the extension does not collect, store, transmit or sell
+  your personal data. There is no analytics, no tracking, and no third-party
+  service receiving anything about you. It holds no private keys.</p>
+
+  <h2>What is stored, and where</h2>
+  <p>Everything below lives in your browser's local extension storage, on your
+  own device. None of it is transmitted to us.</p>
+  <ul>
+    <li><strong>A session token</strong> copied from valotrading.app, so the
+      extension can read your rewards as the signed-in user. It is the same
+      token the website already holds; the extension mirrors it rather than
+      asking you for a password.</li>
+    <li><strong>Your public wallet addresses.</strong> These are public
+      information — the same strings visible to anyone on a block explorer.</li>
+    <li><strong>Cached balances and the current reward epoch</strong>, so the
+      popup can render immediately when you open it.</li>
+  </ul>
+
+  <h2>What is never stored</h2>
+  <ul>
+    <li><strong>Private keys and seed phrases.</strong> The extension contains
+      no signing code at all. Transactions are signed either by your own wallet
+      (Phantom), or by a key held on valotrading.app behind a PIN you enter on
+      that site and nowhere else.</li>
+    <li><strong>Your PIN.</strong> It is never requested by, passed through, or
+      visible to the extension.</li>
+    <li>Browsing history, page contents, form data, or anything about the sites
+      you visit.</li>
+  </ul>
+
+  <h2>Network requests</h2>
+  <p>The extension talks to valotrading.app and to no other server. Those
+  requests fetch public blockchain data (wallet balances, token prices, the
+  current epoch) and carry out actions you explicitly start, such as claiming
+  rewards. Blockchain data is public by nature.</p>
+
+  <h2>Permissions, and why each is needed</h2>
+  <ul>
+    <li><strong>storage</strong> — keeps your session token, wallet addresses
+      and cached balances on your device.</li>
+    <li><strong>alarms</strong> — refreshes the toolbar badge countdown once a
+      minute.</li>
+    <li><strong>tabs</strong> — finds an open valotrading.app tab so a signing
+      request can reach it.</li>
+    <li><strong>activeTab</strong> and <strong>scripting</strong> — connect to
+      your Phantom wallet on the page you are already viewing. Wallet providers
+      are only reachable from page context, never from an extension popup. This
+      runs only when you click a button in the extension.</li>
+    <li><strong>host permission for valotrading.app</strong> — reads your
+      session and wallet addresses from that site so you are not asked to sign
+      in twice.</li>
+  </ul>
+
+  <h2>Third parties</h2>
+  <p>No data is sold, rented or shared. There are no advertising networks,
+  analytics providers or data brokers involved.</p>
+
+  <h2>Deleting your data</h2>
+  <p>Removing the extension deletes everything it stored. You can also sign out
+  of a connected wallet at any time from the extension itself, which clears the
+  stored address.</p>
+
+  <h2>Changes</h2>
+  <p>Material changes to this policy will be reflected here with a new date.</p>
+
+  <div class="line"></div>
+  <p style="font-size:13px;color:#8A93A6">Questions:
+    <a href="https://valotrading.app">valotrading.app</a></p>
+</div>
+</body>
+</html>
