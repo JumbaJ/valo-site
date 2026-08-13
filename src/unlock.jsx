@@ -134,8 +134,16 @@ function Unlock() {
             turbo: (rec && rec.pubkey) || null });
           return;
         }
-        if (!kp) { reply({ ok: false, locked: true, err: "turbo is locked" }); return; }
-        if (!armedRef.current) { reply({ ok: false, err: "not armed — arm this window first" }); return; }
+        // These guards protect the TURBO key. A Phantom-owned position is
+        // signed by Phantom, which raises its own approval every time - so it
+        // needs neither an unlock nor an arm, and demanding them was raising
+        // the PIN window for a sale that has nothing to do with that key.
+        const phantomOwned = d.src === "phantom" ||
+          (!!d.owner && !!rec && d.owner !== rec.pubkey);
+        if (!phantomOwned) {
+          if (!kp) { reply({ ok: false, locked: true, err: "turbo is locked" }); return; }
+          if (!armedRef.current) { reply({ ok: false, err: "not armed — arm this window first" }); return; }
+        }
 
         // amountRaw is exact base units and is what the endpoint prefers; a UI
         // amount rounds, which leaves dust behind on what should be a full exit.
@@ -208,11 +216,33 @@ function Unlock() {
           say("selling " + String(d.mint).slice(0, 6));
           const web3 = await loadWeb3();
           if (!d.raw && !(Number(d.qty) > 0)) { reply({ ok: false, err: "no amount for that holding" }); return; }
-          const br = await fetch(`/api/swap?mode=build&inputMint=${d.mint}&outputMint=${SOLM}${amtOf(d)}&slippageBps=${d.slip || 600}&user=${rec.pubkey}`);
+          const br = await fetch(`/api/swap?mode=build&inputMint=${d.mint}&outputMint=${SOLM}${amtOf(d)}&slippageBps=${d.slip || 600}&user=${d.owner || rec.pubkey}`);
           const bj = await br.json();
           if (!br.ok || bj.error || !bj.swapTransaction) { reply({ ok: false, err: bj.error || "no route" }); return; }
           const raw = Uint8Array.from(atob(bj.swapTransaction), (c) => c.charCodeAt(0));
           const tx = web3.VersionedTransaction.deserialize(raw);
+          if (phantomOwned) {
+            // Phantom signs AND submits in one call, over this page
+            const prov = (window.phantom && window.phantom.solana) ||
+              (window.solana && window.solana.isPhantom ? window.solana : null);
+            if (!prov) { reply({ ok: false, err: "phantom not found on this page" }); return; }
+            if (!prov.isConnected || !prov.publicKey) {
+              try { await prov.connect(); }
+              catch (e) { reply({ ok: false, err: "declined in phantom" }); return; }
+            }
+            try {
+              const res = await prov.signAndSendTransaction(tx);
+              const sig = res && (res.signature || res.sig);
+              say(sig ? "sold" : "sell failed");
+              reply(sig ? { ok: true, sig } : { ok: false, err: "no signature" });
+            } catch (e) {
+              const m = String((e && e.message) || e);
+              say("sell failed: " + m);
+              reply({ ok: false, err: /reject|4001|denied/i.test(m) ? "declined in phantom" : m });
+            }
+            return;
+          }
+
           tx.sign([kp]);
           const out = await relay(web3, tx);
           say(out.sig ? "sold" : "sell failed: " + out.err);
