@@ -19440,17 +19440,63 @@ export default function App() {
           clear of the FULLSCREEN button that owns the corner */}
       {!isMobile && (
         <div className="valo-fixed-safe" style={{ position: "fixed", top: 0, right: 172, zIndex: 56, display: "flex", alignItems: "flex-start", gap: 8 }}>
+      {/* lbButton-v1 - signed out this is the way in; signed in it is what you
+          are carrying. Same 152px slot either way so the row never reflows. */}
       {sb && !isMobile && (
-        <button onClick={() => setCloudOpen(true)}
-          title={cloudUser ? `Signed in as ${cloudUser.email} — portfolio syncs to the cloud` : "Sign in — your paper portfolio, watchlist and bots follow you across devices"}
-          style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto", width: 152, height: 26, boxSizing: "border-box", justifyContent: "center", 
+        <button onClick={() => (cloudUser ? setLbOpen(true) : setCloudOpen(true))}
+          title={cloudUser
+            ? (() => { const r = (epochLive && epochLive.you && epochLive.you.ranks) || {};
+                const ks = Object.keys(r);
+                return ks.length
+                  ? `Leaderboard \u2014 ranked ${ks.map((k) => `#${r[k]} ${k}`).join(", ")}`
+                  : "Leaderboard \u2014 place on any board to earn a multiplier"; })()
+            : "Sign in — your paper portfolio, watchlist and bots follow you across devices"}
+          style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto", width: 152, height: 26, boxSizing: "border-box", justifyContent: "center",
             borderTop: "none", borderRadius: "0 0 9px 9px",
             background: cloudUser ? "rgba(125,92,240,0.16)" : "rgba(59,130,246,0.16)",
             border: `1px solid ${cloudUser ? VALO_PURPLE : T.blue}`, padding: "0 8px", cursor: "pointer",
             boxShadow: cloudUser ? `0 0 10px ${VALO_PURPLE}55` : `0 0 12px ${T.blue}66`,
             animation: cloudUser ? "none" : "claimPulse 2.6s ease-in-out infinite" }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: cloudUser ? (cloudSynced ? T.green : T.amber) : T.blue, boxShadow: `0 0 6px ${cloudUser ? (cloudSynced ? T.green : T.amber) : T.blue}` }} />
-          <span style={{ fontFamily: T.mono, fontSize: 8.5, letterSpacing: 1.2, color: cloudUser ? VALO_PURPLE : T.blue, fontWeight: 900 }}>{cloudUser ? "☁ SYNCED" : "☁ SIGN IN"}</span>
+          {cloudUser ? (() => {
+            const m = (epochLive && epochLive.you && epochLive.you.mult) || 1;
+            const placed = m > 1.001;
+            return (<>
+              <span style={{ fontSize: 10 }}>{placed ? "\u{1F3C6}" : "\u{1F4CA}"}</span>
+              <span style={{ fontFamily: T.mono, fontSize: 8.5, letterSpacing: 1.2, color: VALO_PURPLE, fontWeight: 900 }}>
+                {placed ? `LEADERBOARD \u00d7${m.toFixed(2)}` : "LEADERBOARD"}
+              </span>
+            </>);
+          })() : (<>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.blue, boxShadow: `0 0 6px ${T.blue}` }} />
+            <span style={{ fontFamily: T.mono, fontSize: 8.5, letterSpacing: 1.2, color: T.blue, fontWeight: 900 }}>\u2601 SIGN IN</span>
+          </>)}
+        </button>
+      )}
+
+      {/* lbButton-v1 - mobile had nothing up top at all. Its own fixed block
+          rather than un-gating the desktop wrapper, which would mean moving
+          JSX between containers. */}
+      {sb && isMobile && (
+        <button onClick={() => (cloudUser ? setLbOpen(true) : setCloudOpen(true))}
+          className="valo-fixed-safe"
+          style={{ position: "fixed", top: 0, right: 8, zIndex: 56,
+            display: "flex", alignItems: "center", gap: 5, height: 24, boxSizing: "border-box",
+            borderTop: "none", borderRadius: "0 0 8px 8px",
+            background: cloudUser ? "rgba(125,92,240,0.16)" : "rgba(59,130,246,0.16)",
+            border: `1px solid ${cloudUser ? VALO_PURPLE : T.blue}`, padding: "0 8px", cursor: "pointer",
+            animation: cloudUser ? "none" : "claimPulse 2.6s ease-in-out infinite" }}>
+          {cloudUser ? (() => {
+            const m = (epochLive && epochLive.you && epochLive.you.mult) || 1;
+            const placed = m > 1.001;
+            return (<>
+              <span style={{ fontSize: 9 }}>{placed ? "\u{1F3C6}" : "\u{1F4CA}"}</span>
+              <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1, color: VALO_PURPLE, fontWeight: 900 }}>
+                {placed ? `\u00d7${m.toFixed(2)}` : "BOARD"}
+              </span>
+            </>);
+          })() : (
+            <span style={{ fontFamily: T.mono, fontSize: 8, letterSpacing: 1, color: T.blue, fontWeight: 900 }}>\u2601 SIGN IN</span>
+          )}
         </button>
       )}
 
