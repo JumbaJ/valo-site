@@ -88,6 +88,78 @@ const writeBaseline = async (lamports) => sb("creator_split_state", {
   body: JSON.stringify([{ id: "creator", baseline_lamports: Math.floor(lamports), updated_at: new Date().toISOString() }]),
 });
 
+// ── leg 0: claim creator fees from pump.fun ───────────────────────
+// Copied verbatim from a real CollectCreatorFeeV2 the creator wallet signed
+// (3n7itspwkuAh4Z…), rather than derived from pump.fun's seeds. The accounts
+// at indexes 1-3 are PDAs of this creator and this mint; both are fixed, so
+// hardcoding is safe and avoids guessing at a layout that has changed before.
+//
+// If VALO is ever not the only token this wallet created, these addresses stop
+// being right — override them with VALO_PUMP_ACCOUNTS rather than editing here.
+const PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+const PUMP_CLAIM_DISC = Buffer.from("cf118af204221338", "hex");
+const PUMP_DEFAULT_ACCOUNTS = [
+  "EiWQwQiqPyNymfgwFppkVEC33qRvKtq7zfBLEVkkKE93",
+  "EAEYpcFUwJv9Cq4nDs7dfiFXk2kiTVAxEYz5ZszSSwXB",
+  "RiTL56fCWsgQDufT1qFnNYp8m1RyD2fMiWoVRUmtKVy",
+];
+
+async function claimLeg(out) {
+  const CREATOR = (process.env.VALO_CREATOR || "").trim();
+  if (!CREATOR) { out.claim = { skipped: "VALO_CREATOR not set" }; return; }
+  if (String(process.env.VALO_PUMP_CLAIM || "on").toLowerCase() === "off") {
+    out.claim = { skipped: "VALO_PUMP_CLAIM=off" }; return;
+  }
+
+  let signer;
+  try { signer = keypairFrom(process.env.VALO_CREATOR_SECRET); }
+  catch (e) { out.claim = { skipped: `VALO_CREATOR_SECRET unreadable: ${String(e.message || e)}` }; return; }
+  if (signer.publicKey !== CREATOR) {
+    out.claim = { error: "VALO_CREATOR_SECRET does not match VALO_CREATOR — refusing to sign" };
+    return;
+  }
+
+  const pdas = (process.env.VALO_PUMP_ACCOUNTS || "").trim()
+    ? process.env.VALO_PUMP_ACCOUNTS.split(",").map((x) => x.trim()).filter(Boolean)
+    : PUMP_DEFAULT_ACCOUNTS;
+  if (pdas.length !== 3) { out.claim = { error: "VALO_PUMP_ACCOUNTS must be exactly 3 addresses" }; return; }
+
+  const before = await rpc("getBalance", [CREATOR, { commitment: "confirmed" }]);
+  const beforeLam = (before && before.value) || 0;
+
+  const ix = {
+    programId: PUMP_PROGRAM,
+    keys: [
+      { pubkey: CREATOR, isSigner: true, isWritable: true },
+      { pubkey: pdas[0], isSigner: false, isWritable: true },
+      { pubkey: pdas[1], isSigner: false, isWritable: true },
+      { pubkey: pdas[2], isSigner: false, isWritable: true },
+      { pubkey: SOL_MINT, isSigner: false, isWritable: false },
+      { pubkey: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", isSigner: false, isWritable: false },
+      { pubkey: "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", isSigner: false, isWritable: false },
+      { pubkey: "11111111111111111111111111111111", isSigner: false, isWritable: false },
+      { pubkey: "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1", isSigner: false, isWritable: false },
+      { pubkey: PUMP_PROGRAM, isSigner: false, isWritable: false },
+    ],
+    data: PUMP_CLAIM_DISC,
+  };
+
+  const bh = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+  const blockhash = bh && bh.value && bh.value.blockhash;
+  if (!blockhash) throw new Error("no blockhash for claim");
+
+  const raw = buildTx({ payer: CREATOR, instructions: [ix], recentBlockhash: blockhash, signer });
+  const sig = await rpc("sendTransaction", [raw, { encoding: "base64", maxRetries: 3, skipPreflight: false }]);
+  await confirm(rpc, sig);
+
+  const after = await rpc("getBalance", [CREATOR, { commitment: "confirmed" }]);
+  const claimed = ((after && after.value) || 0) - beforeLam;
+  out.claim = {
+    executed: true, claimedSol: claimed / LAMPORTS,
+    sig, solscan: `https://solscan.io/tx/${sig}`,
+  };
+}
+
 // ── leg 1: split only what newly arrived ──────────────────────────
 async function splitLeg(out) {
   const CREATOR = (process.env.VALO_CREATOR || "").trim();
@@ -305,6 +377,12 @@ export default async function handler(req, res) {
     await writeBaseline((b && b.value) || 0);
     return res.status(200).json({ ...out, anchoredSol: ((b && b.value) || 0) / LAMPORTS });
   }
+
+  // Claim first, so anything pump.fun owes lands before the split measures the
+  // balance. A failed claim must not stop the split: fees claimed on an earlier
+  // run may still be sitting unsplit.
+  try { await claimLeg(out); }
+  catch (e) { out.claim = { executed: false, error: String(e.message || e).slice(0, 300) }; }
 
   // Each leg is reported independently: a failed split must not stop the burn
   // of SOL already sitting on the burn wallet from a previous cycle.
