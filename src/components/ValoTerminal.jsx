@@ -15289,7 +15289,13 @@ export default function App() {
   // a real token to arrive, so slow connections briefly saw the sim cast.)
   // 🛰 LIVE MEANS LIVE: only tokens backed by a real pool. The old rule let the
   // seeded demo $VALO through — the REAL $VALO arrives from its own mint.
-  const shownLive = liveData ? shownRaw.filter((t) => t && (t.pool || (t.isValo && valoMint))) : shownRaw;
+  // secLive-v1 - LIVE MEANS LIVE exists to keep SIMULATED cards off a live
+  // board, and those have neither pool nor mint. A token you saved into the
+  // loaded section, carrying a real mint, is not what the rule is for - it
+  // was being dropped only because its pool field was never recorded.
+  const shownLive = liveData
+    ? shownRaw.filter((t) => t && (t.pool || (t.isValo && valoMint) || (scanSec && t.liveMint)))
+    : shownRaw;
   // one card per pool / mint / symbol — duplicates from different feeds collapse
   const shown = useMemo(() => {
     const byKey = new Map(); let out = [];
