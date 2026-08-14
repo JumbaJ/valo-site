@@ -5145,10 +5145,10 @@ function NotificationsModal({ onClose, isMobile, notifs = [], friendReqs = [], o
 }
 // PC toast — pops down top-right, out of the way of the ticket & chart; the
 // whole card opens the chart; auto-fades after 10s (timer lives in App)
-function NotifToast({ notif, isMobile, onClick, onClose }) {
+function NotifToast({ notif, isMobile, onClick, onClose, index = 0 }) {
   return (
     <div onClick={onClick} className="co-open"
-      style={{ position: "fixed", top: isMobile ? 62 : 36, right: 12, zIndex: 110, maxWidth: 290, cursor: "pointer",
+      style={{ position: "fixed", top: (isMobile ? 62 : 36) + index * 66, right: 12, zIndex: 110 - index, maxWidth: 290, cursor: "pointer",
         background: T.panel2, border: `1px solid ${VALO_PURPLE}55`, borderRadius: 11, padding: "9px 12px",
         boxShadow: "0 12px 34px rgba(0,0,0,0.65)", transformOrigin: "90% 0%" }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
@@ -10475,7 +10475,9 @@ export default function App() {
   const [sentFriendReqs, setSentFriendReqs] = useState([]);
   const [friendReqs, setFriendReqs] = useState([]);          // incoming
   const [notifs, setNotifs] = useState([]);
-  const [notifToast, setNotifToast] = useState(null);
+  // toastStack-v1 - a list, not a slot: two notifications in one tick used to
+  // leave only the last one visible.
+  const [notifToasts, setNotifToasts] = useState([]);
   const notifTimer = useRef(null);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifSetting, setNotifSetting] = useState(true);    // website setting: callout pushes
@@ -10497,9 +10499,10 @@ export default function App() {
   const pushNotif = (n) => {
     const notif = { id: Date.now() + Math.random(), ts: Date.now(), read: false, ...n };
     setNotifs((N) => [notif, ...N].slice(0, 200));           // history log
-    setNotifToast(notif);
-    clearTimeout(notifTimer.current);
-    notifTimer.current = setTimeout(() => setNotifToast(null), 10000); // text fades after 10s
+    // each toast owns its expiry — a shared timer meant a new arrival reset the
+    // clock on every toast already showing
+    setNotifToasts((T0) => [...T0, notif].slice(-4));
+    setTimeout(() => setNotifToasts((T0) => T0.filter((t) => t.id !== notif.id)), 10000);
     if (notifSaveRef.current && !n.noSave) notifSaveRef.current(notif); // survives refresh
   };
   // one exit rule everywhere: ✕ (and tapping the backdrop) drops every open
@@ -10516,7 +10519,7 @@ export default function App() {
     setSel(tk.id); setClickMode(null);
     // close every tab/popup so the chart is front and center
     setNotifOpen(false); setProfileUser(null); setFollowListOpen(null);
-    setMyCalloutsOpen(false); setCalloutHubOpen(false); setNotifToast(null);
+    setMyCalloutsOpen(false); setCalloutHubOpen(false); setNotifToasts([]);
     setPortfolioDrawer(false);
   };
   // simulated inbound social events — followed callers call out, new followers, friend requests
@@ -20170,9 +20173,11 @@ export default function App() {
         </div>
       )}
       {botRunOpen && <BotRunStatsModal run={botRuns.find((r) => r.id === botRunOpen)} onClose={() => setBotRunOpen(null)} isMobile={isMobile} />}
-      {notifToast && <NotifToast notif={notifToast} isMobile={isMobile}
-        onClick={() => { if (notifToast.tokenId) navigateToToken(notifToast.tokenId); else { setProfileUser(notifToast.user); setNotifToast(null); } }}
-        onClose={() => setNotifToast(null)} />}
+      {notifToasts.map((t, i) => (
+        <NotifToast key={t.id} notif={t} isMobile={isMobile} index={i}
+          onClick={() => { if (t.tokenId) navigateToToken(t.tokenId); else { setProfileUser(t.user); setNotifToasts((T0) => T0.filter((x) => x.id !== t.id)); } }}
+          onClose={() => setNotifToasts((T0) => T0.filter((x) => x.id !== t.id))} />
+      ))}
 
       {/* WHY IT'S TRENDING / DEV WALLET POPUP (fills the screen) */}
       {trendOpen && selected && (
