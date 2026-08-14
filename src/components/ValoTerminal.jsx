@@ -10115,6 +10115,13 @@ export default function App() {
   const [botRuns, setBotRuns] = useState([]);                      // filled bot positions — never touch the Live P/L book
   const [botRunOpen, setBotRunOpen] = useState(null);              // run id → full stats popup
   const [ticketTab, setTicketTab] = useState("ticket");            // PC right column: ticket | auto
+  // railDesk-v1 - default closed so a first visit sees the chart, remembered after
+  const [ticketOpen, setTicketOpen] = useState(() => {
+    try { return localStorage.getItem("valo-ticket-open") === "1"; } catch (e) { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("valo-ticket-open", ticketOpen ? "1" : "0"); } catch (e) {}
+  }, [ticketOpen]);
   const layoutPro = true;   // PC is always the pro desk: panels under the chart, feeds on the right
   const setLayoutPro = () => {}; // retired switch — kept as a no-op so nothing downstream breaks
   const [pcCrunch, setPcCrunch] = useState(0);                     // PC: chart pulled up over the stats (0..1)
@@ -10529,6 +10536,14 @@ export default function App() {
   // wide. Desktop by every other measure, but not wide enough for the header
   // band at full size.
   const [isNarrow, setIsNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth < 1700);
+  // a 1080p laptop at 125% scaling reports ~780px tall - wide enough for the
+  // desktop layout, not tall enough to stack a chart and a trading desk
+  const [isShort, setIsShort] = useState(() => typeof window !== "undefined" && window.innerHeight < 1100);
+  // railSize-v1 - percentages need a definite parent height; pixels do not
+  const [railH, setRailH] = useState(() => (typeof window !== "undefined" ? window.innerHeight : 900));
+  // the desk rides in the rail only when stacking will not fit; mobile has its
+  // own drawer already
+  const railDesk = isShort && !isMobile;
   // browser tab reads VALO, not the repo name
   useEffect(() => { try { document.title = "VALO"; } catch (e) {} }, []);
   // mobile: stop the phone from zooming in when a keyboard input focuses —
@@ -13979,7 +13994,7 @@ export default function App() {
     return () => clearInterval(iv);
   }, [liveData, valoMint, valoLive && valoLive.mc, valoLive && valoLive.price]);
   useEffect(() => {
-    const on = () => { setIsMobile(window.innerWidth < 900); setIsNarrow(window.innerWidth < 1700); };
+    const on = () => { setIsMobile(window.innerWidth < 900); setIsNarrow(window.innerWidth < 1700); setIsShort(window.innerHeight < 1100); setRailH(window.innerHeight); };
     window.addEventListener("resize", on);
     return () => window.removeEventListener("resize", on);
   }, []);
@@ -17809,7 +17824,8 @@ export default function App() {
               <span>‹</span><span>⚡</span><span>📊</span><span>💬</span>
             </div>
             ) : (
-            <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, overflow: "hidden" }}>
+            <div style={{ background: T.panel, border: `1px solid ${T.border2}`, borderRadius: 12, overflow: "hidden",
+              ...(railDesk ? { maxHeight: Math.max(420, railH - 150), display: "flex", flexDirection: "column" } : {}) }}>
               <button onClick={() => setWalletCollapsed((v) => !v)}
                 title={walletCollapsed ? "Open your wallet" : "Close your wallet"}
                 style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -17953,7 +17969,7 @@ export default function App() {
                       fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 0.8 }}>{label}</button>
                 ))}
               </div>
-              <div style={{ padding: 8 }}>
+              <div style={{ padding: 8, ...(railDesk ? { maxHeight: Math.max(120, railH - 580), overflowY: "auto", flex: "0 1 auto" } : {}) }}>
                 {railTab === "trades" && selected && (
                   <LiveTrades token={selected} isMobile={false} traderPrefs={traderPrefs} onPickTrader={pickTraderRow} />
                 )}
@@ -17970,6 +17986,74 @@ export default function App() {
                 )}
                 {railTab === "chat" && chatBlock}
               </div>
+              {railDesk && selected && layoutPro && (
+                <div style={{ borderTop: `1px solid ${liveAuto ? "#854F0B" : T.border2}`, background: T.panel }}>
+                  <div style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${T.border}` }}>
+                    {[["ticket", "TICKET", T.blue], ["auto", "TRADER", T.amber],
+                      ["bots", `BOTS \u00b7 ${pendingOrders.filter((o) => !o.runId).length + botRuns.filter((r) => r.status === "live").length}`, T.amber]]
+                      .map(([k, lab, col], i) => (
+                      <button key={k} onClick={() => {
+                          if (ticketTab === k) setTicketOpen((v) => !v);
+                          else { setTicketTab(k); setTicketOpen(true); }
+                        }}
+                        style={{ flex: 1, border: "none", borderRight: i < 2 ? `1px solid ${T.border}` : "none",
+                          borderBottom: ticketOpen && ticketTab === k ? `2px solid ${col}` : "2px solid transparent",
+                          background: ticketOpen && ticketTab === k ? "rgba(255,255,255,0.035)" : "transparent",
+                          color: ticketOpen && ticketTab === k ? col : T.dim, padding: "8px 4px",
+                          fontFamily: T.mono, fontSize: 9, fontWeight: 900, letterSpacing: 0.7, cursor: "pointer" }}>
+                        {lab}
+                      </button>
+                    ))}
+                    <div onClick={() => setTicketOpen((v) => !v)}
+                      style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 10px", cursor: "pointer",
+                        fontFamily: T.mono, fontSize: 9, whiteSpace: "nowrap" }}>
+                      {liveAuto
+                        ? <span style={{ color: T.amber, fontWeight: 900 }}>ARMED</span>
+                        : (() => { const h = chainHoldingOf(selected);
+                            const pl = h && Number.isFinite(+h.pnlUsd) ? +h.pnlUsd : null;
+                            return h && h.qty > 0
+                              ? <span style={{ color: pl == null ? T.faint : pl >= 0 ? T.green : T.red, fontWeight: 800 }}>
+                                  {pl == null ? "held" : `${pl >= 0 ? "+" : "\u2212"}$${Math.abs(pl).toFixed(2)}`}</span>
+                              : <span style={{ color: T.faint }}>flat</span>; })()}
+                      <span style={{ color: T.dim, fontSize: 10 }}>{ticketOpen ? "\u25be" : "\u25b4"}</span>
+                    </div>
+                  </div>
+                  {ticketOpen && (
+                    <div style={{ padding: 8, maxHeight: Math.max(200, railH - 470), overflowY: "auto" }}>
+                      {ticketTab === "bots" ? (
+                        <AllBotsPanel tokens={tokens} curTokenId={selected && selected.id} pendingOrders={pendingOrders} botRuns={botRuns}
+                          onEdit={(id, tid) => { setSel(tid); setClickMode(null); setTicketTab("auto"); setEditingBotId(id); }}
+                          onCancel={cancelBot} onSellRun={sellRun} onSellAll={sellAllRuns} onOpenBotRun={(id) => setBotRunOpen(id)}
+                          onHighlight={(id, tid) => { setSel(tid); setSelLineId(id); }} />
+                      ) : ticketTab === "auto" ? (
+                        <AutoTraderPanel solBalance={dispSol} valoWallet={dispValo} position={positions[selected.id]}
+                          token={selected} tokens={tokens} amount={amount} setAmount={setAmount} pay={pay} setPay={setPay} botLock={botLock}
+                          dragSetOn={botDragSet} onToggleDragSet={() => setBotDragSet((v) => !v)}
+                          onStageSide={(m) => setBotSide(m)} onArmPair={armVisualPair}
+                          onSetDragSet={(v) => setBotDragSet(!!v)} onLinesChange={(l) => setVtLines(l)}
+                          onReadyArm={(fn) => { quickArmRef.current = fn; setQuickArmOn(!!fn); }}
+                          onExecute={(o) => execute(selected, o)}
+                          pendingOrders={pendingOrders} botRuns={botRuns}
+                          editingBotId={editingBotId} setEditingBotId={setEditingBotId}
+                          onRelaunch={(id, o) => relaunchBot(id, o, selected)}
+                          onCancelBot={cancelBot} onSellRun={sellRun} onOpenBotRun={(id) => setBotRunOpen(id)} />
+                      ) : (
+                        <ProOrderBar token={selected}
+                          onRealOrder={quoteRealOrder}
+                          onChainReady={!!(onchain.enabled && walletReady && selected && selected.liveMint)}
+                          onChainMax={onchain.maxSol || 0}
+                          chainHeld={chainHeldOf(selected)} chainSol={dispSol}
+                          liveMode={liveData} chainHoldings={chainHoldingsLive}
+                          onRealSellOne={realSellHolding} onRealSellAll={realSellAllHoldings}
+                          amount={amount} setAmount={setAmount} pay={pay} setPay={setPay}
+                          solBalance={dispSol} valoBalance={dispValo} position={positions[selected.id]}
+                          clickMode={clickMode} setClickMode={setClickMode}
+                          onExecute={(o) => execute(selected, o)} onPosTrade={onPosTrade} />
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             )
   );
@@ -18408,7 +18492,7 @@ export default function App() {
               {chartBlock}
             </div>
             {/* PRO LAYOUT: the full trading desk sits under the chart */}
-            {layoutPro && selected ? (
+            {layoutPro && selected && !railDesk ? (
               <div style={{ marginTop: 4, border: `1px solid ${T.border2}`, borderRadius: 12, overflow: "hidden", background: T.panel }}>
                 {/* tabs fused to the desk — the border wraps buttons and content as one */}
                 <div style={{ display: "flex", borderBottom: `1px solid ${T.border}` }}>
