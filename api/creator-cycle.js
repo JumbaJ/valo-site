@@ -1,0 +1,300 @@
+// VALO — /api/creator-cycle
+//
+// Runs daily. Two legs, either of which can be skipped without breaking the
+// other:
+//
+//   1. SPLIT   Only what has newly arrived in the creator wallet since the last
+//              run is split 25 burn / 50 epoch / 25 keep. The kept share is
+//              never touched again — that is the whole point of the baseline.
+//   2. BURN    Whatever SOL sits on the burn wallet is swapped to $VALO through
+//              Jupiter and burned.
+//
+// WHY A BASELINE
+//   The site's doCreatorSplit takes the entire wallet balance minus rent. That
+//   re-splits the creator's kept share on every run, so the keep erodes by 75%
+//   each time. Here the untouchable floor is stored in Supabase and re-anchored
+//   to the real on-chain balance after every successful split, which also
+//   absorbs whatever the transaction fees cost.
+//
+// WHY THE BURN LEG IS SELF-HEALING
+//   It swaps whatever is on the burn wallet above the reserve, rather than an
+//   amount carried over from the split. If the split lands and the burn fails,
+//   tomorrow's run finds the SOL still sitting there and burns it. Nothing has
+//   to be reconciled by hand.
+//
+// ENV
+//   VALO_CREATOR_SECRET   base58 or JSON secret key for VALO_CREATOR
+//   VALO_BURN_SECRET      base58 or JSON secret key for VALO_BURN
+//   VALO_SPLIT_MIN_SOL    hold below this much newly claimed SOL (default 0.05)
+//   VALO_BURN_MIN_SOL     hold below this much on the burn wallet (default 0.02)
+//   CRON_SECRET           Vercel cron bearer, or VALO_CRON_KEY via x-cron-key
+//
+// Requires a Supabase table:
+//   create table creator_split_state (
+//     id text primary key,
+//     baseline_lamports int8 not null,
+//     updated_at timestamptz not null default now()
+//   );
+
+import { keypairFrom, buildTx, findAta } from "./_solana-lite.js";
+import {
+  ixTransferSol, ixBurnChecked, signSerialized, tokenProgramOf, confirm,
+} from "./_burn-lite.js";
+
+const RPC = () => (process.env.HELIUS_API_KEY
+  ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`
+  : "https://api.mainnet-beta.solana.com");
+
+const rpc = async (method, params) => {
+  const r = await fetch(RPC(), {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    signal: AbortSignal.timeout(15000),
+  });
+  const j = await r.json();
+  if (j && j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+  return j && j.result;
+};
+
+const sb = async (path, opts = {}) => {
+  const url = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
+  const key = (process.env.SUPABASE_SERVICE_KEY || "").trim();
+  if (!url || !key) return null;
+  try {
+    const r = await fetch(`${url}/rest/v1/${path}`, {
+      ...opts,
+      headers: { apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json", ...(opts.headers || {}) },
+      signal: AbortSignal.timeout(9000),
+    });
+    if (!r.ok) return null;
+    const t = await r.text();
+    return t ? JSON.parse(t) : [];
+  } catch (e) { return null; }
+};
+
+const JUP = (process.env.JUPITER_API || "https://lite-api.jup.ag/swap/v1").replace(/\/$/, "");
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+const LAMPORTS = 1e9;
+
+const readBaseline = async () => {
+  const rows = await sb("creator_split_state?id=eq.creator&select=baseline_lamports");
+  if (!rows || !rows.length) return null;
+  return Number(rows[0].baseline_lamports);
+};
+
+const writeBaseline = async (lamports) => sb("creator_split_state", {
+  method: "POST",
+  headers: { prefer: "resolution=merge-duplicates" },
+  body: JSON.stringify([{ id: "creator", baseline_lamports: Math.floor(lamports), updated_at: new Date().toISOString() }]),
+});
+
+// ── leg 1: split only what newly arrived ──────────────────────────
+async function splitLeg(out) {
+  const CREATOR = (process.env.VALO_CREATOR || "").trim();
+  const BURN = (process.env.VALO_BURN || "").trim();
+  const EPOCH = (process.env.VALO_EPOCH || "").trim();
+  const MIN = Math.max(0.001, parseFloat(process.env.VALO_SPLIT_MIN_SOL || "0.05"));
+
+  if (!CREATOR || !BURN || !EPOCH) { out.split = { skipped: "VALO_CREATOR / VALO_BURN / VALO_EPOCH not all set" }; return; }
+
+  let signer;
+  try { signer = keypairFrom(process.env.VALO_CREATOR_SECRET); }
+  catch (e) { out.split = { skipped: `VALO_CREATOR_SECRET unreadable: ${String(e.message || e)}` }; return; }
+  if (signer.publicKey !== CREATOR) {
+    out.split = { error: "VALO_CREATOR_SECRET does not match VALO_CREATOR — refusing to sign", secretPubkey: signer.publicKey };
+    return;
+  }
+
+  const balance = await rpc("getBalance", [CREATOR, { commitment: "confirmed" }]);
+  const bal = (balance && balance.value) || 0;
+
+  let baseline = await readBaseline();
+  if (baseline === null) {
+    // First run: everything currently in the wallet is the creator's, by
+    // definition. Anchor and split nothing — better to skip one cycle than to
+    // split a balance we cannot account for.
+    await writeBaseline(bal);
+    out.split = { anchored: true, baselineSol: bal / LAMPORTS, note: "first run — baseline set, nothing split" };
+    return;
+  }
+
+  // Fees paid by past runs can push the balance under the baseline. That is
+  // not a claim; re-anchor down so it does not read as one later.
+  if (bal < baseline) {
+    await writeBaseline(bal);
+    out.split = { claimedSol: 0, note: "balance below baseline (fees) — re-anchored", baselineSol: bal / LAMPORTS };
+    return;
+  }
+
+  const claimed = bal - baseline;
+  if (claimed < MIN * LAMPORTS) {
+    out.split = { executed: false, claimedSol: claimed / LAMPORTS, thresholdSol: MIN, note: "below threshold — holding" };
+    return;
+  }
+
+  const burnLam = Math.floor(claimed * 0.25);
+  const epochLam = Math.floor(claimed * 0.5);
+
+  const bh = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+  const blockhash = bh && bh.value && bh.value.blockhash;
+  if (!blockhash) throw new Error("no blockhash for split");
+
+  const raw = buildTx({
+    payer: CREATOR,
+    instructions: [
+      ixTransferSol({ from: CREATOR, to: BURN, lamports: burnLam }),
+      ixTransferSol({ from: CREATOR, to: EPOCH, lamports: epochLam }),
+    ],
+    recentBlockhash: blockhash,
+    signer,
+  });
+  const sig = await rpc("sendTransaction", [raw, { encoding: "base64", maxRetries: 3, skipPreflight: false }]);
+  await confirm(rpc, sig);
+
+  // Re-anchor to the real post-split balance: it absorbs the fee automatically,
+  // so the kept share never drifts.
+  const after = await rpc("getBalance", [CREATOR, { commitment: "confirmed" }]);
+  await writeBaseline((after && after.value) || 0);
+
+  out.split = {
+    executed: true, claimedSol: claimed / LAMPORTS,
+    burnedToWalletSol: burnLam / LAMPORTS, epochSol: epochLam / LAMPORTS,
+    keptSol: (claimed - burnLam - epochLam) / LAMPORTS,
+    newBaselineSol: ((after && after.value) || 0) / LAMPORTS,
+    sig, solscan: `https://solscan.io/tx/${sig}`,
+  };
+}
+
+// ── leg 2: swap the burn wallet's SOL to $VALO and burn it ────────
+async function burnLeg(out) {
+  const BURN = (process.env.VALO_BURN || "").trim();
+  const MINT = (process.env.VALO_MINT || "").trim();
+  const MIN = Math.max(0.002, parseFloat(process.env.VALO_BURN_MIN_SOL || "0.02"));
+  // The route creates a wrapped-SOL account and a token account mid-swap, each
+  // needing rent. 0.006 was not enough in testing — pump.fun ran out of
+  // lamports at instruction 6.
+  const RESERVE = 0.01;
+
+  if (!BURN || !MINT) { out.burn = { skipped: "VALO_BURN / VALO_MINT not set" }; return; }
+
+  let signer;
+  try { signer = keypairFrom(process.env.VALO_BURN_SECRET); }
+  catch (e) { out.burn = { skipped: `VALO_BURN_SECRET unreadable: ${String(e.message || e)}` }; return; }
+  if (signer.publicKey !== BURN) {
+    out.burn = { error: "VALO_BURN_SECRET does not match VALO_BURN — refusing to sign", secretPubkey: signer.publicKey };
+    return;
+  }
+
+  const balR = await rpc("getBalance", [BURN, { commitment: "confirmed" }]);
+  const bal = (balR && balR.value) || 0;
+  const swapLam = Math.floor(bal - RESERVE * LAMPORTS);
+  if (swapLam < MIN * LAMPORTS) {
+    out.burn = { executed: false, availableSol: Math.max(0, swapLam) / LAMPORTS, thresholdSol: MIN, note: "below threshold — holding" };
+    return;
+  }
+
+  const tokenProgram = await tokenProgramOf(rpc, MINT);
+
+  const qr = await fetch(`${JUP}/quote?inputMint=${SOL_MINT}&outputMint=${MINT}&amount=${swapLam}&slippageBps=${process.env.VALO_SLIPPAGE_BPS || 300}`,
+    { signal: AbortSignal.timeout(12000) });
+  if (!qr.ok) throw new Error(`Jupiter quote ${qr.status}`);
+  const quote = await qr.json();
+
+  const sr = await fetch(`${JUP}/swap`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      quoteResponse: quote, userPublicKey: BURN, wrapAndUnwrapSol: true,
+      dynamicComputeUnitLimit: true,
+      prioritizationFeeLamports: { priorityLevelWithMaxLamports: { maxLamports: 500000, priorityLevel: "high" } },
+    }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!sr.ok) throw new Error(`Jupiter swap ${sr.status}: ${(await sr.text()).slice(0, 200)}`);
+  const { swapTransaction } = await sr.json();
+
+  const swapSig = await rpc("sendTransaction", [signSerialized(swapTransaction, signer), { encoding: "base64", maxRetries: 3, skipPreflight: false }]);
+  await confirm(rpc, swapSig);
+
+  // Burn what actually landed, not what was quoted — slippage means those
+  // differ, and burning the quote would either fail or strand dust forever.
+  const ata = findAta(BURN, MINT, tokenProgram);
+  let held = null, decimals = 0;
+  for (let i = 0; i < 6; i++) {
+    try {
+      const b = await rpc("getTokenAccountBalance", [ata, { commitment: "confirmed" }]);
+      if (b && b.value && BigInt(b.value.amount) > 0n) { held = BigInt(b.value.amount); decimals = b.value.decimals; break; }
+    } catch (e) { /* the account may lag the swap */ }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  if (held === null) {
+    out.burn = { executed: false, swapSig, error: "swap confirmed but no $VALO balance found — tokens are safe, next run will burn them" };
+    return;
+  }
+
+  const bh = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+  const blockhash = bh && bh.value && bh.value.blockhash;
+  const raw = buildTx({
+    payer: BURN,
+    instructions: [ixBurnChecked({ account: ata, mint: MINT, owner: BURN, amount: held, decimals, tokenProgram })],
+    recentBlockhash: blockhash,
+    signer,
+  });
+  const burnSig = await rpc("sendTransaction", [raw, { encoding: "base64", maxRetries: 3, skipPreflight: false }]);
+  await confirm(rpc, burnSig);
+
+  const supply = await rpc("getTokenSupply", [MINT]);
+  out.burn = {
+    executed: true, swappedSol: swapLam / LAMPORTS,
+    burnedTokens: Number(held) / 10 ** decimals,
+    swapSig, burnSig,
+    solscan: `https://solscan.io/tx/${burnSig}`,
+    supplyNow: supply && supply.value && supply.value.uiAmount,
+  };
+}
+
+export default async function handler(req, res) {
+  const cronOk = process.env.CRON_SECRET && req.headers.authorization === `Bearer ${process.env.CRON_SECRET}`;
+  const keyOk = process.env.VALO_CRON_KEY && req.headers["x-cron-key"] === process.env.VALO_CRON_KEY;
+  if (!cronOk && !keyOk) return res.status(401).json({ ok: false, error: "unauthorized" });
+
+  const out = { ok: true, at: new Date().toISOString() };
+
+  // Dry run reports what it would do and signs nothing.
+  if (String(req.query.mode || "") === "status") {
+    const CREATOR = (process.env.VALO_CREATOR || "").trim();
+    const BURN = (process.env.VALO_BURN || "").trim();
+    const baseline = await readBaseline();
+    const cb = CREATOR ? await rpc("getBalance", [CREATOR, { commitment: "confirmed" }]) : null;
+    const bb = BURN ? await rpc("getBalance", [BURN, { commitment: "confirmed" }]) : null;
+    const bal = (cb && cb.value) || 0;
+    return res.status(200).json({
+      ...out, mode: "status",
+      creatorBalanceSol: bal / LAMPORTS,
+      baselineSol: baseline === null ? null : baseline / LAMPORTS,
+      claimedSol: baseline === null ? null : Math.max(0, bal - baseline) / LAMPORTS,
+      splitThresholdSol: parseFloat(process.env.VALO_SPLIT_MIN_SOL || "0.05"),
+      burnWalletSol: ((bb && bb.value) || 0) / LAMPORTS,
+      keysPresent: { creator: !!process.env.VALO_CREATOR_SECRET, burn: !!process.env.VALO_BURN_SECRET },
+    });
+  }
+
+  // Manually re-anchor the untouchable floor to the current balance.
+  if (String(req.query.mode || "") === "anchor") {
+    const CREATOR = (process.env.VALO_CREATOR || "").trim();
+    const b = await rpc("getBalance", [CREATOR, { commitment: "confirmed" }]);
+    await writeBaseline((b && b.value) || 0);
+    return res.status(200).json({ ...out, anchoredSol: ((b && b.value) || 0) / LAMPORTS });
+  }
+
+  // Each leg is reported independently: a failed split must not stop the burn
+  // of SOL already sitting on the burn wallet from a previous cycle.
+  try { await splitLeg(out); }
+  catch (e) { out.ok = false; out.split = { error: String(e.message || e).slice(0, 300) }; }
+
+  try { await burnLeg(out); }
+  catch (e) { out.ok = false; out.burn = { error: String(e.message || e).slice(0, 300) }; }
+
+  return res.status(200).json(out);
+}
+
+export const config = { maxDuration: 120 };
