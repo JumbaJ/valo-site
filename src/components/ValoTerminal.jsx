@@ -12154,7 +12154,11 @@ export default function App() {
   useEffect(() => {
     if (!sb) return;
     sb.auth.getSession().then(({ data }) => setCloudUser(data?.session?.user || null));
-    const { data: sub } = sb.auth.onAuthStateChange((_e, session) => setCloudUser(session?.user || null));
+    const { data: sub } = sb.auth.onAuthStateChange((_e, session) => {
+      setCloudUser(session?.user || null);
+      // briefSess-v1 - the session the app runs on, reachable synchronously
+      try { if (typeof window !== "undefined") window.__VALO_SESS__ = session || null; } catch (e) {}
+    });
     return () => { try { sub.subscription.unsubscribe(); } catch (e) {} };
   }, []);
   // load-on-login: pull the whole account into existing state
@@ -15521,8 +15525,12 @@ export default function App() {
     setAiBrief({ id: tk.id, loading: true, open: true });
     try {
       const sb2 = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
-      const sess = sb2 ? (await sb2.auth.getSession()).data.session : null;
-      if (!sess) { setAiBrief({ id: tk.id, open: true, error: "sign in to use AI briefings" }); return; }
+      if (!sb2) { setAiBrief({ id: tk.id, open: true, error: "cloud client missing on this device \u2014 tell the dev (code 1)" }); return; }
+      // briefSess-v1 - getSession auto-refreshes; the stash is what the app is
+      // provably running on when getSession comes back empty
+      let sess = (await sb2.auth.getSession()).data.session;
+      if (!sess && typeof window !== "undefined") sess = window.__VALO_SESS__ || null;
+      if (!sess) { setAiBrief({ id: tk.id, open: true, error: "no session on this device \u2014 sign out and back in here (code 2)" }); return; }
       const m = tokMetrics(tk);
       const flags = ((typeof window !== "undefined" && window.__VALO_RISK__) || {})[String(tk.liveMint || tk.id)] || [];
       const r = await fetch("/api/brief", {
