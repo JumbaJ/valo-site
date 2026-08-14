@@ -16132,6 +16132,15 @@ export default function App() {
                       pointerEvents: metricsCrunch > 0.5 ? "none" : "auto",
                       transition: "max-height .22s ease, opacity .18s ease",
                     } : {}),
+                    // crunchPro-v1 - pro layout folds this away with the chart pull
+                    ...(!isMobile && layoutPro ? {
+                      maxHeight: pcCrunch > 0.5 ? 0 : 200,
+                      opacity: 1 - pcCrunch,
+                      marginTop: pcCrunch > 0.5 ? 0 : undefined,
+                      overflow: "hidden",
+                      pointerEvents: pcCrunch > 0.5 ? "none" : "auto",
+                      transition: pcPullRef.current ? "none" : "max-height .2s ease, opacity .18s ease",
+                    } : {}),
                     paddingRight: !isMobile && myMcCallouts[selected.id]
                       ? Math.max(64, ("×" + myMcCallouts[selected.id].peak.toFixed(1)).length * 15 + 26) : 0 }}>
                     {/* socials */}
@@ -16768,7 +16777,16 @@ export default function App() {
                   const tot = buys + sells || 1;
                   return (
                     <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", fontFamily: T.mono, fontSize: 9,
-                      border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.015)", borderRadius: 8, padding: "4px 10px", marginBottom: 7 }}>
+                      border: `1px solid ${T.border}`, background: "rgba(255,255,255,0.015)", borderRadius: 8, padding: "4px 10px", marginBottom: 7,
+                      ...(!isMobile ? {
+                        maxHeight: pcCrunch > 0.5 ? 0 : 30,
+                        paddingTop: pcCrunch > 0.5 ? 0 : 4, paddingBottom: pcCrunch > 0.5 ? 0 : 4,
+                        marginBottom: pcCrunch > 0.5 ? 0 : 7,
+                        borderWidth: pcCrunch > 0.5 ? 0 : 1,
+                        opacity: 1 - pcCrunch, overflow: "hidden",
+                        pointerEvents: pcCrunch > 0.5 ? "none" : "auto",
+                        transition: pcPullRef.current ? "none" : "max-height .2s ease, opacity .18s ease, padding .2s ease, margin-bottom .2s ease",
+                      } : {}) }}>
                       <span style={{ color: T.faint }}>MOM <b style={{ color: accent(selected.hue) }}>{Math.round(selected.momentum)}</b></span>
                       <span style={{ color: T.faint }}>B/S <b style={{ color: selected.buyPressure >= 50 ? T.green : T.red }}>{Math.round(selected.buyPressure)}</b></span>
                       <span style={{ color: T.faint }}>▲ <b style={{ color: T.green }}>{fmt$(selected.greenUsd)}</b></span>
@@ -16860,7 +16878,7 @@ export default function App() {
                   <div onMouseDown={(e) => { e.preventDefault(); pcPullRef.current = { y0: e.clientY, base: pcCrunch, moved: false }; }}
                     onClick={() => { if (pcPullRef.current && pcPullRef.current.moved) return;
                       setPcCrunch((c) => (c > 0.5 ? 0 : 1)); }}
-                    title="Click or drag — the chart rises over the stats, leaving the name, price and socials"
+                    title="Click or drag — the chart rises, leaving the pair, its price and the timeframes"
                     style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "2px 0 6px", cursor: "ns-resize" }}>
                     <div style={{ width: 76, height: 5, borderRadius: 3, background: pcCrunch > 0 ? VALO_PURPLE : T.border2, boxShadow: pcCrunch > 0 ? `0 0 8px ${VALO_PURPLE}` : "none" }} />
                   </div>
@@ -16927,7 +16945,7 @@ export default function App() {
                     mcRatio={selected && selected.price > 0 ? mcOf(selected) / selected.price : 0}
                     historyShift={histShift && selected && histShift.id === selected.id ? histShift : null}
                     onLineSelect={(id) => setSelLineId(id)}
-                    isMobile={isMobile} height={isMobile ? mobChartH : 480 + extraH + Math.round(pcCrunch * 196)} />
+                    isMobile={isMobile} height={isMobile ? mobChartH : (isShort ? Math.max(280, railH - 330 + Math.round(pcCrunch * 150)) : 480 + extraH + Math.round(pcCrunch * 262))} />
 
                   {/* MOBILE bottom handle — pull up for a skinnier chart, down for taller;
                       everything below follows in flow so it stays right under the chart */}
