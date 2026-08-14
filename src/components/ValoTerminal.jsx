@@ -19764,7 +19764,10 @@ export default function App() {
         </button>
       )}
 
-      {cloudOpen && (
+      {/* cloudPortal-v1 - plain fixed dies inside transformed ancestors on
+          mobile; the modal mounted invisibly and SIGN UP looked dead. Portal
+          to body, like every other overlay here. */}
+      {cloudOpen && typeof document !== "undefined" && createPortal(
         <>
           <div onClick={() => setCloudOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 141, background: "rgba(4,6,10,0.7)", backdropFilter: "blur(3px)" }} />
           <div style={{ position: "fixed", left: "50%", top: "22%", transform: "translateX(-50%)", zIndex: 142, width: "min(92vw, 360px)",
@@ -19846,8 +19849,7 @@ export default function App() {
               </>
             )}
           </div>
-        </>
-      )}
+        </>, document.body)}
       {!isMobile && (
         <div title="Every price, chart and balance here is real chain data"
           style={{ display: "flex", alignItems: "center", gap: 6, width: 152, height: 26, boxSizing: "border-box", justifyContent: "center", flex: "0 0 auto",
