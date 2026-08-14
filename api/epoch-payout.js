@@ -40,6 +40,34 @@ const rpc = async (method, params) => {
 const weightOf = (volSol, lbBonus, holderWeight = 0) =>
   ((holderWeight || 0) + (volSol || 0)) * (1 + Math.max(0, Math.min(4, (lbBonus || 1) - 1)));
 
+// serverMult-v1 — the same seven boards the terminal shows, and the same bonus
+// curve. Kept literal rather than imported: this file runs on the server and
+// ValoTerminal.jsx is a browser bundle.
+const LB_MS = { "1H": 3600e3, "12H": 12 * 3600e3, "1D": 86400e3, "7D": 7 * 86400e3, "30D": 30 * 86400e3, "180D": 180 * 86400e3, "365D": 365 * 86400e3 };
+const lbBonusOf = (r) => r < 1 ? 0 : r === 1 ? 0.5 : r === 2 ? 0.42 : r === 3 ? 0.36 : r === 4 ? 0.32 : r === 5 ? 0.29 : r === 6 ? 0.26 : r === 7 ? 0.23 : r === 8 ? 0.20 : r === 9 ? 0.17 : r === 10 ? 0.14 : r <= 100 ? 0.10 : 0;
+
+// Every user's standing across every board, computed here rather than reported
+// by a browser that may never have opened the leaderboard.
+const calloutMultipliers = async () => {
+  const totals = {};
+  for (const ms of Object.values(LB_MS)) {
+    const since = new Date(Date.now() - ms).toISOString();
+    const rows = await sb(`callouts?ts=gte.${since}&select=user_id,peak_mult&order=peak_mult.desc&limit=250`);
+    if (!rows || !rows.length) continue;
+    // Rank is the row's position, matching the visible board — a user holding
+    // two of the top three genuinely pushes everyone below them down.
+    const seen = new Set();
+    rows.forEach((r, i) => {
+      if (!r.user_id || seen.has(r.user_id)) return;
+      seen.add(r.user_id);
+      totals[r.user_id] = (totals[r.user_id] || 0) + lbBonusOf(i + 1);
+    });
+  }
+  const out = {};
+  for (const [u, t] of Object.entries(totals)) out[u] = 1 + Math.min(4, t);   // +4.0 cap, per the whitepaper
+  return out;
+};
+
 const sb = async (path, opts = {}) => {
   const url = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
   const key = (process.env.SUPABASE_SERVICE_KEY || "").trim();
@@ -108,8 +136,17 @@ export default async function handler(req, res) {
     // 2. weights
     const rows = await sb(`epoch_activity?epoch=eq.${epoch}&select=user_id,vol_sol,callout_mult`);
     if (!rows) return res.status(200).json({ ok: false, error: "could not read epoch_activity — check SUPABASE_URL / SUPABASE_SERVICE_KEY and that the table exists" });
+    // serverMult-v1 — callout_mult on the row is the browser's guess and is now
+    // display only. The number that pays is derived here from the callouts.
+    const multOf = await calloutMultipliers();
     const weights = rows
-      .map((r) => ({ user: r.user_id, volSol: +r.vol_sol || 0, w: weightOf(+r.vol_sol, +r.callout_mult) }))
+      .map((r) => ({
+        user: r.user_id,
+        volSol: +r.vol_sol || 0,
+        mult: multOf[r.user_id] || 1,
+        clientMult: +r.callout_mult || null,
+        w: weightOf(+r.vol_sol, multOf[r.user_id] || 1),
+      }))
       .filter((x) => x.w > 0);
     const totalW = weights.reduce((a, x) => a + x.w, 0);
     if (!weights.length || totalW <= 0) {
