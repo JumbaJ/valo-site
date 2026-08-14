@@ -76,6 +76,33 @@ const JUP = (process.env.JUPITER_API || "https://lite-api.jup.ag/swap/v1").repla
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const LAMPORTS = 1e9;
 
+// Helius load-balances, so a blockhash fetched at "confirmed" can be simulated
+// on a node a slot or two behind that has never seen it — which surfaces as
+// "Blockhash not found" and looks exactly like an exhausted RPC key.
+// "finalized" is old enough that every node knows it, and a retry covers the
+// rest. web3.js does this internally, which is why the local script never hit it.
+const sendSigned = async ({ payer, instructions, signer, label }) => {
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const bh = await rpc("getLatestBlockhash", [{ commitment: "finalized" }]);
+    const blockhash = bh && bh.value && bh.value.blockhash;
+    if (!blockhash) throw new Error(`no blockhash for ${label}`);
+    try {
+      const raw = buildTx({ payer, instructions, recentBlockhash: blockhash, signer });
+      return await rpc("sendTransaction", [raw, { encoding: "base64", maxRetries: 3, skipPreflight: false }]);
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e.message || e);
+      // Only a stale blockhash is worth retrying. Anything else — a bad
+      // account, no fees owed — will fail identically every time, and retrying
+      // just burns the function's timeout.
+      if (!/[Bb]lockhash not found|block height exceeded/.test(msg)) throw e;
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+  }
+  throw lastErr;
+};
+
 const readBaseline = async () => {
   const rows = await sb("creator_split_state?id=eq.creator&select=baseline_lamports");
   if (!rows || !rows.length) return null;
@@ -144,12 +171,7 @@ async function claimLeg(out) {
     data: PUMP_CLAIM_DISC,
   };
 
-  const bh = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
-  const blockhash = bh && bh.value && bh.value.blockhash;
-  if (!blockhash) throw new Error("no blockhash for claim");
-
-  const raw = buildTx({ payer: CREATOR, instructions: [ix], recentBlockhash: blockhash, signer });
-  const sig = await rpc("sendTransaction", [raw, { encoding: "base64", maxRetries: 3, skipPreflight: false }]);
+  const sig = await sendSigned({ payer: CREATOR, instructions: [ix], signer, label: "claim" });
   await confirm(rpc, sig);
 
   const after = await rpc("getBalance", [CREATOR, { commitment: "confirmed" }]);
@@ -207,20 +229,14 @@ async function splitLeg(out) {
   const burnLam = Math.floor(claimed * 0.25);
   const epochLam = Math.floor(claimed * 0.5);
 
-  const bh = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
-  const blockhash = bh && bh.value && bh.value.blockhash;
-  if (!blockhash) throw new Error("no blockhash for split");
-
-  const raw = buildTx({
+  const sig = await sendSigned({
     payer: CREATOR,
     instructions: [
       ixTransferSol({ from: CREATOR, to: BURN, lamports: burnLam }),
       ixTransferSol({ from: CREATOR, to: EPOCH, lamports: epochLam }),
     ],
-    recentBlockhash: blockhash,
-    signer,
+    signer, label: "split",
   });
-  const sig = await rpc("sendTransaction", [raw, { encoding: "base64", maxRetries: 3, skipPreflight: false }]);
   await confirm(rpc, sig);
 
   // Re-anchor to the real post-split balance: it absorbs the fee automatically,
@@ -303,15 +319,11 @@ async function burnLeg(out) {
     return;
   }
 
-  const bh = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
-  const blockhash = bh && bh.value && bh.value.blockhash;
-  const raw = buildTx({
+  const burnSig = await sendSigned({
     payer: BURN,
     instructions: [ixBurnChecked({ account: ata, mint: MINT, owner: BURN, amount: held, decimals, tokenProgram })],
-    recentBlockhash: blockhash,
-    signer,
+    signer, label: "burn",
   });
-  const burnSig = await rpc("sendTransaction", [raw, { encoding: "base64", maxRetries: 3, skipPreflight: false }]);
   await confirm(rpc, burnSig);
 
   const supply = await rpc("getTokenSupply", [MINT]);
