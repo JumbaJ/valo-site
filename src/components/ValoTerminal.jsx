@@ -7960,13 +7960,17 @@ const tokMetrics = (t) => {
 // riskEngine-v1 ─ deterministic risk flags over live token state.
 // Facts about the present, never predictions - which is why these may alert
 // automatically where a model's opinion never should.
+// riskV2 - is the tvl figure a measurement or an artifact? Sub-$50 readings
+// on tokens with real caps are feed breakage (bonding-curve pairs especially),
+// not thin liquidity. A genuinely tiny token can honestly have a tiny LP.
+const tvlBelievable = (t) => (t.tvl || 0) >= 50 || (t.mc || 0) < 5000;
 const RISK_RULES = [
   { id: "lp-drain", sev: 3, label: "LP DRAINING",
     text: (t, m, b) => `\u{1F6A8} ${t.sym}: LP down ${Math.round((1 - (t.tvl || 0) / b.lpPeak) * 100)}% from its peak \u2014 exit while there is a door`,
     test: (t, m, b) => b.lpPeak > 400 && (t.tvl || 0) < b.lpPeak * 0.65 && b.lpPeakAt > Date.now() - 5 * 60e3 },
   { id: "exit-thin", sev: 3, label: "EXIT TOO THIN",
     text: (t) => `\u{1F6A8} ${t.sym}: $${Math.round((t.mc || 0) / 1000)}K cap on $${Math.round(t.tvl || 0)} of LP \u2014 a sell of any size moves the floor`,
-    test: (t) => (t.mc || 0) > 40000 && (t.tvl || 0) > 0 && (t.tvl || 0) < 1200 },
+    test: (t) => (t.mc || 0) > 40000 && tvlBelievable(t) && (t.tvl || 0) > 0 && (t.tvl || 0) < 1200 },
   { id: "below-launch", sev: 2, label: "BELOW LAUNCH",
     text: (t) => `\u26A0 ${t.sym} is trading under its launch cap \u2014 the market has been here and left`,
     test: (t) => belowLaunch(t) },
@@ -7979,6 +7983,9 @@ const RISK_RULES = [
   { id: "holder-exit", sev: 2, label: "HOLDERS LEAVING",
     text: (t, m, b) => `\u26A0 ${t.sym}: holders down ${Math.round((1 - b.holdersNow / b.holdersPeak) * 100)}% from peak \u2014 wallets are walking out`,
     test: (t, m, b) => b.holdersPeak >= 40 && b.holdersNow > 0 && b.holdersNow < b.holdersPeak * 0.88 },
+  { id: "vol-phantom", sev: 2, label: "PHANTOM VOLUME",
+    text: (t) => `\u26A0 ${t.sym}: $${Math.round((t.vol24 || 0) / 1e6 * 10) / 10}M reported volume on invisible liquidity \u2014 wash trading or broken data; trust nothing on this card`,
+    test: (t) => (t.vol24 || 0) > 200000 && (t.tvl || 0) < 50 },
   { id: "wash-spin", sev: 1, label: "WASH SUSPECT",
     text: (t) => `\u2139 ${t.sym}: volume is ${Math.round((t.vol24 || 0) / Math.max(1, t.mc || 1))}\u00d7 its whole cap in a day \u2014 that churn is rarely organic`,
     test: (t, m) => m.ageMin < 120 && (t.mc || 0) > 5000 && (t.vol24 || 0) > (t.mc || 0) * 5 },
@@ -15524,7 +15531,11 @@ export default function App() {
         body: JSON.stringify({
           mint: tk.liveMint || "",
           snapshot: {
-            sym: tk.sym, mc: tk.mc, tvl: tk.tvl, vol24: tk.vol24,
+            sym: tk.sym, mc: tk.mc,
+            // riskV2 - an implausible LP reading goes to the model as null,
+            // so it reasons "liquidity unreported" rather than from $0.0000004
+            tvl: tvlBelievable(tk) ? tk.tvl : null,
+            vol24: tk.vol24,
             buys: tk.buys, sells: tk.sells, ch: tk.ch,
             ageMin: Number.isFinite(m.ageMin) ? Math.round(m.ageMin) : null,
             curvePct: m.curvePct, holders: holdersOf(tk),
