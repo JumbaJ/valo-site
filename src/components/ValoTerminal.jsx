@@ -11275,7 +11275,18 @@ export default function App() {
       const j = await r.json();
       if (!r.ok || !j) { pushNotif({ type: "system", text: `👑 split failed: ${(j && j.error) || r.status}` }); return; }
 
-      const sp = j.split || {}, bn = j.burn || {};
+      // claimNotify-v1 - the claim leg gets a voice. Without this a permanently
+      // broken claim is indistinguishable from pump.fun owing nothing.
+      const sp = j.split || {}, bn = j.burn || {}, cl = j.claim || {};
+      if (cl.executed && (cl.claimedSol || 0) > 0) {
+        pushNotif({ type: "system", text: `\u{1F4B0} claimed ${(cl.claimedSol || 0).toFixed(4)} SOL from pump.fun` });
+      } else if (cl.executed) {
+        pushNotif({ type: "system", text: "\u{1F4B0} pump.fun had nothing to claim" });
+      } else if (cl.error) {
+        pushNotif({ type: "system", text: `\u26A0 claim failed: ${String(cl.error).slice(0, 90)}` });
+      } else if (cl.skipped) {
+        pushNotif({ type: "system", text: `\u26A0 claim skipped: ${String(cl.skipped).slice(0, 90)}` });
+      }
       if (sp.executed) {
         pushNotif({ type: "system", text: `👑 split ${(sp.claimedSol || 0).toFixed(4)} SOL claimed · 🔥 ${(sp.burnedToWalletSol || 0).toFixed(4)} → burn · 🎁 ${(sp.epochSol || 0).toFixed(4)} → vault · kept ${(sp.keptSol || 0).toFixed(4)}` });
       } else if (sp.anchored) {
