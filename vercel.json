@@ -1,7 +1,7 @@
 {
   "crons": [
     { "path": "/api/epoch-payout", "schedule": "5 * * * *" },
-    { "path": "/api/creator-cycle", "schedule": "0 9 * * *" }
+    { "path": "/api/creator-cycle", "schedule": "30 9 * * *" }
   ],
   "functions": {
     "api/epoch-payout.js": { "maxDuration": 60 },
