@@ -16438,10 +16438,21 @@ export default function App() {
                           {open && (
                             <>
                               <div onClick={() => setAiBrief((b) => b && { ...b, open: false })}
-                                style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                              <div style={{ position: "absolute", top: 30, right: 0, zIndex: 41, width: 330,
-                                background: T.panel, border: `1px solid ${VALO_PURPLE}55`, borderRadius: 11,
-                                boxShadow: "0 12px 36px rgba(0,0,0,0.6)", padding: "11px 13px" }}>
+                                style={{ position: "fixed", inset: 0, zIndex: isMobile ? 140 : 40,
+                                  background: isMobile ? "rgba(4,6,10,0.55)" : "transparent" }} />
+                              <div style={isMobile
+                                // aiBriefMob-v1 - a popover anchored inside a
+                                // horizontally scrolling header lands off-screen
+                                // on a phone; the mobile shape is a bottom sheet
+                                // fixed to the viewport with its own scroll.
+                                ? { position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 141,
+                                    maxHeight: "70vh", overflowY: "auto", WebkitOverflowScrolling: "touch",
+                                    background: T.panel, borderTop: `1px solid ${VALO_PURPLE}66`,
+                                    borderRadius: "14px 14px 0 0", boxShadow: "0 -12px 40px rgba(0,0,0,0.65)",
+                                    padding: "13px 15px calc(env(safe-area-inset-bottom, 0px) + 14px)" }
+                                : { position: "absolute", top: 30, right: 0, zIndex: 41, width: 330,
+                                    background: T.panel, border: `1px solid ${VALO_PURPLE}55`, borderRadius: 11,
+                                    boxShadow: "0 12px 36px rgba(0,0,0,0.6)", padding: "11px 13px" }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
                                   <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 1.4, color: VALO_PURPLE }}>✨ AI READ · {selected.sym}</span>
                                   {mine && aiBrief.brief && (
