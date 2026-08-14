@@ -2204,7 +2204,8 @@ const chipEditProps = (fn) => ({
       n._ht = null; n._held = true;
       if (navigator.vibrate) navigator.vibrate(12);
       fn();
-    }, 450);
+    }, 700);   // tapFix-v1 - 450ms sat inside a deliberate thumb-press, so real
+               // taps registered as holds and the header pill swapped under the finger
   },
   onTouchMove: (e) => {
     const n = e.currentTarget; const t = e.touches && e.touches[0];
@@ -20811,6 +20812,18 @@ export default function App() {
               <span style={{ fontFamily: T.mono, fontSize: 12, letterSpacing: 2, color: T.dim }}>🎁 AIRDROP VAULT · ROLLING HOURLY</span>
               <button onClick={() => !claiming && setClaimOpen(false)} style={{ ...chip(false), padding: "3px 9px" }}>✕</button>
             </div>
+
+            {/* tapFix-v1 - signed out, this sheet is where mis-taps land; give
+                it the door forward instead of a dead end */}
+            {!cloudUser && (
+              <button onClick={() => { setClaimOpen(false); setCloudOpen(true); }}
+                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  border: `1.5px solid ${T.blue}`, background: "rgba(59,130,246,0.14)", borderRadius: 10,
+                  padding: "11px", marginBottom: 12, cursor: "pointer",
+                  fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, letterSpacing: 1, color: T.blue }}>
+                ☁ SIGN IN TO EARN &amp; CLAIM — free
+              </button>
+            )}
 
             {/* ⚡ this hour, at a glance — the countdown and your projected slice */}
             <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
