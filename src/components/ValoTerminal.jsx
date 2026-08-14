@@ -11249,27 +11249,45 @@ export default function App() {
     // the epoch-rewards / VALO-burn split is the operator's move.
   // 👑 creator fee split — 25% burn · 50% epoch vault · 25% stays. Signed by
   // the creator's own Phantom; only rendered for that wallet.
+  // creatorCycle-v1 - the split is decided server-side against a stored
+  // baseline, so only NEWLY claimed fees are ever split and the creator's kept
+  // share is never touched twice. The button proves who it is with a signed
+  // message; the key that spends stays on the server.
   const doCreatorSplit = async () => {
     try {
       const split = (onchain && onchain.feeSplit) || {};
       if (!wallet || !wallet.address || !split.burn || !split.epoch) { pushNotif({ type: "system", text: "⚠ creator split needs VALO_BURN + VALO_EPOCH configured" }); return; }
-      const web3 = await loadWeb3();
-      const conn = null;
-      const balR = await fetch(`/api/wallet?address=${wallet.address}&t=${Date.now()}`);
-      const balJ = await balR.json();
-      const solBal = (balJ && balJ.sol) || 0;
-      const distributable = Math.max(0, solBal - 0.01);            // keep rent + fees
-      if (distributable < 0.001) { pushNotif({ type: "system", text: "👑 creator wallet has nothing to split yet" }); return; }
-      const lam = Math.floor(distributable * 1e9);
-      const burnLam = Math.floor(lam * 0.25), vaultLam = Math.floor(lam * 0.5);
-      const bhx = await getBlockhash();
-      const tx = new web3.Transaction({ feePayer: new web3.PublicKey(wallet.address), recentBlockhash: bhx });
-      tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(wallet.address), toPubkey: new web3.PublicKey(split.burn), lamports: burnLam }));
-      tx.add(web3.SystemProgram.transfer({ fromPubkey: new web3.PublicKey(wallet.address), toPubkey: new web3.PublicKey(split.epoch), lamports: vaultLam }));
+      if (split.creator && wallet.address !== split.creator) { pushNotif({ type: "system", text: "👑 connect the creator wallet to run the split" }); return; }
       const ph = getProvider();
-      if (!ph) { pushNotif({ type: "system", text: "👻 Phantom not available to sign the split" }); return; }
-      const { signature } = await ph.signAndSendTransaction(tx);
-      pushNotif({ type: "system", text: `👑 creator fees split: 🔥 ${(burnLam / 1e9).toFixed(4)} burned · 🎁 ${(vaultLam / 1e9).toFixed(4)} → epoch vault · kept ${((lam - burnLam - vaultLam) / 1e9).toFixed(4)} · ${signature.slice(0, 8)}…` });
+      if (!ph || !ph.signMessage) { pushNotif({ type: "system", text: "👻 Phantom not available to authorize the split" }); return; }
+
+      // Timestamped so the signature cannot be replayed later.
+      const msg = `valo-creator-cycle:${Date.now()}`;
+      const signed = await ph.signMessage(new TextEncoder().encode(msg), "utf8");
+      const sigBytes = signed && (signed.signature || signed);
+      const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sigBytes)));
+
+      pushNotif({ type: "system", text: "👑 running the creator cycle…" });
+      const r = await fetch("/api/creator-cycle", {
+        method: "POST",
+        headers: { "x-valo-msg": msg, "x-valo-sig": sigB64 },
+      });
+      const j = await r.json();
+      if (!r.ok || !j) { pushNotif({ type: "system", text: `👑 split failed: ${(j && j.error) || r.status}` }); return; }
+
+      const sp = j.split || {}, bn = j.burn || {};
+      if (sp.executed) {
+        pushNotif({ type: "system", text: `👑 split ${(sp.claimedSol || 0).toFixed(4)} SOL claimed · 🔥 ${(sp.burnedToWalletSol || 0).toFixed(4)} → burn · 🎁 ${(sp.epochSol || 0).toFixed(4)} → vault · kept ${(sp.keptSol || 0).toFixed(4)}` });
+      } else if (sp.anchored) {
+        pushNotif({ type: "system", text: `👑 baseline anchored at ${(sp.baselineSol || 0).toFixed(4)} SOL — nothing split this run` });
+      } else {
+        pushNotif({ type: "system", text: `👑 ${(sp.claimedSol || 0).toFixed(4)} SOL claimed · below the ${sp.thresholdSol || 0} threshold, holding` });
+      }
+      if (bn.executed) {
+        pushNotif({ type: "system", text: `🔥 burned ${Math.round(bn.burnedTokens || 0).toLocaleString()} $VALO · supply ${Math.round(bn.supplyNow || 0).toLocaleString()}` });
+      } else if (bn.error) {
+        pushNotif({ type: "system", text: `🔥 burn leg: ${String(bn.error).slice(0, 80)}` });
+      }
     } catch (e) { pushNotif({ type: "system", text: `👑 split failed: ${String(e.message || e).slice(0, 80)}` }); }
   };
   // 🧾 build (but do NOT send) the site-fee transfer for any payer. Returning

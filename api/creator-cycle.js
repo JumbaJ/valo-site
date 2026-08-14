@@ -38,7 +38,7 @@
 
 import { keypairFrom, buildTx, findAta } from "./_solana-lite.js";
 import {
-  ixTransferSol, ixBurnChecked, signSerialized, tokenProgramOf, confirm,
+  ixTransferSol, ixBurnChecked, signSerialized, tokenProgramOf, confirm, verifyEd25519,
 } from "./_burn-lite.js";
 
 const RPC = () => (process.env.HELIUS_API_KEY
@@ -255,7 +255,27 @@ async function burnLeg(out) {
 export default async function handler(req, res) {
   const cronOk = process.env.CRON_SECRET && req.headers.authorization === `Bearer ${process.env.CRON_SECRET}`;
   const keyOk = process.env.VALO_CRON_KEY && req.headers["x-cron-key"] === process.env.VALO_CRON_KEY;
-  if (!cronOk && !keyOk) return res.status(401).json({ ok: false, error: "unauthorized" });
+
+  // The creator can also authorize a run by signing a message in Phantom.
+  // Nothing secret reaches the browser: the signature proves control of
+  // VALO_CREATOR, and the server holds the key that actually spends.
+  let walletOk = false;
+  const sigHdr = req.headers["x-valo-sig"];
+  const msgHdr = req.headers["x-valo-msg"];
+  if (!cronOk && !keyOk && sigHdr && msgHdr) {
+    try {
+      const CREATOR = (process.env.VALO_CREATOR || "").trim();
+      const m = String(msgHdr);
+      const [tag, ts] = m.split(":");
+      // A signature is replayable forever unless it is bound to a moment.
+      const age = Math.abs(Date.now() - Number(ts));
+      if (tag === "valo-creator-cycle" && Number.isFinite(age) && age < 300000) {
+        walletOk = verifyEd25519(CREATOR, new TextEncoder().encode(m), Buffer.from(String(sigHdr), "base64"));
+      }
+    } catch (e) { walletOk = false; }
+  }
+
+  if (!cronOk && !keyOk && !walletOk) return res.status(401).json({ ok: false, error: "unauthorized" });
 
   const out = { ok: true, at: new Date().toISOString() };
 

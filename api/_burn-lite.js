@@ -4,6 +4,7 @@
 // payout code, and this adds a versioned-transaction path that nothing else
 // uses yet. A bug in here can only break the cycle route.
 
+import { createPublicKey, verify as edVerify } from "node:crypto";
 import { b58decode, b58encode } from "./_solana-lite.js";
 
 export const SYSTEM_PROGRAM = "11111111111111111111111111111111";
@@ -84,6 +85,21 @@ export const confirm = async (rpc, sig, { tries = 20, waitMs = 1500 } = {}) => {
     if (v.confirmationStatus === "confirmed" || v.confirmationStatus === "finalized") return true;
   }
   throw new Error(`signature ${sig} did not confirm in time — check Solscan before re-running`);
+};
+
+// ── verify a message signed by a wallet ───────────────────────────
+// Lets the creator authorize a run by signing a string in Phantom, with no
+// secret in the browser. The mirror of keypairFrom's PKCS#8 trick: wrap the
+// raw 32-byte public key as SPKI so node's crypto will verify with it.
+export const verifyEd25519 = (pubkeyB58, message, signature) => {
+  const pub = Buffer.from(b58decode(pubkeyB58));
+  if (pub.length !== 32) throw new Error("public key must be 32 bytes");
+  const der = Buffer.concat([
+    Buffer.from("302a300506032b6570032100", "hex"),
+    pub,
+  ]);
+  const key = createPublicKey({ key: der, format: "der", type: "spki" });
+  return edVerify(null, Buffer.from(message), key, Buffer.from(signature));
 };
 
 export { b58decode, b58encode };
