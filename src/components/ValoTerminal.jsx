@@ -16289,11 +16289,14 @@ export default function App() {
                       transition: "max-height .22s ease, opacity .18s ease",
                     } : {}),
                     // crunchPro-v1 - pro layout folds this away with the chart pull
+                    // crunchClip-v2 - clip ONLY while folding: an unconditional
+                    // overflow:hidden here was silently eating the 🔗 links
+                    // popover, which is position:absolute inside this wrapper.
                     ...(!isMobile && layoutPro ? {
                       maxHeight: pcCrunch > 0.5 ? 0 : 200,
                       opacity: 1 - pcCrunch,
                       marginTop: pcCrunch > 0.5 ? 0 : undefined,
-                      overflow: "hidden",
+                      overflow: pcCrunch > 0.01 ? "hidden" : "visible",
                       pointerEvents: pcCrunch > 0.5 ? "none" : "auto",
                       transition: pcPullRef.current ? "none" : "max-height .2s ease, opacity .18s ease",
                     } : {}),
