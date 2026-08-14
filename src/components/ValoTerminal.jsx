@@ -12149,6 +12149,7 @@ export default function App() {
   const [cloudOpen, setCloudOpen] = useState(false);    // sign-in modal
   const [cloudEmail, setCloudEmail] = useState("");
   const [cloudMsg, setCloudMsg] = useState("");
+  const [cloudCode, setCloudCode] = useState("");        // otpCode-v1 - 6-digit email code
   const [cloudSynced, setCloudSynced] = useState(false);
   const cloudLoaded = useRef(false);                    // guard: never sync UP before load DOWN
   useEffect(() => {
@@ -19846,6 +19847,34 @@ export default function App() {
                   }}
                   style={{ width: "100%", border: "none", background: VALO_PURPLE, color: "#0a0713", borderRadius: 9, padding: "10px", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>SEND MAGIC LINK</button>
                 {cloudMsg && <div style={{ fontFamily: T.mono, fontSize: 8.5, color: cloudMsg.startsWith("✓") ? T.green : T.amber, marginTop: 8 }}>{cloudMsg}</div>}
+                {/* otpCode-v1 - the link opens in whatever browser the OS picks
+                    and the session lands THERE; the code completes it HERE.
+                    This is the only path that works inside an installed PWA. */}
+                {cloudMsg.startsWith("\u2713") && (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontFamily: T.mono, fontSize: 8.5, color: T.faint, marginBottom: 6 }}>
+                      or type the 6-digit code from the email \u2014 finishes sign-in right here, no link needed
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input value={cloudCode} inputMode="numeric" autoComplete="one-time-code" placeholder="123456" maxLength={8}
+                        onChange={(e) => setCloudCode(e.target.value.replace(/\D/g, ""))}
+                        onKeyDown={(e) => { if (e.key === "Enter") document.getElementById("valo-otp-go")?.click(); }}
+                        style={{ flex: 1, boxSizing: "border-box", background: "#0c0f16", border: `1px solid ${T.border2}`, borderRadius: 9, padding: "10px 12px", color: T.text, fontFamily: T.mono, fontSize: 13, letterSpacing: 4, outline: "none" }} />
+                      <button id="valo-otp-go"
+                        onClick={async () => {
+                          const code = cloudCode.trim();
+                          if (code.length < 6) { setCloudMsg("\u2713 sent \u2014 the code is 6 digits"); return; }
+                          setCloudMsg("\u2713 checking code\u2026");
+                          try {
+                            const { error } = await sb.auth.verifyOtp({ email: cloudEmail.trim(), token: code, type: "email" });
+                            if (error) setCloudMsg(`\u2713 sent \u2014 code failed: ${error.message}`);
+                            else { setCloudMsg(""); setCloudCode(""); }
+                          } catch (e) { setCloudMsg("\u2713 sent \u2014 code check failed, try again"); }
+                        }}
+                        style={{ border: "none", background: VALO_PURPLE, color: "#0a0713", borderRadius: 9, padding: "10px 14px", fontFamily: T.mono, fontSize: 10.5, fontWeight: 900, letterSpacing: 1, cursor: "pointer" }}>GO</button>
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
