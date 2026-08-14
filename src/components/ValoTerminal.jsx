@@ -15272,8 +15272,16 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokens, filter]);
   // curated slots: a dropped token claims that exact position on the left rail
+  // secResolve-v1 - the same five-source lookup the watchlist panel uses.
+  // `tokens` alone misses anything added from a feed: feed ids are reissued on
+  // refresh, which is the whole reason watchTokRef snapshots exist.
+  const resolveScanId = (id) => tokens.find((t) => t.id === id)
+    || (mktHitsRef.current || []).find((t) => t.id === id)
+    || (moreToksRef.current || []).find((t) => t.id === id)
+    || (floorToksRef.current || []).find((t) => t.id === id)
+    || ((watchTokRef.current || {})[id] && { ...(watchTokRef.current || {})[id], fromSnapshot: true });
   const shownCore = scanOrder
-    ? scanOrder.map((id) => tokens.find((t) => t.id === id)).filter(Boolean)
+    ? scanOrder.map(resolveScanId).filter(Boolean)
     : shownBase;
   // ♾ endless by default; a chosen subsection narrows to exactly its tokens
   const shownRaw = scanSec
@@ -15294,7 +15302,10 @@ export default function App() {
   // loaded section, carrying a real mint, is not what the rule is for - it
   // was being dropped only because its pool field was never recorded.
   const shownLive = liveData
-    ? shownRaw.filter((t) => t && (t.pool || (t.isValo && valoMint) || (scanSec && t.liveMint)))
+    ? shownRaw.filter((t) => t && (t.pool || (t.isValo && valoMint)
+        // a section token earns its place by mint, or by being the snapshot
+        // you saved - neither exists on a simulated card
+        || (scanSec && (t.liveMint || t.fromSnapshot))))
     : shownRaw;
   // one card per pool / mint / symbol — duplicates from different feeds collapse
   const shown = useMemo(() => {
