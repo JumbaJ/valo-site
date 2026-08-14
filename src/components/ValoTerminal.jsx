@@ -7957,6 +7957,56 @@ const tokMetrics = (t) => {
   return { winMin, tx, txRate: tx / winMin, txPerMinLife, flow, buyRatio, accel, rateNow, volPerMin,
     ageMs, ageMin, isPump, curvePct, turnover, hasTraders };
 };
+// riskEngine-v1 ─ deterministic risk flags over live token state.
+// Facts about the present, never predictions - which is why these may alert
+// automatically where a model's opinion never should.
+const RISK_RULES = [
+  { id: "lp-drain", sev: 3, label: "LP DRAINING",
+    text: (t, m, b) => `\u{1F6A8} ${t.sym}: LP down ${Math.round((1 - (t.tvl || 0) / b.lpPeak) * 100)}% from its peak \u2014 exit while there is a door`,
+    test: (t, m, b) => b.lpPeak > 400 && (t.tvl || 0) < b.lpPeak * 0.65 && b.lpPeakAt > Date.now() - 5 * 60e3 },
+  { id: "exit-thin", sev: 3, label: "EXIT TOO THIN",
+    text: (t) => `\u{1F6A8} ${t.sym}: $${Math.round((t.mc || 0) / 1000)}K cap on $${Math.round(t.tvl || 0)} of LP \u2014 a sell of any size moves the floor`,
+    test: (t) => (t.mc || 0) > 40000 && (t.tvl || 0) > 0 && (t.tvl || 0) < 1200 },
+  { id: "below-launch", sev: 2, label: "BELOW LAUNCH",
+    text: (t) => `\u26A0 ${t.sym} is trading under its launch cap \u2014 the market has been here and left`,
+    test: (t) => belowLaunch(t) },
+  { id: "distribution", sev: 2, label: "DISTRIBUTION",
+    text: (t) => `\u26A0 ${t.sym}: price holding near the top while buys dry up \u2014 someone is selling into strength`,
+    test: (t, m, b) => b.buyHi && m.buyRatio < 0.35 && (t.mc || 0) > (b.mcPeak || 0) * 0.88 && (m.tx || 0) >= 8 },
+  { id: "vol-collapse", sev: 2, label: "VOLUME GONE",
+    text: (t) => `\u26A0 ${t.sym}: volume is down ~${"90"}% from its peak \u2014 the crowd moved on`,
+    test: (t, m, b) => m.ageMin < 360 && b.ratePeak > 50 && m.rateNow < b.ratePeak * 0.15 },
+  { id: "holder-exit", sev: 2, label: "HOLDERS LEAVING",
+    text: (t, m, b) => `\u26A0 ${t.sym}: holders down ${Math.round((1 - b.holdersNow / b.holdersPeak) * 100)}% from peak \u2014 wallets are walking out`,
+    test: (t, m, b) => b.holdersPeak >= 40 && b.holdersNow > 0 && b.holdersNow < b.holdersPeak * 0.88 },
+  { id: "wash-spin", sev: 1, label: "WASH SUSPECT",
+    text: (t) => `\u2139 ${t.sym}: volume is ${Math.round((t.vol24 || 0) / Math.max(1, t.mc || 1))}\u00d7 its whole cap in a day \u2014 that churn is rarely organic`,
+    test: (t, m) => m.ageMin < 120 && (t.mc || 0) > 5000 && (t.vol24 || 0) > (t.mc || 0) * 5 },
+  { id: "ghost-social", sev: 1, label: "NO SOCIALS",
+    text: (t) => `\u2139 ${t.sym}: $${Math.round((t.mc || 0) / 1000)}K cap and no socials published \u2014 nothing to hold anyone to`,
+    test: (t) => (t.mc || 0) > 100000 && !(t.socials && Object.values(t.socials).some(Boolean)) },
+];
+// session baselines per mint - observed, never assumed. First sight of a token
+// establishes them; nothing can fire until a baseline exists to compare with.
+const riskBase = {};
+const riskEval = (t) => {
+  const key = String(t.liveMint || t.pool || t.id);
+  const m = tokMetrics(t);
+  const b = riskBase[key] || (riskBase[key] = { lpPeak: 0, lpPeakAt: 0, mcPeak: 0, ratePeak: 0, buyHi: false, holdersPeak: 0, holdersNow: 0, seenAt: Date.now() });
+  if ((t.tvl || 0) > b.lpPeak) { b.lpPeak = t.tvl || 0; b.lpPeakAt = Date.now(); }
+  if ((t.mc || 0) > b.mcPeak) b.mcPeak = t.mc || 0;
+  if (m.rateNow > b.ratePeak) b.ratePeak = m.rateNow;
+  if (m.buyRatio > 0.6 && m.tx >= 8) b.buyHi = true;
+  const hl = holdersOf(t);
+  if (Number.isFinite(hl)) { b.holdersNow = hl; if (hl > b.holdersPeak) b.holdersPeak = hl; }
+  if (Date.now() - b.seenAt < 45e3) return [];      // no verdicts on first sight
+  const out = [];
+  for (const r of RISK_RULES) {
+    try { if (r.test(t, m, b)) out.push({ id: r.id, sev: r.sev, label: r.label, text: r.text(t, m, b) }); } catch (e) {}
+  }
+  return out;
+};
+
 // 🍀 weighted lottery order — health-biased randomness for hidden gems
 const luckyOrder = (list, seed, onlyElig = false) => {
   const elig = list.filter((t) => {
@@ -15449,6 +15499,40 @@ export default function App() {
     return [...out].sort((a, b) => scoreOf(b) - scoreOf(a));
   }, [shownLive, scanMode, moversSide, luckyDraw, sel, scanSec]);
   shownRef.current = shown;
+  // riskEngine-v1 ─ evaluate the board every 5s; auto-alert only where the
+  // user has skin: the open pair and held tokens. Everything else is scored
+  // silently onto window.__VALO_RISK__ for the UI and for Layer 2 to read.
+  const riskCtxRef = useRef({});
+  useEffect(() => { riskCtxRef.current = { sel, positions, liveData }; }, [sel, positions, liveData]);
+  const riskFiredRef = useRef({});
+  useEffect(() => {
+    const tick = () => {
+      const ctx = riskCtxRef.current;
+      if (!ctx.liveData) return;
+      const board = shownRef.current || [];
+      const flags = {};
+      const heldIds = new Set(Object.keys(ctx.positions || {}).filter((k) => ctx.positions[k] && ctx.positions[k].qty > 0).map(Number));
+      for (const t of board.slice(0, 120)) {
+        if (!t) continue;
+        const fs = riskEval(t);
+        if (fs.length) flags[String(t.liveMint || t.id)] = fs;
+        const mine = t.id === ctx.sel || heldIds.has(t.id)
+          || (t.liveMint && chainLedger.byMint[t.liveMint] && chainLedger.byMint[t.liveMint].qty > 0);
+        if (!mine) continue;
+        for (const f of fs) {
+          const k = `${t.liveMint || t.id}|${f.id}`;
+          const last = riskFiredRef.current[k] || 0;
+          if (Date.now() - last < 10 * 60e3) continue;   // one voice per rule per 10min
+          riskFiredRef.current[k] = Date.now();
+          pushNotif({ type: "system", tokenId: t.id, text: f.text, noSave: f.sev < 2 });
+        }
+      }
+      try { if (typeof window !== "undefined") window.__VALO_RISK__ = flags; } catch (e) {}
+    };
+    const iv = setInterval(tick, 5000);
+    tick();
+    return () => clearInterval(iv);
+  }, []);
 
   const gTvl = tokens.reduce((a, t) => a + t.tvl, 0);
   const gNet = tokens.reduce((a, t) => a + t.greenUsd - t.redUsd, 0);
