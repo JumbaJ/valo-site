@@ -267,11 +267,37 @@ export default async function handler(req, res) {
       }
       if (!ixs.length) continue;
       try {
-        const bh = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
-        const blockhash = bh && bh.value && bh.value.blockhash;
-        if (!blockhash) throw new Error("no blockhash");
-        const raw = buildTx({ payer: signer.publicKey, instructions: ixs, recentBlockhash: blockhash, signer });
-        const sig = await rpc("sendTransaction", [raw, { encoding: "base64", maxRetries: 3, skipPreflight: false }]);
+        // "finalized", not "confirmed": Helius load-balances, and a confirmed
+        // hash can be unknown to the node that simulates the send.
+        const sendOnce = async () => {
+          const bh2 = await rpc("getLatestBlockhash", [{ commitment: "finalized" }]);
+          const blockhash = bh2 && bh2.value && bh2.value.blockhash;
+          if (!blockhash) throw new Error("no blockhash");
+          const raw = buildTx({ payer: signer.publicKey, instructions: ixs, recentBlockhash: blockhash, signer });
+          return rpc("sendTransaction", [raw, { encoding: "base64", maxRetries: 3, skipPreflight: false }]);
+        };
+        // a signature from sendTransaction is a promise to TRY, not a receipt.
+        // Only the chain's own confirmation makes a payout real.
+        const confirmSig = async (sg) => {
+          for (let i = 0; i < 8; i++) {
+            await new Promise((r) => setTimeout(r, 2000));
+            const st = await rpc("getSignatureStatuses", [[sg], { searchTransactionHistory: true }]);
+            const v = st && st.value && st.value[0];
+            if (v && (v.confirmationStatus === "confirmed" || v.confirmationStatus === "finalized")) {
+              if (v.err) throw new Error("tx landed but failed on chain: " + JSON.stringify(v.err).slice(0, 120));
+              return true;
+            }
+          }
+          return false;
+        };
+        let sig = await sendOnce();
+        let landed = await confirmSig(sig);
+        if (!landed) {
+          // the chain never saw it - one fresh blockhash, one more attempt
+          sig = await sendOnce();
+          landed = await confirmSig(sig);
+        }
+        if (!landed) throw new Error(`tx never confirmed after 2 attempts (last sig ${String(sig).slice(0, 12)}\u2026) \u2014 NOT recorded as sent`);
         for (const p of included) results.push({ ...p, status: "sent", sig, solscan: `https://solscan.io/tx/${sig}` });
       } catch (e) {
         for (const p of included) results.push({ ...p, status: "failed", error: String(e.message || e).slice(0, 180) });
