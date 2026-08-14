@@ -10074,6 +10074,9 @@ export default function App() {
   const [tf, setTf] = useState(15);
   const [tfMoreOpen, setTfMoreOpen] = useState(false);   // 🧪 UI_NEXT: reveal the rarely-used durations
   const [linksOpen, setLinksOpen] = useState(null);      // 🧪 UI_NEXT: token links popover (by token id)
+  // aiBrief-v1 - one briefing, keyed to its token so a pair switch can never
+  // show a stale read under the wrong symbol
+  const [aiBrief, setAiBrief] = useState(null);          // {id, loading, brief, error, open}
   const [sigSheet, setSigSheet] = useState(false);       // 🧪 UI_NEXT mobile: signals bottom sheet
   const [moreBand, setMoreBand] = useState(false);       // 🧪 UI_NEXT mobile: the band's ⋯ hanging menu
   const [hubOpen, setHubOpen] = useState(false);         // 🧪 UI_NEXT mobile: the all-in-one hub fan
@@ -15504,6 +15507,39 @@ export default function App() {
   // silently onto window.__VALO_RISK__ for the UI and for Layer 2 to read.
   const riskCtxRef = useRef({});
   useEffect(() => { riskCtxRef.current = { sel, positions, liveData }; }, [sel, positions, liveData]);
+  // aiBrief-v1 - assemble the snapshot from the live token + the risk
+  // engine's flags for its mint, and ask the server for a read
+  const fetchBrief = async (tk) => {
+    if (!tk) return;
+    setAiBrief({ id: tk.id, loading: true, open: true });
+    try {
+      const sb2 = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
+      const sess = sb2 ? (await sb2.auth.getSession()).data.session : null;
+      if (!sess) { setAiBrief({ id: tk.id, open: true, error: "sign in to use AI briefings" }); return; }
+      const m = tokMetrics(tk);
+      const flags = ((typeof window !== "undefined" && window.__VALO_RISK__) || {})[String(tk.liveMint || tk.id)] || [];
+      const r = await fetch("/api/brief", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-valo-auth": sess.access_token },
+        body: JSON.stringify({
+          mint: tk.liveMint || "",
+          snapshot: {
+            sym: tk.sym, mc: tk.mc, tvl: tk.tvl, vol24: tk.vol24,
+            buys: tk.buys, sells: tk.sells, ch: tk.ch,
+            ageMin: Number.isFinite(m.ageMin) ? Math.round(m.ageMin) : null,
+            curvePct: m.curvePct, holders: holdersOf(tk),
+            hasSocials: !!(tk.socials && Object.values(tk.socials).some(Boolean)),
+            riskFlags: flags.map((f) => f.label),
+          },
+        }),
+      });
+      const j = await r.json();
+      if (j && j.ok) setAiBrief({ id: tk.id, open: true, brief: j.brief, remaining: j.remaining, cached: j.cached });
+      else setAiBrief({ id: tk.id, open: true, error: (j && j.error) || `briefing failed (${r.status})` });
+    } catch (e) {
+      setAiBrief({ id: tk.id, open: true, error: String(e.message || e).slice(0, 90) });
+    }
+  };
   const riskFiredRef = useRef({});
   useEffect(() => {
     const tick = () => {
@@ -16361,6 +16397,83 @@ export default function App() {
                                     <span style={{ marginLeft: "auto", color: T.faint, fontSize: 9 }}>↗</span>
                                   </a>
                                 ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })()}
+                    {/* aiBrief-v1 - ✨ the AI read of this pair. Same popover
+                        pattern as the links dropdown beside it. */}
+                    {liveData && selected.liveMint && (() => {
+                      const mine = aiBrief && aiBrief.id === selected.id;
+                      const open = !!(mine && aiBrief.open);
+                      return (
+                        <div style={{ position: "relative" }}>
+                          <button
+                            onClick={() => {
+                              if (open) { setAiBrief((b) => b && { ...b, open: false }); return; }
+                              if (mine && aiBrief.brief) { setAiBrief((b) => ({ ...b, open: true })); return; }
+                              fetchBrief(selected);
+                            }}
+                            title="AI read of this pair — analysis, never advice"
+                            style={{ display: "flex", alignItems: "center", gap: 4, height: 26, borderRadius: 7,
+                              border: `1px solid ${open ? VALO_PURPLE : T.border2}`,
+                              background: open ? "rgba(125,92,240,0.14)" : "rgba(255,255,255,0.03)",
+                              color: open ? VALO_PURPLE : T.dim, fontFamily: T.mono, fontSize: 9.5, fontWeight: 800,
+                              padding: "0 8px", cursor: "pointer" }}>
+                            ✨ AI
+                          </button>
+                          {open && (
+                            <>
+                              <div onClick={() => setAiBrief((b) => b && { ...b, open: false })}
+                                style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                              <div style={{ position: "absolute", top: 30, right: 0, zIndex: 41, width: 330,
+                                background: T.panel, border: `1px solid ${VALO_PURPLE}55`, borderRadius: 11,
+                                boxShadow: "0 12px 36px rgba(0,0,0,0.6)", padding: "11px 13px" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
+                                  <span style={{ fontFamily: T.mono, fontSize: 9.5, fontWeight: 900, letterSpacing: 1.4, color: VALO_PURPLE }}>✨ AI READ · {selected.sym}</span>
+                                  {mine && aiBrief.brief && (
+                                    <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 7.5, color: T.faint }}>
+                                      {aiBrief.brief.confidence} data{aiBrief.cached ? " · cached" : ""}
+                                    </span>
+                                  )}
+                                </div>
+                                {mine && aiBrief.loading && (
+                                  <div style={{ fontFamily: T.mono, fontSize: 10, color: T.dim, padding: "8px 0" }}>reading the tape…</div>
+                                )}
+                                {mine && aiBrief.error && (
+                                  <div style={{ fontFamily: T.mono, fontSize: 10, color: T.amber, padding: "6px 0" }}>{aiBrief.error}</div>
+                                )}
+                                {mine && aiBrief.brief && (
+                                  <>
+                                    <div style={{ fontFamily: T.mono, fontSize: 10.5, color: T.text, lineHeight: 1.55, marginBottom: 9 }}>{aiBrief.brief.read}</div>
+                                    {aiBrief.brief.risks.length > 0 && (
+                                      <div style={{ marginBottom: 8 }}>
+                                        <div style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1.4, color: T.red, marginBottom: 3 }}>RISKS</div>
+                                        {aiBrief.brief.risks.map((r, i) => (
+                                          <div key={i} style={{ fontFamily: T.mono, fontSize: 9.5, color: T.dim, lineHeight: 1.5, paddingLeft: 9, position: "relative" }}>
+                                            <span style={{ position: "absolute", left: 0, color: T.red }}>·</span>{r}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                    {aiBrief.brief.watch.length > 0 && (
+                                      <div style={{ marginBottom: 8 }}>
+                                        <div style={{ fontFamily: T.mono, fontSize: 8, fontWeight: 900, letterSpacing: 1.4, color: T.blue, marginBottom: 3 }}>WATCH</div>
+                                        {aiBrief.brief.watch.map((w, i) => (
+                                          <div key={i} style={{ fontFamily: T.mono, fontSize: 9.5, color: T.dim, lineHeight: 1.5, paddingLeft: 9, position: "relative" }}>
+                                            <span style={{ position: "absolute", left: 0, color: T.blue }}>·</span>{w}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                    <div style={{ display: "flex", alignItems: "center", fontFamily: T.mono, fontSize: 7.5, color: T.faint, borderTop: `1px solid ${T.border}`, paddingTop: 6 }}>
+                                      analysis, not advice · refreshes every 5 min
+                                      {Number.isFinite(aiBrief.remaining) && <span style={{ marginLeft: "auto" }}>{aiBrief.remaining} left today</span>}
+                                    </div>
+                                  </>
+                                )}
                               </div>
                             </>
                           )}
