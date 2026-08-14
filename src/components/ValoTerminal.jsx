@@ -15293,6 +15293,20 @@ export default function App() {
   // one card per pool / mint / symbol — duplicates from different feeds collapse
   const shown = useMemo(() => {
     const byKey = new Map(); let out = [];
+    // secBypass-v1 - a loaded subsection IS the board. The lens's job is to
+    // pick tokens for you; here you already picked. Without this exit the
+    // active lens filtered the section by its own criteria and withBackfill
+    // buried the survivors under trending tokens.
+    if (scanSec) {
+      const seenS = new Set();
+      return shownLive.filter((t) => {
+        if (!t) return false;
+        const k = String(t.liveMint || t.ca || t.pool || ("id" + t.id)).toLowerCase();
+        if (seenS.has(k)) return false;
+        seenS.add(k);
+        return true;
+      });
+    }
     // richness score: when two records are the same token, the fuller one wins
     // and donates its missing fields to the survivor
     const rich = (t) => (t.img ? 4 : 0) + (t.pool ? 3 : 0) + (t.createdAt ? 2 : 0)
@@ -15416,7 +15430,7 @@ export default function App() {
       return s2;
     };
     return [...out].sort((a, b) => scoreOf(b) - scoreOf(a));
-  }, [shownLive, scanMode, moversSide, luckyDraw, sel]);
+  }, [shownLive, scanMode, moversSide, luckyDraw, sel, scanSec]);
   shownRef.current = shown;
 
   const gTvl = tokens.reduce((a, t) => a + t.tvl, 0);
