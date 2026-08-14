@@ -16435,7 +16435,8 @@ export default function App() {
                               padding: "0 8px", cursor: "pointer" }}>
                             ✨ AI
                           </button>
-                          {open && (
+                          {open && (() => { /* aiBriefPortal-v2 */
+                            const frag = (
                             <>
                               <div onClick={() => setAiBrief((b) => b && { ...b, open: false })}
                                 style={{ position: "fixed", inset: 0, zIndex: isMobile ? 140 : 40,
@@ -16497,8 +16498,10 @@ export default function App() {
                                   </>
                                 )}
                               </div>
-                            </>
-                          )}
+                            </>);
+                            return isMobile && typeof document !== "undefined"
+                              ? createPortal(frag, document.body) : frag;
+                          })()}
                         </div>
                       );
                     })()}
