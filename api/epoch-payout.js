@@ -20,6 +20,7 @@ import {
   b58decode, keypairFrom, buildTx, findAta,
   ixCreateAta, ixTransferChecked, TOKEN_PROGRAM, TOKEN_2022_PROGRAM,
 } from "./_solana-lite.js";
+import { calloutMultipliers } from "./_lb.js";
 
 const RPC = () => (process.env.HELIUS_API_KEY
   ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`
@@ -43,30 +44,8 @@ const weightOf = (volSol, lbBonus, holderWeight = 0) =>
 // serverMult-v1 — the same seven boards the terminal shows, and the same bonus
 // curve. Kept literal rather than imported: this file runs on the server and
 // ValoTerminal.jsx is a browser bundle.
-const LB_MS = { "1H": 3600e3, "12H": 12 * 3600e3, "1D": 86400e3, "7D": 7 * 86400e3, "30D": 30 * 86400e3, "180D": 180 * 86400e3, "365D": 365 * 86400e3 };
-const lbBonusOf = (r) => r < 1 ? 0 : r === 1 ? 0.5 : r === 2 ? 0.42 : r === 3 ? 0.36 : r === 4 ? 0.32 : r === 5 ? 0.29 : r === 6 ? 0.26 : r === 7 ? 0.23 : r === 8 ? 0.20 : r === 9 ? 0.17 : r === 10 ? 0.14 : r <= 100 ? 0.10 : 0;
+// lbShared-v1 - curve and standings now live in api/_lb.js
 
-// Every user's standing across every board, computed here rather than reported
-// by a browser that may never have opened the leaderboard.
-const calloutMultipliers = async () => {
-  const totals = {};
-  for (const ms of Object.values(LB_MS)) {
-    const since = new Date(Date.now() - ms).toISOString();
-    const rows = await sb(`callouts?ts=gte.${since}&select=user_id,peak_mult&order=peak_mult.desc&limit=250`);
-    if (!rows || !rows.length) continue;
-    // Rank is the row's position, matching the visible board — a user holding
-    // two of the top three genuinely pushes everyone below them down.
-    const seen = new Set();
-    rows.forEach((r, i) => {
-      if (!r.user_id || seen.has(r.user_id)) return;
-      seen.add(r.user_id);
-      totals[r.user_id] = (totals[r.user_id] || 0) + lbBonusOf(i + 1);
-    });
-  }
-  const out = {};
-  for (const [u, t] of Object.entries(totals)) out[u] = 1 + Math.min(4, t);   // +4.0 cap, per the whitepaper
-  return out;
-};
 
 const sb = async (path, opts = {}) => {
   const url = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();

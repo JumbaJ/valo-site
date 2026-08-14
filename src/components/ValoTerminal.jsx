@@ -3512,6 +3512,7 @@ function TierListModal({ onClose, isMobile, myBest = 0, embed = false }) {
 
 // compact leaderboard — the tier-list's sibling: same frame, top-10 badges per
 // duration, your rank, and the epoch bonus each placement pays
+// lbCurve-v2 - raised so the +4.0 cap is reachable
 const LB_MS = { "1H": 3600e3, "12H": 12 * 3600e3, "1D": 86400e3, "7D": 7 * 86400e3, "30D": 30 * 86400e3, "180D": 180 * 86400e3, "365D": 365 * 86400e3 };
 function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onOpenUser, embed = false, focusUser = null, username = "you", onMyRank = null }) {
   // ☁ REAL entries — actual callouts ranked by the peak the market gave them
@@ -3538,7 +3539,7 @@ function LeaderboardModal({ onClose, isMobile, myCallouts = {}, tokens = [], onO
   const [hl, setHl] = useState(!!focusUser); // the jumped-to name glows, then fades
   const focusRef = useRef(null);
   useEffect(() => { if (!focusUser) return; const t = setTimeout(() => setHl(false), 5000); return () => clearTimeout(t); }, [focusUser]);
-  const lbBonus = (r) => r < 1 ? 0 : r === 1 ? 0.5 : r === 2 ? 0.42 : r === 3 ? 0.36 : r === 4 ? 0.32 : r === 5 ? 0.29 : r === 6 ? 0.26 : r === 7 ? 0.23 : r === 8 ? 0.20 : r === 9 ? 0.17 : r === 10 ? 0.14 : r <= 100 ? 0.10 : 0;
+  const lbBonus = (r) => r < 1 ? 0 : r === 1 ? 0.60 : r === 2 ? 0.50 : r === 3 ? 0.43 : r === 4 ? 0.38 : r === 5 ? 0.34 : r === 6 ? 0.31 : r === 7 ? 0.28 : r === 8 ? 0.25 : r === 9 ? 0.22 : r === 10 ? 0.19 : r <= 100 ? 0.12 : 0;
   const board = useMemo(() => {
     const mine = Object.entries(myCallouts).map(([id, c]) => {
       const tk = tokens.find((t) => String(t.id) === String(id));
@@ -11010,7 +11011,7 @@ export default function App() {
   // 📜 WHITEPAPER epoch bonuses: rank per duration board → +0.50…+0.10 each,
   // stacking across boards, capped +4.0. Stored as (1 + Σbonus) on the row.
   const lbRanksRef = useRef({});             // { period: rank }
-  const lbBonusOf = (r) => r < 1 ? 0 : r === 1 ? 0.5 : r === 2 ? 0.42 : r === 3 ? 0.36 : r === 4 ? 0.32 : r === 5 ? 0.29 : r === 6 ? 0.26 : r === 7 ? 0.23 : r === 8 ? 0.20 : r === 9 ? 0.17 : r === 10 ? 0.14 : r <= 100 ? 0.10 : 0;
+  const lbBonusOf = (r) => r < 1 ? 0 : r === 1 ? 0.60 : r === 2 ? 0.50 : r === 3 ? 0.43 : r === 4 ? 0.38 : r === 5 ? 0.34 : r === 6 ? 0.31 : r === 7 ? 0.28 : r === 8 ? 0.25 : r === 9 ? 0.22 : r === 10 ? 0.19 : r <= 100 ? 0.12 : 0;
   const lastLbMultRef = useRef(1);
   const reportMyRank = (period, rank) => {
     lbRanksRef.current[period] = rank;
@@ -17674,7 +17675,7 @@ export default function App() {
   // epoch snapshot adds it: 11th–100th +0.10 · 10th +0.14 · 9th +0.17 · 8th +0.20
   // 7th +0.23 · 6th +0.26 · 5th +0.29 · 4th +0.32 · 3rd +0.36 · 2nd +0.42 · 1st +0.50
   // — and bonuses STACK across every duration you place on (up to +4.0 total)
-  const lbBonusFor = (r) => r < 1 ? 0 : r === 1 ? 0.5 : r === 2 ? 0.42 : r === 3 ? 0.36 : r === 4 ? 0.32 : r === 5 ? 0.29 : r === 6 ? 0.26 : r === 7 ? 0.23 : r === 8 ? 0.20 : r === 9 ? 0.17 : r === 10 ? 0.14 : r <= 100 ? 0.10 : 0;
+  const lbBonusFor = (r) => r < 1 ? 0 : r === 1 ? 0.60 : r === 2 ? 0.50 : r === 3 ? 0.43 : r === 4 ? 0.38 : r === 5 ? 0.34 : r === 6 ? 0.31 : r === 7 ? 0.28 : r === 8 ? 0.25 : r === 9 ? 0.22 : r === 10 ? 0.19 : r <= 100 ? 0.12 : 0;
   const calloutBonus = useMemo(() => {
     const mine = Object.entries(myMcCallouts).map(([id, c]) => ({ you: true, mult: c.peak || 1 }));
     if (!mine.length) return { total: 0, hits: [] };

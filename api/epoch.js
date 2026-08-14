@@ -44,6 +44,8 @@ const solBalance = async (addr) => {
 // weight = (holderWeight + volSol) × (1 + Σ leaderboard bonuses, capped 4.0)
 // holderWeight arms itself when VALO_MINT exists (real $VALO balances);
 // until launch it is honestly 0 and volume carries the epoch.
+import { calloutStandings } from "./_lb.js";
+
 const weightOf = (volSol, lbBonus, holderWeight = 0) =>
   ((holderWeight || 0) + (volSol || 0)) * (1 + Math.max(0, Math.min(4, (lbBonus || 1) - 1)));
 
@@ -64,7 +66,13 @@ export default async function handler(req, res) {
     } catch (e) {}
   }
   // callout_mult column carries (1 + Σ leaderboard bonuses) per the spec
-  const weights = (rows || []).map((x) => ({ user: x.user_id, volSol: +x.vol_sol || 0, w: weightOf(+x.vol_sol, +x.callout_mult) })).filter((x) => x.w > 0);
+  // lbShared-v1 - projecting from callout_mult meant the number shown here
+  // and the number paid could differ, because that column is only written
+  // while a leaderboard modal happens to be open.
+  const standings = await calloutStandings();
+  const weights = (rows || []).map((x) => ({ user: x.user_id, volSol: +x.vol_sol || 0,
+    mult: (standings[x.user_id] && standings[x.user_id].mult) || 1,
+    w: weightOf(+x.vol_sol, (standings[x.user_id] && standings[x.user_id].mult) || 1) })).filter((x) => x.w > 0);
   const totalW = weights.reduce((a, x) => a + x.w, 0);
 
   const MINT = (process.env.VALO_MINT || "").trim();
@@ -110,6 +118,8 @@ export default async function handler(req, res) {
     // the vault pays rent for recipients who don't hold $VALO yet (~0.002 each)
     gasOk: poolSol == null ? null : poolSol >= 0.01,
     you: mine ? { volSol: +mine.volSol.toFixed(4), weight: +mine.w.toFixed(3),
+      mult: +(mine.mult || 1).toFixed(2),
+      ranks: (standings[user] && standings[user].ranks) || {},
       share: totalW > 0 ? +(mine.w / totalW).toFixed(4) : 0,
       amount: pool != null && totalW > 0 ? +((mine.w / totalW) * pool).toFixed(4) : null } : null,
   });
