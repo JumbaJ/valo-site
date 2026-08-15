@@ -7958,6 +7958,45 @@ const tokMetrics = (t) => {
   return { winMin, tx, txRate: tx / winMin, txPerMinLife, flow, buyRatio, accel, rateNow, volPerMin,
     ageMs, ageMin, isPump, curvePct, turnover, hasTraders };
 };
+// cloudDebug-v2 - TEMPORARY. An on-screen event and error console so a phone
+// with no DevTools can still tell us what its taps are doing. ?debug=1 only.
+function DebugConsole({ cloudOpen, onTest }) {
+  const [lines, setLines] = useState([]);
+  useEffect(() => {
+    const push = (t, err) => setLines((L) => [...L.slice(-7), { t: String(t).slice(0, 90), err: !!err, at: Date.now() }]);
+    window.__dbg = push;
+    const onTouch = (e) => { const el = e.target; push(`touchend <${el.tagName}> ${String(el.className || "").slice(0, 24)}`); };
+    const onClick = (e) => { const el = e.target; push(`click <${el.tagName}> ${String(el.textContent || "").slice(0, 22)}`); };
+    const onErr = (e) => push(`ERR ${e.message || e.reason && e.reason.message || e.reason || "?"}`, true);
+    document.addEventListener("touchend", onTouch, true);
+    document.addEventListener("click", onClick, true);
+    window.addEventListener("error", onErr);
+    window.addEventListener("unhandledrejection", onErr);
+    return () => {
+      document.removeEventListener("touchend", onTouch, true);
+      document.removeEventListener("click", onClick, true);
+      window.removeEventListener("error", onErr);
+      window.removeEventListener("unhandledrejection", onErr);
+      delete window.__dbg;
+    };
+  }, []);
+  return (
+    <div style={{ position: "fixed", bottom: 90, left: 8, right: 8, zIndex: 999999,
+      background: "rgba(0,0,0,0.92)", border: "2px solid #ff5577", borderRadius: 10, padding: "8px 10px",
+      fontFamily: "monospace", fontSize: 11, color: "#fff", pointerEvents: "auto" }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 6 }}>
+        <span>cloudOpen: <b style={{ color: cloudOpen ? "#16c784" : "#ff5577" }}>{String(cloudOpen)}</b></span>
+        <button onClick={onTest}
+          style={{ background: "#7d5cf0", color: "#fff", border: "none", borderRadius: 6, padding: "7px 12px", fontFamily: "monospace", fontWeight: 900 }}>
+          TEST</button>
+      </div>
+      {lines.map((l, i) => (
+        <div key={i} style={{ color: l.err ? "#ff5577" : "#9aa3b8", whiteSpace: "nowrap", overflow: "hidden" }}>{l.t}</div>
+      ))}
+    </div>
+  );
+}
+
 // riskEngine-v1 ─ deterministic risk flags over live token state.
 // Facts about the present, never predictions - which is why these may alert
 // automatically where a model's opinion never should.
@@ -19765,16 +19804,10 @@ export default function App() {
         </button>
       )}
 
-      {/* cloudDebug-v1 - TEMPORARY instrument, only with ?debug=1 */}
+      {/* cloudDebug-v2 - TEMPORARY on-screen event+error console, ?debug=1 only */}
       {typeof window !== "undefined" && /[?&]debug=1/.test(window.location.search) && typeof document !== "undefined" && createPortal(
-        <div style={{ position: "fixed", bottom: 90, left: 10, zIndex: 9999, display: "flex", gap: 8, alignItems: "center",
-          background: "#000", border: "2px solid #ff5577", borderRadius: 8, padding: "8px 10px",
-          fontFamily: "monospace", fontSize: 13, color: "#fff" }}>
-          <span>cloudOpen: <b style={{ color: cloudOpen ? "#16c784" : "#ff5577" }}>{String(cloudOpen)}</b></span>
-          <button onClick={() => setCloudOpen(true)}
-            style={{ background: "#7d5cf0", color: "#fff", border: "none", borderRadius: 6, padding: "6px 10px", fontFamily: "monospace", fontWeight: 900 }}>
-            TEST</button>
-        </div>, document.body)}
+        <DebugConsole cloudOpen={cloudOpen} onTest={() => { window.__dbg && window.__dbg("TEST fired"); setCloudOpen(true); }} />,
+        document.body)}
       {/* cloudPortal-v1 - plain fixed dies inside transformed ancestors on
           mobile; the modal mounted invisibly and SIGN UP looked dead. Portal
           to body, like every other overlay here. */}
