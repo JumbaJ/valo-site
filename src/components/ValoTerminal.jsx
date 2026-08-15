@@ -12187,6 +12187,24 @@ export default function App() {
   }, [cloudUser && cloudUser.id]);
   const [mobHeadPill, setMobHeadPill] = useState("cloud"); // mobile header slot: "cloud" sign-in pill ⇄ "epoch" reward pill (hold to swap)
   const [cloudOpen, setCloudOpen] = useState(false);    // sign-in modal
+  // sessionTruth-v1 - a cloudUser with no live session is a ghost restored
+  // from storage. Opening the modal over one showed sync/SIGN OUT instead of
+  // the sign-in form, and the form was unreachable. Verify on open; if the
+  // session is dead, clear the husk and let the form render.
+  useEffect(() => {
+    if (!cloudOpen || !cloudUser || !sb) return;
+    let dead = false;
+    (async () => {
+      try {
+        const { data } = await sb.auth.getSession();
+        if (!dead && !(data && data.session)) {
+          try { await sb.auth.signOut({ scope: "local" }); } catch (e) {}
+          setCloudUser(null);
+        }
+      } catch (e) {}
+    })();
+    return () => { dead = true; };
+  }, [cloudOpen]);
   const [cloudEmail, setCloudEmail] = useState("");
   const [cloudMsg, setCloudMsg] = useState("");
   const [cloudCode, setCloudCode] = useState("");        // otpCode-v1 - 6-digit email code
