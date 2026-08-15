@@ -18507,10 +18507,10 @@ export default function App() {
                     border: `1px solid ${T.border2}`, background: "rgba(76,154,255,0.08)", borderRadius: 9, padding: "7px 9px" }}>
                   <span style={{ fontSize: 15 }}>📄</span>
                 </button>
-                {/* claim pill ⇄ SIGN UP/IN — hold either to swap slots */}
-                {!(sb && mobHeadPill === "cloud") && (
+                {/* pillState-v1 - no gesture: the slot follows sign-in state.
+                    Hold-to-swap read deliberate taps as holds and ate them. */}
+                {(!sb || cloudUser) && (
                 <button onClick={() => setClaimOpen(true)}
-                  {...(sb ? chipEditProps(() => setMobHeadPill("cloud")) : {})}
                   style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
                     border: `1px solid ${claimable > 0 ? "rgba(22,199,132,0.5)" : T.border}`,
                     background: claimable > 0 ? "rgba(22,199,132,0.10)" : "rgba(255,255,255,0.02)",
@@ -18528,9 +18528,8 @@ export default function App() {
                 </span>
               </button>
                 )}
-                {sb && mobHeadPill === "cloud" && (
+                {sb && !cloudUser && (
                 <button onClick={() => setCloudOpen(true)}
-                  {...chipEditProps(() => setMobHeadPill("epoch"))}
                   style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
                     border: `1.5px solid ${T.blue}`, background: "rgba(59,130,246,0.14)",
                     borderRadius: 9, padding: "5px 8px", lineHeight: 1.1,
