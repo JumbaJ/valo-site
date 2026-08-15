@@ -19765,6 +19765,16 @@ export default function App() {
         </button>
       )}
 
+      {/* cloudDebug-v1 - TEMPORARY instrument, only with ?debug=1 */}
+      {typeof window !== "undefined" && /[?&]debug=1/.test(window.location.search) && typeof document !== "undefined" && createPortal(
+        <div style={{ position: "fixed", bottom: 90, left: 10, zIndex: 9999, display: "flex", gap: 8, alignItems: "center",
+          background: "#000", border: "2px solid #ff5577", borderRadius: 8, padding: "8px 10px",
+          fontFamily: "monospace", fontSize: 13, color: "#fff" }}>
+          <span>cloudOpen: <b style={{ color: cloudOpen ? "#16c784" : "#ff5577" }}>{String(cloudOpen)}</b></span>
+          <button onClick={() => setCloudOpen(true)}
+            style={{ background: "#7d5cf0", color: "#fff", border: "none", borderRadius: 6, padding: "6px 10px", fontFamily: "monospace", fontWeight: 900 }}>
+            TEST</button>
+        </div>, document.body)}
       {/* cloudPortal-v1 - plain fixed dies inside transformed ancestors on
           mobile; the modal mounted invisibly and SIGN UP looked dead. Portal
           to body, like every other overlay here. */}
