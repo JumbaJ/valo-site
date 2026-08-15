@@ -20816,7 +20816,10 @@ export default function App() {
             {/* tapFix-v1 - signed out, this sheet is where mis-taps land; give
                 it the door forward instead of a dead end */}
             {!cloudUser && (
-              <button onClick={() => { setClaimOpen(false); setCloudOpen(true); }}
+              <button onClick={() => { /* ghostClick-v1 - iOS re-delivers the tap
+                  ~300ms later at the same spot; opening the modal instantly put
+                  its own backdrop under that ghost, which dismissed it. */
+                setClaimOpen(false); setTimeout(() => setCloudOpen(true), 380); }}
                 style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
                   border: `1.5px solid ${T.blue}`, background: "rgba(59,130,246,0.14)", borderRadius: 10,
                   padding: "11px", marginBottom: 12, cursor: "pointer",
