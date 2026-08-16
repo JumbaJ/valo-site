@@ -53,6 +53,21 @@ export default async function handler(req, res) {
     const p = await pumpStats(mint);
     let holders = p && p.holders;
     let holdersFloor = false;
+    // the chain's own supply, decimals included - the truth anchor for pairs
+    // whose stream-derived numbers carry the wrong decimal assumption
+    let supplyUi = null;
+    try {
+      const key = process.env.HELIUS_API_KEY;
+      if (key) {
+        const r = await fetch(`https://mainnet.helius-rpc.com/?api-key=${key}`, {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: "s", method: "getTokenSupply", params: [mint] }),
+          signal: AbortSignal.timeout(8000) });
+        const j = await r.json();
+        const v = j && j.result && j.result.value;
+        if (v && Number.isFinite(+v.uiAmount)) supplyUi = +v.uiAmount;
+      }
+    } catch (e) {}
     if (!(holders > 0)) {
       const h = await heliusHolders(mint);
       if (h) { holders = h.n; holdersFloor = !!h.capped; }
@@ -60,6 +75,7 @@ export default async function handler(req, res) {
     out[mint] = {
       holders: holders > 0 ? holders : null,
       holdersFloor,
+      supplyUi,
       replies: p ? p.replies : null,
       graduated: p ? p.graduated : null,
     };

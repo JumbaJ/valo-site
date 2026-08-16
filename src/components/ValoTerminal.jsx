@@ -15942,6 +15942,25 @@ export default function App() {
             if (typeof window !== "undefined") {
               window.__VALO_HOLDERS__ = { ...(window.__VALO_HOLDERS__ || {}), [m]: d.holders };
               window.__VALO_HOLDERS_FLOOR__ = { ...(window.__VALO_HOLDERS_FLOOR__ || {}), [m]: !!d.holdersFloor };
+              // supplyFix-v1 - when the chain's supply disagrees with the
+              // pair's derived supply by >10x, every supply-scaled dollar
+              // field is wrong by the same factor. Rescale them together,
+              // across all sources, once, on real evidence.
+              if (Number.isFinite(+d.supplyUi) && +d.supplyUi > 0) {
+                const realSup = +d.supplyUi;
+                const fixSupply = (x) => {
+                  if (!x || x.liveMint !== m || !(x.supply > 0)) return x;
+                  const k = x.supply / realSup;
+                  if (k > 0.1 && k < 10) return x;          // close enough - leave it
+                  return { ...x, supply: realSup,
+                    mc: (x.mc || 0) / k, tvl: (x.tvl || 0) / k, vol24: (x.vol24 || 0) / k,
+                    greenUsd: (x.greenUsd || 0) / k, redUsd: (x.redUsd || 0) / k };
+                };
+                setTokens((Ts) => Ts.map(fixSupply));
+                try { if (mktHitsRef.current) mktHitsRef.current = mktHitsRef.current.map(fixSupply); } catch (e) {}
+                try { if (moreToksRef.current) moreToksRef.current = moreToksRef.current.map(fixSupply); } catch (e) {}
+                try { if (floorToksRef.current) floorToksRef.current = floorToksRef.current.map(fixSupply); } catch (e) {}
+              }
               if (Number.isFinite(d.replies)) window.__VALO_PUMP_REPLIES__ = { ...(window.__VALO_PUMP_REPLIES__ || {}), [m]: d.replies };
             }
             changed = true;
