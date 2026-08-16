@@ -41,20 +41,22 @@ export default async function handler(req, res) {
   }
   if (!mint) return res.status(400).json({ error: "mint or wallet required" });
 
-  // 1) pump.fun knows its own launches
-  try {
-    const r = await fetch(`https://frontend-api.pump.fun/coins/${mint}`, {
-      headers: { accept: "application/json" }, signal: AbortSignal.timeout(4000),
-    });
-    if (r.ok) {
-      const j = await r.json();
-      if (j && j.creator) {
-        res.setHeader("Cache-Control", "s-maxage=86400, stale-while-revalidate=604800");
-        return res.status(200).json({ creator: j.creator, short: short(j.creator),
-          createdAt: j.created_timestamp || null, src: "pump" });
+  // 1) pump.fun knows its own launches - two hosts, the original has been flaky
+  for (const host of ["frontend-api.pump.fun", "frontend-api-v3.pump.fun"]) {
+    try {
+      const r = await fetch(`https://${host}/coins/${mint}`, {
+        headers: { accept: "application/json" }, signal: AbortSignal.timeout(4000),
+      });
+      if (r.ok) {
+        const j = await r.json();
+        if (j && j.creator) {
+          res.setHeader("Cache-Control", "s-maxage=86400, stale-while-revalidate=604800");
+          return res.status(200).json({ creator: j.creator, short: short(j.creator),
+            createdAt: j.created_timestamp || null, src: "pump" });
+        }
       }
-    }
-  } catch (e) {}
+    } catch (e) {}
+  }
 
   // 2) Helius: earliest transaction touching the mint — its fee payer deployed it
   const key = process.env.HELIUS_API_KEY;
@@ -66,6 +68,15 @@ export default async function handler(req, res) {
       if (r.ok) {
         const txs = await r.json();
         if (Array.isArray(txs) && txs.length) {
+          // helius-truncated: a FULL page means the history did not fit -
+          // the oldest tx of page one is just a recent trade, not the deploy.
+          // The fee payer of that tx is a random trader, not the creator.
+          // Unknown is the honest answer; the client's candle floor takes over.
+          if (txs.length >= 100) {
+            res.setHeader("Cache-Control", "s-maxage=300");
+            return res.status(200).json({ creator: null, short: null,
+              createdAt: null, src: "helius-truncated" });
+          }
           const first = txs[txs.length - 1];   // API returns newest-first
           const payer = first.feePayer || null;
           if (payer) {
