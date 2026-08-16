@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VALO — Sign in</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0B0E14; color: #E6E9F0; min-height: 100dvh;
+    display: flex; align-items: center; justify-content: center;
+    font: 15px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .card { width: min(92vw, 400px); background: #10131c; border: 1px solid #262c3d;
+    border-radius: 16px; padding: 26px 22px; }
+  h1 { font-size: 18px; margin: 0 0 4px; letter-spacing: 1px; }
+  .sub { color: #8A93A6; font-size: 12px; margin-bottom: 22px; }
+  label { display: block; font-size: 10px; letter-spacing: 1.5px; color: #8A93A6;
+    text-transform: uppercase; margin: 14px 0 6px; }
+  input { width: 100%; background: #0c0f16; border: 1px solid #2a3145; border-radius: 10px;
+    padding: 13px 14px; color: #E6E9F0; font: inherit; font-size: 16px; outline: none; }
+  input:focus { border-color: #7D5CF0; }
+  #code { letter-spacing: 8px; text-align: center; font-size: 20px; }
+  button { width: 100%; border: none; border-radius: 10px; padding: 14px;
+    font: inherit; font-weight: 800; letter-spacing: 1px; cursor: pointer; margin-top: 14px; }
+  #send { background: #7D5CF0; color: #fff; }
+  #verify { background: #16c784; color: #06130c; display: none; }
+  .msg { font-size: 12px; margin-top: 12px; min-height: 18px; color: #8A93A6; }
+  .msg.err { color: #ff5577; } .msg.ok { color: #16c784; }
+  .step2 { display: none; }
+  a.back { display: block; text-align: center; color: #5C6478; font-size: 12px;
+    margin-top: 18px; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>☁ VALO ACCOUNT</h1>
+  <div class="sub">Sign in with your email — a 6-digit code, no passwords. Your watchlist, rewards and callouts follow you everywhere.</div>
+
+  <label for="email">Email</label>
+  <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" />
+  <button id="send">SEND CODE</button>
+
+  <div class="step2" id="step2">
+    <label for="code">6-digit code from the email</label>
+    <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="123456" />
+    <button id="verify">VERIFY &amp; ENTER</button>
+  </div>
+
+  <div class="msg" id="msg"></div>
+  <a class="back" href="/">← back to the terminal</a>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+(async function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var msg = function (t, cls) { var m = $("msg"); m.textContent = t; m.className = "msg " + (cls || ""); };
+
+  // config comes from the server so nothing is hardcoded here
+  var cfg = null;
+  try { cfg = await (await fetch("/api/auth-config")).json(); } catch (e) {}
+  if (!cfg || !cfg.ok) { msg("sign-in is not configured — tell the dev", "err"); return; }
+
+  // IMPORTANT: default options = default storage key = the exact session the
+  // terminal reads. Signing in here IS signing in there.
+  var sb = window.supabase.createClient(cfg.url, cfg.anon);
+
+  // already signed in? straight back to the terminal
+  try {
+    var s0 = (await sb.auth.getSession()).data.session;
+    if (s0) { msg("already signed in — returning…", "ok"); location.replace("/"); return; }
+  } catch (e) {}
+
+  var email = "";
+  $("send").addEventListener("click", async function () {
+    email = $("email").value.trim();
+    if (!/.+@.+\..+/.test(email)) { msg("that email doesn't look right", "err"); return; }
+    msg("sending…");
+    try {
+      var r = await sb.auth.signInWithOtp({ email: email, options: { shouldCreateUser: true } });
+      if (r.error) { msg(r.error.message, "err"); return; }
+      msg("✓ sent — check your inbox for the 6-digit code", "ok");
+      $("step2").style.display = "block";
+      $("verify").style.display = "block";
+      $("code").focus();
+    } catch (e) { msg("send failed — try again", "err"); }
+  });
+
+  var verify = async function () {
+    var code = $("code").value.replace(/\D/g, "");
+    if (code.length < 6) { msg("the code is 6 digits", "err"); return; }
+    msg("checking…");
+    try {
+      var r = await sb.auth.verifyOtp({ email: email, token: code, type: "email" });
+      if (r.error) { msg(r.error.message, "err"); return; }
+      msg("✓ signed in — loading the terminal…", "ok");
+      setTimeout(function () { location.replace("/"); }, 600);
+    } catch (e) { msg("verification failed — try again", "err"); }
+  };
+  $("verify").addEventListener("click", verify);
+  $("code").addEventListener("keydown", function (e) { if (e.key === "Enter") verify(); });
+})();
+</script>
+</body>
+</html>
