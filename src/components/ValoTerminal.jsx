@@ -19822,6 +19822,20 @@ export default function App() {
         </button>
       )}
 
+      {/* signinFab-v1 - bypasses the header: body portal + bottom placement,
+          both proven on-device. Shown signed-out only. */}
+      {isMobile && sb && !cloudUser && !cloudOpen && typeof document !== "undefined" && createPortal(
+        <button
+          onClick={() => setTimeout(() => setCloudOpen(true), 380)}
+          style={{ position: "fixed", bottom: 88, left: "50%", transform: "translateX(-50%)",
+            zIndex: 200, display: "flex", alignItems: "center", gap: 8,
+            background: "rgba(17,24,39,0.96)", border: `1.5px solid ${T.blue}`,
+            borderRadius: 999, padding: "13px 22px", cursor: "pointer",
+            boxShadow: `0 6px 24px rgba(0,0,0,0.55), 0 0 18px ${T.blue}44`,
+            fontFamily: T.mono, fontSize: 12.5, fontWeight: 900, letterSpacing: 1.2, color: T.blue,
+            animation: "claimPulse 2.6s ease-in-out infinite" }}>
+          ☁ SIGN IN · EARN HOURLY $VALO
+        </button>, document.body)}
       {/* cloudDebug-v2 - TEMPORARY on-screen event+error console, ?debug=1 only */}
       {typeof window !== "undefined" && /[?&]debug=1/.test(window.location.search) && typeof document !== "undefined" && createPortal(
         <DebugConsole cloudOpen={cloudOpen} onTest={() => { window.__dbg && window.__dbg("TEST fired"); setCloudOpen(true); }} />,
