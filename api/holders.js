@@ -26,7 +26,7 @@ async function heliusHolders(mint) {
   if (!key) return null;
   try {
     // count token accounts holding a non-zero balance
-    let holders = 0, cursor = undefined, pages = 0;
+    let holders = 0, cursor = undefined, pages = 0, capped = false;
     do {
       const body = { jsonrpc: "2.0", id: "h", method: "getTokenAccounts",
         params: { mint, limit: 1000, ...(cursor ? { cursor } : {}) } };
@@ -38,7 +38,8 @@ async function heliusHolders(mint) {
       cursor = j && j.result && j.result.cursor;
       pages++;
     } while (cursor && pages < 6);   // cap ~6k accounts, enough for a count badge
-    return holders > 0 ? holders : null;
+    if (cursor) capped = true;       // budget exhausted mid-scan: this is a FLOOR, not a count
+    return holders > 0 ? { n: holders, capped } : null;
   } catch (e) { return null; }
 }
 
@@ -51,9 +52,14 @@ export default async function handler(req, res) {
   await Promise.all(mints.map(async (mint) => {
     const p = await pumpStats(mint);
     let holders = p && p.holders;
-    if (!(holders > 0)) holders = await heliusHolders(mint);
+    let holdersFloor = false;
+    if (!(holders > 0)) {
+      const h = await heliusHolders(mint);
+      if (h) { holders = h.n; holdersFloor = !!h.capped; }
+    }
     out[mint] = {
       holders: holders > 0 ? holders : null,
+      holdersFloor,
       replies: p ? p.replies : null,
       graduated: p ? p.graduated : null,
     };

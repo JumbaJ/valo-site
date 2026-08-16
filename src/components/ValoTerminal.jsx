@@ -118,6 +118,8 @@ const holdersOf = (t, _fallback) => {
     ? window.__VALO_HOLDERS__[t.liveMint] : null;
   return Number.isFinite(real) && real > 0 ? real : null;
 };
+const holdersFloorOf = (t) => !!(typeof window !== "undefined" && window.__VALO_HOLDERS_FLOOR__
+  && t && t.liveMint && window.__VALO_HOLDERS_FLOOR__[t.liveMint]);
 // render a holder count: a real number, or an honest dash
 const fmtHolders = (n) => (Number.isFinite(n) && n > 0
   ? (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "K" : String(Math.round(n)))
@@ -9629,7 +9631,7 @@ function TokenEcosystem({ tokens, q = "", onPick, onOpenUser, isMobile, maxH = "
                   <span style={{ color: T.green }}>B {fmt$(t.greenUsd)}</span>
                   <span style={{ color: T.red }}>S {fmt$(t.redUsd)}</span>
                   <span>M {Math.round(t.momentum)}</span>
-                  <span title={holdersOf(t) ? "real on-chain holders" : "waiting on chain"}>👥{fmtHolders(holdersOf(t))}</span>
+                  <span title={holdersOf(t) ? (holdersFloorOf(t) ? "at least this many — scan capped" : "real on-chain holders") : "waiting on chain"}>👥{fmtHolders(holdersOf(t))}{holdersFloorOf(t) ? "+" : ""}</span>
                   {(() => { const v = liveViewersOf(t, "pump"); return v != null ? <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>💬{v}</span> : null; })()}
                   <span style={{ fontSize: 6.5, fontWeight: 800, color: platOf(t) === "pump" ? T.green : "#c6f24e", marginLeft: "auto" }}>{platOf(t) === "pump" ? "PUMP" : "RH"}</span>
                 </div>
@@ -15640,7 +15642,10 @@ export default function App() {
             vol24: tk.vol24,
             buys: tk.buys, sells: tk.sells, ch: tk.ch,
             ageMin: trueAgeMin,
-            curvePct: m.curvePct, holders: holdersOf(tk),
+            curvePct: m.curvePct,
+            // a capped scan is a floor, not a count — the model gets null and
+            // says "unreported" rather than reasoning from a ceiling
+            holders: holdersFloorOf(tk) ? null : holdersOf(tk),
             hasSocials: !!(tk.socials && Object.values(tk.socials).some(Boolean)),
             riskFlags: flags.map((f) => f.label),
           },
@@ -15936,6 +15941,7 @@ export default function App() {
             holderCache.current[m] = { holders: d.holders, replies: d.replies, at: Date.now() };
             if (typeof window !== "undefined") {
               window.__VALO_HOLDERS__ = { ...(window.__VALO_HOLDERS__ || {}), [m]: d.holders };
+              window.__VALO_HOLDERS_FLOOR__ = { ...(window.__VALO_HOLDERS_FLOOR__ || {}), [m]: !!d.holdersFloor };
               if (Number.isFinite(d.replies)) window.__VALO_PUMP_REPLIES__ = { ...(window.__VALO_PUMP_REPLIES__ || {}), [m]: d.replies };
             }
             changed = true;
