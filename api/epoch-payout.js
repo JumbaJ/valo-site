@@ -89,6 +89,22 @@ const destFor = async (owner, mint, tokenProgram) => {
   return { ata: findAta(owner, mint, tokenProgram), exists: false };
 };
 
+
+// discordAnnounce-v1 - fire-and-forget receipt into a channel webhook.
+// Never throws, never blocks money: a dead webhook costs 4s max and nothing else.
+const discordAnnounce = async (envKey, content) => {
+  const hook = (process.env[envKey] || "").trim();
+  if (!hook) return;
+  try {
+    await fetch(hook, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
+      signal: AbortSignal.timeout(4000),
+    });
+  } catch (e) {}
+};
+
 export default async function handler(req, res) {
   try {
     const cronOk = process.env.CRON_SECRET && req.headers.authorization === `Bearer ${process.env.CRON_SECRET}`;
@@ -319,6 +335,13 @@ export default async function handler(req, res) {
     } catch (e) {}
 
     const sent = results.filter((r) => r.status === "sent");
+    // discordAnnounce-v1 - hours that pay get a receipt; quiet hours post nothing
+    if (sent.length > 0) {
+      const total = Math.round(sent.reduce((a, r) => a + r.amount, 0)).toLocaleString("en-US");
+      const link = sent[0].sig ? ` \u00b7 [tx](<https://solscan.io/tx/${sent[0].sig}>)` : "";
+      await discordAnnounce("DISCORD_WEBHOOK_EPOCH",
+        `\ud83c\udf81 **Epoch ${epoch} paid** \u2014 **${total} $VALO** to ${sent.length} trader${sent.length === 1 ? "" : "s"}, on-chain, automatically${link}`);
+    }
     return res.status(200).json({
       ok: true, mode: "live", epoch, executed: true,
       sent: sent.length, failed: results.length - sent.length,

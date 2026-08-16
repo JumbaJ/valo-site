@@ -336,6 +336,22 @@ async function burnLeg(out) {
   };
 }
 
+
+// discordAnnounce-v1 - fire-and-forget receipt into a channel webhook.
+// Never throws, never blocks money: a dead webhook costs 4s max and nothing else.
+const discordAnnounce = async (envKey, content) => {
+  const hook = (process.env[envKey] || "").trim();
+  if (!hook) return;
+  try {
+    await fetch(hook, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
+      signal: AbortSignal.timeout(4000),
+    });
+  } catch (e) {}
+};
+
 export default async function handler(req, res) {
   const cronOk = process.env.CRON_SECRET && req.headers.authorization === `Bearer ${process.env.CRON_SECRET}`;
   const keyOk = process.env.VALO_CRON_KEY && req.headers["x-cron-key"] === process.env.VALO_CRON_KEY;
@@ -403,6 +419,23 @@ export default async function handler(req, res) {
 
   try { await burnLeg(out); }
   catch (e) { out.ok = false; out.burn = { error: String(e.message || e).slice(0, 300) }; }
+
+  // discordAnnounce-v1 - receipts only: legs that executed. Held legs are
+  // the machine being careful, not news.
+  if (out.split && out.split.executed) {
+    await discordAnnounce("DISCORD_WEBHOOK_BURN",
+      `\u2699 **Creator fees split** \u00b7 ${(out.split.claimedSol || 0).toFixed(4)} SOL \u2192 ` +
+      `\ud83d\udd25 ${(out.split.burnedToWalletSol || 0).toFixed(4)} burn \u00b7 ` +
+      `\ud83c\udf81 ${(out.split.epochSol || 0).toFixed(4)} rewards \u00b7 ` +
+      `[tx](<${out.split.solscan || "https://solscan.io"}>)`);
+  }
+  if (out.burn && out.burn.executed) {
+    const n = Math.round(out.burn.burnedTokens || 0).toLocaleString("en-US");
+    const sup = out.burn.supplyNow ? Math.round(out.burn.supplyNow).toLocaleString("en-US") : "?";
+    await discordAnnounce("DISCORD_WEBHOOK_BURN",
+      `\ud83d\udd25 **${n} $VALO burned** \u2014 bought off the market and destroyed.\n` +
+      `Supply now **${sup}** \u00b7 it only goes one way \u00b7 [verify on Solscan](<${out.burn.solscan}>)`);
+  }
 
   return res.status(200).json(out);
 }
