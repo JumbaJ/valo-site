@@ -19826,7 +19826,7 @@ export default function App() {
           both proven on-device. Shown signed-out only. */}
       {isMobile && sb && !cloudUser && !cloudOpen && typeof document !== "undefined" && createPortal(
         <button
-          onClick={() => setTimeout(() => setCloudOpen(true), 380)}
+          onClick={() => { window.location.href = "/signin.html"; }} /* signinLinks-v1 */
           style={{ position: "fixed", bottom: 88, left: "50%", transform: "translateX(-50%)",
             zIndex: 200, display: "flex", alignItems: "center", gap: 8,
             background: "rgba(17,24,39,0.96)", border: `1.5px solid ${T.blue}`,
@@ -20890,10 +20890,7 @@ export default function App() {
             {/* tapFix-v1 - signed out, this sheet is where mis-taps land; give
                 it the door forward instead of a dead end */}
             {!cloudUser && (
-              <button onClick={() => { /* ghostClick-v1 - iOS re-delivers the tap
-                  ~300ms later at the same spot; opening the modal instantly put
-                  its own backdrop under that ghost, which dismissed it. */
-                setClaimOpen(false); setTimeout(() => setCloudOpen(true), 380); }}
+              <button onClick={() => { window.location.href = "/signin.html"; }}
                 style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
                   border: `1.5px solid ${T.blue}`, background: "rgba(59,130,246,0.14)", borderRadius: 10,
                   padding: "11px", marginBottom: 12, cursor: "pointer",
