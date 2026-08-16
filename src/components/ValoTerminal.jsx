@@ -16807,6 +16807,18 @@ export default function App() {
                                     ? `$VALO · ≈ $${(epochYou * (valoLive && +valoLive.price > 0 ? +valoLive.price : 0)).toFixed(2)}`
                                     : isMobile ? "trade to enter" : "trade this hour to be in the split"}
                               </div>
+                              {/* signinInline-v1 - plain anchor in normal flow:
+                                  the one rendering+tap path proven on every device */}
+                              {isMobile && sb && !cloudUser && (
+                                <a href="/signin.html"
+                                  style={{ display: "block", textAlign: "center", marginTop: 8,
+                                    padding: "11px 10px", borderRadius: 10, textDecoration: "none",
+                                    border: `1.5px solid ${T.blue}`, background: "rgba(59,130,246,0.14)",
+                                    fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
+                                    color: T.blue }}>
+                                  ☁ SIGN IN — EARN HOURLY $VALO · free
+                                </a>
+                              )}
                               {youClaimable > 0 && (
                                 <div
                                   onClick={() => setClaimOpen(true)}
