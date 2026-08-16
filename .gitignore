@@ -23,3 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 burn-keypair.json
+patch-*.py
+*.mjs
+burn-keypair.json
