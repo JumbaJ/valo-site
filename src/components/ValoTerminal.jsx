@@ -15636,7 +15636,10 @@ export default function App() {
       const alt = (tk.liveMint && [
         ...(mktHitsRef.current || []), ...(moreToksRef.current || []), ...(floorToksRef.current || []),
       ].find((x) => x && x.liveMint === tk.liveMint && (x.mc || x.tvl))) || null;
-      const mcVal = tk.mc || (alt && alt.mc) || null;
+      // mcDerive-v1 - the field can be bare while price x supply is solid:
+      // supply is chain-anchored on open, so derive what the UI derives
+      const mcVal = tk.mc || (alt && alt.mc)
+        || (tk.price > 0 && tk.supply > 0 ? tk.price * tk.supply : null);
       const tvlRaw = tk.tvl || (alt && alt.tvl) || 0;
       const flags = ((typeof window !== "undefined" && window.__VALO_RISK__) || {})[String(tk.liveMint || tk.id)] || [];
       const r = await fetch("/api/brief", {
