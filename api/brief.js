@@ -155,7 +155,7 @@ Respond ONLY with JSON, no markdown fences, exactly this shape:
       },
       body: JSON.stringify({
         model: (process.env.VALO_BRIEF_MODEL || "claude-haiku-4-5-20251001").trim(),
-        max_tokens: 600,
+        max_tokens: 800,
         system,
         messages: [{ role: "user", content: `Token data:\n${JSON.stringify(facts, null, 2)}` }],
       }),
