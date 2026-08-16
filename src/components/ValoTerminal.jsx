@@ -15600,6 +15600,32 @@ export default function App() {
       if (!sess && typeof window !== "undefined") sess = window.__VALO_SESS__ || null;
       if (!sess) { setAiBrief({ id: tk.id, open: true, error: "no session on this device \u2014 sign out and back in here (code 2)" }); return; }
       const m = tokMetrics(tk);
+      // trueAge-v1 - the snapshot's age comes from the real launch, not the
+      // pool listing. Cache first, one direct fetch if needed - briefs are
+      // on-demand and capped, the call is nothing.
+      let trueCreated = tk.createdAt || null;
+      try {
+        const cc = (typeof window !== "undefined" && window.__VALO_CREATORS__ || {})[tk.liveMint];
+        if (cc && cc.createdAt > 0) trueCreated = cc.createdAt;
+        else if (tk.liveMint) {
+          const cr = await fetch(`/api/creator?mint=${encodeURIComponent(tk.liveMint)}`);
+          if (cr.ok) {
+            const cj = await cr.json();
+            if (cj && cj.createdAt > 0) {
+              trueCreated = cj.createdAt;
+              if (typeof window !== "undefined") window.__VALO_CREATORS__ = { ...(window.__VALO_CREATORS__ || {}), [tk.liveMint]: cj };
+            }
+          }
+        }
+      } catch (e) {}
+      const trueAgeMin = trueCreated ? Math.max(1, Math.round((Date.now() - trueCreated) / 60000)) : (Number.isFinite(m.ageMin) ? Math.round(m.ageMin) : null);
+      // missing basics backfill through the other token sources - the number
+      // is usually on screen, just not on this copy of the object
+      const alt = (tk.liveMint && [
+        ...(mktHitsRef.current || []), ...(moreToksRef.current || []), ...(floorToksRef.current || []),
+      ].find((x) => x && x.liveMint === tk.liveMint && (x.mc || x.tvl))) || null;
+      const mcVal = tk.mc || (alt && alt.mc) || null;
+      const tvlRaw = tk.tvl || (alt && alt.tvl) || 0;
       const flags = ((typeof window !== "undefined" && window.__VALO_RISK__) || {})[String(tk.liveMint || tk.id)] || [];
       const r = await fetch("/api/brief", {
         method: "POST",
@@ -15607,13 +15633,13 @@ export default function App() {
         body: JSON.stringify({
           mint: tk.liveMint || "",
           snapshot: {
-            sym: tk.sym, mc: tk.mc,
-            // riskV2 - an implausible LP reading goes to the model as null,
-            // so it reasons "liquidity unreported" rather than from $0.0000004
-            tvl: tvlBelievable(tk) ? tk.tvl : null,
+            sym: tk.sym, mc: mcVal,
+            // riskV2 + trueAge-v1 - believability judged on the backfilled
+            // values, since the passed object may have carried nulls
+            tvl: ((tvlRaw || 0) >= 50 || (mcVal || 0) < 5000) ? tvlRaw : null,
             vol24: tk.vol24,
             buys: tk.buys, sells: tk.sells, ch: tk.ch,
-            ageMin: Number.isFinite(m.ageMin) ? Math.round(m.ageMin) : null,
+            ageMin: trueAgeMin,
             curvePct: m.curvePct, holders: holdersOf(tk),
             hasSocials: !!(tk.socials && Object.values(tk.socials).some(Boolean)),
             riskFlags: flags.map((f) => f.label),
@@ -15844,9 +15870,16 @@ export default function App() {
           // pool date — a graduated token's pool is days younger than the coin
           if (j.createdAt > 0) {
             const mintFix = selected.liveMint;
-            setTokens((Ts) => Ts.map((x) => (x.liveMint === mintFix && Math.abs((x.createdAt || 0) - j.createdAt) > 3600e3
+            const fixAge = (x) => (x && x.liveMint === mintFix && Math.abs((x.createdAt || 0) - j.createdAt) > 3600e3
               ? { ...x, createdAt: j.createdAt, ageMin: Math.max(1, Math.round((Date.now() - j.createdAt) / 60000)) }
-              : x)));
+              : x);
+            setTokens((Ts) => Ts.map(fixAge));
+            // trueAge-v1 - most opened tokens live in the feed lists, not
+            // `tokens`; the truth patches them too so every future read
+            // (scanner card, risk engine, brief) sees the real launch
+            try { if (mktHitsRef.current) mktHitsRef.current = mktHitsRef.current.map(fixAge); } catch (e) {}
+            try { if (moreToksRef.current) moreToksRef.current = moreToksRef.current.map(fixAge); } catch (e) {}
+            try { if (floorToksRef.current) floorToksRef.current = floorToksRef.current.map(fixAge); } catch (e) {}
           }
         }
       } catch (e) {}
