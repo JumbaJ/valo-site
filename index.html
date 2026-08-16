@@ -27,14 +27,10 @@
   <body>
     <div id="root"></div>
     <script>
-      // Phones: nudge the page so Safari/Chrome collapse their address bar into
-      // the slim form. The bottom toolbar (back · forward · share · bookmarks)
-      // stays exactly where it is, so leaving the site is always one tap away.
+      /* collapseGone-v1 - scroll nudge removed: it put iOS into the
+         displaced hit-box state (taps a row below the paint). --vvh stays. */
       (function () {
         if (!/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) return;
-        var collapse = function () { if (window.scrollY < 2) window.scrollTo(0, 1); };
-        window.addEventListener("load", function () { setTimeout(collapse, 120); setTimeout(collapse, 600); });
-        window.addEventListener("orientationchange", function () { setTimeout(collapse, 350); });
         // keep a CSS var with the true visible height for any layout that needs it
         var setVH = function () {
           var h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
