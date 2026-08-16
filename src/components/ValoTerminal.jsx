@@ -15620,7 +15620,17 @@ export default function App() {
           }
         }
       } catch (e) {}
-      const trueAgeMin = trueCreated ? Math.max(1, Math.round((Date.now() - trueCreated) / 60000)) : (Number.isFinite(m.ageMin) ? Math.round(m.ageMin) : null);
+      // ageCandleFloor-v1 - the oldest candle is a truth floor: the token
+      // cannot be younger than its own visible history
+      let candleFloor = null;
+      try {
+        const c0 = tk.candles && tk.candles.length ? tk.candles[0] : null;
+        const t0 = c0 && (c0.t || c0.time || c0[0]);
+        if (t0 > 0) candleFloor = Math.round((Date.now() - (t0 > 2e12 ? t0 : t0 * 1000)) / 60000);
+      } catch (e) {}
+      const baseAge = trueCreated ? Math.round((Date.now() - trueCreated) / 60000)
+        : (Number.isFinite(m.ageMin) && m.ageMin < 1e6 ? Math.round(m.ageMin) : null);
+      const trueAgeMin = Math.max(1, baseAge || 0, candleFloor || 0) || null;
       // missing basics backfill through the other token sources - the number
       // is usually on screen, just not on this copy of the object
       const alt = (tk.liveMint && [
