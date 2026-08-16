@@ -16816,7 +16816,7 @@ export default function App() {
                                     border: `1.5px solid ${T.blue}`, background: "rgba(59,130,246,0.14)",
                                     fontFamily: T.mono, fontSize: 11, fontWeight: 900, letterSpacing: 1,
                                     color: T.blue }}>
-                                  ☁ SIGN IN — EARN HOURLY $VALO · free
+                                  ☁ SIGN IN — EARN HOURLY $VALO
                                 </a>
                               )}
                               {youClaimable > 0 && (
@@ -18597,21 +18597,22 @@ export default function App() {
                 </span>
               </button>
                 )}
+                {/* headerLb-v1 - sign-in moved into the page flow; this slot
+                    now holds the callout leaderboard instead */}
                 {sb && !cloudUser && (
-                <button onClick={() => setCloudOpen(true)}
+                <button onClick={() => setLbOpen(true)}
                   style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
-                    border: `1.5px solid ${T.blue}`, background: "rgba(59,130,246,0.14)",
+                    border: `1.5px solid ${VALO_PURPLE}`, background: "rgba(125,92,240,0.14)",
                     borderRadius: 9, padding: "5px 8px", lineHeight: 1.1,
                     userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitTapHighlightColor: "transparent",
-                    boxShadow: `0 0 14px ${T.blue}55`,
-                    animation: cloudUser ? "none" : "claimPulse 2.6s ease-in-out infinite" }}>
-                <span style={{ fontSize: 12 }}>☁</span>
+                    boxShadow: `0 0 14px ${VALO_PURPLE}55` }}>
+                <span style={{ fontSize: 12 }}>🏆</span>
                 <span style={{ textAlign: "left" }}>
-                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 0.4, color: T.blue }}>
-                    {cloudUser ? "SIGNED IN" : "SIGN UP"}
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 10, fontWeight: 900, letterSpacing: 0.4, color: VALO_PURPLE }}>
+                    LEADERBOARD
                   </span>
-                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 6.8, color: cloudUser ? (cloudSynced ? T.green : T.amber) : "rgba(138,168,248,0.85)", letterSpacing: 0.2 }}>
-                    {cloudUser ? (cloudSynced ? "● SYNCED" : "● SYNCING…") : "free · sign in"}
+                  <span style={{ display: "block", fontFamily: T.mono, fontSize: 6.8, color: "rgba(167,139,250,0.85)", letterSpacing: 0.2 }}>
+                    callouts · ranks
                   </span>
                 </span>
               </button>
