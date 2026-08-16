@@ -115,6 +115,35 @@ export default async function handler(req, res) {
     const EPOCH_ADDR = (process.env.VALO_EPOCH || "").trim();
     if (!MINT || !EPOCH_ADDR) return res.status(400).json({ error: "VALO_MINT and VALO_EPOCH must be set" });
 
+    // calloutCross-v1 - announce calls that crossed 2x since the last run.
+    // Own try/catch: this must never touch payout money. Runs every hour,
+    // paying or quiet - a 2x on a dead hour still counts.
+    try {
+      if ((process.env.DISCORD_WEBHOOK_CALLOUTS || "").trim()) {
+        const since = new Date(Date.now() - 48 * 3600e3).toISOString();
+        const crossed = await sb(`callouts?peak_mult=gte.2&ts=gte.${since}&select=id,handle,sym,mc_at,peak_mult,peak_mc&order=peak_mult.desc&limit=50`);
+        if (crossed && crossed.length) {
+          const ids = crossed.map((c) => c.id).join(",");
+          const seen = await sb(`callout_announced?id=in.(${ids})&select=id`);
+          const seenSet = new Set((seen || []).map((r) => r.id));
+          const fresh = crossed.filter((c) => !seenSet.has(c.id)).slice(0, 5);
+          for (const c of fresh) {
+            const fm = (v) => v >= 1e6 ? `$${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(1)}K` : `$${Math.round(v)}`;
+            await discordAnnounce("DISCORD_WEBHOOK_CALLOUTS",
+              `\ud83d\udce3 **${c.handle || "a trader"}'s call on $${c.sym} just hit ${(+c.peak_mult).toFixed(1)}x** \u2014 ` +
+              `called at ${fm(+c.mc_at || 0)}, peaked at ${fm(+c.peak_mc || 0)} \u00b7 riding the header on valotrading.app`);
+          }
+          if (fresh.length) {
+            await sb("callout_announced", {
+              method: "POST",
+              headers: { prefer: "resolution=merge-duplicates" },
+              body: JSON.stringify(fresh.map((c) => ({ id: c.id }))),
+            });
+          }
+        }
+      }
+    } catch (e) {}
+
     const force = String(req.query.force || "") === "1";
     const nowEpoch = Math.floor(Date.now() / 3600e3);
     const epoch = String(req.query.epoch || (nowEpoch - 1));
