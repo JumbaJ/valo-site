@@ -8002,7 +8002,7 @@ function DebugConsole({ cloudOpen, onTest }) {
 // briefShare-v1 - draw an AI read to a branded PNG and hand it to Discord.
 const VALO_DISCORD_GUILD = "1538559930578247830";
 const VALO_DISCORD_AIREADS = "1538564303148417085";
-const briefToPng = async ({ brief, sym, mc, mint }) => {
+const briefToPng = async ({ brief, sym, mc, mint, candles, tvl, vol24, holders, buys, sells, ageMin }) => {
   const W = 720, PAD = 26, LH = 19;
   const wrap = (ctx, text, max) => {
     const words = String(text || "").split(/\s+/); const lines = []; let cur = "";
@@ -8019,7 +8019,10 @@ const briefToPng = async ({ brief, sym, mc, mint }) => {
   const readLines = wrap(probe, brief.read, W - PAD * 2);
   const riskLines = (brief.risks || []).flatMap((r) => wrap(probe, "\u00b7 " + r, W - PAD * 2 - 10));
   const watchLines = (brief.watch || []).flatMap((w) => wrap(probe, "\u00b7 " + w, W - PAD * 2 - 10));
-  const H = 96 + readLines.length * LH + (riskLines.length ? 30 + riskLines.length * LH : 0)
+  const cds = Array.isArray(candles) ? candles.slice(-60).filter((c) => c && Number.isFinite(+c.c)) : [];
+  const CHART_H = cds.length >= 8 ? 150 : 0;                 // no chart, no dead space
+  const H = 96 + CHART_H + (CHART_H ? 12 : 0) + 30 + readLines.length * LH
+    + (riskLines.length ? 30 + riskLines.length * LH : 0)
     + (watchLines.length ? 30 + watchLines.length * LH : 0) + 64;
   const cv = document.createElement("canvas");
   cv.width = W * 2; cv.height = H * 2;                       // 2x for crisp text
@@ -8032,7 +8035,38 @@ const briefToPng = async ({ brief, sym, mc, mint }) => {
   ctx.font = "11px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#5c6478";
   const conf = `${brief.confidence || "thin"} data`;
   ctx.fillText(conf, W - PAD - ctx.measureText(conf).width, y);
-  y += 28;
+  y += 20;
+  // shareChart-v1 - the candles the chart was showing at share time
+  if (CHART_H) {
+    const cx = PAD, cw = W - PAD * 2, ch = CHART_H - 18, cy = y;
+    let lo = Infinity, hi = -Infinity;
+    for (const c of cds) { lo = Math.min(lo, +c.l || +c.c); hi = Math.max(hi, +c.h || +c.c); }
+    if (hi <= lo) hi = lo + 1e-12;
+    const px = (v) => cy + ch - ((v - lo) / (hi - lo)) * ch;
+    const step = cw / cds.length, bw = Math.max(2, step * 0.62);
+    ctx.strokeStyle = "rgba(255,255,255,0.05)";
+    for (let g = 0; g <= 3; g++) { const gy = cy + (ch / 3) * g; ctx.beginPath(); ctx.moveTo(cx, gy); ctx.lineTo(cx + cw, gy); ctx.stroke(); }
+    for (let i = 0; i < cds.length; i++) {
+      const c = cds[i], up = (+c.c) >= (+c.o || +c.c);
+      const x0 = cx + i * step + step / 2;
+      ctx.strokeStyle = up ? "#16c784" : "#ff5577"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x0, px(+c.h || +c.c)); ctx.lineTo(x0, px(+c.l || +c.c)); ctx.stroke();
+      ctx.fillStyle = up ? "#16c784" : "#ff5577";
+      const yO = px(+c.o || +c.c), yC = px(+c.c);
+      ctx.fillRect(x0 - bw / 2, Math.min(yO, yC), bw, Math.max(1.5, Math.abs(yC - yO)));
+    }
+    const last = +cds[cds.length - 1].c;
+    ctx.strokeStyle = "rgba(125,92,240,0.55)"; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(cx, px(last)); ctx.lineTo(cx + cw, px(last)); ctx.stroke(); ctx.setLineDash([]);
+    y += CHART_H;
+    // metrics strip
+    const fmtK = (v) => !(v > 0) ? "\u2014" : v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(1)}K` : `$${Math.round(v)}`;
+    const ageTxt = ageMin > 0 ? (ageMin >= 1440 ? `${(ageMin / 1440).toFixed(1)}d` : ageMin >= 60 ? `${Math.round(ageMin / 60)}h` : `${Math.round(ageMin)}m`) : "\u2014";
+    const bsTxt = (buys > 0 || sells > 0) ? `${buys || 0}/${sells || 0}` : "\u2014";
+    ctx.font = "11px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#8a93a6";
+    ctx.fillText(`AGE ${ageTxt}   LP ${fmtK(tvl)}   24H VOL ${fmtK(vol24)}   HOLDERS ${holders > 0 ? holders.toLocaleString("en-US") : "\u2014"}   B/S ${bsTxt}`, PAD, y);
+    y += 24;
+  }
   ctx.font = "13px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#e6e9f0";
   for (const l of readLines) { ctx.fillText(l, PAD, y); y += LH; }
   if (riskLines.length) {
@@ -8050,8 +8084,13 @@ const briefToPng = async ({ brief, sym, mc, mint }) => {
   y = H - 26;
   ctx.strokeStyle = "rgba(255,255,255,0.08)"; ctx.beginPath(); ctx.moveTo(PAD, y - 16); ctx.lineTo(W - PAD, y - 16); ctx.stroke();
   ctx.font = "11px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#8a93a6";
-  const mcTxt = mc > 0 ? (mc >= 1e6 ? `$${(mc / 1e6).toFixed(2)}M` : `$${(mc / 1e3).toFixed(0)}K`) : "\u2014";
-  ctx.fillText(`$${sym} \u00b7 MC ${mcTxt} \u00b7 ${String(mint || "").slice(0, 6)}\u2026${String(mint || "").slice(-6)}`, PAD, y);
+  // shareChart-v1 - an mc above $10B on a curve token is a poisoned reading,
+  // and a dash beats publishing a fabricated number forever
+  const mcSane = mc > 0 && mc < 1e10 ? mc : 0;
+  const mcTxt = mcSane > 0 ? (mcSane >= 1e6 ? `$${(mcSane / 1e6).toFixed(2)}M` : `$${(mcSane / 1e3).toFixed(0)}K`) : "\u2014";
+  const when = new Date();
+  const stamp = `${when.toISOString().slice(0, 10)} ${String(when.getUTCHours()).padStart(2, "0")}:${String(when.getUTCMinutes()).padStart(2, "0")} UTC`;
+  ctx.fillText(`$${sym} \u00b7 MC ${mcTxt} \u00b7 ${String(mint || "").slice(0, 6)}\u2026${String(mint || "").slice(-6)} \u00b7 ${stamp}`, PAD, y);
   ctx.fillStyle = "#7d5cf0"; ctx.font = "700 11px ui-monospace, Menlo, monospace";
   const brand = "valotrading.app";
   ctx.fillText(brand, W - PAD - ctx.measureText(brand).width, y);
@@ -15730,8 +15769,9 @@ export default function App() {
       ].find((x) => x && x.liveMint === tk.liveMint && (x.mc || x.tvl))) || null;
       // mcDerive-v1 - the field can be bare while price x supply is solid:
       // supply is chain-anchored on open, so derive what the UI derives
-      const mcVal = tk.mc || (alt && alt.mc)
+      let mcVal = tk.mc || (alt && alt.mc)
         || (tk.price > 0 && tk.supply > 0 ? tk.price * tk.supply : null);
+      if (mcVal > 1e10) mcVal = null;   // shareChart-v1 - impossible cap = unreported
       const tvlRaw = tk.tvl || (alt && alt.tvl) || 0;
       const flags = ((typeof window !== "undefined" && window.__VALO_RISK__) || {})[String(tk.liveMint || tk.id)] || [];
       const r = await fetch("/api/brief", {
@@ -16739,7 +16779,11 @@ export default function App() {
                                       onClick={() => shareBriefToDiscord(
                                         { brief: aiBrief.brief, sym: selected.sym,
                                           mc: (selected.mc || (selected.price > 0 && selected.supply > 0 ? selected.price * selected.supply : 0)),
-                                          mint: selected.liveMint },
+                                          mint: selected.liveMint,
+                                          candles: selected.candles, tvl: selected.tvl, vol24: selected.vol24,
+                                          holders: holdersFloorOf(selected) ? null : holdersOf(selected),
+                                          buys: selected.buys, sells: selected.sells,
+                                          ageMin: selected.createdAt > 0 ? Math.round((Date.now() - selected.createdAt) / 60000) : null },
                                         (t) => pushNotif({ type: "system", text: t, noSave: true }))}
                                       style={{ width: "100%", marginTop: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
                                         border: `1px solid ${VALO_PURPLE}66`, background: "rgba(125,92,240,0.12)", borderRadius: 8,
