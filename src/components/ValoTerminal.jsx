@@ -7999,6 +7999,94 @@ function DebugConsole({ cloudOpen, onTest }) {
   );
 }
 
+// briefShare-v1 - draw an AI read to a branded PNG and hand it to Discord.
+const VALO_DISCORD_GUILD = "1538559930578247830";
+const VALO_DISCORD_AIREADS = "1538564303148417085";
+const briefToPng = async ({ brief, sym, mc, mint }) => {
+  const W = 720, PAD = 26, LH = 19;
+  const wrap = (ctx, text, max) => {
+    const words = String(text || "").split(/\s+/); const lines = []; let cur = "";
+    for (const w of words) {
+      const t = cur ? cur + " " + w : w;
+      if (ctx.measureText(t).width > max && cur) { lines.push(cur); cur = w; } else cur = t;
+    }
+    if (cur) lines.push(cur);
+    return lines;
+  };
+  // measure pass
+  const probe = document.createElement("canvas").getContext("2d");
+  probe.font = "13px ui-monospace, Menlo, monospace";
+  const readLines = wrap(probe, brief.read, W - PAD * 2);
+  const riskLines = (brief.risks || []).flatMap((r) => wrap(probe, "\u00b7 " + r, W - PAD * 2 - 10));
+  const watchLines = (brief.watch || []).flatMap((w) => wrap(probe, "\u00b7 " + w, W - PAD * 2 - 10));
+  const H = 96 + readLines.length * LH + (riskLines.length ? 30 + riskLines.length * LH : 0)
+    + (watchLines.length ? 30 + watchLines.length * LH : 0) + 64;
+  const cv = document.createElement("canvas");
+  cv.width = W * 2; cv.height = H * 2;                       // 2x for crisp text
+  const ctx = cv.getContext("2d"); ctx.scale(2, 2);
+  ctx.fillStyle = "#0d1018"; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = "rgba(125,92,240,0.5)"; ctx.lineWidth = 2; ctx.strokeRect(1, 1, W - 2, H - 2);
+  let y = 40;
+  ctx.font = "700 15px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#7d5cf0";
+  ctx.fillText(`\u2728 AI READ \u00b7 ${sym}`, PAD, y);
+  ctx.font = "11px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#5c6478";
+  const conf = `${brief.confidence || "thin"} data`;
+  ctx.fillText(conf, W - PAD - ctx.measureText(conf).width, y);
+  y += 28;
+  ctx.font = "13px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#e6e9f0";
+  for (const l of readLines) { ctx.fillText(l, PAD, y); y += LH; }
+  if (riskLines.length) {
+    y += 14; ctx.font = "700 11px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#ff5577";
+    ctx.fillText("RISKS", PAD, y); y += LH;
+    ctx.font = "12px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#9aa3b8";
+    for (const l of riskLines) { ctx.fillText(l, PAD + 6, y); y += LH; }
+  }
+  if (watchLines.length) {
+    y += 14; ctx.font = "700 11px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#4c9aff";
+    ctx.fillText("WATCH", PAD, y); y += LH;
+    ctx.font = "12px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#9aa3b8";
+    for (const l of watchLines) { ctx.fillText(l, PAD + 6, y); y += LH; }
+  }
+  y = H - 26;
+  ctx.strokeStyle = "rgba(255,255,255,0.08)"; ctx.beginPath(); ctx.moveTo(PAD, y - 16); ctx.lineTo(W - PAD, y - 16); ctx.stroke();
+  ctx.font = "11px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#8a93a6";
+  const mcTxt = mc > 0 ? (mc >= 1e6 ? `$${(mc / 1e6).toFixed(2)}M` : `$${(mc / 1e3).toFixed(0)}K`) : "\u2014";
+  ctx.fillText(`$${sym} \u00b7 MC ${mcTxt} \u00b7 ${String(mint || "").slice(0, 6)}\u2026${String(mint || "").slice(-6)}`, PAD, y);
+  ctx.fillStyle = "#7d5cf0"; ctx.font = "700 11px ui-monospace, Menlo, monospace";
+  const brand = "valotrading.app";
+  ctx.fillText(brand, W - PAD - ctx.measureText(brand).width, y);
+  return new Promise((res) => cv.toBlob((b) => res(b), "image/png"));
+};
+const shareBriefToDiscord = async (args, notify) => {
+  try {
+    const blob = await briefToPng(args);
+    if (!blob) { notify("\u26a0 could not render the read"); return; }
+    const file = new File([blob], `valo-ai-read-${args.sym}.png`, { type: "image/png" });
+    // mobile: the native share sheet carries the image straight into Discord
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); return; } catch (e) { /* user cancelled or unsupported */ }
+    }
+    // desktop: clipboard + deep link to #ai-reads
+    let onClip = false;
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      onClip = true;
+    } catch (e) {}
+    if (!onClip) {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = file.name; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }
+    notify(onClip ? "\ud83d\udcf8 read copied \u2014 paste it in #ai-reads (Ctrl+V) and add your take"
+                  : "\ud83d\udcf8 read downloaded \u2014 drop it in #ai-reads and add your take");
+    const app = `discord://-/channels/${VALO_DISCORD_GUILD}/${VALO_DISCORD_AIREADS}`;
+    const web = `https://discord.com/channels/${VALO_DISCORD_GUILD}/${VALO_DISCORD_AIREADS}`;
+    const t0 = Date.now();
+    window.location.href = app;                              // try the desktop app first
+    setTimeout(() => { if (Date.now() - t0 < 1600) window.open(web, "_blank"); }, 1200);
+  } catch (e) { notify(`\u26a0 share failed: ${String(e.message || e).slice(0, 60)}`); }
+};
+
 // riskEngine-v1 ─ deterministic risk flags over live token state.
 // Facts about the present, never predictions - which is why these may alert
 // automatically where a model's opinion never should.
@@ -16642,6 +16730,19 @@ export default function App() {
                                       analysis, not advice · refreshes every 5 min
                                       {Number.isFinite(aiBrief.remaining) && <span style={{ marginLeft: "auto" }}>{aiBrief.remaining} left today</span>}
                                     </div>
+                                    {/* briefShare-v1 - render to PNG, hand to Discord */}
+                                    <button
+                                      onClick={() => shareBriefToDiscord(
+                                        { brief: aiBrief.brief, sym: selected.sym,
+                                          mc: (selected.mc || (selected.price > 0 && selected.supply > 0 ? selected.price * selected.supply : 0)),
+                                          mint: selected.liveMint },
+                                        (t) => pushNotif({ type: "system", text: t, noSave: true }))}
+                                      style={{ width: "100%", marginTop: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                                        border: `1px solid ${VALO_PURPLE}66`, background: "rgba(125,92,240,0.12)", borderRadius: 8,
+                                        padding: "8px", cursor: "pointer", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900,
+                                        letterSpacing: 1, color: VALO_PURPLE }}>
+                                      📤 SHARE TO #AI-READS
+                                    </button>
                                   </>
                                 )}
                               </div>
