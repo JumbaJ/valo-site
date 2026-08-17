@@ -2687,11 +2687,12 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
           )}
           {held.length > 0 && (
             <button onClick={() => (liveMode ? (onRealSellAll && onRealSellAll()) : onCloseAll && onCloseAll())}
-              style={{ width: "100%", boxSizing: "border-box", border: "none", borderRadius: 10, padding: "10px", fontFamily: T.mono, fontWeight: 800,
-                background: bulkGain ? T.green : T.red, color: bulkGain ? "#07130d" : "#170808", cursor: "pointer", lineHeight: 1.35,
-                boxShadow: `0 0 14px ${bulkGain ? "rgba(22,199,132,0.35)" : "rgba(234,57,67,0.35)"}` }}>
-              <div style={{ fontSize: 12.5 }}>✕ CLOSE ALL · {bulkGain ? "+" : "−"}${Math.abs(totalPnlUsd).toFixed(2)}</div>
-              <div style={{ fontSize: 8.5, opacity: 0.9 }}>
+              style={{ width: "100%", boxSizing: "border-box", borderRadius: 9, padding: "9px 10px", fontFamily: T.mono, fontWeight: 600,
+                border: `1px solid ${T.border2}`, /* ledger-v1 - closing dust is not a celebration */
+                background: "rgba(255,255,255,0.02)", color: T.dim, cursor: "pointer", lineHeight: 1.4 }}>
+              <div style={{ fontSize: 11.5, display: "flex", justifyContent: "space-between" }}><span>Close all positions</span>
+                <span style={{ color: bulkGain ? T.green : T.red }}>{bulkGain ? "+" : "−"}${Math.abs(totalPnlUsd).toFixed(2)}</span></div>
+              <div style={{ fontSize: 8.5, color: T.faint, textAlign: "left" }}>
                 {liveMode
                   ? `${chainRows.length} token${chainRows.length === 1 ? "" : "s"} → ${fmt$(totalUsdLive)} · sells settle on chain`
                   : `put in $${investedUsd.toFixed(0)} → now $${currentUsd.toFixed(0)} · ${totalSol.toFixed(2)} SOL`}
@@ -2710,10 +2711,10 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
                     <span style={{ display: "block", fontFamily: T.mono, fontSize: 11.5, fontWeight: 800, color: T.text,
                       overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {r.sym}
-                      <span style={{ marginLeft: 6, fontSize: 7.5, fontWeight: 900, letterSpacing: 0.6,
-                        color: r.src === "turbo" ? T.amber : "#a98fff",
-                        border: `1px solid ${r.src === "turbo" ? T.amber : "#a98fff"}55`, borderRadius: 999, padding: "1px 5px" }}>
-                        {r.src === "turbo" ? "⚡ TURBO" : "👻 PHANTOM"}
+                      <span style={{ marginLeft: 6, fontSize: 7, fontWeight: 600, letterSpacing: 0.8,
+                        color: T.faint, /* ledger-v1 - provenance is metadata, not fireworks */
+                        border: `1px solid ${T.border}`, borderRadius: 4, padding: "1px 5px" }}>
+                        {r.src === "turbo" ? "turbo" : "phantom"}
                       </span>
                     </span>
                     <span style={{ display: "block", fontFamily: T.mono, fontSize: 8.5, color: T.faint }}>
@@ -7085,21 +7086,20 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
             {UI_NEXT && liveMode && (
               <button data-tour="turbo" onClick={() => setTurboPop((v) => !v)}
                 title={!turboState ? "Set up your ⚡ TURBO wallet" : turboState.unlocked ? "Turbo controls" : "Unlock turbo"}
-                style={{ position: "absolute", left: 8, top: 8, padding: "3px 9px", fontFamily: T.mono, fontSize: 9,
-                  fontWeight: 900, letterSpacing: 0.8, cursor: "pointer", borderRadius: 7,
-                  border: `1px solid ${turboState && turboState.unlocked ? (turboAutoOn ? VALO_PURPLE : T.green) : T.border2}`,
-                  background: turboState && turboState.unlocked ? (turboAutoOn ? "rgba(125,92,240,0.16)" : "rgba(22,199,132,0.10)") : "rgba(255,255,255,0.03)",
-                  color: turboState && turboState.unlocked ? (turboAutoOn ? VALO_PURPLE : T.green) : T.faint,
-                  boxShadow: turboState && turboState.unlocked && turboAutoOn ? `0 0 10px ${VALO_PURPLE}55` : "none" }}>
-                {turboState && turboState.unlocked ? (turboAutoOn ? "◆ ARMED" : "⚡ READY") : "🔒 ARM"}{turboPop ? " ▴" : ""}
+                style={{ position: "absolute", left: 8, top: 8, padding: "3px 9px", fontFamily: T.mono, fontSize: 8.5,
+                  fontWeight: 700, letterSpacing: 1, cursor: "pointer", borderRadius: 6,
+                  border: `1px solid ${T.border2}`, /* ledger-v1 - status, not billboard */
+                  background: "transparent",
+                  color: turboState && turboState.unlocked ? (turboAutoOn ? T.text : T.dim) : T.faint }}>
+                {turboState && turboState.unlocked ? (turboAutoOn ? "● armed" : "○ ready") : "○ arm"}{turboPop ? " ▴" : ""}
               </button>
             )}
             <div style={{ userSelect: "none" }}>
               <div onClick={() => chainOn && turboState && setWalletView((v) => (v === "turbo" ? "phantom" : "turbo"))}
                 title={chainOn && turboState ? "Tap to flip between your TURBO and PHANTOM wallet values" : undefined}
-                style={{ fontFamily: T.mono, fontSize: 9, color: chainOn ? (walletView === "phantom" ? "#AB9FF2" : T.amber) : T.faint, letterSpacing: 1,
+                style={{ fontFamily: T.mono, fontSize: 9, color: chainOn ? (walletView === "phantom" ? "#AB9FF2" : T.faint) : T.faint, letterSpacing: 1.4,
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: chainOn && turboState ? "pointer" : "default" }}>
-                {chainOn ? (turboState ? (walletView === "phantom" ? "👻 PHANTOM WALLET ⇄" : "⚡ TURBO WALLET ⇄") : "⛓ WALLET") : liveMode ? "⛓ WALLET" : "TOTAL EQUITY"}
+                {chainOn ? (turboState ? (walletView === "phantom" ? "WALLET · phantom ⇄" : "WALLET · turbo ⇄") : "WALLET") : liveMode ? "WALLET" : "TOTAL EQUITY"}
               </div>
               {chainOn ? (
                 <>
@@ -7111,12 +7111,26 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                       : (walletChain && walletChain.solTrading != null ? walletChain.solTrading : chSol);
                     const vEq = vSol * SOL_USD + tokUsdOf(walletView === "phantom" ? "phantom" : "turbo");
                     const showEq = turboState ? vEq : chEquity;
+                    // ledger-v1 - allocation: SOL vs tokens as proportion
+                    const solUsdV = vSol * SOL_USD;
+                    const tokUsdV = Math.max(0, vEq - solUsdV);
+                    const solPct = vEq > 0 ? Math.round((solUsdV / vEq) * 100) : 0;
                     return (
                       <div onClick={() => turboState && setWalletView((v) => (v === "turbo" ? "phantom" : "turbo"))}
                         title={turboState ? "Tap to flip turbo ⇄ phantom" : undefined}
-                        style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 800, cursor: turboState ? "pointer" : "default",
-                          color: walletView === "phantom" ? "#AB9FF2" : T.amber }}>
+                        style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 600, cursor: turboState ? "pointer" : "default",
+                          letterSpacing: 0.3, /* ledger-v1 */ color: walletView === "phantom" ? "#AB9FF2" : T.text }}>
                         {mask(`$${showEq.toLocaleString(undefined, { maximumFractionDigits: showEq < 100 ? 2 : 0 })}`)}
+                        {vEq > 0 && (
+                          <div onClick={(e) => e.stopPropagation()} style={{ cursor: "default", margin: "7px auto 0", maxWidth: 240 }}>
+                            <div style={{ display: "flex", height: 4, borderRadius: 2, overflow: "hidden", background: "rgba(255,255,255,0.06)" }}>
+                              <div style={{ width: `${solPct}%`, background: "rgba(255,255,255,0.34)" }} />
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3, fontFamily: T.mono, fontSize: 7.5, color: T.faint, fontWeight: 400 }}>
+                              <span>{mask(`SOL ${solPct}%`)}</span><span>{mask(`tokens ${100 - solPct}%`)}</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
