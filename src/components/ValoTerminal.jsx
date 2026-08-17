@@ -307,6 +307,15 @@ const UI_NEXT = (() => {
   } catch (e) { return true; }
 })();
 
+// deepLink-v1 - /t/<mint> opens that chart directly. Parsed once at load;
+// consumed by the boot effect below.
+const DEEP_MINT = (() => {
+  try {
+    const m = window.location.pathname.match(/^\/t\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);
+    return m ? m[1] : null;
+  } catch (e) { return null; }
+})();
+
 // Nine durations is more than anyone switches between. The five people use
 // stay visible; the rest live behind "···" so nothing is lost.
 const TIMEFRAMES_PRIMARY = new Set([1, 5, 15, 60, 1440]);
@@ -13745,6 +13754,32 @@ export default function App() {
       setSel(card.id); setClickMode(null);
     } catch (e) {}
   }, []);
+  // deepLink-v1 - a /t/<mint> arrival opens that pair once feeds are up.
+  // Two attempts: fast path, then a retry for slow boots.
+  const deepDoneRef = useRef(false);
+  useEffect(() => {
+    if (!DEEP_MINT || deepDoneRef.current) return;
+    const go = () => {
+      if (deepDoneRef.current) return;
+      const already = (tokensRef.current || []).find((t) => t.liveMint === DEEP_MINT);
+      if (already) { setSel(already.id); deepDoneRef.current = true; return; }
+      try { openTokenByMint(DEEP_MINT); deepDoneRef.current = true; } catch (e) {}
+    };
+    const t1 = setTimeout(go, 1200);
+    const t2 = setTimeout(go, 4000);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // deepLink-v1 - the address bar follows the chart: copying the URL always
+  // captures what you are looking at. replaceState keeps history clean.
+  useEffect(() => {
+    try {
+      const tk = (tokensRef.current || []).find((t) => t.id === sel);
+      if (tk && tk.liveMint) {
+        window.history.replaceState(null, "", `/t/${tk.liveMint}${window.location.search || ""}`);
+      }
+    } catch (e) {}
+  }, [sel]);
   const openAnyToken = useCallback((id, tokObj = null) => {
     holdScroll();
     const board = tokensRef.current || [];

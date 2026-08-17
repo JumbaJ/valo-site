@@ -35,6 +35,21 @@
           "value": "no-store, must-revalidate"
         }
       ]
+    },
+    {
+      "source": "/t/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, must-revalidate"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/t/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
