@@ -316,6 +316,19 @@ const DEEP_MINT = (() => {
   } catch (e) { return null; }
 })();
 
+// ledger-v2 - the wallet's warm-neutral palette. Color means P/L, nothing else.
+const LG = { card: "#1c1c1a", line: "rgba(232,230,223,0.09)", line2: "rgba(232,230,223,0.16)",
+  ink: "#e8e6df", sub: "#9a988f", faint: "#6b6a63", red: "#e0524d", green: "#57a35f",
+  track: "rgba(232,230,223,0.10)", fillBar: "rgba(232,230,223,0.38)" };
+// ledger-v2 - a dependency-free toast: the wallet component has no notifier prop
+const lgToast = (t) => { try {
+  const d = document.createElement("div"); d.textContent = t;
+  d.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99999;" +
+    "background:#1c1c1a;border:1px solid rgba(232,230,223,0.18);color:#e8e6df;" +
+    "font:600 11px ui-monospace,Menlo,monospace;padding:9px 14px;border-radius:8px";
+  document.body.appendChild(d); setTimeout(() => d.remove(), 2600);
+} catch (e) {} };
+
 // Nine durations is more than anyone switches between. The five people use
 // stay visible; the rest live behind "···" so nothing is lost.
 const TIMEFRAMES_PRIMARY = new Set([1, 5, 15, 60, 1440]);
@@ -2686,7 +2699,8 @@ function HeldPositions({ positions, tokens, pay, onOpenToken, onSellAll, onClose
             </div>
           )}
           {held.length > 0 && (
-            <button onClick={() => (liveMode ? (onRealSellAll && onRealSellAll()) : onCloseAll && onCloseAll())}
+            <button id="valo-close-all" ref={(el) => { if (el && !el._sweepWired) { el._sweepWired = true; window.addEventListener("valo-sweep", () => { try { el.click(); } catch (e) {} }); } }}
+              onClick={() => (liveMode ? (onRealSellAll && onRealSellAll()) : onCloseAll && onCloseAll())}
               style={{ width: "100%", boxSizing: "border-box", borderRadius: 9, padding: "9px 10px", fontFamily: T.mono, fontWeight: 600,
                 border: `1px solid ${T.border2}`, /* ledger-v1 - closing dust is not a celebration */
                 background: "rgba(255,255,255,0.02)", color: T.dim, cursor: "pointer", lineHeight: 1.4 }}>
@@ -7075,31 +7089,56 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
         <>
           {/* total equity + pnl + privacy eye — under UI_NEXT this IS the wallet card */}
           <div style={UI_NEXT
-            ? { textAlign: "center", marginBottom: 0, position: "relative", padding: "16px 12px 14px",
-                borderRadius: 0, border: `1px solid ${T.border2}`,
-                background: "#11151d" }
+            ? { textAlign: "center", marginBottom: 0, position: "relative", padding: "0 0 14px",
+                borderRadius: 12, border: `1px solid ${LG.line}`,
+                background: LG.card, overflow: "hidden" }
             : { textAlign: "center", marginBottom: 12, position: "relative" }}>
+            {/* ledger-v2 - identity row */}
+            {UI_NEXT && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "12px 14px", borderBottom: `1px solid ${LG.line}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(232,230,223,0.08)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontFamily: T.mono, fontSize: 11, fontWeight: 600, color: LG.sub, flexShrink: 0 }}>
+                    {(username || "??").slice(0, 2).toUpperCase()}
+                  </div>
+                  <div style={{ textAlign: "left", minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: LG.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{username || "trader"}</div>
+                    {turboState && turboState.pubkey && (
+                      <div onClick={() => { try { navigator.clipboard.writeText(turboState.pubkey); } catch (e) {} }}
+                        title="Copy turbo address"
+                        style={{ fontFamily: T.mono, fontSize: 9.5, color: LG.faint, cursor: "pointer" }}>
+                        {turboState.pubkey.slice(0, 4)}…{turboState.pubkey.slice(-4)} ⧉
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }} />
+              </div>
+            )}
             <button onClick={() => setHideBalance && setHideBalance((v) => !v)} title="Hide/show balances"
-              style={{ position: "absolute", right: UI_NEXT ? 8 : 0, top: UI_NEXT ? 8 : 0, ...chip(false), padding: "3px 8px", fontSize: 11 }}>
-              {hideBalance ? "🙈" : "👁"}
+              style={{ position: "absolute", right: UI_NEXT ? 12 : 0, top: UI_NEXT ? 15 : 0, border: "none",
+                background: "transparent", cursor: "pointer", padding: "3px", fontSize: 12, color: LG.faint }}>
+              {hideBalance ? "\ud83d\ude48" : "\ud83d\udc41"}
             </button>
             {UI_NEXT && liveMode && (
               <button data-tour="turbo" onClick={() => setTurboPop((v) => !v)}
                 title={!turboState ? "Set up your ⚡ TURBO wallet" : turboState.unlocked ? "Turbo controls" : "Unlock turbo"}
-                style={{ position: "absolute", left: 8, top: 8, padding: "3px 9px", fontFamily: T.mono, fontSize: 8.5,
-                  fontWeight: 700, letterSpacing: 1, cursor: "pointer", borderRadius: 6,
-                  border: `1px solid ${T.border2}`, /* ledger-v1 - status, not billboard */
+                style={{ position: "absolute", right: 42, top: 14, padding: "4px 10px", fontFamily: T.mono, fontSize: 9,
+                  fontWeight: 600, letterSpacing: 0.6, cursor: "pointer", borderRadius: 7,
+                  border: `1px solid ${LG.line2}`, /* ledger-v2 - lives in the identity band */
                   background: "transparent",
-                  color: turboState && turboState.unlocked ? (turboAutoOn ? T.text : T.dim) : T.faint }}>
-                {turboState && turboState.unlocked ? (turboAutoOn ? "● armed" : "○ ready") : "○ arm"}{turboPop ? " ▴" : ""}
+                  color: turboState && turboState.unlocked ? (turboAutoOn ? LG.ink : LG.sub) : LG.faint }}>
+                {turboState && turboState.unlocked ? (turboAutoOn ? "\ud83d\udd12 armed" : "\u25cb ready") : "\u25cb arm"}{turboPop ? " \u25b4" : ""}
               </button>
             )}
             <div style={{ userSelect: "none" }}>
               <div onClick={() => chainOn && turboState && setWalletView((v) => (v === "turbo" ? "phantom" : "turbo"))}
                 title={chainOn && turboState ? "Tap to flip between your TURBO and PHANTOM wallet values" : undefined}
-                style={{ fontFamily: T.mono, fontSize: 9, color: chainOn ? (walletView === "phantom" ? "#AB9FF2" : T.faint) : T.faint, letterSpacing: 1.4,
+                style={{ fontFamily: T.mono, fontSize: 10, color: chainOn ? (walletView === "phantom" ? "#AB9FF2" : LG.sub) : LG.sub, letterSpacing: 0.4, textTransform: "none", padding: "12px 14px 0", justifyContent: "flex-start",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: chainOn && turboState ? "pointer" : "default" }}>
-                {chainOn ? (turboState ? (walletView === "phantom" ? "WALLET · phantom ⇄" : "WALLET · turbo ⇄") : "WALLET") : liveMode ? "WALLET" : "TOTAL EQUITY"}
+                {chainOn ? (turboState ? (walletView === "phantom" ? "Net worth · phantom ⇄" : "Net worth · turbo ⇄") : "Net worth") : liveMode ? "Net worth" : "Total equity"}
               </div>
               {chainOn ? (
                 <>
@@ -7118,19 +7157,36 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
                     return (
                       <div onClick={() => turboState && setWalletView((v) => (v === "turbo" ? "phantom" : "turbo"))}
                         title={turboState ? "Tap to flip turbo ⇄ phantom" : undefined}
-                        style={{ fontFamily: T.mono, fontSize: 26, fontWeight: 600, cursor: turboState ? "pointer" : "default",
-                          letterSpacing: 0.3, /* ledger-v1 */ color: walletView === "phantom" ? "#AB9FF2" : T.text }}>
+                        style={{ fontFamily: T.mono, fontSize: 27, fontWeight: 600, cursor: turboState ? "pointer" : "default",
+                          letterSpacing: 0.3, textAlign: "left", padding: "0 14px", /* ledger-v2 */ color: walletView === "phantom" ? "#AB9FF2" : LG.ink }}>
                         {mask(`$${showEq.toLocaleString(undefined, { maximumFractionDigits: showEq < 100 ? 2 : 0 })}`)}
                         {vEq > 0 && (
-                          <div onClick={(e) => e.stopPropagation()} style={{ cursor: "default", margin: "7px auto 0", maxWidth: 240 }}>
-                            <div style={{ display: "flex", height: 4, borderRadius: 2, overflow: "hidden", background: "rgba(255,255,255,0.06)" }}>
-                              <div style={{ width: `${solPct}%`, background: "rgba(255,255,255,0.34)" }} />
+                          <div onClick={(e) => e.stopPropagation()} style={{ cursor: "default", margin: "10px 14px 0" }}>
+                            <div style={{ display: "flex", height: 5, borderRadius: 3, overflow: "hidden", background: LG.track }}>
+                              <div style={{ width: `${solPct}%`, background: LG.fillBar }} />
                             </div>
-                            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3, fontFamily: T.mono, fontSize: 7.5, color: T.faint, fontWeight: 400 }}>
-                              <span>{mask(`SOL ${solPct}%`)}</span><span>{mask(`tokens ${100 - solPct}%`)}</span>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5, fontFamily: T.mono, fontSize: 9, color: LG.sub, fontWeight: 400 }}>
+                              <span>{mask(`SOL ${solPct}% \u00b7 $${Math.round(solUsdV).toLocaleString("en-US")}`)}</span>
+                              <span>{mask(`Tokens ${100 - solPct}% \u00b7 $${Math.round(tokUsdV).toLocaleString("en-US")}`)}</span>
                             </div>
                           </div>
                         )}
+                        {/* ledger-v2 - action rail */}
+                        <div onClick={(e) => e.stopPropagation()} style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)",
+                          borderTop: `1px solid ${LG.line}`, borderBottom: `1px solid ${LG.line}`, margin: "12px 0 0", cursor: "default" }}>
+                          {[["\u2191", "Send", () => lgToast("\u2191 Send lands in ledger phase 2")],
+                            ["\u25a6", "Receive", () => { try { navigator.clipboard.writeText((turboState && turboState.pubkey) || ""); lgToast("\u25a6 turbo address copied \u2014 QR lands in phase 2"); } catch (e) {} }],
+                            ["\u21c4", "Swap", () => { try { const el = document.getElementById("valo-swap-block"); el && el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {} }],
+                            ["\u232b", "Sweep", () => { try { window.dispatchEvent(new CustomEvent("valo-sweep")); } catch (e) {} }],
+                          ].map(([ic, lb, fn], i) => (
+                            <button key={lb} onClick={fn}
+                              style={{ border: "none", borderRight: i < 3 ? `1px solid ${LG.line}` : "none", borderRadius: 0,
+                                background: "transparent", padding: "10px 0 9px", cursor: "pointer",
+                                fontFamily: T.mono, fontSize: 9.5, color: LG.sub, lineHeight: 1.5 }}>
+                              <span style={{ display: "block", fontSize: 12, color: LG.faint }}>{ic}</span>{lb}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     );
                   })()}
@@ -7402,7 +7458,7 @@ function PortfolioPanel({ big, solBalance, valoWallet, positions, tokens, realiz
           {liveMode && (
             <div style={{ background: "#0c0f16", border: `1px solid ${VALO_PURPLE}44`, borderRadius: 9, padding: 10, marginBottom: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
-                <span style={{ fontFamily: T.mono, fontSize: 9, color: T.faint, letterSpacing: 1 }}>⇄ SWAP · SOL → $VALO <span style={{ color: T.amber }}>⛓ real</span></span>
+                <span id="valo-swap-block" style={{ fontFamily: T.mono, fontSize: 9, color: LG.sub, letterSpacing: 1 }}>\u21c4 Swap \u00b7 SOL \u2192 $VALO</span>
               </div>
               {valoMint ? (
                 <>
