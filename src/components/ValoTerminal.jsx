@@ -10275,6 +10275,8 @@ export default function App() {
   // aiBrief-v1 - one briefing, keyed to its token so a pair switch can never
   // show a stale read under the wrong symbol
   const [aiBrief, setAiBrief] = useState(null);          // {id, loading, brief, error, open}
+  const [shareTake, setShareTake] = useState("");        // sharePost-v1 - the user's line above the card
+  const [sharePosting, setSharePosting] = useState(false);
   const [sigSheet, setSigSheet] = useState(false);       // 🧪 UI_NEXT mobile: signals bottom sheet
   const [moreBand, setMoreBand] = useState(false);       // 🧪 UI_NEXT mobile: the band's ⋯ hanging menu
   const [hubOpen, setHubOpen] = useState(false);         // 🧪 UI_NEXT mobile: the all-in-one hub fan
@@ -15756,6 +15758,33 @@ export default function App() {
   useEffect(() => { riskCtxRef.current = { sel, positions, liveData }; }, [sel, positions, liveData]);
   // aiBrief-v1 - assemble the snapshot from the live token + the risk
   // engine's flags for its mint, and ask the server for a read
+  // sharePost-v1 - render the card and POST it server-side: the message in
+  // #ai-reads carries the clickable /t/<mint> link, guaranteed, no paste.
+  const postBriefToDiscord = async (args, take) => {
+    setSharePosting(true);
+    try {
+      const sb2 = typeof window !== "undefined" ? window.__VALO_SB_CLIENT__ : null;
+      const sess = sb2 ? (await sb2.auth.getSession()).data.session : null;
+      if (!sess) { pushNotif({ type: "system", text: "\u2601 sign in to post to #ai-reads", noSave: true }); return; }
+      const blob = await briefToPng(args);
+      if (!blob) { pushNotif({ type: "system", text: "\u26a0 could not render the card", noSave: true }); return; }
+      const b64 = await new Promise((res2, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res2(fr.result); fr.onerror = rej;
+        fr.readAsDataURL(blob);
+      });
+      const r = await fetch("/api/share-read", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-valo-auth": sess.access_token },
+        body: JSON.stringify({ mint: args.mint, sym: args.sym, take, handle: username || "a trader", png: b64 }),
+      });
+      const j = await r.json();
+      if (j && j.ok) { setShareTake(""); pushNotif({ type: "system", text: `\u2728 posted to #ai-reads \u00b7 ${j.remaining} shares left today`, noSave: true }); }
+      else pushNotif({ type: "system", text: `\u26a0 ${(j && j.error) || "post failed"}`, noSave: true });
+    } catch (e) {
+      pushNotif({ type: "system", text: `\u26a0 post failed: ${String(e.message || e).slice(0, 60)}`, noSave: true });
+    } finally { setSharePosting(false); }
+  };
   const fetchBrief = async (tk) => {
     if (!tk) return;
     setAiBrief({ id: tk.id, loading: true, open: true });
@@ -16809,6 +16838,29 @@ export default function App() {
                                       analysis, not advice · refreshes every 5 min
                                       {Number.isFinite(aiBrief.remaining) && <span style={{ marginLeft: "auto" }}>{aiBrief.remaining} left today</span>}
                                     </div>
+                                    {/* sharePost-v1 - one-click post with the chart link baked in */}
+                                    <input value={shareTake} maxLength={280}
+                                      onChange={(e) => setShareTake(e.target.value)}
+                                      placeholder="your take (optional) \u2014 posts above the card"
+                                      style={{ width: "100%", boxSizing: "border-box", marginTop: 8,
+                                        background: "#0c0f16", border: `1px solid ${T.border2}`, borderRadius: 8,
+                                        padding: "8px 10px", color: T.text, fontFamily: T.mono, fontSize: 10, outline: "none" }} />
+                                    <button disabled={sharePosting}
+                                      onClick={() => postBriefToDiscord(
+                                        { brief: aiBrief.brief, sym: selected.sym,
+                                          mc: (selected.mc || (selected.price > 0 && selected.supply > 0 ? selected.price * selected.supply : 0)),
+                                          mint: selected.liveMint,
+                                          candles: selected.candles, tvl: selected.tvl, vol24: selected.vol24,
+                                          holders: holdersFloorOf(selected) ? null : holdersOf(selected),
+                                          buys: selected.buys, sells: selected.sells,
+                                          ageMin: selected.createdAt > 0 ? Math.round((Date.now() - selected.createdAt) / 60000) : null },
+                                        shareTake)}
+                                      style={{ width: "100%", marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                                        border: "none", background: sharePosting ? "rgba(125,92,240,0.4)" : VALO_PURPLE, borderRadius: 8,
+                                        padding: "9px", cursor: sharePosting ? "wait" : "pointer", fontFamily: T.mono, fontSize: 10, fontWeight: 900,
+                                        letterSpacing: 1, color: "#0a0713" }}>
+                                      {sharePosting ? "POSTING\u2026" : "\ud83d\ude80 POST TO #AI-READS \u00b7 with chart link"}
+                                    </button>
                                     {/* briefShare-v1 - render to PNG, hand to Discord */}
                                     <button
                                       onClick={() => shareBriefToDiscord(
@@ -16824,7 +16876,7 @@ export default function App() {
                                         border: `1px solid ${VALO_PURPLE}66`, background: "rgba(125,92,240,0.12)", borderRadius: 8,
                                         padding: "8px", cursor: "pointer", fontFamily: T.mono, fontSize: 9.5, fontWeight: 900,
                                         letterSpacing: 1, color: VALO_PURPLE }}>
-                                      📤 SHARE TO #AI-READS
+                                      📋 COPY CARD · paste it yourself
                                     </button>
                                   </>
                                 )}
