@@ -8062,8 +8062,12 @@ const shareBriefToDiscord = async (args, notify) => {
     const blob = await briefToPng(args);
     if (!blob) { notify("\u26a0 could not render the read"); return; }
     const file = new File([blob], `valo-ai-read-${args.sym}.png`, { type: "image/png" });
-    // mobile: the native share sheet carries the image straight into Discord
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    // shareRoute-v2 - desktop Chrome also implements navigator.share now,
+    // which hijacked the flow into the Windows share sheet. The sheet is the
+    // MOBILE road (touch devices); desktop gets clipboard + deep link to the
+    // exact channel.
+    const isTouch = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+    if (isTouch && navigator.canShare && navigator.canShare({ files: [file] })) {
       try { await navigator.share({ files: [file] }); return; } catch (e) { /* user cancelled or unsupported */ }
     }
     // desktop: clipboard + deep link to #ai-reads
