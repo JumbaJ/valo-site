@@ -298,7 +298,7 @@ async function burnLeg(out) {
       signer, label: "burn",
     });
     await confirm(rpc, burnSig0);
-    const sup0 = await rpc("getTokenSupply", [MINT]);
+    const sup0 = await rpc("getTokenSupply", [MINT, { commitment: "confirmed" }]);
     out.burn = {
       executed: true, swappedSol: 0,
       burnedTokens: Number(held0) / 10 ** dec0,
@@ -353,7 +353,7 @@ async function burnLeg(out) {
   });
   await confirm(rpc, burnSig);
 
-  const supply = await rpc("getTokenSupply", [MINT]);
+  const supply = await rpc("getTokenSupply", [MINT, { commitment: "confirmed" }]);
   out.burn = {
     executed: true, swappedSol: swapLam / LAMPORTS,
     burnedTokens: Number(held) / 10 ** decimals,
