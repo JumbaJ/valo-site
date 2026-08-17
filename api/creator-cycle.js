@@ -276,12 +276,39 @@ async function burnLeg(out) {
   const balR = await rpc("getBalance", [BURN, { commitment: "confirmed" }]);
   const bal = (balR && balR.value) || 0;
   const swapLam = Math.floor(bal - RESERVE * LAMPORTS);
+  const tokenProgram = await tokenProgramOf(rpc, MINT);
+
+  // burnDirect-v1 - the SOL threshold gates only the SWAP. Tokens already in
+  // the wallet (manual top-ups, stranded output from a past run) burn
+  // regardless: send $VALO to the burn wallet, trigger the cycle, done.
   if (swapLam < MIN * LAMPORTS) {
-    out.burn = { executed: false, availableSol: Math.max(0, swapLam) / LAMPORTS, thresholdSol: MIN, note: "below threshold — holding" };
+    const ata0 = findAta(BURN, MINT, tokenProgram);
+    let held0 = null, dec0 = 0;
+    try {
+      const b = await rpc("getTokenAccountBalance", [ata0, { commitment: "confirmed" }]);
+      if (b && b.value && BigInt(b.value.amount) > 0n) { held0 = BigInt(b.value.amount); dec0 = b.value.decimals; }
+    } catch (e) { /* no token account = nothing pre-funded */ }
+    if (held0 === null) {
+      out.burn = { executed: false, availableSol: Math.max(0, swapLam) / LAMPORTS, thresholdSol: MIN, note: "below threshold — holding" };
+      return;
+    }
+    const burnSig0 = await sendSigned({
+      payer: BURN,
+      instructions: [ixBurnChecked({ account: ata0, mint: MINT, owner: BURN, amount: held0, decimals: dec0, tokenProgram })],
+      signer, label: "burn",
+    });
+    await confirm(rpc, burnSig0);
+    const sup0 = await rpc("getTokenSupply", [MINT]);
+    out.burn = {
+      executed: true, swappedSol: 0,
+      burnedTokens: Number(held0) / 10 ** dec0,
+      burnSig: burnSig0,
+      solscan: `https://solscan.io/tx/${burnSig0}`,
+      supplyNow: sup0 && sup0.value && sup0.value.uiAmount,
+      note: "pre-funded tokens burned directly — no swap this run",
+    };
     return;
   }
-
-  const tokenProgram = await tokenProgramOf(rpc, MINT);
 
   const qr = await fetch(`${JUP}/quote?inputMint=${SOL_MINT}&outputMint=${MINT}&amount=${swapLam}&slippageBps=${process.env.VALO_SLIPPAGE_BPS || 300}`,
     { signal: AbortSignal.timeout(12000) });
